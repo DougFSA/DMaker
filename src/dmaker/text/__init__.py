@@ -1,0 +1,1 @@
+"""Pacote text do DMaker."""

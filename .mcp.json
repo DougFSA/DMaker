@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dmaker": {
+      "command": "D:\\DMaker\\.venv\\Scripts\\dmaker.exe",
+      "args": ["mcp"]
+    }
+  }
+}

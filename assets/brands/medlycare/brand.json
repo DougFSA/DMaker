@@ -1,0 +1,70 @@
+{
+  "name": "MedlyCare",
+  "colors": {
+    "primary": "#0C535A",
+    "accent": "#75B9A2",
+    "icon": "#309A90",
+    "mint": "#B2E1CF",
+    "text": "#253238",
+    "muted": "#697A80",
+    "white": "#FFFFFF",
+    "bg": "#FFFFFF",
+    "bg_dark": "#0C535A"
+  },
+  "fonts": {
+    "family": "Poppins",
+    "title": "bold",
+    "body": "regular",
+    "highlight": "medium",
+    "light": "light"
+  },
+  "logos": {
+    "horizontal": "lockup-horizontal.png",
+    "horizontal_dark": "lockup-horizontal-dark.png",
+    "symbol": "symbol-light.png",
+    "symbol_dark": "symbol-dark.png"
+  },
+  "rules": {
+    "no_dash": true,
+    "notes": "Medly sempre em teal escuro, Care sempre em verde medio. Sem cruz vermelha, estetoscopio, seringa, jaleco ou foto de medico. Fundo nunca chapado: blobs organicos, linhas de rede com nos, brilhos em losango."
+  },
+  "cta": {
+    "url": "medlycare.com.br",
+    "text": "Teste gratis por 3 meses, sem cartao"
+  },
+  "style": {
+    "caption_highlight": "accent",
+    "caption_outline": "primary",
+    "cta_box": "primary",
+    "cta_text": "white",
+    "card_variant": "light"
+  },
+  "captions": {
+    "vocabulary": [
+      "MedlyCare",
+      "WhatsApp",
+      "receituário",
+      "prontuário",
+      "teleconsulta",
+      "atestado",
+      "laudo",
+      "fisioterapeuta",
+      "psicólogo",
+      "nutricionista",
+      "odontologista",
+      "ICP-Brasil",
+      "agenda",
+      "clínica"
+    ],
+    "replacements": {
+      "medriquer": "MedlyCare",
+      "medlicare": "MedlyCare",
+      "medli care": "MedlyCare",
+      "medly care": "MedlyCare",
+      "medlyker": "MedlyCare",
+      "medliquer": "MedlyCare",
+      "mediquer": "MedlyCare",
+      "whats app": "WhatsApp"
+    }
+  }
+}

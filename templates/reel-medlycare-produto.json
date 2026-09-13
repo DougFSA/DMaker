@@ -1,0 +1,53 @@
+{
+  "name": "medlycare-produto-reel",
+  "output": { "preset": "instagram/reels", "quality": "high" },
+  "brand": "medlycare",
+  "timeline": [
+    {
+      "type": "card",
+      "title": "Sua agenda organizada em um clique",
+      "subtitle": "MedlyCare para clínicas e profissionais autônomos",
+      "duration": 3.5
+    },
+    {
+      "type": "image",
+      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/02-agenda-lista.png",
+      "duration": 4,
+      "motion": "zoom-in",
+      "transition": { "type": "fade", "duration": 0.5 }
+    },
+    {
+      "type": "image",
+      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/03-agenda-semana.png",
+      "duration": 4,
+      "motion": "pan-left",
+      "motion_amount": 0.08,
+      "transition": { "type": "slideleft", "duration": 0.5 }
+    },
+    {
+      "type": "image",
+      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/05-atendimento.png",
+      "duration": 4,
+      "motion": "zoom-out",
+      "transition": { "type": "fade", "duration": 0.5 }
+    },
+    {
+      "type": "card",
+      "title": "Teste grátis por 3 meses, sem cartão",
+      "subtitle": "medlycare.com.br",
+      "variant": "dark",
+      "duration": 4,
+      "transition": { "type": "fade", "duration": 0.6 }
+    }
+  ],
+  "overlays": [
+    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11, "start": 3.5, "end": 14 },
+    { "type": "text", "text": "Chega de agenda no papel", "role": "hook", "start": 3.2, "end": 7 },
+    { "type": "text", "text": "Agenda por profissional, com cor por tipo de consulta", "role": "subtitle", "position": "bottom", "start": 3.4, "end": 7 },
+    { "type": "text", "text": "Bloqueio de período com remarcação pelo WhatsApp", "role": "subtitle", "position": "bottom", "start": 7, "end": 10.5 },
+    { "type": "text", "text": "Prontuário e histórico lado a lado", "role": "subtitle", "position": "top", "start": 10.6, "end": 14 },
+    { "type": "text", "text": "medlycare.com.br", "role": "cta", "start": 11.2, "end": 14.2 },
+    { "type": "progress-bar" }
+  ],
+  "audio": { "normalize": "two-pass" }
+}

@@ -1,0 +1,27 @@
+# ambiente e binários baixados pelo `dmaker setup`
+.venv/
+bin/
+cache/
+output/
+*.log
+.fetch.sh
+
+# projetos de edição (vídeos-fonte e renders ficam fora do git)
+projects/*/output/
+projects/*/*.mp4
+projects/*/*.mov
+projects/*/*.wav
+projects/*/*.mp3
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# sistema
+Thumbs.db
+desktop.ini

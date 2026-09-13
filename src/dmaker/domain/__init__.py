@@ -1,0 +1,1 @@
+"""Pacote domain do DMaker."""

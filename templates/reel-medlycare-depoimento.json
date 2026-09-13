@@ -1,0 +1,39 @@
+{
+  "name": "medlycare-depoimento-reel",
+  "output": { "preset": "instagram/reels", "quality": "high" },
+  "brand": "medlycare",
+  "timeline": [
+    {
+      "type": "clip",
+      "src": "D:/videos/depoimento-dra-helena.mp4",
+      "start": 4.0,
+      "end": 34.0,
+      "reframe": { "mode": "crop", "focus": [0.5, 0.35] },
+      "color": { "contrast": 1.05, "saturation": 1.05 }
+    },
+    {
+      "type": "card",
+      "title": "Teste grátis por 3 meses, sem cartão",
+      "subtitle": "medlycare.com.br",
+      "variant": "dark",
+      "duration": 4,
+      "transition": { "type": "fade", "duration": 0.6 }
+    }
+  ],
+  "overlays": [
+    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11, "end": 30 },
+    { "type": "text", "text": "Como a Dra. Helena parou de perder consulta", "role": "hook", "start": 0.3, "end": 4.5 },
+    { "type": "text", "text": "Dra. Helena Prado", "secondary": "Clínica Modelo", "role": "lower-third", "start": 5, "end": 11 },
+    { "type": "progress-bar" }
+  ],
+  "captions": {
+    "source": "auto",
+    "language": "pt",
+    "model": "small",
+    "style": { "mode": "karaoke", "max_words": 4, "uppercase": true }
+  },
+  "audio": {
+    "music": { "src": "D:/musicas/trilha-suave.mp3", "volume": 0.15, "ducking": true, "fade_out": 2 },
+    "normalize": "two-pass"
+  }
+}

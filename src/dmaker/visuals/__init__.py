@@ -1,0 +1,1 @@
+"""Pacote visuals do DMaker."""
