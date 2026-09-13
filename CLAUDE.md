@@ -3,20 +3,24 @@
 Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 em `bin/ffmpeg` (baixado por `dmaker setup`), Poppins em `assets/fonts`, marcas em `assets/brands/<nome>/brand.json`.
 
 - Como operar o editor a partir de um pedido: `.claude/skills/dmaker/SKILL.md` (fluxo, spec, regras da marca).
-- Rodar comandos: `.venv\Scripts\dmaker.exe ...` (não use o Python global). Servidor MCP: `dmaker mcp` (config em `.mcp.json`).
+- Rodar comandos: `.venv\Scripts\dmaker.exe ...` (não use o Python global). Servidor MCP: `dmaker mcp` (config em `.mcp.json`). Interface: `dmaker ui`.
+- Desenvolvimento com economia de tokens: skill `dmaker-dev` (`.claude/skills/dmaker-dev/SKILL.md`): Opus planeja e revisa, agentes Sonnet implementam.
 - Testes: `.venv\Scripts\python -m pytest` (~2 min; a integração renderiza com ffmpeg e o MCP sobe por stdio). Lint/format: `.venv\Scripts\ruff check --fix src tests && .venv\Scripts\ruff format src tests`. Os dois precisam passar antes de dar algo por pronto.
 
 ## Arquitetura (pacotes por responsabilidade)
 
 ```
 domain/      spec.py (modelo Pydantic do projeto), presets.py, brand.py, timeline.py (contas puras)
-media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner), probe.py, fonts.py
+media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio)
 text/        ass.py (ASS), overlays.py (texto/legendas -> eventos), captions.py (cues, SRT, regroup), transcribe.py (Transcriber: WhisperTranscriber)
-visuals/     cards.py (cartões e fundos), motion.py (Ken Burns sub-pixel), reframe_image.py, geometry.py
-filtergraph/ grafos e comandos ffmpeg como funções puras: reframe, timeline (xfade), overlays, audio, encode, mezzanine
-pipeline/    context (RenderContext/Options/Result), sources, segments (preparadores por tipo), captions, textlayer, assembly (+ LoudnessMeter), renderer (orquestra), projects (serviços), jobs, qa, lint
+visuals/     cards.py (cartões e fundos), motion.py (Ken Burns sub-pixel), reframe_image.py, geometry.py, pip.py (máscara/moldura do PiP)
+filtergraph/ grafos e comandos ffmpeg como funções puras: reframe, timeline (xfade), overlays, pip (picture-in-picture), audio, encode, mezzanine
+pipeline/    context (RenderContext/Options/Result), sources (avulsas e sessão multicâmera), sync (offsets com cache), segments (preparadores por tipo), captions, textlayer, assembly (+ LoudnessMeter), renderer (orquestra), projects (serviços), jobs, qa, lint
+ui/          server.py (API FastAPI local + SSE de jobs) e static/ (página, vanilla JS)
 cli.py       adaptador Typer, fino    mcp_server.py   adaptador MCP, fino (mesmos serviços)
 ```
+
+Progresso: o `FFmpegRunner` recebe um `ProgressSink` (Rich no terminal, `JobSink` na interface/MCP); o pipeline emite etapas por `ctx.log`. Jobs em segundo plano em `pipeline/jobs.py` (eventos + SSE).
 
 Fluxo do render: `resolve_sources` -> `MezzanineBuilder` (um `SegmentPreparer` por tipo; cache em `cache/mez` por hash) -> `CaptionPipeline` -> `build_text_layer` (ASS) -> `LoudnessMeter` -> `build_assembly` -> runner -> thumbnail.
 

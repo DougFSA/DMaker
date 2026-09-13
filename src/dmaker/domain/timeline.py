@@ -6,13 +6,18 @@ from ..media.probe import MediaInfo
 from .spec import ClipSegment, Segment, Transition
 
 
-def segment_duration(segment: Segment, info: MediaInfo | None) -> float:
-    """Duração do trecho no tempo final (já descontada a velocidade)."""
+def segment_duration(segment: Segment, info: MediaInfo | None, offset: float = 0.0) -> float:
+    """Duração do trecho no tempo final (já descontada a velocidade). `offset` é onde a fonte
+    começa no relógio da sessão (clipes sincronizados); para arquivo avulso é 0."""
     if isinstance(segment, ClipSegment):
         if info is None:
             raise ValueError("clipe sem informação de mídia")
-        end = segment.end if segment.end is not None else info.duration
-        end = min(end, info.duration) if info.duration else end
+        coverage_end = offset + info.duration if info.duration else None
+        end = segment.end if segment.end is not None else coverage_end
+        if end is None:
+            raise ValueError("clipe sem duração conhecida: informe end")
+        if coverage_end is not None:
+            end = min(end, coverage_end)
         return max(end - segment.start, 0.0) / segment.speed
     return segment.duration
 

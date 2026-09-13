@@ -94,11 +94,64 @@ class FFmpegRunner(Protocol):
         """Executa com log em nível info e devolve o stderr (medições como o loudnorm imprimem ali)."""
 
 
-class SubprocessRunner:
-    """Executa o ffmpeg de verdade."""
+class ProgressSink(Protocol):
+    """Recebe o andamento de cada comando: barra no terminal, eventos para a interface, ou nada."""
 
-    def __init__(self, quiet: bool = False):
-        self.quiet = quiet
+    def start(self, label: str, total: float | None) -> None: ...
+
+    def update(self, done: float) -> None: ...
+
+    def finish(self) -> None: ...
+
+
+class NullSink:
+    def start(self, label: str, total: float | None) -> None:
+        return None
+
+    def update(self, done: float) -> None:
+        return None
+
+    def finish(self) -> None:
+        return None
+
+
+class RichSink:
+    """Barra de progresso no terminal (some ao terminar)."""
+
+    def __init__(self) -> None:
+        self._progress: Progress | None = None
+        self._task = None
+        self._total = 0.0
+
+    def start(self, label: str, total: float | None) -> None:
+        if not total:
+            return
+        self._progress = Progress(
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.percentage:>3.0f}%"),
+            TimeRemainingColumn(),
+            transient=True,
+        )
+        self._total = max(total, 0.01)
+        self._progress.start()
+        self._task = self._progress.add_task(label, total=self._total)
+
+    def update(self, done: float) -> None:
+        if self._progress is not None:
+            self._progress.update(self._task, completed=min(done, self._total))
+
+    def finish(self) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+            self._progress = None
+
+
+class SubprocessRunner:
+    """Executa o ffmpeg de verdade. O progresso vai para o `sink` (terminal por padrão)."""
+
+    def __init__(self, quiet: bool = False, sink: ProgressSink | None = None):
+        self.sink: ProgressSink = sink or (NullSink() if quiet else RichSink())
 
     def run(self, command: FFmpegCommand) -> list[str]:
         cmd = command.full()
@@ -130,7 +183,9 @@ class SubprocessRunner:
         for t in threads:
             t.start()
 
-        with self._progress(command) as update:
+        self.sink.start(command.label, command.total)
+        update = self.sink.update
+        try:
             try:
                 if command.frames is not None:
                     assert proc.stdin is not None
@@ -146,6 +201,8 @@ class SubprocessRunner:
                         pass
             except BrokenPipeError:
                 pass
+        finally:
+            self.sink.finish()
         proc.wait()
         for t in threads:
             t.join(timeout=5)
@@ -154,47 +211,12 @@ class SubprocessRunner:
             raise FFmpegError(f"ffmpeg falhou (código {proc.returncode}) em: {command.label}", cmd, stderr)
         return cmd
 
-    def _progress(self, command: FFmpegCommand):
-        """Context manager que devolve uma função update(segundos)."""
-        total = command.total
-        if self.quiet or not total:
-            return _NoProgress()
-        return _RichProgress(command.label, total)
-
     def capture(self, args: list[str], label: str = "ffmpeg") -> str:
         cmd = [str(ffmpeg_path()), "-hide_banner", "-nostats", "-y", *args]
         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if res.returncode != 0:
             raise FFmpegError(f"ffmpeg falhou em: {label}", cmd, res.stderr)
         return res.stderr
-
-
-class _NoProgress:
-    def __enter__(self) -> Callable[[float], None]:
-        return lambda _done: None
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-
-class _RichProgress:
-    def __init__(self, label: str, total: float):
-        self.progress = Progress(
-            TextColumn("[bold cyan]{task.description}"),
-            BarColumn(),
-            TextColumn("{task.percentage:>3.0f}%"),
-            TimeRemainingColumn(),
-            transient=True,
-        )
-        self.label, self.total = label, max(total, 0.01)
-
-    def __enter__(self) -> Callable[[float], None]:
-        self.progress.start()
-        task = self.progress.add_task(self.label, total=self.total)
-        return lambda done: self.progress.update(task, completed=min(done, self.total))
-
-    def __exit__(self, *exc: object) -> None:
-        self.progress.stop()
 
 
 @dataclass
@@ -318,3 +340,35 @@ def encoder_works(name: str) -> bool:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0
     except Exception:
         return False
+
+
+HARDWARE_PROBE_ORDER = (("nvenc", "h264_nvenc"), ("qsv", "h264_qsv"), ("amf", "h264_amf"))
+
+
+@lru_cache(maxsize=1)
+def hardware_encoder() -> str | None:
+    """Melhor encoder de hardware que funciona nesta máquina (nvenc > qsv > amf), com cache em disco.
+
+    O teste real (codificar 1 quadro) leva alguns décimos de segundo por encoder; o resultado fica em
+    cache/hw.json junto da versão do ffmpeg, para não repetir a cada render.
+    """
+    from ..config import CACHE_DIR
+
+    caps = capabilities()
+    store = CACHE_DIR / "hw.json"
+    try:
+        data = json.loads(store.read_text(encoding="utf-8"))
+        if data.get("ffmpeg") == caps.version:
+            return data.get("encoder")
+    except (OSError, json.JSONDecodeError):
+        pass
+    found = next(
+        (name for name, codec in HARDWARE_PROBE_ORDER if caps.has_encoder(codec) and encoder_works(codec)),
+        None,
+    )
+    try:
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text(json.dumps({"ffmpeg": caps.version, "encoder": found}), encoding="utf-8")
+    except OSError:
+        pass
+    return found

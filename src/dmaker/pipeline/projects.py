@@ -23,10 +23,12 @@ from ..domain.spec import (
     Transition,
 )
 from ..domain.timeline import segment_duration, timeline_total, transitions_of
+from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
 from .context import Prober
 from .lint import lint
-from .sources import resolve_sources
+from .sources import resolve_session, resolve_sources
+from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 
 
 def project_path(name_or_path: str | Path) -> Path:
@@ -35,6 +37,14 @@ def project_path(name_or_path: str | Path) -> Path:
     if p.suffix == ".json":
         return p
     return PROJECTS_DIR / str(name_or_path) / "spec.json"
+
+
+def parse_segments(value: str | None) -> tuple[int, int] | None:
+    """ "3-6" -> (3, 6); "4" -> (4, 4)."""
+    if not value:
+        return None
+    first, _, last = value.partition("-")
+    return int(first), int(last or first)
 
 
 def load_project(name_or_path: str | Path) -> Project:
@@ -67,22 +77,35 @@ class ProjectSummary:
     total: float
     segments: list[SegmentSummary] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    offsets: dict[str, float] = field(
+        default_factory=dict
+    )  # fontes sincronizadas: início no relógio da sessão
 
 
-def summarize(project: Project, prober: Prober = probe) -> ProjectSummary:
-    """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra)."""
+def summarize(
+    project: Project, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+) -> ProjectSummary:
+    """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra).
+    Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto)."""
     theme = load_theme(project.brand, project.theme)
     preset = get_preset(project.output.preset)
-    sources = resolve_sources(project, prober)
+    finder = offset_finder or ffmpeg_offset_finder(SubprocessRunner(quiet=True))
+    store = (project.base_dir / "sync.json") if project.base_dir else None
+    offsets = SyncResolver(finder).resolve(project, store)
+    session = resolve_session(project, prober, offsets)
+    sources = resolve_sources(project, prober, session)
     infos = [s.info for s in sources]
-    durations = [segment_duration(seg, info) for seg, info in zip(project.timeline, infos, strict=True)]
+    durations = [
+        segment_duration(seg, s.info, s.offset) for seg, s in zip(project.timeline, sources, strict=True)
+    ]
     total = timeline_total(durations, transitions_of(project.timeline))
-    warnings = lint(project, theme, preset, total, durations, infos)
+    warnings = lint(project, theme, preset, total, durations, infos, [s.offset for s in sources])
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, durations, strict=True)):
-        label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "title", "")
+        label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)
+        label = label or getattr(seg, "title", "")
         segments.append(SegmentSummary(i, seg.type, d, str(label)))
-    return ProjectSummary(project.name, preset, theme, total, segments, warnings)
+    return ProjectSummary(project.name, preset, theme, total, segments, warnings, offsets)
 
 
 def scaffold_project(

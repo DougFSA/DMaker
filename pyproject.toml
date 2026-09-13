@@ -15,11 +15,13 @@ dependencies = [
     "pydantic>=2.6",
     "pillow>=10.2",
     "mcp>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
 
 [project.optional-dependencies]
 captions = ["faster-whisper>=1.0"]
-dev = ["pytest>=8", "ruff>=0.5", "numpy>=1.26"]
+dev = ["pytest>=8", "ruff>=0.5", "numpy>=1.26", "httpx>=0.27"]
 
 [project.scripts]
 dmaker = "dmaker.cli:app"
@@ -29,7 +31,7 @@ dmaker-mcp = "dmaker.mcp_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dmaker = ["py.typed"]
+dmaker = ["py.typed", "ui/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

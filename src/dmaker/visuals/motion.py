@@ -7,6 +7,7 @@ Aqui o plano de movimento é calculado em ponto flutuante e cada quadro é reamo
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -113,16 +114,22 @@ def render_frame(image: Image.Image, box: Box, out_w: int, out_h: int) -> bytes:
     return frame.tobytes()
 
 
-def render_frames(image: Image.Image, plan: MotionPlan, workers: int = 4) -> Iterator[bytes]:
+def render_frames(image: Image.Image, plan: MotionPlan, workers: int | None = None) -> Iterator[bytes]:
     """Quadros em ordem, renderizados em paralelo (o Pillow libera o GIL ao reamostrar)."""
     src = image.convert("RGB")
+    workers = workers or os.cpu_count() or 4
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         yield from pool.map(
             lambda box: render_frame(src, box, plan.out_w, plan.out_h), plan.boxes, chunksize=4
         )
 
 
-def source_size_for(out_w: int, out_h: int, amount: float, supersample: float = 2.0) -> tuple[int, int]:
+DEFAULT_SUPERSAMPLE = 1.5  # 1.5x já dá antialias limpo com LANCZOS; 2x custava 1.6x mais tempo por quadro
+
+
+def source_size_for(
+    out_w: int, out_h: int, amount: float, supersample: float = DEFAULT_SUPERSAMPLE
+) -> tuple[int, int]:
     """Tamanho mínimo da fonte para que o recorte mais fechado ainda tenha `supersample`x a saída."""
     k = supersample * (1 + max(amount, 0))
     return int(round(out_w * k)), int(round(out_h * k))

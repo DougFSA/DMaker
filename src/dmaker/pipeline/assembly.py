@@ -12,10 +12,11 @@ from ..config import FONTS_DIR
 from ..domain.spec import Transition
 from ..filtergraph.audio import audio_graph, loudnorm_measure_graph
 from ..filtergraph.common import Inputs, ffq
-from ..filtergraph.encode import encode_args
+from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.overlays import image_overlay_graph
+from ..filtergraph.pip import video_overlay_graph
 from ..filtergraph.timeline import timeline_graph
-from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args
+from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_encoder
 from .context import RenderContext
 from .segments import PreparedSegment
 from .textlayer import TextLayer
@@ -122,6 +123,18 @@ def build_assembly(
         ctx.scale,
         ctx.preset.safe,
     )
+    cur_v, pip_audio = video_overlay_graph(
+        lines,
+        inputs,
+        cur_v,
+        layer.video_overlays,
+        ctx.width,
+        ctx.height,
+        ctx.fps,
+        total,
+        ctx.scale,
+        ctx.preset.safe,
+    )
     if layer.has_text:
         lines.append(
             f"{cur_v}ass=filename={ffq('overlay.ass')}:fontsdir={ffq(_relpath(FONTS_DIR, ctx.job_dir))}[v_ass]"
@@ -129,11 +142,19 @@ def build_assembly(
         cur_v = "[v_ass]"
     lines.append(f"{cur_v}format=yuv420p[vout]")
     aout = audio_graph(
-        lines, inputs, graph.audio, p.audio, music_path, total, measured=measured, include_norm=normalize
+        lines,
+        inputs,
+        graph.audio,
+        p.audio,
+        music_path,
+        total,
+        measured=measured,
+        include_norm=normalize,
+        extra_voices=pip_audio,
     )
 
     quality = "draft" if o.preview else p.output.quality
-    encoder = "x264" if o.preview else p.output.encoder
+    encoder = "x264" if o.preview else resolve_encoder(p.output.encoder, hardware_encoder())
     args = inputs.args + filter_complex_file_args("graph.txt") + ["-map", "[vout]", "-map", aout]
     args += encode_args(ctx.preset, quality, encoder, ctx.fps) + ["-shortest", str(out_path)]
     return Assembly(FFmpegCommand(args, label="montagem final", total=total, cwd=ctx.job_dir), lines)

@@ -18,9 +18,17 @@ def audio_graph(
     measured: dict | None = None,
     include_music: bool = True,
     include_norm: bool = True,
+    extra_voices: list[str] | None = None,
 ) -> str:
-    """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final."""
+    """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
+    `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz."""
     a = cur_a
+    if extra_voices:
+        lines.append(
+            f"{a}{''.join(extra_voices)}amix=inputs={1 + len(extra_voices)}:duration=first"
+            ":dropout_transition=0:normalize=0[a_voices]"
+        )
+        a = "[a_voices]"
     if audio.mute_clips:
         lines.append(f"{a}volume=0[a_mute]")
         a = "[a_mute]"

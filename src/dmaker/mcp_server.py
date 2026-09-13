@@ -16,7 +16,7 @@ from . import __version__, config
 from .domain.brand import available_brands, load_theme
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
-from .pipeline.jobs import JobManager
+from .pipeline.jobs import Job, JobManager
 
 GUIDE_PATH = config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md"
 
@@ -200,10 +200,19 @@ def list_projects() -> list[dict]:
 
 
 def _render(
-    name_or_path: str, preview: bool, preset: str | None, force: bool, guides: bool, no_captions: bool
-):
+    job: Job,
+    name_or_path: str,
+    preview: bool,
+    preset: str | None,
+    force: bool = False,
+    guides: bool = False,
+    no_captions: bool = False,
+    segments: str | None = None,
+) -> dict:
+    """Roda um render ligado ao job (progresso e etapas viram eventos)."""
+    from .media.ffmpeg import SubprocessRunner
     from .pipeline import RenderOptions, RenderPipeline
-    from .pipeline.projects import load_project
+    from .pipeline.projects import load_project, parse_segments
 
     project = load_project(name_or_path)
     options = RenderOptions(
@@ -213,8 +222,10 @@ def _render(
         guides=guides or None,
         no_captions=no_captions,
         quiet=True,
+        segments=parse_segments(segments),
     )
-    return _result_dict(RenderPipeline(project, options).run())
+    pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
+    return _result_dict(pipeline.run())
 
 
 @server.tool(
@@ -230,13 +241,15 @@ def render_project(
     force: bool = False,
     guides: bool = False,
     no_captions: bool = False,
+    segments: str | None = None,
     wait_seconds: float = 600,
 ) -> dict:
+    """`segments` = "12-20" renderiza só esses trechos (sem sobreposições/legendas), para revisar vídeos longos."""
     if preset:
         get_preset(preset)
     job = jobs.start(
         f"render {name_or_path} ({'preview' if preview else preset or 'final'})",
-        lambda: _render(name_or_path, preview, preset, force, guides, no_captions),
+        lambda job: _render(job, name_or_path, preview, preset, force, guides, no_captions, segments),
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
@@ -249,8 +262,8 @@ def export_project(name_or_path: str, presets: list[str], wait_seconds: float = 
     for p in presets:
         get_preset(p)
 
-    def work() -> list[dict]:
-        return [_render(name_or_path, False, p, False, False, False) for p in presets]
+    def work(job: Job) -> list[dict]:
+        return [_render(job, name_or_path, False, p) for p in presets]
 
     job = jobs.start(f"export {name_or_path} -> {', '.join(presets)}", work)
     jobs.wait(job, wait_seconds)
@@ -309,15 +322,47 @@ def quick_edit(
     )
     spec_path = _save(project)
 
-    def work() -> dict:
-        return {
-            "spec_path": str(spec_path),
-            **_result_dict(RenderPipeline(project, RenderOptions(preview=preview, quiet=True)).run()),
-        }
+    def work(job: Job) -> dict:
+        from .media.ffmpeg import SubprocessRunner
+
+        pipeline = RenderPipeline(
+            project,
+            RenderOptions(preview=preview, quiet=True),
+            runner=SubprocessRunner(sink=job.sink()),
+            log=job.log,
+        )
+        return {"spec_path": str(spec_path), **_result_dict(pipeline.run())}
 
     job = jobs.start(f"quick {src}", work)
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Sincroniza câmeras/gravadores do mesmo evento pelo áudio: devolve, para cada arquivo, o instante do "
+        "relógio da fonte principal em que ele começa (para usar em sources.<nome>.sync)."
+    )
+)
+def sync_sources(master: str, others: list[str], master_stream: int = 0, stream: int = 0) -> list[dict]:
+    from .media.audiosync import sync_offset
+    from .media.ffmpeg import SubprocessRunner
+
+    runner = SubprocessRunner(quiet=True)
+    out = []
+    for other in others:
+        result = sync_offset(
+            runner, Path(master), Path(other), config.CACHE_DIR / "audio" / "sync", master_stream, stream
+        )
+        out.append(
+            {
+                "path": other,
+                "offset_s": result.offset,
+                "confidence": result.confidence,
+                "reliable": result.reliable,
+            }
+        )
+    return out
 
 
 # ---------- legendas ----------

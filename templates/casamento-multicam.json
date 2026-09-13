@@ -1,0 +1,31 @@
+{
+  "name": "casamento-cerimonia",
+  "output": { "preset": "youtube/video", "quality": "high" },
+  "sources": {
+    "cam1": { "src": "D:/casamento/cam1-altar.mp4", "label": "Câmera principal (altar)" },
+    "cam2": { "src": "D:/casamento/cam2-lateral.mp4", "sync": "auto", "label": "Câmera lateral" },
+    "cam3": { "src": "D:/casamento/celular-convidados.mp4", "sync": "auto" },
+    "gravador": { "src": "D:/casamento/gravador-altar.wav", "sync": "auto", "label": "Lapela do celebrante" },
+    "mesa": { "src": "D:/casamento/mesa-som.wav", "sync": "auto", "label": "Mesa de som (música e votos)" }
+  },
+  "master": "cam1",
+  "timeline": [
+    { "type": "card", "title": "Ana e Carlos", "subtitle": "27 de dezembro de 2025", "duration": 4, "motion": "zoom-in" },
+    { "type": "clip", "source": "cam2", "start": 120, "end": 150, "transition": { "type": "fade", "duration": 1.0 }, "label": "entrada da noiva" },
+    { "type": "clip", "source": "cam1", "start": 150, "end": 260, "transition": { "type": "cut" } },
+    { "type": "clip", "source": "cam3", "start": 260, "end": 275, "transition": { "type": "cut" }, "label": "reação dos convidados" },
+    { "type": "clip", "source": "cam1", "start": 275, "end": 420, "transition": { "type": "cut" }, "label": "votos" },
+    { "type": "clip", "source": "cam2", "start": 420, "end": 470, "transition": { "type": "dissolve", "duration": 0.8 }, "label": "beijo" },
+    { "type": "card", "title": "Obrigado por celebrar com a gente", "duration": 5, "variant": "dark", "transition": { "type": "fade", "duration": 1.2 } }
+  ],
+  "overlays": [
+    { "type": "text", "text": "Ana e Carlos", "secondary": "Cerimônia", "role": "lower-third", "start": 6, "end": 14 }
+  ],
+  "audio": {
+    "tracks": [
+      { "source": "gravador", "volume": 1.0 },
+      { "source": "mesa", "volume": 0.7 }
+    ],
+    "normalize": "two-pass"
+  }
+}

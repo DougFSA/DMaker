@@ -142,19 +142,32 @@ class SegmentBase(Strict):
 
 
 class ClipSegment(SegmentBase):
+    """Trecho de vídeo. Com `src`, start/end são tempos no arquivo. Com `source` (nome em
+    `project.sources`), start/end são tempos no relógio da sessão (o da fonte principal): é assim
+    que se corta entre câmeras sincronizadas sem calcular pontos de entrada na mão."""
+
     type: Literal["clip"] = "clip"
-    src: str
-    start: float = Field(0.0, ge=0)  # ponto de entrada no arquivo fonte
-    end: float | None = Field(None, ge=0)  # ponto de saída; None = até o fim
+    src: str | None = None
+    source: str | None = None
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
     speed: float = Field(1.0, gt=0, le=8)
-    volume: float = Field(1.0, ge=0, le=4)
+    volume: float = Field(1.0, ge=0, le=4)  # áudio da própria câmera
     mute: bool = False
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
+        if bool(self.src) == bool(self.source):
+            raise ValueError("clipe precisa de `src` (arquivo) ou `source` (fonte sincronizada), um dos dois")
         if self.end is not None and self.end <= self.start:
-            raise ValueError(f"end ({self.end}) precisa ser maior que start ({self.start}) em {self.src}")
+            raise ValueError(
+                f"end ({self.end}) precisa ser maior que start ({self.start}) em {self.src or self.source}"
+            )
         return self
+
+    @property
+    def origin(self) -> str:
+        return self.src or self.source or ""
 
 
 class ImageSegment(SegmentBase):
@@ -240,7 +253,59 @@ class ProgressBar(Strict):
     track_alpha: float = Field(0.25, ge=0, le=1)
 
 
-Overlay = Annotated[TextOverlay | ImageOverlay | ProgressBar, Field(discriminator="type")]
+class VideoOverlay(Strict):
+    """Picture-in-picture: um segundo vídeo (webcam, câmera 2) sobre a linha do tempo, como no
+    Shotcut (Size & Position + Crop Circle/Mask): retângulo, formato, borda, sombra e o áudio misturado."""
+
+    type: Literal["video"] = "video"
+    src: str | None = None
+    source: str | None = None  # fonte sincronizada; `offset` vira o tempo da sessão mostrado em `start`
+    start: float = Field(0.0, ge=0)  # na linha do tempo
+    end: float | None = Field(None, ge=0)
+    offset: float = Field(0.0, ge=0)  # ponto de entrada no arquivo (src) ou tempo da sessão (source)
+    position: Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] = (
+        "bottom-right"
+    )
+    x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (sobrescreve position)
+    y: float | None = Field(None, ge=0, le=1)
+    width: float = Field(0.28, gt=0, le=1)  # fração da largura do vídeo
+    aspect: str | None = None  # "16:9", "1:1"...; None = proporção da fonte (círculo força 1:1)
+    shape: Literal["rect", "rounded", "circle"] = "rounded"
+    radius: float = Field(0.08, ge=0, le=0.5)  # cantos redondos, fração da largura do PiP
+    softness: float = Field(0.0, ge=0)  # suavidade da borda da máscara, px na base 1080
+    border: float = Field(6, ge=0)  # px na base 1080
+    border_color: str = "white"
+    shadow: bool = True
+    opacity: float = Field(1.0, ge=0, le=1)
+    margin: float = Field(40, ge=0)
+    volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
+    animation: Literal["none", "fade", "slide"] = "fade"
+    fade: float = Field(0.3, ge=0)
+
+    @model_validator(mode="after")
+    def _origin(self) -> VideoOverlay:
+        if bool(self.src) == bool(self.source):
+            raise ValueError("sobreposição de vídeo precisa de `src` ou `source`, um dos dois")
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start na sobreposição de vídeo")
+        if self.aspect is not None:
+            parse_aspect(self.aspect)
+        return self
+
+
+def parse_aspect(value: str) -> float:
+    """ "16:9" -> 1.777..."""
+    try:
+        w, h = value.replace("/", ":").split(":")
+        ratio = float(w) / float(h)
+    except (ValueError, ZeroDivisionError) as exc:
+        raise ValueError(f"proporção inválida: {value!r} (use algo como 16:9)") from exc
+    if ratio <= 0:
+        raise ValueError(f"proporção inválida: {value!r}")
+    return ratio
+
+
+Overlay = Annotated[TextOverlay | ImageOverlay | ProgressBar | VideoOverlay, Field(discriminator="type")]
 
 
 # ---------- legendas ----------
@@ -293,8 +358,17 @@ class Music(Strict):
     duck_release: float = Field(350, ge=10, le=5000)
 
 
+class AudioTrack(Strict):
+    """Faixa externa sincronizada (gravador no altar, mesa do DJ) que segue os cortes dos clipes
+    com `source`. É misturada ao áudio das câmeras em cada trecho."""
+
+    source: str
+    volume: float = Field(1.0, ge=0, le=4)
+
+
 class AudioSettings(Strict):
     music: Music | None = None
+    tracks: list[AudioTrack] = []
     voice_gain: float = Field(1.0, ge=0, le=4)
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
@@ -308,10 +382,20 @@ class Output(Strict):
     preset: str = "instagram/reels"
     path: str | None = None
     fps: float | None = Field(None, gt=0, le=120)
-    encoder: Literal["x264", "nvenc", "amf", "qsv"] = "x264"
-    quality: Literal["high", "medium", "draft"] = "high"
+    encoder: Literal["x264", "auto", "nvenc", "amf", "qsv"] = "x264"  # auto = hardware se houver
+    quality: Literal["max", "high", "medium", "draft"] = "high"  # max = x264 slow (mais lento, arquivo menor)
     thumbnail_at: float | None = Field(None, ge=0)
     guides: bool = False  # desenha as zonas seguras (para conferência)
+
+
+class SourceRef(Strict):
+    """Câmera ou gravador que captou o mesmo evento. `sync` é o instante, no relógio da fonte
+    principal, em que esta fonte começa; "auto" descobre pelo áudio (correlação)."""
+
+    src: str
+    sync: Literal["auto"] | float = 0.0
+    audio_stream: int = Field(0, ge=0)
+    label: str | None = None
 
 
 class Project(Strict):
@@ -320,11 +404,41 @@ class Project(Strict):
     output: Output = Output()
     brand: str | None = None
     theme: dict | None = None  # sobrescreve cores/fontes do tema
+    sources: dict[str, SourceRef] = {}  # fontes sincronizadas (multicâmera, gravadores)
+    master: str | None = None  # fonte principal = relógio da sessão; padrão: a primeira de `sources`
     timeline: list[Segment] = Field(min_length=1)
     overlays: list[Overlay] = []
     captions: Captions | None = None
     audio: AudioSettings = AudioSettings()
     base_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def _session_refs(self) -> Project:
+        names = set(self.sources)
+        if self.master and self.master not in names:
+            raise ValueError(f"master {self.master!r} não está em sources")
+        missing = [
+            seg.source
+            for seg in self.timeline
+            if isinstance(seg, ClipSegment) and seg.source and seg.source not in names
+        ]
+        missing += [t.source for t in self.audio.tracks if t.source not in names]
+        missing += [
+            ov.source
+            for ov in self.overlays
+            if isinstance(ov, VideoOverlay) and ov.source and ov.source not in names
+        ]
+        if missing:
+            raise ValueError(
+                f"fonte(s) desconhecida(s): {', '.join(sorted(set(missing)))} (declare em sources)"
+            )
+        return self
+
+    @property
+    def master_source(self) -> str | None:
+        if not self.sources:
+            return None
+        return self.master or next(iter(self.sources))
 
     @field_validator("name")
     @classmethod

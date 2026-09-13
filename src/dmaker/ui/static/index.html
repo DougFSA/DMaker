@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMaker</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="alert-bar" class="alert-bar" hidden>
+  <span id="alert-text"></span>
+  <button id="alert-close" class="alert-close" type="button" aria-label="Fechar aviso">&times;</button>
+</div>
+
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-project">
+      <span class="topbar-label">Projeto</span>
+      <strong id="project-name">Nenhum projeto aberto</strong>
+    </div>
+    <div class="topbar-actions">
+      <button id="btn-save" class="btn" type="button" disabled>Salvar</button>
+      <button id="btn-validate" class="btn" type="button" disabled>Validar</button>
+      <div class="preview-segments-field" id="preview-segments-field" title="Render parcial: só os trechos indicados, pelos números dos cartões (começando em 0). Não inclui sobreposições nem legendas.">
+        <span>Só os trechos</span>
+        <input id="preview-segment-from" type="number" min="0" step="1" placeholder="de">
+        <input id="preview-segment-to" type="number" min="0" step="1" placeholder="até">
+      </div>
+      <button id="btn-preview" class="btn btn-accent" type="button" disabled>Preview</button>
+      <button id="btn-render" class="btn btn-accent" type="button" disabled>Render final</button>
+      <button id="btn-export" class="btn" type="button" disabled>Exportar</button>
+    </div>
+  </header>
+
+  <div id="validate-banner" class="validate-banner" hidden></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="side-section">
+        <div class="side-section-header">
+          <h2>Projetos</h2>
+          <button id="btn-new-project" class="btn btn-small" type="button">Novo projeto</button>
+        </div>
+        <ul id="project-list" class="project-list"></ul>
+      </section>
+
+      <section class="side-section">
+        <h2>Jobs</h2>
+        <ul id="job-list" class="job-list"><li class="empty-hint">Nenhum job ainda</li></ul>
+      </section>
+
+      <section class="side-section side-section-grow">
+        <h2>Saídas</h2>
+        <ul id="output-list" class="output-list"><li class="empty-hint">Nenhuma saída ainda</li></ul>
+      </section>
+    </aside>
+
+    <main class="main-area">
+      <nav class="tabs" id="tabs">
+        <button class="tab-btn active" data-tab="editor" type="button">Editor</button>
+        <button class="tab-btn" data-tab="json" type="button">JSON</button>
+        <button class="tab-btn" data-tab="preview" type="button">Preview</button>
+        <button class="tab-btn" data-tab="captions" type="button" hidden id="tab-btn-captions">Legendas</button>
+      </nav>
+
+      <div class="tab-panels">
+        <section class="tab-panel active" id="panel-editor">
+          <div id="editor-empty" class="empty-state">Abra ou crie um projeto para começar a editar.</div>
+          <div id="editor-form" class="editor-form" hidden>
+            <fieldset class="form-block" id="block-output">
+              <legend>Saída</legend>
+              <div class="form-grid" id="output-fields"></div>
+            </fieldset>
+
+            <fieldset class="form-block" id="block-sources">
+              <legend>Fontes sincronizadas (multicâmera)</legend>
+              <div class="source-rows" id="sources-rows"></div>
+              <div class="add-row">
+                <button class="btn btn-small" type="button" id="btn-add-source">Adicionar fonte</button>
+              </div>
+              <div class="form-grid" id="sources-master-field" style="margin-top:10px"></div>
+              <div class="sync-actions">
+                <button class="btn btn-small" type="button" id="btn-sync-sources">Sincronizar agora</button>
+                <span class="hint-text">Pode levar alguns segundos por arquivo.</span>
+              </div>
+              <div id="sync-results" class="sync-results"></div>
+            </fieldset>
+
+            <fieldset class="form-block" id="block-timeline">
+              <legend>Linha do tempo</legend>
+              <div class="timeline-cards" id="timeline-cards"></div>
+              <div class="add-row">
+                <div class="dropdown" id="add-segment-dropdown">
+                  <button class="btn btn-small" type="button" id="btn-add-segment">Adicionar trecho ▾</button>
+                  <div class="dropdown-menu" id="add-segment-menu" hidden>
+                    <button type="button" data-add-segment="clip">Clipe</button>
+                    <button type="button" data-add-segment="image">Imagem</button>
+                    <button type="button" data-add-segment="card">Cartão</button>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="form-block" id="block-overlays">
+              <legend>Sobreposições</legend>
+              <div class="overlay-cards" id="overlay-cards"></div>
+              <div class="add-row">
+                <div class="dropdown" id="add-overlay-dropdown">
+                  <button class="btn btn-small" type="button" id="btn-add-overlay">Adicionar sobreposição ▾</button>
+                  <div class="dropdown-menu" id="add-overlay-menu" hidden>
+                    <button type="button" data-add-overlay="text">Texto</button>
+                    <button type="button" data-add-overlay="image">Imagem</button>
+                    <button type="button" data-add-overlay="video">Vídeo (PiP)</button>
+                    <button type="button" data-add-overlay="progress-bar">Barra de progresso</button>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="form-block" id="block-captions-settings">
+              <legend>Legendas</legend>
+              <div class="form-grid" id="captions-fields"></div>
+            </fieldset>
+
+            <fieldset class="form-block" id="block-audio">
+              <legend>Áudio</legend>
+              <div class="form-grid" id="audio-fields"></div>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="panel-json">
+          <div class="json-toolbar">
+            <button id="btn-apply-json" class="btn btn-small" type="button">Aplicar</button>
+            <span id="json-error" class="json-error"></span>
+          </div>
+          <textarea id="json-editor" class="json-editor" spellcheck="false"></textarea>
+        </section>
+
+        <section class="tab-panel" id="panel-preview">
+          <div id="preview-empty" class="empty-state">Ainda não há saída para este projeto.</div>
+          <div id="preview-content" class="preview-content" hidden>
+            <div class="preview-player-wrap">
+              <video id="preview-player" class="preview-player" controls></video>
+            </div>
+            <div class="preview-meta" id="preview-meta"></div>
+            <div class="preview-tools">
+              <button id="btn-qa-sheet" class="btn btn-small" type="button">Grade de quadros</button>
+              <label class="inline-field">
+                Quadro em t=
+                <input id="qa-frame-time" type="number" min="0" step="0.1" value="0">
+                <button id="btn-qa-frame" class="btn btn-small" type="button">Gerar</button>
+              </label>
+              <button id="btn-open-folder" class="btn btn-small" type="button">Abrir pasta</button>
+            </div>
+            <div id="qa-result" class="qa-result"></div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="panel-captions">
+          <p class="hint-text">Depois de salvar, gere o preview de novo para ver as legendas corrigidas.</p>
+          <div class="captions-toolbar">
+            <button id="btn-save-captions" class="btn btn-accent btn-small" type="button">Salvar legendas</button>
+          </div>
+          <table class="captions-table">
+            <thead>
+              <tr><th>Início</th><th>Fim</th><th>Texto</th></tr>
+            </thead>
+            <tbody id="captions-rows"></tbody>
+          </table>
+        </section>
+      </div>
+
+      <section class="progress-panel collapsed" id="progress-panel">
+        <button class="progress-toggle" id="progress-toggle" type="button">
+          <span>Andamento</span>
+          <span id="progress-status" class="progress-status"></span>
+        </button>
+        <div class="progress-body" id="progress-body">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+          </div>
+          <div class="progress-bar-label" id="progress-bar-label"></div>
+          <div class="progress-log" id="progress-log"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay" hidden>
+  <div class="modal" id="modal-box"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

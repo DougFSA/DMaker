@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from ..domain.brand import Theme
 from ..domain.presets import Preset
 from ..domain.spec import Project
 from ..media.ffmpeg import FFmpegRunner
 from ..media.probe import MediaInfo
+
+if TYPE_CHECKING:  # pragma: no cover
+    pass
 
 Prober = Callable[[Path], MediaInfo]
 
@@ -26,6 +30,7 @@ class RenderOptions:
     preset: str | None = None
     no_captions: bool = False
     thumbnail: bool = True
+    segments: tuple[int, int] | None = None  # render parcial: só os trechos [primeiro, último] (índices)
 
 
 @dataclass
@@ -55,6 +60,10 @@ class RenderContext:
     runner: FFmpegRunner
     prober: Prober
     warnings: list[str] = field(default_factory=list)
+    log: Callable[[str], None] = lambda message: None  # noqa: E731 - etapas do render (terminal, interface)
+    session: dict[str, Any] = field(
+        default_factory=dict
+    )  # fontes sincronizadas por nome (pipeline.sources.Source)
 
     @property
     def width(self) -> int:
@@ -75,3 +84,4 @@ class RenderContext:
 
     def warn(self, message: str) -> None:
         self.warnings.append(message)
+        self.log(f"aviso: {message}")

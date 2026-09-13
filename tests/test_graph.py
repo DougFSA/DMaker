@@ -114,7 +114,7 @@ def test_clip_mezzanine_silent_and_brand(tmp_path):
     )
     fc = _filter_complex(cmd.args)
     assert "anullsrc=r=48000:cl=stereo" in cmd.args
-    assert str(tmp_path / "bg.png") in cmd.args and "[2:v][rf_fg]overlay=" in fc
+    assert str(tmp_path / "bg.png") in cmd.args and "[1:v][rf_fg]overlay=" in fc
 
 
 def test_still_and_frames_mezzanine(tmp_path):
@@ -170,3 +170,62 @@ def test_encode_args_by_platform():
     assert args[args.index("-b:a") + 1] == "256k" and "+faststart" in args
     assert "ultrafast" in encode_args(p, "draft", "x264", 30)
     assert "h264_nvenc" in encode_args(p, "high", "nvenc", 30)
+
+
+def test_encoder_resolution_and_quality_levels():
+    from dmaker.filtergraph.encode import resolve_encoder
+
+    assert resolve_encoder("auto", "qsv") == "qsv" and resolve_encoder("auto", None) == "x264"
+    assert resolve_encoder("x264", "qsv") == "x264"
+    p = get_preset("instagram/reels")
+    assert "slow" in encode_args(p, "max", "x264", 30) and "medium" in encode_args(p, "high", "x264", 30)
+    assert "h264_qsv" in encode_args(p, "high", "qsv", 30)
+
+
+def test_clip_mezzanine_session_in_point_and_tracks(tmp_path):
+    from dmaker.filtergraph import TrackSlice
+
+    seg = ClipSegment(source="cam2", start=20, end=30, volume=0.3)
+    tracks = (
+        TrackSlice(Path("altar.wav"), in_point=5.0, volume=1.0),
+        TrackSlice(Path("dj.wav"), in_point=-1.5, volume=0.5, audio_stream=1),  # gravador ligou 1,5 s depois
+    )
+    cmd = clip_mezzanine(
+        seg,
+        _info(dur=60),
+        Path("cam2.mp4"),
+        10.0,
+        1080,
+        1920,
+        30,
+        tmp_path / "m.mov",
+        in_point=7.5,
+        tracks=tracks,
+    )
+    args = cmd.args
+    assert args[:4] == ["-ss", "7.500", "-t", "10.000"]  # 20 s da sessão = 7,5 s no arquivo da câmera 2
+    fc = _filter_complex(args)
+    assert "[0:a:0]asetpts=PTS-STARTPTS,volume=0.300" in fc
+    assert "-ss" in args and "5.000" in args and "0.000" in args  # faixa negativa entra do início do arquivo
+    assert "[2:a:1]asetpts=PTS-STARTPTS,adelay=1500:all=1,volume=0.500" in fc
+    assert "amix=inputs=3:duration=longest" in fc
+
+
+def test_clip_mezzanine_muted_camera_keeps_tracks(tmp_path):
+    from dmaker.filtergraph import TrackSlice
+
+    seg = ClipSegment(source="cam1", start=0, end=5, mute=True, speed=2)
+    cmd = clip_mezzanine(
+        seg,
+        _info(),
+        Path("cam1.mp4"),
+        2.5,
+        1080,
+        1920,
+        30,
+        tmp_path / "m.mov",
+        in_point=0,
+        tracks=(TrackSlice(Path("rec.wav"), 0.0),),
+    )
+    fc = _filter_complex(cmd.args)
+    assert "[mz_cam]" not in fc and "[mz_trk0]atempo=2" in fc and "anullsrc" not in " ".join(cmd.args)

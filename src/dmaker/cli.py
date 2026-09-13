@@ -101,9 +101,13 @@ def doctor(
             f"  filtros: {'ok' if not missing else '[red]faltam: ' + ', '.join(missing) + '[/red]'}"
         )
         if hw:
+            from .media.ffmpeg import hardware_encoder
+
             for enc in ("h264_nvenc", "h264_amf", "h264_qsv"):
                 ok = caps.has_encoder(enc) and encoder_works(enc)
                 console.print(f"  {enc}: {'[green]disponível[/green]' if ok else 'indisponível'}")
+            chosen = hardware_encoder()
+            console.print(f'  encoder de hardware para "encoder": "auto": {chosen or "nenhum (x264)"}')
     for fam in ("Poppins", "Bahnschrift", "Arial"):
         console.print(f"  fonte {fam}: {'ok' if fonts.family_available(fam) else '[yellow]ausente[/yellow]'}")
     console.print(f"  marcas: {', '.join(available_brands())}")
@@ -245,10 +249,15 @@ def render(
     ] = None,
     no_captions: Annotated[bool, typer.Option(help="Não gera legendas.")] = False,
     quiet: Annotated[bool, typer.Option(help="Sem barra de progresso.")] = False,
+    segments: Annotated[
+        str | None,
+        typer.Option(help="Render parcial só destes trechos, ex.: 12-20 (para revisar vídeos longos)."),
+    ] = None,
 ) -> None:
     """Renderiza o projeto no formato da plataforma."""
     from .media.ffmpeg import FFmpegError
     from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline.projects import parse_segments
 
     project = _load(spec)
     options = RenderOptions(
@@ -260,6 +269,7 @@ def render(
         out=out,
         preset=preset,
         no_captions=no_captions,
+        segments=parse_segments(segments),
     )
     try:
         result = RenderPipeline(project, options).run()
@@ -334,6 +344,37 @@ def captions(
     console.print(
         f"[green]{len(transcript.cues)} trechos, {len(lines)} linhas[/green] -> {out.with_suffix('.srt')} e .json "
         f"(idioma detectado: {meta.get('language')}, {meta.get('language_probability', 0):.0%})"
+    )
+
+
+@app.command()
+def sync(
+    master: Annotated[Path, typer.Argument(help="Fonte principal (relógio da sessão).")],
+    others: Annotated[list[Path], typer.Argument(help="Outras câmeras ou gravadores do mesmo evento.")],
+    master_stream: Annotated[int, typer.Option(help="Faixa de áudio da fonte principal.")] = 0,
+    stream: Annotated[int, typer.Option(help="Faixa de áudio das outras fontes.")] = 0,
+) -> None:
+    """Descobre pelo áudio em que instante do relógio da fonte principal cada outra fonte começa."""
+    from .config import CACHE_DIR
+    from .media.audiosync import sync_offset
+    from .media.ffmpeg import FFmpegError, SubprocessRunner
+
+    for f in (master, *others):
+        if not f.exists():
+            _fail(f"Arquivo não encontrado: {f}")
+    runner = SubprocessRunner(quiet=True)
+    console.print(f"Fonte principal: {master.name}")
+    for other in others:
+        try:
+            result = sync_offset(runner, master, other, CACHE_DIR / "audio" / "sync", master_stream, stream)
+        except FFmpegError as exc:
+            _fail(str(exc))
+        flag = "" if result.reliable else "  [yellow](baixa confiança, confira)[/yellow]"
+        console.print(
+            f"  {other.name}: começa em [green]{result.offset:+.3f} s[/green]  confiança {result.confidence:.1f}{flag}"
+        )
+    console.print(
+        'Na spec: "sources": {"cam2": {"src": "...", "sync": <valor>}} (ou "sync": "auto" para calcular no render).'
     )
 
 
@@ -452,6 +493,18 @@ def clean(
         shutil.rmtree(config.JOBS_DIR)
     config.ensure_dirs()
     console.print(f"[green]Cache limpo[/green] ({n} arquivos).")
+
+
+@app.command()
+def ui(
+    port: Annotated[int, typer.Option(help="Porta local.")] = 8765,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Não abre o navegador.")] = False,
+) -> None:
+    """Abre a interface gráfica (http://127.0.0.1:8765): projetos, editor, preview e progresso em tempo real."""
+    from .ui.server import serve
+
+    console.print(f"[green]DMaker UI[/green] em http://127.0.0.1:{port}  (Ctrl+C para parar)")
+    serve(port=port, open_browser=not no_browser)
 
 
 @app.command()

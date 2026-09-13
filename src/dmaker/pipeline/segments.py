@@ -16,7 +16,7 @@ from PIL import Image
 from ..domain.presets import SafeZone
 from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Segment
 from ..domain.timeline import segment_duration
-from ..filtergraph.mezzanine import clip_mezzanine, frames_mezzanine, still_mezzanine
+from ..filtergraph.mezzanine import TrackSlice, clip_mezzanine, frames_mezzanine, still_mezzanine
 from ..filtergraph.reframe import resolve_reframe_mode
 from ..media.ffmpeg import FFmpegCommand
 from ..visuals.cards import render_backdrop, render_card, save_card
@@ -66,6 +66,17 @@ def _default_variant(ctx: RenderContext) -> str:
     return ctx.theme.style.get("card_variant", "light")
 
 
+def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice, ...]:
+    """Fatias das faixas externas alinhadas ao início do trecho (tempo da sessão -> tempo na faixa)."""
+    slices = []
+    for track in ctx.project.audio.tracks:
+        source = ctx.session[track.source]
+        slices.append(
+            TrackSlice(source.path, source.in_point(segment.start), track.volume, source.audio_stream)
+        )
+    return tuple(slices)
+
+
 class ClipPreparer:
     """Vídeo: corte, velocidade, enquadramento e cor ficam no FFmpeg."""
 
@@ -75,6 +86,8 @@ class ClipPreparer:
         W, H = ctx.width, ctx.height
         mode = resolve_reframe_mode(segment.reframe.mode, info.width, info.height, W, H, ctx.has_brand)
         theme_part = _theme_signature(ctx) if mode == "brand" else None
+        in_point = source.in_point(segment.start) if segment.source else segment.start
+        tracks = _track_slices(ctx, segment) if segment.source else ()
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),
@@ -85,9 +98,11 @@ class ClipPreparer:
             ctx.fps,
             mode,
             theme_part,
+            in_point,
+            [(str(t.path), t.in_point, t.volume, t.audio_stream) for t in tracks],
         )
         out = ctx.cache_dir / f"{key}.mov"
-        duration = segment_duration(segment, info)
+        duration = segment_duration(segment, info, source.offset)
         backdrop = None
         tone = None
         if mode == "brand":
@@ -105,6 +120,9 @@ class ClipPreparer:
             H,
             ctx.fps,
             out,
+            in_point=in_point,
+            tracks=tracks,
+            audio_stream=source.audio_stream,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
             label=_label(index, ctx),

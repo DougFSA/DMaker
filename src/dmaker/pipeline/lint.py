@@ -17,8 +17,10 @@ def lint(
     total: float,
     durations: list[float],
     infos: list[MediaInfo | None],
+    offsets: list[float] | None = None,
 ) -> list[str]:
-    """Devolve avisos; levanta ValueError só para o que não tem como renderizar."""
+    """Devolve avisos; levanta ValueError só para o que não tem como renderizar. `offsets` é onde cada
+    fonte começa no relógio da sessão (0 para arquivos avulsos)."""
     warnings: list[str] = []
     segments = project.timeline
     if preset.max_duration and total > preset.max_duration + 0.01:
@@ -42,13 +44,18 @@ def lint(
             )
     for i, (seg, info) in enumerate(zip(segments, infos, strict=True)):
         if isinstance(seg, ClipSegment) and info:
-            if seg.start >= info.duration:
-                raise ValueError(
-                    f"timeline[{i}]: start={seg.start}s é maior que a duração da fonte ({info.duration:.2f}s)."
-                )
-            if seg.end and seg.end > info.duration + 0.05:
+            offset = offsets[i] if offsets else 0.0
+            begins, ends = offset, offset + info.duration
+            where = (
+                f"a fonte {seg.source!r} cobre {begins:.2f}s a {ends:.2f}s da sessão"
+                if seg.source
+                else (f"a fonte tem {info.duration:.2f}s")
+            )
+            if seg.start >= ends or seg.start < begins:
+                raise ValueError(f"timeline[{i}]: start={seg.start}s fora da fonte ({where}).")
+            if seg.end and seg.end > ends + 0.05:
                 warnings.append(
-                    f"timeline[{i}]: end={seg.end:g}s passa da duração da fonte ({info.duration:.2f}s); cortado no fim."
+                    f"timeline[{i}]: end={seg.end:g}s passa do fim da fonte ({where}); cortado no fim."
                 )
         if info and info.width and max(info.width, info.height) < preset.short_side:
             warnings.append(

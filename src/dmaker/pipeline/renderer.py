@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from ..config import JOBS_DIR, MEZ_DIR, OUTPUT_DIR, ensure_dirs
@@ -16,7 +17,8 @@ from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_f
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .lint import lint
 from .segments import MezzanineBuilder
-from .sources import resolve_sources
+from .sources import resolve_session, resolve_sources
+from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
 
 
@@ -35,6 +37,8 @@ class RenderPipeline:
         cache_dir: Path = MEZ_DIR,
         jobs_dir: Path = JOBS_DIR,
         output_dir: Path = OUTPUT_DIR,
+        log: Callable[[str], None] | None = None,
+        offset_finder: OffsetFinder | None = None,
     ):
         self.project = project
         self.options = options or RenderOptions()
@@ -45,6 +49,8 @@ class RenderPipeline:
         self.mezzanines = mezzanines or MezzanineBuilder()
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
+        self.log = log or (lambda message: None)
+        self.sync = SyncResolver(offset_finder or ffmpeg_offset_finder(self.runner), self.log)
         self.cache_dir = cache_dir
         self.jobs_dir = jobs_dir
         self.output_dir = output_dir
@@ -71,6 +77,7 @@ class RenderPipeline:
             cache_dir=self.cache_dir,
             runner=self.runner,
             prober=self.prober,
+            log=self.log,
         )
 
     def _output_path(self, preset: Preset) -> Path:
@@ -88,20 +95,37 @@ class RenderPipeline:
         ctx = self._context()
         p, o = ctx.project, ctx.options
 
-        sources = resolve_sources(p, ctx.prober)
+        ctx.log(
+            f"render {p.name}: {ctx.preset.id} {ctx.width}x{ctx.height}" + (" (preview)" if o.preview else "")
+        )
+        p = ctx.project = self._sliced(p, o, ctx)
+        offsets = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
+        ctx.session = resolve_session(p, ctx.prober, offsets)
+        sources = resolve_sources(p, ctx.prober, ctx.session)
         infos = [s.info for s in sources]
         transitions = transitions_of(p.timeline)
-        durations = [segment_duration(seg, info) for seg, info in zip(p.timeline, infos, strict=True)]
+        durations = [
+            segment_duration(seg, src.info, src.offset) for seg, src in zip(p.timeline, sources, strict=True)
+        ]
         total = timeline_total(durations, transitions)
-        ctx.warnings.extend(lint(p, ctx.theme, ctx.preset, total, durations, infos))
+        ctx.warnings.extend(
+            lint(p, ctx.theme, ctx.preset, total, durations, infos, [s.offset for s in sources])
+        )
 
         prepared = self.mezzanines.prepare(ctx, sources)
+        pending = sum(1 for item in prepared if item.command is not None)
+        ctx.log(f"trechos: {len(prepared)} ({pending} a gerar, {len(prepared) - pending} em cache)")
         self.mezzanines.build(ctx, prepared)
         durations = [item.duration for item in prepared]
         total = timeline_total(durations, transitions)
         spans = timeline_spans(durations, transitions)
         tones = [item.tone for item in prepared]
 
+        if p.captions and p.captions.enabled and not o.no_captions:
+            ctx.log(
+                "legendas: "
+                + ("transcrição automática" if p.captions.source == "auto" else p.captions.source)
+            )
         captions = self.captions.produce(ctx, sources, prepared, transitions)
         guides = o.guides if o.guides is not None else p.output.guides
         layer = build_text_layer(ctx, total, spans, tones, captions.cues if captions else None, guides)
@@ -116,7 +140,9 @@ class RenderPipeline:
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
+        ctx.log("montagem final")
         ctx.runner.run(assembly.command)
+        ctx.log(f"pronto: {out_path}")
 
         commands = [format_cmd(c) for c in getattr(ctx.runner, "commands", [])]
         (ctx.job_dir / "cmd.txt").write_text("\n\n".join(commands), encoding="utf-8")
@@ -132,6 +158,25 @@ class RenderPipeline:
             job_dir=ctx.job_dir,
             size_bytes=out_path.stat().st_size if out_path.exists() and not o.dry_run else 0,
         )
+
+    @staticmethod
+    def _sliced(project: Project, options: RenderOptions, ctx: RenderContext) -> Project:
+        """Render parcial: mantém só os trechos pedidos, sem sobreposições nem legendas (tempos absolutos
+        deixariam de bater). Serve para revisar cortes de um vídeo longo sem renderizar tudo."""
+        if options.segments is None:
+            return project
+        first, last = options.segments
+        if first < 0 or last >= len(project.timeline) or first > last:
+            raise ValueError(
+                f"segmentos {first}-{last} fora da linha do tempo (0 a {len(project.timeline) - 1})"
+            )
+        ctx.log(f"render parcial: trechos {first} a {last} (sem sobreposições e legendas)")
+        sliced = project.model_copy(
+            update={"timeline": project.timeline[first : last + 1], "overlays": [], "captions": None}
+        )
+        sliced.base_dir = project.base_dir
+        sliced.timeline[0] = sliced.timeline[0].model_copy(update={"transition": None})
+        return sliced
 
     def _music_path(self) -> Path | None:
         music = self.project.audio.music

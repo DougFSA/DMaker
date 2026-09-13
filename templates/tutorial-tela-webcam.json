@@ -1,0 +1,35 @@
+{
+  "name": "tutorial-agenda-webcam",
+  "output": { "preset": "youtube/video", "quality": "high" },
+  "brand": "medlycare",
+  "sources": {
+    "tela": { "src": "D:/gravacoes/tela-obs.mp4" },
+    "webcam": { "src": "D:/gravacoes/webcam-obs.mp4", "sync": "auto" }
+  },
+  "timeline": [
+    { "type": "card", "title": "Como montar a agenda no MedlyCare", "subtitle": "Passo a passo em 5 minutos", "duration": 4 },
+    { "type": "clip", "source": "tela", "start": 3, "end": 300, "transition": { "type": "fade", "duration": 0.5 } },
+    { "type": "card", "title": "Teste grátis por 3 meses, sem cartão", "subtitle": "medlycare.com.br", "variant": "dark", "duration": 5, "transition": { "type": "fade", "duration": 0.8 } }
+  ],
+  "overlays": [
+    {
+      "type": "video",
+      "source": "webcam",
+      "offset": 3,
+      "start": 4,
+      "end": 300.5,
+      "shape": "circle",
+      "width": 0.18,
+      "position": "bottom-right",
+      "border": 6,
+      "border_color": "accent",
+      "shadow": true,
+      "animation": "slide",
+      "volume": 1.0
+    },
+    { "type": "text", "text": "Douglas Vasconcelos", "secondary": "MedlyCare", "role": "lower-third", "start": 5, "end": 11 },
+    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.06, "opacity": 0.85, "start": 4, "end": 300 }
+  ],
+  "captions": { "source": "auto", "language": "pt", "model": "medium", "style": { "mode": "classic", "max_words": 8, "max_chars": 42, "uppercase": false, "size": 40 } },
+  "audio": { "normalize": "two-pass" }
+}

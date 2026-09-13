@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -124,3 +125,125 @@ def test_missing_source_fails_clearly(tmp_path):
     project.base_dir = tmp_path
     with pytest.raises(FileNotFoundError):
         RenderPipeline(project, RenderOptions(dry_run=True)).run()
+
+
+def _write_event_wav(path: Path, seconds: float, seed: int = 5) -> None:
+    """Áudio de evento (rajadas aleatórias) para a sincronização ter o que correlacionar."""
+    import wave
+
+    import numpy as np
+
+    rate = 16000
+    rng = np.random.default_rng(seed)
+    n = int(seconds * rate)
+    signal = rng.normal(0, 0.02, n).astype(np.float32)
+    for start in rng.uniform(0, seconds - 0.5, size=int(seconds * 2)):
+        i = int(start * rate)
+        burst = (rng.normal(0, 0.4, int(0.15 * rate)) * np.hanning(int(0.15 * rate))).astype(np.float32)
+        signal[i : i + len(burst)] += burst
+    pcm = (np.clip(signal, -1, 1) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(pcm.tobytes())
+
+
+def test_multicam_sync_and_render(tmp_path):
+    from dmaker.media import ffmpeg
+
+    master_wav = tmp_path / "evento.wav"
+    _write_event_wav(master_wav, 40)
+    cam1 = tmp_path / "cam1.mp4"
+    cam2 = tmp_path / "cam2.mp4"
+    rec = tmp_path / "gravador.wav"
+    video = ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30"]
+    encode = ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"]
+    ffmpeg.run([*video, "-i", str(master_wav), "-t", "40", *encode, str(cam1)], quiet=True)
+    # câmera 2 ligou 2,0 s depois (o -ss vale só para a entrada seguinte); gravador ligou 0,5 s depois
+    ffmpeg.run([*video, "-ss", "2.0", "-i", str(master_wav), "-t", "36", *encode, str(cam2)], quiet=True)
+    ffmpeg.run(["-ss", "0.5", "-i", str(master_wav), "-t", "38", "-c:a", "pcm_s16le", str(rec)], quiet=True)
+
+    project = Project.model_validate(
+        {
+            "name": "multicam_teste",
+            "output": {"preset": "youtube/video"},
+            "sources": {
+                "cam1": {"src": str(cam1)},
+                "cam2": {"src": str(cam2), "sync": "auto"},
+                "rec": {"src": str(rec), "sync": "auto"},
+            },
+            "timeline": [
+                {"type": "clip", "source": "cam1", "start": 5, "end": 8},
+                {"type": "clip", "source": "cam2", "start": 8, "end": 11, "transition": {"type": "cut"}},
+            ],
+            "audio": {"tracks": [{"source": "rec"}], "normalize": "fast"},
+        }
+    )
+    project.base_dir = tmp_path
+    out = tmp_path / "multicam.mp4"
+    result = RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True, thumbnail=False)).run()
+    sync = json.loads((tmp_path / "sync.json").read_text(encoding="utf-8"))
+    assert sync["cam2"]["offset"] == pytest.approx(2.0, abs=0.02)
+    assert sync["rec"]["offset"] == pytest.approx(0.5, abs=0.02)
+    assert sync["cam2"]["confidence"] > 4
+    info = probe(out)
+    assert abs(info.duration - 6.0) < 0.25 and info.has_audio and result.duration == pytest.approx(6.0)
+
+
+def test_picture_in_picture_render(synthetic_media, tmp_path):
+    """Tela (clip_a, 16:9) com webcam (clip_b) em círculo no canto e em retângulo com slide."""
+    from PIL import Image
+
+    from dmaker.media import ffmpeg
+
+    project = Project.model_validate(
+        {
+            "name": "pip_teste",
+            "output": {"preset": "youtube/video"},
+            "timeline": [{"type": "clip", "src": str(synthetic_media["clip_a"]), "end": 3.0}],
+            "overlays": [
+                {
+                    "type": "video",
+                    "src": str(synthetic_media["clip_a"]),  # tem áudio (senoide)
+                    "start": 0.5,
+                    "end": 2.5,
+                    "shape": "circle",
+                    "width": 0.22,
+                    "position": "bottom-right",
+                    "border": 8,
+                    "volume": 0.5,
+                },
+                {
+                    "type": "video",
+                    "src": str(synthetic_media["clip_b"]),
+                    "start": 1.0,
+                    "end": 3.0,
+                    "shape": "rounded",
+                    "aspect": "16:9",
+                    "width": 0.3,
+                    "position": "top-left",
+                    "animation": "slide",
+                    "shadow": False,
+                },
+            ],
+            "audio": {"normalize": "fast"},
+        }
+    )
+    project.base_dir = tmp_path
+    out = tmp_path / "pip.mp4"
+    result = RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True, thumbnail=False)).run()
+    info = probe(out)
+    assert abs(info.duration - 3.0) < 0.25 and result.job_dir
+    assert (result.job_dir / "pip0_mask.png").exists() and (result.job_dir / "pip0_frame.png").exists()
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "alphamerge" in graph and "tpad=start_duration=0.500" in graph and "eval=frame" in graph
+    assert "amix=inputs=2" in graph  # áudio do PiP misturado (o segundo PiP não tem áudio)
+    # no meio do vídeo o canto inferior direito tem o PiP (barras coloridas), não o padrão da tela
+    frame = tmp_path / "pip_frame.jpg"
+    ffmpeg.run(["-ss", "1.5", "-i", str(out), "-frames:v", "1", str(frame)], quiet=True)
+    img = Image.open(frame).convert("RGB")
+    w, h = img.size
+    mask = Image.open(result.job_dir / "pip0_mask.png")
+    assert mask.size[0] == mask.size[1]  # círculo é 1:1
+    assert img.getpixel((w - 40, h - 40)) != img.getpixel((w // 2, 10))

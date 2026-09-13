@@ -13,7 +13,7 @@ D:\DMaker\.venv\Scripts\dmaker.exe <comando>
 
 (ou `cd D:\DMaker` e `.venv\Scripts\dmaker.exe`). Se der "ffmpeg não encontrado", rode `dmaker setup`.
 
-Se o servidor MCP `dmaker` estiver conectado na sessão, as mesmas operações existem como ferramentas (`probe_media`, `save_project`, `validate_project`, `render_project`, `contact_sheet`, `frames`...); `contact_sheet` e `frames` já devolvem as imagens para conferir.
+Interface gráfica para o usuário acompanhar e editar: `dmaker ui` (http://127.0.0.1:8765). Se o servidor MCP `dmaker` estiver conectado na sessão, as mesmas operações existem como ferramentas (`probe_media`, `save_project`, `validate_project`, `render_project`, `contact_sheet`, `frames`...); `contact_sheet` e `frames` já devolvem as imagens para conferir.
 
 ## Fluxo de trabalho (sempre nessa ordem)
 
@@ -76,16 +76,33 @@ Atalhos aceitos: reels, stories, shorts, youtube, feed, square, tiktok, status, 
 Regras e valores:
 
 - **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior); tipos: `cut`, `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `smoothleft`, `circleopen`, `zoomin`, `fadeblack`, `fadewhite`, `pixelize`... (nomes do xfade). Transição consome tempo: duração final = soma dos trechos menos as transições (`validate` mostra).
-- **Trechos**: `clip` (vídeo; `start`/`end` no arquivo fonte, `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; o movimento é sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
+- **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; o movimento é sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; se for muito diferente, usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
 - **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `uppercase`, `align`, `max_width`, `font`, `weight`. `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição.
 - **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `opacity`, `start`/`end`, `fade`.
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
+- **Picture-in-picture** (`type: "video"`): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y`; `width` (fração da largura, 0.18 a 0.3 para webcam); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do PiP (0 = mudo). Caso típico: tela gravada no OBS + webcam, ambos em `sources` com `sync: "auto"`, PiP em círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; modelo `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus).
-- **audio**: `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
-- **output**: `preset`, `quality` (high/medium/draft), `encoder` (x264 padrão; `qsv`/`nvenc`/`amf` se `dmaker doctor` mostrar disponível), `fps`, `thumbnail_at`, `path`.
+- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
+- **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa o encoder de hardware que `dmaker doctor` detectar, mais rápido e com qualidade um pouco menor: bom para rascunhos e vídeos pessoais rápidos), `fps`, `thumbnail_at`, `path`. Nesta máquina o hardware é Intel Quick Sync (a GeForce MX130 não tem encoder de vídeo).
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.
+
+## Vídeos longos, multicâmera e áudio externo (casamentos, eventos, aulas)
+
+Declare as fontes do mesmo evento em `sources` e diga qual é o relógio principal (`master`, padrão: a primeira). `sync: "auto"` descobre pelo áudio em que instante do relógio principal cada fonte começa (correlação; resultado fica em `projects/<nome>/sync.json` e é reaproveitado). Clipes com `source` (em vez de `src`) usam tempos **da sessão**, então cortar entre câmeras é só trocar o `source` e manter a contagem. Faixas de `audio.tracks` (gravador, mesa de som) seguem os cortes automaticamente e são misturadas ao áudio das câmeras (controle o da câmera com `volume`/`mute` do clipe).
+
+```json
+"sources": {"cam1": {"src": "cam1.mp4"}, "cam2": {"src": "cam2.mp4", "sync": "auto"}, "rec": {"src": "altar.wav", "sync": "auto"}},
+"timeline": [{"type": "clip", "source": "cam1", "start": 120, "end": 150}, {"type": "clip", "source": "cam2", "start": 150, "end": 200, "transition": {"type": "cut"}}],
+"audio": {"tracks": [{"source": "rec", "volume": 1.0}]}
+```
+
+- Conferir a sincronização antes: `dmaker sync cam1.mp4 cam2.mp4 altar.wav` (mostra deslocamento e confiança; abaixo de 4 confira à mão e informe o número em `sync`).
+- Escolher os cortes: `dmaker sheet` e `dmaker frames` nas fontes; ou peça ao usuário os instantes.
+- Revisar sem renderizar tudo: `dmaker render spec.json --preview --segments 3-6` (só esses trechos, sem sobreposições/legendas).
+- Cronograma realista: mezaninos ~1x tempo real e render final ~1x em 1080p; um vídeo de 1 h leva ~2 h. Use `quality: high` (padrão) ou `medium` se a pressa for maior; `max` só para entrega final quando sobrar tempo.
+- Template: `templates/casamento-multicam.json`.
 
 ## Regras da marca MedlyCare (quando `"brand": "medlycare"`)
 

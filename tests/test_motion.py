@@ -50,7 +50,8 @@ def test_plan_none_and_invalid():
 
 
 def test_source_size_for():
-    assert source_size_for(1080, 1920, 0.12) == (2419, 4301)
+    assert source_size_for(1080, 1920, 0.12) == (1814, 3226)
+    assert source_size_for(1080, 1920, 0.12, supersample=2.0) == (2419, 4301)
 
 
 def test_render_frames_size_and_order():
