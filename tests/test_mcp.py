@@ -11,6 +11,8 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from dmaker import config
 
+from .conftest import requires_ffmpeg
+
 
 async def _session(fn):
     params = StdioServerParameters(
@@ -44,10 +46,13 @@ def test_lists_tools_and_prompt():
         "presets",
         "probe_media",
         "save_project",
+        "list_templates",
+        "new_from_template",
         "validate_project",
         "render_project",
         "job_status",
         "contact_sheet",
+        "qa_report",
         "frames",
         "fix_captions",
         "edit_project",
@@ -89,6 +94,56 @@ def test_save_and_validate_project_via_mcp(tmp_path):
     assert spec_path.exists()
     spec_path.unlink()
     spec_path.parent.rmdir()
+
+
+def test_list_templates_via_mcp():
+    async def go(session):
+        result = await session.call_tool("list_templates", {})
+        return result.structured_content["result"]
+
+    data = asyncio.run(_session(go))
+    assert len(data) >= 4
+    names = {t["name"] for t in data}
+    assert "reel-medlycare-produto" in names
+    produto = next(t for t in data if t["name"] == "reel-medlycare-produto")
+    assert "prints" in produto["params"]
+    assert produto["params"]["prints"]["required"] is True
+    assert "titulo" in produto["summary"]
+
+
+@requires_ffmpeg
+def test_new_from_template_via_mcp(synthetic_media):
+    params = {"prints": [str(synthetic_media["photo"])] * 2}
+
+    async def go(session):
+        created = await session.call_tool(
+            "new_from_template",
+            {"template": "reel-medlycare-produto", "name": "mcp-template-teste", "params": params},
+        )
+        return _text(created)
+
+    created = json.loads(asyncio.run(_session(go)))
+    assert created["name"] == "mcp-template-teste"
+    assert created["total_s"] > 0
+
+    spec_path = config.PROJECTS_DIR / "mcp-template-teste" / "spec.json"
+    saved = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert saved["name"] == "mcp-template-teste"
+    assert len(saved["timeline"]) == 4  # cartão + 2 prints + cartão de CTA
+    spec_path.unlink()
+    spec_path.parent.rmdir()
+
+
+def test_new_from_template_missing_required_param_via_mcp():
+    async def go(session):
+        return await session.call_tool(
+            "new_from_template",
+            {"template": "reel-medlycare-produto", "name": "mcp-template-erro", "params": {}},
+        )
+
+    result = asyncio.run(_session(go))
+    assert result.is_error
+    assert "prints" in _text(result)
 
 
 class _FakeUIClient:
@@ -208,5 +263,71 @@ def test_edit_project_and_timeline_view_via_mcp():
     spec_path = config.PROJECTS_DIR / "mcp-edit-teste" / "spec.json"
     saved = json.loads(spec_path.read_text(encoding="utf-8"))
     assert len(saved["timeline"]) == 2
+    spec_path.unlink()
+    spec_path.parent.rmdir()
+
+
+def test_read_captions_compact_and_full():
+    # direto (não via stdio), igual aos testes de render_project: evita subprocesso para checar o roteamento.
+    import dmaker.mcp_server as mcp_server
+
+    name = "mcp-captions-teste"
+    project_dir = config.PROJECTS_DIR / name
+    project_dir.mkdir(parents=True, exist_ok=True)
+    spec = {
+        "name": name,
+        "output": {"preset": "instagram/reels"},
+        "timeline": [{"type": "card", "title": "Legendas via MCP", "duration": 1.0}],
+        "captions": {"source": "auto"},
+        "audio": {"normalize": "off"},
+    }
+    (project_dir / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+    data = {
+        "language": "pt",
+        "cues": [
+            {
+                "start": 0.0,
+                "end": 0.8,
+                "text": "oi tudo bem",
+                "words": [
+                    {"start": 0.0, "end": 0.3, "text": "oi", "probability": 0.95},
+                    {"start": 0.3, "end": 0.6, "text": "tudo", "probability": 0.3},
+                    {"start": 0.6, "end": 0.8, "text": "bem", "probability": 0.9},
+                ],
+            }
+        ],
+    }
+    (project_dir / "captions.auto.json").write_text(json.dumps(data), encoding="utf-8")
+    try:
+        compact = mcp_server.read_captions(name)
+        assert compact["digest"]["total_cues"] == 1
+        assert any("baixa confiança" in reason for issue in compact["issues"] for reason in issue["reasons"])
+        assert "hint" in compact
+
+        full = mcp_server.read_captions(name, mode="full")
+        assert full["cues"][0]["words"][1]["probability"] == 0.3
+    finally:
+        (project_dir / "captions.auto.json").unlink()
+        (project_dir / "spec.json").unlink()
+        project_dir.rmdir()
+
+
+def test_qa_report_via_mcp():
+    spec = {
+        "output": {"preset": "instagram/stories"},
+        "timeline": [{"type": "card", "title": "QA via MCP", "duration": 1.0}],
+        "audio": {"normalize": "off"},
+    }
+
+    async def go(session):
+        await session.call_tool("save_project", {"name": "mcp-qa-teste", "spec": spec})
+        return await session.call_tool("qa_report", {"name_or_path": "mcp-qa-teste"})
+
+    result = asyncio.run(_session(go))
+    data = json.loads(_text(result))
+    assert "Checagens feitas" in data["text"]
+    assert data["project"] == "mcp-qa-teste"
+
+    spec_path = config.PROJECTS_DIR / "mcp-qa-teste" / "spec.json"
     spec_path.unlink()
     spec_path.parent.rmdir()

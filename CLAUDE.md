@@ -2,7 +2,7 @@
 
 Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 em `bin/ffmpeg` (baixado por `dmaker setup`), Poppins em `assets/fonts`, marcas em `assets/brands/<nome>/brand.json`.
 
-- Como operar o editor a partir de um pedido: `.claude/skills/dmaker/SKILL.md` (fluxo, spec, regras da marca).
+- Como operar o editor a partir de um pedido: `.claude/skills/dmaker/SKILL.md` (fluxo e regras da marca, enxuta); a referência completa da spec, presets, multicâmera e picture-in-picture está no recurso MCP `dmaker://guide` (ferramenta `dmaker_guide`), lido só quando necessário.
 - Rodar comandos: `.venv\Scripts\dmaker.exe ...` (não use o Python global). Servidor MCP: `dmaker mcp` (config em `.mcp.json`). Interface: `dmaker ui`.
 - Desenvolvimento com economia de tokens: skill `dmaker-dev` (`.claude/skills/dmaker-dev/SKILL.md`): Opus planeja e revisa, agentes Sonnet implementam.
 - Testes: `.venv\Scripts\python -m pytest` (~2 min; a integração renderiza com ffmpeg e o MCP sobe por stdio). Lint/format: `.venv\Scripts\ruff check --fix src tests && .venv\Scripts\ruff format src tests`. Os dois precisam passar antes de dar algo por pronto.

@@ -1,11 +1,29 @@
 {
+  "description": "Story MedlyCare de uma dica: uma captura de tela de fundo, gancho, texto e CTA.",
+  "params": {
+    "titulo": {
+      "description": "Pergunta ou gancho no topo do story",
+      "default": "Chegou sem hora marcada?",
+      "type": "text"
+    },
+    "texto": {
+      "description": "Texto explicativo abaixo do gancho",
+      "default": "A fila de espera organiza quem chega e avisa o profissional",
+      "type": "text"
+    },
+    "print": {
+      "description": "Captura de tela do produto usada como fundo",
+      "type": "path",
+      "required": true
+    }
+  },
   "name": "medlycare-stories-dica",
   "output": { "preset": "instagram/stories", "quality": "high" },
   "brand": "medlycare",
   "timeline": [
     {
       "type": "image",
-      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/04-fila-de-espera.png",
+      "src": "{{print}}",
       "duration": 8,
       "motion": "zoom-in",
       "motion_amount": 0.06,
@@ -13,8 +31,8 @@
     }
   ],
   "overlays": [
-    { "type": "text", "text": "Chegou sem hora marcada?", "role": "hook", "start": 0.3, "end": 8 },
-    { "type": "text", "text": "A fila de espera organiza quem chega e avisa o profissional", "role": "subtitle", "position": "bottom", "start": 1.5, "end": 8 },
+    { "type": "text", "text": "{{titulo}}", "role": "hook", "start": 0.3, "end": 8 },
+    { "type": "text", "text": "{{texto}}", "role": "subtitle", "position": "bottom", "start": 1.5, "end": 8 },
     { "type": "text", "text": "medlycare.com.br", "role": "cta", "start": 4, "end": 8, "y": 0.9 },
     { "type": "image", "src": "logo:horizontal_dark", "position": "top", "width": 0.4, "start": 0, "end": 8 }
   ],

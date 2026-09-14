@@ -53,6 +53,44 @@ def test_project_roundtrip_and_validation(client):
     assert client.get("/api/projects/nao-existe").status_code == 404
 
 
+def test_list_templates_endpoint(client):
+    templates = client.get("/api/templates").json()
+    assert len(templates) >= 4
+    names = {t["name"] for t in templates}
+    assert "stories-medlycare" in names
+    stories = next(t for t in templates if t["name"] == "stories-medlycare")
+    assert stories["params"]["print"]["required"] is True
+    assert stories["params"]["titulo"]["required"] is False
+
+
+def test_create_project_from_template_endpoint(client):
+    name = "ui-teste-template"
+    resp = client.post(
+        "/api/projects",
+        json={"name": name, "template": "stories-medlycare", "params": {"print": "D:/fake/print.png"}},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["name"] == name
+    assert data["spec"]["timeline"][0]["src"] == "D:/fake/print.png"
+    assert data["spec"]["overlays"][0]["text"] == "Chegou sem hora marcada?"  # default de "titulo"
+
+    folder = config.PROJECTS_DIR / name
+    for f in folder.glob("*"):
+        f.unlink()
+    folder.rmdir()
+
+
+def test_create_project_from_template_missing_required_param_returns_400(client):
+    resp = client.post(
+        "/api/projects",
+        json={"name": "ui-teste-template-erro", "template": "stories-medlycare", "params": {}},
+    )
+    assert resp.status_code == 400
+    assert "print" in resp.json()["detail"]
+    assert not (config.PROJECTS_DIR / "ui-teste-template-erro").exists()
+
+
 def test_captions_read_and_update(client):
     client.put(f"/api/projects/{PROJECT}", json=SPEC)
     store = config.PROJECTS_DIR / PROJECT / "captions.auto.json"
@@ -227,3 +265,11 @@ def test_render_preview_via_api(client):
     assert client.get(sheet["url"]).status_code == 200
     for f in config.OUTPUT_DIR.glob(f"{PROJECT}__*"):
         f.unlink()
+
+
+def test_qa_endpoint(client):
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    result = client.post(f"/api/projects/{PROJECT}/qa").json()
+    assert "Checagens feitas" in result["text"]
+    assert result["project"] == PROJECT
+    assert client.post("/api/projects/nao-existe/qa").status_code == 404

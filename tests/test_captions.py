@@ -1,11 +1,15 @@
+import json
+
 from dmaker.text.captions import (
     Cue,
     Word,
+    captions_digest,
     flatten_words,
     from_json,
     parse_srt,
     regroup,
     shift,
+    suspicious_cues,
     to_json,
     to_srt,
 )
@@ -107,3 +111,103 @@ def test_regroup_holds_short_gaps():
     assert [ln.text for ln in lines] == ["um dois.", "tres", "quatro"]
     assert lines[0].end == 1.6  # pausa curta segurada até a próxima linha
     assert lines[1].end < 4.0  # pausa longa não é segurada
+
+
+# ---------- probability por palavra ----------
+
+
+def test_word_probability_json_roundtrip():
+    cue = Cue(0, 1, "oi", [Word(0, 1, "oi", 0.87)])
+    back = from_json(to_json([cue]))
+    assert back[0].words[0].probability == 0.87
+
+
+def test_word_probability_defaults_to_none_reading_old_files():
+    old = json.dumps(
+        {
+            "language": "pt",
+            "cues": [{"start": 0, "end": 1, "text": "oi", "words": [{"start": 0, "end": 1, "text": "oi"}]}],
+        }
+    )
+    cues = from_json(old)
+    assert cues[0].words[0].probability is None
+
+
+def test_shift_preserves_probability():
+    out = shift([Cue(1, 2, "x", [Word(1, 1.5, "x", 0.4)])], 0.5)
+    assert out[0].words[0].probability == 0.4
+
+
+# ---------- suspicious_cues ----------
+
+
+def test_suspicious_cues_flags_low_probability_word():
+    cues = [
+        Cue(
+            0,
+            1,
+            "oi tudo bem",
+            [Word(0, 0.3, "oi", 0.95), Word(0.3, 0.6, "tudo", 0.3), Word(0.6, 1, "bem", 0.9)],
+        )
+    ]
+    issues = suspicious_cues(cues)
+    assert len(issues) == 1
+    assert any("baixa confiança" in r and "tudo" in r for r in issues[0].reasons)
+    assert issues[0].words_low == ["tudo"]
+
+
+def test_suspicious_cues_flags_brand_term():
+    cues = [
+        Cue(0, 1, "uso o medlicare", [Word(0, 0.3, "uso"), Word(0.3, 0.6, "o"), Word(0.6, 1, "medlicare")])
+    ]
+    issues = suspicious_cues(cues, vocabulary=["MedlyCare"])
+    assert any("parece termo da marca" in r for r in issues[0].reasons)
+
+
+def test_suspicious_cues_flags_pending_replacement():
+    cues = [Cue(0, 1, "medriquer chegou", [Word(0, 0.5, "medriquer"), Word(0.5, 1, "chegou")])]
+    issues = suspicious_cues(cues, replacements={"medriquer": "MedlyCare"})
+    assert any("substituição pendente" in r and "MedlyCare" in r for r in issues[0].reasons)
+
+
+def test_suspicious_cues_flags_long_and_short_cues():
+    cues = [
+        Cue(0, 0.1, "oi", []),  # curta demais
+        Cue(1, 10, "x" * 60, []),  # longa demais no tempo
+        Cue(11, 11.5, "x" * 60, []),  # texto longo demais
+    ]
+    issues = suspicious_cues(cues, max_chars=44, min_duration=0.3, max_duration=7.0)
+    assert len(issues) == 3
+    assert any("cue curta" in r for r in issues[0].reasons)
+    assert any("cue longa" in r for r in issues[1].reasons)
+    assert any("cue longa" in r for r in issues[2].reasons)
+
+
+def test_suspicious_cues_no_false_positives_on_normal_cue():
+    cues = [Cue(0, 2, "um texto normal e curto", [Word(0, 1, "um", 0.99), Word(1, 2, "texto", 0.95)])]
+    assert suspicious_cues(cues, vocabulary=["MedlyCare"], replacements={"x": "y"}) == []
+
+
+# ---------- captions_digest ----------
+
+
+def test_captions_digest_summarizes_cues():
+    cues = [
+        Cue(0, 1, "primeira", [Word(0, 1, "primeira", 0.9)]),
+        Cue(1, 2, "segunda", [Word(1, 2, "segunda", 0.5)]),
+        Cue(2, 3, "terceira", []),
+        Cue(3, 4, "quarta", []),
+    ]
+    digest = captions_digest(cues)
+    assert digest["total_cues"] == 4
+    assert digest["covered_duration_s"] == 4.0
+    assert digest["avg_probability"] == 0.7
+    assert digest["first_cues"] == ["primeira", "segunda"]
+    assert digest["last_cues"] == ["terceira", "quarta"]
+
+
+def test_captions_digest_empty():
+    digest = captions_digest([])
+    assert digest["total_cues"] == 0
+    assert digest["avg_probability"] is None
+    assert digest["first_cues"] == [] and digest["last_cues"] == []

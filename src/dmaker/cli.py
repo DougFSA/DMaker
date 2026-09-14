@@ -65,6 +65,32 @@ def _print_result(result) -> None:
         console.print(f"[yellow]aviso:[/yellow] {w}")
 
 
+def _print_qa_summary(spec: Path, project, preset: str | None, output: Path) -> None:
+    """Contagem e achados de erro/aviso do relatório de QA, ao final de um render local."""
+    from .pipeline.report import build_report
+
+    report_project = project
+    if preset:
+        report_project = project.model_copy(
+            update={"output": project.output.model_copy(update={"preset": preset})}
+        )
+    try:
+        report = build_report(report_project, output=output)
+    except Exception as exc:  # noqa: BLE001 - QA é um extra; não deve interromper o render
+        console.print(f"[yellow]QA não pôde ser gerado: {exc}[/yellow]")
+        return
+    counts = {"erro": 0, "aviso": 0, "info": 0}
+    for f in report.findings:
+        counts[f.level] = counts.get(f.level, 0) + 1
+    console.print(
+        f"QA: {counts['erro']} erro(s), {counts['aviso']} aviso(s), {counts['info']} info(s) "
+        f"(dmaker qa {spec} --output {output} para o relatório completo)"
+    )
+    for f in report.findings:
+        if f.level in ("erro", "aviso"):
+            console.print(f"  {f.level}: {f.where}: {f.message}", markup=False, highlight=False)
+
+
 def _project_name_for_ui(spec: Path, project) -> str | None:
     """Nome do projeto para a interface: só quando a spec está no layout padrão projects/<nome>/spec.json
     (a interface só conhece projetos por nome, não caminhos de spec avulsos)."""
@@ -262,6 +288,81 @@ def new(
     console.print(f"Edite a spec e rode: dmaker render {path}")
 
 
+@app.command(name="templates")
+def list_templates_cmd() -> None:
+    """Lista os templates disponíveis (templates/*.json) e os parâmetros de cada um."""
+    from .domain.templates import list_templates as _list_templates
+    from .domain.templates import template_summary
+
+    for t in _list_templates():
+        console.print(template_summary(t))
+        console.print()
+
+
+@app.command(name="new-from-template")
+def new_from_template_cmd(
+    template: Annotated[str, typer.Argument(help="Nome do template (dmaker templates).")],
+    name: Annotated[str, typer.Argument(help="Nome do projeto (vira pasta em projects/).")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--param", help='Parâmetro "chave=valor" (listas separadas por vírgula). Repita para cada um.'
+        ),
+    ] = None,
+    params_json: Annotated[
+        str | None,
+        typer.Option("--params-json", help='Parâmetros como um JSON só, ex.: \'{"titulo": "..."}\'.'),
+    ] = None,
+) -> None:
+    """Cria projects/<nome>/spec.json a partir de um template + parâmetros (dmaker templates lista as opções)."""
+    from .domain.templates import TemplateError, find_template
+    from .pipeline.projects import project_from_template, project_path, summarize
+
+    try:
+        tmpl = find_template(template)
+    except TemplateError as exc:
+        _fail(str(exc))
+
+    params: dict = {}
+    if params_json:
+        try:
+            params.update(json.loads(params_json))
+        except json.JSONDecodeError as exc:
+            _fail(f"--params-json inválido: {exc}")
+    for item in param or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            _fail(f'--param inválido: "{item}" (use chave=valor)')
+        params[key] = _coerce_param(tmpl, key, value)
+
+    try:
+        project = project_from_template(tmpl.name, name, params)
+    except (TemplateError, FileNotFoundError, ValidationError) as exc:
+        _fail(str(exc))
+    try:
+        s = summarize(project)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Projeto criado a partir do template {tmpl.name!r}:[/green] {project_path(name)} "
+        f"({s.total:.1f}s, {len(s.segments)} trechos)"
+    )
+    for w in s.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {w}")
+
+
+def _coerce_param(template, key: str, value: str):
+    """Converte o texto vindo de `--param chave=valor` para o tipo declarado no template."""
+    param_type = template.params[key].type if key in template.params else None
+    if param_type in ("list", "paths"):
+        return [v.strip() for v in value.split(",")] if "," in value else [value]
+    if param_type == "number":
+        return float(value) if "." in value else int(value)
+    if param_type == "bool":
+        return value.strip().lower() in ("1", "true", "sim", "yes")
+    return value
+
+
 @app.command()
 def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
     """Valida a spec, confere arquivos e mostra a duração final e avisos."""
@@ -348,6 +449,8 @@ def render(
             console.print()
         return
     _print_result(result)
+    if not preview and not segments:
+        _print_qa_summary(spec, project, preset, result.output)
 
 
 @app.command()
@@ -498,6 +601,29 @@ def sheet(
     out = out or video.with_name(f"{video.stem}_sheet.png")
     contact_sheet(video, out, cols, rows, width)
     console.print(f"[green]Grade salva:[/green] {out}")
+
+
+@app.command()
+def qa(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            help="Vídeo já renderizado para conferir junto (duração, resolução, quadros pretos, "
+            "silêncio, loudness). Sem isso, só as checagens estáticas da spec."
+        ),
+    ] = None,
+) -> None:
+    """Relatório de QA em texto: o que dá para checar sem olhar imagem."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.report import build_report
+
+    project = _load(spec)
+    try:
+        report = build_report(project, output=output)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print(report.to_text(), markup=False, highlight=False)
 
 
 @app.command()

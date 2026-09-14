@@ -1,11 +1,39 @@
 {
+  "description": "Reel de depoimento MedlyCare: um corte do vídeo com gancho, crédito de quem fala e CTA.",
+  "params": {
+    "video": {
+      "description": "Vídeo do depoimento",
+      "type": "path",
+      "required": true
+    },
+    "nome": {
+      "description": "Nome de quem dá o depoimento",
+      "type": "text",
+      "required": true
+    },
+    "cargo": {
+      "description": "Cargo ou clínica de quem dá o depoimento",
+      "type": "text",
+      "required": true
+    },
+    "hook": {
+      "description": "Frase de gancho nos primeiros segundos",
+      "type": "text",
+      "required": true
+    },
+    "cta": {
+      "description": "Título do cartão de encerramento (chamada para ação)",
+      "default": "Teste grátis por 3 meses, sem cartão",
+      "type": "text"
+    }
+  },
   "name": "medlycare-depoimento-reel",
   "output": { "preset": "instagram/reels", "quality": "high" },
   "brand": "medlycare",
   "timeline": [
     {
       "type": "clip",
-      "src": "D:/videos/depoimento-dra-helena.mp4",
+      "src": "{{video}}",
       "start": 4.0,
       "end": 34.0,
       "reframe": { "mode": "crop", "focus": [0.5, 0.35] },
@@ -13,7 +41,7 @@
     },
     {
       "type": "card",
-      "title": "Teste grátis por 3 meses, sem cartão",
+      "title": "{{cta}}",
       "subtitle": "medlycare.com.br",
       "variant": "dark",
       "duration": 4,
@@ -22,8 +50,8 @@
   ],
   "overlays": [
     { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11, "end": 30 },
-    { "type": "text", "text": "Como a Dra. Helena parou de perder consulta", "role": "hook", "start": 0.3, "end": 4.5 },
-    { "type": "text", "text": "Dra. Helena Prado", "secondary": "Clínica Modelo", "role": "lower-third", "start": 5, "end": 11 },
+    { "type": "text", "text": "{{hook}}", "role": "hook", "start": 0.3, "end": 4.5 },
+    { "type": "text", "text": "{{nome}}", "secondary": "{{cargo}}", "role": "lower-third", "start": 5, "end": 11 },
     { "type": "progress-bar" }
   ],
   "captions": {

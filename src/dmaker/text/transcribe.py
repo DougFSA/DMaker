@@ -72,7 +72,7 @@ class WhisperTranscriber:
         cues: list[Cue] = []
         for seg in segments:
             words = [
-                Word(float(w.start), float(w.end), w.word.strip())
+                Word(float(w.start), float(w.end), w.word.strip(), float(w.probability))
                 for w in (seg.words or [])
                 if w.word.strip()
             ]

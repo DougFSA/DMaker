@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 
@@ -20,7 +20,7 @@ from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
 from .pipeline.remote import RenderDispatcher, UIClient
 
-GUIDE_PATH = config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md"
+GUIDE_PATH = config.PACKAGE_DIR / "resources" / "guide.md"
 
 server = MCPServer(
     name="dmaker",
@@ -28,7 +28,8 @@ server = MCPServer(
     instructions=(
         "DMaker edita vídeos curtos para Instagram, Facebook, YouTube, TikTok e WhatsApp a partir de uma spec JSON. "
         "Comece por `dmaker_guide` (manual e regras) e `spec_schema`. Fluxo: probe_media -> save_project -> "
-        "validate_project -> render_project(preview=true) -> contact_sheet/frames para conferir -> render_project."
+        "validate_project -> render_project(preview=true) -> qa_report para conferir (só olhe imagem com "
+        "contact_sheet/frames se o relatório apontar algo) -> render_project."
     ),
 )
 jobs = JobManager()
@@ -158,6 +159,40 @@ def save_project(name: str, spec: dict) -> dict:
     path = _save(project)
     summary = summarize(project)
     return {"spec_path": str(path), **_summary_dict(summary)}
+
+
+@server.tool(
+    description=(
+        "Templates disponíveis (produto, depoimento, stories, vlog, tutorial, casamento...) com os "
+        "parâmetros de cada um. Caminho preferido para criar projetos: em vez de escrever a spec "
+        "inteira, veja aqui os parâmetros e chame `new_from_template`."
+    )
+)
+def list_templates() -> list[dict]:
+    from .pipeline.projects import describe_templates
+
+    return describe_templates()
+
+
+@server.tool(
+    description=(
+        "Cria um projeto a partir de um template (ver `list_templates`) e parâmetros, sem escrever a "
+        "spec inteira. Salva em projects/<name>/spec.json e devolve o mesmo resumo que "
+        "`validate_project` (duração, avisos)."
+    )
+)
+def new_from_template(template: str, name: str, params: dict) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.templates import TemplateError
+    from .pipeline.projects import project_from_template, project_path, summarize
+
+    try:
+        project = project_from_template(template, name, params)
+    except TemplateError as exc:
+        # anticipada: mensagem chega ao cliente (nome do template ou parâmetros faltando)
+        raise ToolError(str(exc)) from exc
+    return {"spec_path": str(project_path(name)), **_summary_dict(summarize(project))}
 
 
 @server.tool(description="Lê a spec de um projeto (nome em projects/ ou caminho de spec.json).")
@@ -310,7 +345,31 @@ def _render(
         segments=parse_segments(segments),
     )
     pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
-    return _result_dict(pipeline.run())
+    result = pipeline.run()
+    payload = _result_dict(result)
+    if not preview and not segments:
+        payload["qa"] = _qa_text_for_output(project, preset, result.output)
+    return payload
+
+
+def _qa_text_for_output(project: Project, preset: str | None, output: Path) -> str:
+    """Relatório de QA completo (com a saída) para embutir no resultado de um render/export bem-sucedido.
+
+    `preset` é o override usado no render (None = preset da spec); a comparação de resolução/fps precisa
+    do preset que foi de fato renderizado, não do padrão do projeto."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.report import build_report
+
+    report_project = project
+    if preset:
+        report_project = project.model_copy(
+            update={"output": project.output.model_copy(update={"preset": preset})}
+        )
+    try:
+        report = build_report(report_project, output=output, runner=SubprocessRunner(quiet=True))
+        return report.to_text()
+    except Exception as exc:  # noqa: BLE001 - QA é um extra; não deve derrubar o render
+        return f"QA não pôde ser gerado: {exc}"
 
 
 @server.tool(
@@ -489,11 +548,17 @@ def sync_sources(master: str, others: list[str], master_stream: int = 0, stream:
 
 
 @server.tool(
-    description="Transcreve um vídeo/áudio (Whisper local) e devolve as cues com tempo por palavra; salva .srt e .json."
+    description=(
+        "Transcreve um vídeo/áudio (Whisper local); salva .srt e .json. Por padrão devolve um resumo "
+        "compacto (digest, cues suspeitas, texto corrido, sem tempo por palavra); full=true devolve o "
+        "formato antigo, com todas as cues e tempos (gasta mais tokens)."
+    )
 )
-def transcribe_media(path: str, language: str = "pt", model: str = "small", device: str = "cpu") -> dict:
+def transcribe_media(
+    path: str, language: str = "pt", model: str = "small", device: str = "cpu", full: bool = False
+) -> dict:
     from .media.ffmpeg import SubprocessRunner
-    from .text.captions import regroup, save_captions
+    from .text.captions import captions_digest, regroup, save_captions, suspicious_cues
     from .text.transcribe import WhisperTranscriber, extract_audio_wav
 
     src = Path(path)
@@ -505,24 +570,76 @@ def transcribe_media(path: str, language: str = "pt", model: str = "small", devi
     transcript = WhisperTranscriber(model=model, device=device).transcribe(wav, language)
     json_path = save_captions(transcript.cues, src.with_suffix(".json"), language)
     srt_path = save_captions(regroup(transcript.cues), src.with_suffix(".srt"))
+    if full:
+        return {
+            "json": str(json_path),
+            "srt": str(srt_path),
+            "meta": transcript.meta,
+            "cues": [{"start": c.start, "end": c.end, "text": c.text} for c in transcript.cues],
+        }
     return {
         "json": str(json_path),
         "srt": str(srt_path),
         "meta": transcript.meta,
-        "cues": [{"start": c.start, "end": c.end, "text": c.text} for c in transcript.cues],
+        "digest": captions_digest(transcript.cues),
+        "issues": [_issue_dict(i) for i in suspicious_cues(transcript.cues)],
+        "text": " ".join(c.text for c in transcript.cues),
     }
 
 
+def _issue_dict(issue: Any) -> dict:
+    return {
+        "index": issue.index,
+        "start": issue.start,
+        "end": issue.end,
+        "text": issue.text,
+        "reasons": issue.reasons,
+    }
+
+
+def _captions_vocabulary_and_replacements(project: Project) -> tuple[list[str], dict[str, str]]:
+    """Vocabulário e substituições combinando o tema da marca (se houver) com a spec do projeto."""
+    vocabulary: list[str] = []
+    replacements: dict[str, str] = {}
+    if project.brand:
+        theme = load_theme(project.brand)
+        vocabulary += list(theme.captions.get("vocabulary", []))
+        replacements.update(theme.captions.get("replacements", {}))
+    if project.captions:
+        vocabulary += list(project.captions.vocabulary)
+        replacements.update(project.captions.replacements)
+    return vocabulary, replacements
+
+
 @server.tool(
-    description="Lê as legendas automáticas geradas para um projeto (captions.auto.json), com tempo por palavra."
+    description=(
+        "Lê as legendas automáticas do projeto (captions.auto.json). mode=compact (padrão) devolve um "
+        "resumo (digest) e só as cues suspeitas (baixa confiança, termo da marca, cue longa/curta, "
+        "substituição pendente); mode=full devolve tudo, com tempo por palavra (gasta muito mais tokens "
+        "num vídeo longo). Corrija o que aparecer com `fix_captions`."
+    )
 )
-def read_captions(name_or_path: str) -> dict:
-    from .pipeline.projects import project_path
+def read_captions(name_or_path: str, mode: Literal["compact", "full"] = "compact", limit: int = 40) -> dict:
+    from .pipeline.projects import load_project, project_path
+    from .text.captions import captions_digest, from_json, suspicious_cues
 
     store = project_path(name_or_path).parent / "captions.auto.json"
     if not store.exists():
         return {"error": "sem legendas automáticas ainda; renderize o projeto com captions.source = auto"}
-    return json.loads(store.read_text(encoding="utf-8"))
+    data = json.loads(store.read_text(encoding="utf-8"))
+    if mode == "full":
+        return data
+    cues = from_json(json.dumps(data))
+    try:
+        vocabulary, replacements = _captions_vocabulary_and_replacements(load_project(name_or_path))
+    except (FileNotFoundError, ValueError):
+        vocabulary, replacements = [], {}
+    issues = suspicious_cues(cues, vocabulary, replacements)[:limit]
+    return {
+        "digest": captions_digest(cues),
+        "issues": [_issue_dict(i) for i in issues],
+        "hint": "use fix_captions para corrigir; mode=full para tudo",
+    }
 
 
 @server.tool(
@@ -552,7 +669,10 @@ def fix_captions(name_or_path: str, replacements: dict[str, str]) -> dict:
 
 
 @server.tool(
-    description="Grade de quadros do vídeo inteiro numa única imagem, para revisar composição e texto.",
+    description=(
+        "Grade de quadros do vídeo inteiro numa única imagem, para revisar composição e texto. Custa "
+        "tokens de imagem: use só quando qa_report apontar algo ou o usuário pedir para olhar."
+    ),
     structured_output=False,
 )
 def contact_sheet(video: str, cols: int = 3, rows: int = 3, width: int = 320) -> list:
@@ -564,7 +684,43 @@ def contact_sheet(video: str, cols: int = 3, rows: int = 3, width: int = 320) ->
 
 
 @server.tool(
-    description="Quadros em instantes específicos do vídeo (segundos), devolvidos como imagens.",
+    description=(
+        "Relatório de QA em texto: checagens automáticas que não precisam de olho humano (zona segura, "
+        "ritmo de leitura, sobreposições, contraste, legendas e, com output=true, a saída renderizada: "
+        "duração, resolução, quadros pretos, silêncio, loudness). Rode antes de contact_sheet/frames; "
+        "essas duas só quando o relatório apontar algo ou o usuário pedir para olhar."
+    )
+)
+def qa_report(name_or_path: str, output: bool = True) -> dict:
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.projects import load_project
+    from .pipeline.report import build_report
+
+    project = load_project(name_or_path)
+    out_path = _latest_final_output(project) if output else None
+    runner = SubprocessRunner(quiet=True) if out_path else None
+    report = build_report(project, output=out_path, runner=runner)
+    return {"text": report.to_text(), **report.to_dict()}
+
+
+def _latest_final_output(project: Project) -> Path | None:
+    """A última saída final (não preview) já renderizada para o preset da spec, se houver."""
+    if not config.OUTPUT_DIR.exists():
+        return None
+    preset_id = get_preset(project.output.preset).id.replace("/", "-")
+    files = sorted(
+        config.OUTPUT_DIR.glob(f"{project.name}__{preset_id}.mp4"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return files[0] if files else None
+
+
+@server.tool(
+    description=(
+        "Quadros em instantes específicos do vídeo (segundos), devolvidos como imagens. Custa tokens de "
+        "imagem: use só quando qa_report apontar algo ou o usuário pedir para olhar."
+    ),
     structured_output=False,
 )
 def frames(video: str, times: list[float], width: int = 540) -> list:
@@ -630,8 +786,9 @@ def edit_video_prompt(pedido: str) -> str:
     return (
         f"Pedido do usuário: {pedido}\n\n"
         "Siga o manual (`dmaker_guide`): inspecione as fontes com `probe_media`, escreva a spec e salve com "
-        "`save_project`, confira com `validate_project`, renderize com `render_project(preview=true)`, olhe o "
-        "resultado com `contact_sheet`/`frames`, ajuste, e só então faça o render final. Entregue o caminho do mp4."
+        "`save_project`, confira com `validate_project`, renderize com `render_project(preview=true)`, confira "
+        "com `qa_report` (só olhe imagem com `contact_sheet`/`frames` se ele apontar algo), ajuste, e só então "
+        "faça o render final. Entregue o caminho do mp4."
     )
 
 

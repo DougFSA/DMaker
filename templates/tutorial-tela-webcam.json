@@ -1,15 +1,55 @@
 {
+  "description": "Tutorial MedlyCare com tela gravada e webcam em picture-in-picture, sincronizadas por áudio.",
+  "params": {
+    "tela": {
+      "description": "Gravação de tela (OBS)",
+      "type": "path",
+      "required": true
+    },
+    "webcam": {
+      "description": "Gravação da webcam, sincronizada por áudio",
+      "type": "path",
+      "required": true
+    },
+    "titulo": {
+      "description": "Título do vídeo no cartão de abertura",
+      "default": "Como montar a agenda no MedlyCare",
+      "type": "text"
+    },
+    "subtitulo": {
+      "description": "Subtítulo do cartão de abertura",
+      "default": "Passo a passo em 5 minutos",
+      "type": "text"
+    },
+    "nome": {
+      "description": "Nome de quem apresenta",
+      "default": "Douglas Vasconcelos",
+      "type": "text"
+    },
+    "cargo": {
+      "description": "Cargo ou empresa de quem apresenta",
+      "default": "MedlyCare",
+      "type": "text"
+    }
+  },
   "name": "tutorial-agenda-webcam",
   "output": { "preset": "youtube/video", "quality": "high" },
   "brand": "medlycare",
   "sources": {
-    "tela": { "src": "D:/gravacoes/tela-obs.mp4" },
-    "webcam": { "src": "D:/gravacoes/webcam-obs.mp4", "sync": "auto" }
+    "tela": { "src": "{{tela}}" },
+    "webcam": { "src": "{{webcam}}", "sync": "auto" }
   },
   "timeline": [
-    { "type": "card", "title": "Como montar a agenda no MedlyCare", "subtitle": "Passo a passo em 5 minutos", "duration": 4 },
-    { "type": "clip", "source": "tela", "start": 3, "end": 300, "transition": { "type": "fade", "duration": 0.5 } },
-    { "type": "card", "title": "Teste grátis por 3 meses, sem cartão", "subtitle": "medlycare.com.br", "variant": "dark", "duration": 5, "transition": { "type": "fade", "duration": 0.8 } }
+    { "type": "card", "title": "{{titulo}}", "subtitle": "{{subtitulo}}", "duration": 4 },
+    { "type": "clip", "source": "tela", "start": 3, "transition": { "type": "fade", "duration": 0.5 } },
+    {
+      "type": "card",
+      "title": "Teste grátis por 3 meses, sem cartão",
+      "subtitle": "medlycare.com.br",
+      "variant": "dark",
+      "duration": 5,
+      "transition": { "type": "fade", "duration": 0.8 }
+    }
   ],
   "overlays": [
     {
@@ -17,7 +57,6 @@
       "source": "webcam",
       "offset": 3,
       "start": 4,
-      "end": 300.5,
       "shape": "circle",
       "width": 0.18,
       "position": "bottom-right",
@@ -27,9 +66,14 @@
       "animation": "slide",
       "volume": 1.0
     },
-    { "type": "text", "text": "Douglas Vasconcelos", "secondary": "MedlyCare", "role": "lower-third", "start": 5, "end": 11 },
-    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.06, "opacity": 0.85, "start": 4, "end": 300 }
+    { "type": "text", "text": "{{nome}}", "secondary": "{{cargo}}", "role": "lower-third", "start": 5, "end": 11 },
+    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.06, "opacity": 0.85, "start": 4 }
   ],
-  "captions": { "source": "auto", "language": "pt", "model": "medium", "style": { "mode": "classic", "max_words": 8, "max_chars": 42, "uppercase": false, "size": 40 } },
+  "captions": {
+    "source": "auto",
+    "language": "pt",
+    "model": "medium",
+    "style": { "mode": "classic", "max_words": 8, "max_chars": 42, "uppercase": false, "size": 40 }
+  },
   "audio": { "normalize": "two-pass" }
 }

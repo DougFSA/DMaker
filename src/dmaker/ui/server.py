@@ -42,6 +42,8 @@ class NewProject(BaseModel):
     sources: list[str] = Field(default_factory=list)
     captions: bool = True
     logo: bool = False
+    template: str | None = None  # se dado, ignora os campos acima e usa project_from_template
+    params: dict = Field(default_factory=dict)
 
 
 class RenderRequest(BaseModel):
@@ -254,17 +256,29 @@ def list_projects() -> list[dict]:
     return out
 
 
+@app.get("/api/templates")
+def list_templates() -> list[dict]:
+    from ..pipeline.projects import describe_templates
+
+    return describe_templates()
+
+
 @app.post("/api/projects")
 def create_project(req: NewProject) -> dict:
-    from ..pipeline.projects import save_project, scaffold_project
+    from ..domain.templates import TemplateError
+    from ..pipeline.projects import project_from_template, project_path, save_project, scaffold_project
 
     try:
-        project = scaffold_project(
-            req.name, req.preset, [Path(s) for s in req.sources], req.brand, req.captions, req.logo
-        )
-    except (FileNotFoundError, KeyError, ValidationError) as exc:
+        if req.template:
+            project = project_from_template(req.template, req.name, req.params)
+            path = project_path(req.name)
+        else:
+            project = scaffold_project(
+                req.name, req.preset, [Path(s) for s in req.sources], req.brand, req.captions, req.logo
+            )
+            path = save_project(project)
+    except (FileNotFoundError, KeyError, ValidationError, TemplateError) as exc:
         raise _error(400, str(exc)) from exc
-    path = save_project(project)
     return {
         "name": project.name,
         "spec_path": str(path),
@@ -316,6 +330,31 @@ def validate_project(name: str) -> dict:
         raise _error(400, str(exc)) from exc
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+
+
+@app.post("/api/projects/{name}/qa")
+def qa_project(name: str) -> dict:
+    """Relatório de QA em texto: checagens estáticas da spec e, se já houver uma saída final renderizada
+    para o preset da spec, também as checagens sobre o arquivo (duração, resolução, quadros pretos, silêncio,
+    loudness)."""
+    from ..pipeline.projects import load_project
+    from ..pipeline.report import build_report
+
+    try:
+        project = load_project(name)
+    except FileNotFoundError as exc:
+        raise _error(404, str(exc)) from exc
+    output = None
+    try:
+        preset_id = get_preset(project.output.preset).id.replace("/", "-")
+        files = sorted(
+            config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        output = files[0] if files else None
+        report = build_report(project, output=output)
+    except (ValueError, KeyError) as exc:
+        raise _error(400, str(exc)) from exc
+    return {"text": report.to_text(), **report.to_dict()}
 
 
 @app.post("/api/projects/{name}/render")

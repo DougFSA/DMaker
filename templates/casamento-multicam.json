@@ -1,31 +1,51 @@
 {
+  "description": "Cerimônia de casamento multicâmera: câmera principal, câmera secundária e áudio externo sincronizados por áudio.",
+  "params": {
+    "cam_principal": {
+      "description": "Câmera principal, referência de tempo da sessão",
+      "type": "path",
+      "required": true
+    },
+    "cam_secundaria": {
+      "description": "Câmera secundária, sincronizada por áudio",
+      "type": "path",
+      "required": true
+    },
+    "audio_externo": {
+      "description": "Gravador externo (lapela do celebrante, mesa de som), sincronizado por áudio",
+      "type": "path",
+      "required": true
+    },
+    "nomes": {
+      "description": "Nomes do casal",
+      "default": "Ana e Carlos",
+      "type": "text"
+    },
+    "data": {
+      "description": "Data da cerimônia",
+      "default": "27 de dezembro de 2025",
+      "type": "text"
+    }
+  },
   "name": "casamento-cerimonia",
   "output": { "preset": "youtube/video", "quality": "high" },
   "sources": {
-    "cam1": { "src": "D:/casamento/cam1-altar.mp4", "label": "Câmera principal (altar)" },
-    "cam2": { "src": "D:/casamento/cam2-lateral.mp4", "sync": "auto", "label": "Câmera lateral" },
-    "cam3": { "src": "D:/casamento/celular-convidados.mp4", "sync": "auto" },
-    "gravador": { "src": "D:/casamento/gravador-altar.wav", "sync": "auto", "label": "Lapela do celebrante" },
-    "mesa": { "src": "D:/casamento/mesa-som.wav", "sync": "auto", "label": "Mesa de som (música e votos)" }
+    "principal": { "src": "{{cam_principal}}", "label": "Câmera principal" },
+    "secundaria": { "src": "{{cam_secundaria}}", "sync": "auto", "label": "Câmera secundária" },
+    "externo": { "src": "{{audio_externo}}", "sync": "auto", "label": "Áudio externo" }
   },
-  "master": "cam1",
+  "master": "principal",
   "timeline": [
-    { "type": "card", "title": "Ana e Carlos", "subtitle": "27 de dezembro de 2025", "duration": 4, "motion": "zoom-in" },
-    { "type": "clip", "source": "cam2", "start": 120, "end": 150, "transition": { "type": "fade", "duration": 1.0 }, "label": "entrada da noiva" },
-    { "type": "clip", "source": "cam1", "start": 150, "end": 260, "transition": { "type": "cut" } },
-    { "type": "clip", "source": "cam3", "start": 260, "end": 275, "transition": { "type": "cut" }, "label": "reação dos convidados" },
-    { "type": "clip", "source": "cam1", "start": 275, "end": 420, "transition": { "type": "cut" }, "label": "votos" },
-    { "type": "clip", "source": "cam2", "start": 420, "end": 470, "transition": { "type": "dissolve", "duration": 0.8 }, "label": "beijo" },
+    { "type": "card", "title": "{{nomes}}", "subtitle": "{{data}}", "duration": 4, "motion": "zoom-in" },
+    { "type": "clip", "source": "principal", "transition": { "type": "fade", "duration": 1.0 }, "label": "cerimônia" },
+    { "type": "clip", "source": "secundaria", "transition": { "type": "cut" }, "label": "outro ângulo" },
     { "type": "card", "title": "Obrigado por celebrar com a gente", "duration": 5, "variant": "dark", "transition": { "type": "fade", "duration": 1.2 } }
   ],
   "overlays": [
-    { "type": "text", "text": "Ana e Carlos", "secondary": "Cerimônia", "role": "lower-third", "start": 6, "end": 14 }
+    { "type": "text", "text": "{{nomes}}", "secondary": "Cerimônia", "role": "lower-third", "start": 6, "end": 14 }
   ],
   "audio": {
-    "tracks": [
-      { "source": "gravador", "volume": 1.0 },
-      { "source": "mesa", "volume": 0.7 }
-    ],
+    "tracks": [{ "source": "externo", "volume": 1.0 }],
     "normalize": "two-pass"
   }
 }

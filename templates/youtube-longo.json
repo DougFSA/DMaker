@@ -1,19 +1,41 @@
 {
+  "description": "Vídeo longo MedlyCare para YouTube: cartão de abertura, gravação principal e cartão de CTA.",
+  "params": {
+    "titulo": {
+      "description": "Título do vídeo, mostrado no cartão de abertura",
+      "default": "Como montar a agenda da clínica no MedlyCare",
+      "type": "text"
+    },
+    "video": {
+      "description": "Gravação principal do vídeo",
+      "type": "path",
+      "required": true
+    }
+  },
   "name": "youtube-tutorial-agenda",
   "output": { "preset": "youtube/video", "quality": "high", "thumbnail_at": 12 },
   "brand": "medlycare",
   "timeline": [
-    { "type": "card", "title": "Como montar a agenda da clínica no MedlyCare", "subtitle": "Tutorial completo em 8 minutos", "duration": 4 },
-    { "type": "clip", "src": "D:/videos/tutorial/intro.mp4", "transition": { "type": "fade", "duration": 0.5 } },
-    { "type": "clip", "src": "D:/videos/tutorial/gravacao-tela.mp4", "start": 0, "end": 300, "reframe": { "mode": "crop" }, "transition": { "type": "cut" } },
-    { "type": "clip", "src": "D:/videos/tutorial/encerramento.mp4", "transition": { "type": "fade", "duration": 0.5 } },
-    { "type": "card", "title": "Teste grátis por 3 meses, sem cartão", "subtitle": "medlycare.com.br", "variant": "dark", "duration": 5, "transition": { "type": "fade", "duration": 0.6 } }
+    { "type": "card", "title": "{{titulo}}", "subtitle": "Tutorial completo em 8 minutos", "duration": 4 },
+    { "type": "clip", "src": "{{video}}", "reframe": { "mode": "crop" }, "transition": { "type": "fade", "duration": 0.5 } },
+    {
+      "type": "card",
+      "title": "Teste grátis por 3 meses, sem cartão",
+      "subtitle": "medlycare.com.br",
+      "variant": "dark",
+      "duration": 5,
+      "transition": { "type": "fade", "duration": 0.6 }
+    }
   ],
   "overlays": [
     { "type": "image", "src": "logo:symbol", "position": "bottom-right", "width": 0.06, "opacity": 0.85, "start": 4 },
-    { "type": "text", "text": "Douglas Vasconcelos", "secondary": "MedlyCare", "role": "lower-third", "start": 5, "end": 11 },
-    { "type": "text", "text": "1. Horários por profissional", "role": "title", "position": "top", "start": 20, "end": 25, "animation": "slide-up", "style": { "size": 48, "align": "left" } }
+    { "type": "text", "text": "Douglas Vasconcelos", "secondary": "MedlyCare", "role": "lower-third", "start": 5, "end": 11 }
   ],
-  "captions": { "source": "auto", "language": "pt", "model": "medium", "style": { "mode": "classic", "max_words": 8, "max_chars": 42, "uppercase": false, "size": 40 } },
+  "captions": {
+    "source": "auto",
+    "language": "pt",
+    "model": "medium",
+    "style": { "mode": "classic", "max_words": 8, "max_chars": 42, "uppercase": false, "size": 40 }
+  },
   "audio": { "normalize": "two-pass" }
 }

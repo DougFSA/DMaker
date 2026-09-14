@@ -1,20 +1,44 @@
 {
+  "description": "Reel pessoal de vlog/viagem: vídeos em sequência com corte seco no primeiro, transição suave nos seguintes, título e trilha.",
+  "params": {
+    "videos": {
+      "description": "Vídeos do vlog, na ordem em que aparecem",
+      "type": "paths",
+      "required": true
+    },
+    "titulo": {
+      "description": "Título mostrado no início",
+      "default": "Fim de semana em Ubatuba",
+      "type": "text"
+    },
+    "musica": {
+      "description": "Trilha de fundo",
+      "default": "D:/musicas/trilha.mp3",
+      "type": "path"
+    }
+  },
   "name": "viagem-reel",
   "output": { "preset": "instagram/reels", "quality": "high" },
   "timeline": [
-    { "type": "clip", "src": "D:/videos/viagem/clip1.mp4", "start": 2, "end": 6, "reframe": { "mode": "crop" }, "fade_in": 0.3 },
-    { "type": "clip", "src": "D:/videos/viagem/clip2.mp4", "start": 0, "end": 5, "speed": 1.5, "transition": { "type": "smoothleft", "duration": 0.4 } },
-    { "type": "image", "src": "D:/fotos/viagem/foto1.jpg", "duration": 3, "motion": "zoom-in", "transition": { "type": "fade", "duration": 0.4 } },
-    { "type": "clip", "src": "D:/videos/viagem/clip3.mp4", "start": 10, "end": 18, "transition": { "type": "circleopen", "duration": 0.5 }, "fade_out": 0.6 }
+    {
+      "$for": "videos",
+      "as": "src",
+      "item": {
+        "type": "clip",
+        "src": "{{src}}",
+        "reframe": { "mode": "crop" },
+        "transition": { "$if": "{{src_index}}", "type": "smoothleft", "duration": 0.4 }
+      }
+    }
   ],
   "overlays": [
-    { "type": "text", "text": "Fim de semana em Ubatuba", "role": "title", "start": 0.5, "end": 4, "animation": "pop", "style": { "uppercase": true } },
+    { "type": "text", "text": "{{titulo}}", "role": "title", "start": 0.5, "end": 4, "animation": "pop", "style": { "uppercase": true } },
     { "type": "text", "text": "@douglas", "role": "custom", "position": "bottom", "start": 0, "style": { "size": 36, "outline": 2 } }
   ],
   "captions": null,
   "audio": {
     "mute_clips": true,
-    "music": { "src": "D:/musicas/trilha.mp3", "volume": 0.9, "ducking": false, "start_at": 12, "fade_out": 2 },
+    "music": { "src": "{{musica}}", "volume": 0.9, "ducking": false, "start_at": 12, "fade_out": 2 },
     "normalize": "two-pass"
   }
 }

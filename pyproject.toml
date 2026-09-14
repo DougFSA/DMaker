@@ -32,7 +32,7 @@ dmaker-mcp = "dmaker.mcp_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dmaker = ["py.typed", "ui/static/*"]
+dmaker = ["py.typed", "ui/static/*", "resources/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

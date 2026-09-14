@@ -1,53 +1,80 @@
 {
+  "description": "Reel de produto MedlyCare: cartão de abertura, capturas de tela com movimento e cartão de CTA.",
+  "params": {
+    "titulo": {
+      "description": "Título do cartão de abertura",
+      "default": "Sua agenda organizada em um clique",
+      "type": "text"
+    },
+    "subtitulo": {
+      "description": "Subtítulo do cartão de abertura",
+      "default": "MedlyCare para clínicas e profissionais autônomos",
+      "type": "text"
+    },
+    "prints": {
+      "description": "Caminhos das capturas de tela do produto, na ordem em que aparecem",
+      "type": "paths",
+      "required": true
+    },
+    "cta_titulo": {
+      "description": "Título do cartão de encerramento (chamada para ação)",
+      "default": "Teste grátis por 3 meses, sem cartão",
+      "type": "text"
+    },
+    "cta_subtitulo": {
+      "description": "Subtítulo do cartão de encerramento",
+      "default": "medlycare.com.br",
+      "type": "text"
+    },
+    "musica": {
+      "description": "Trilha instrumental de fundo (opcional)",
+      "type": "path",
+      "required": false
+    },
+    "legendas": {
+      "description": "Gerar legendas automáticas",
+      "default": false,
+      "type": "bool"
+    }
+  },
   "name": "medlycare-produto-reel",
   "output": { "preset": "instagram/reels", "quality": "high" },
   "brand": "medlycare",
   "timeline": [
+    { "type": "card", "title": "{{titulo}}", "subtitle": "{{subtitulo}}", "duration": 3.5 },
     {
-      "type": "card",
-      "title": "Sua agenda organizada em um clique",
-      "subtitle": "MedlyCare para clínicas e profissionais autônomos",
-      "duration": 3.5
-    },
-    {
-      "type": "image",
-      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/02-agenda-lista.png",
-      "duration": 4,
-      "motion": "zoom-in",
-      "transition": { "type": "fade", "duration": 0.5 }
-    },
-    {
-      "type": "image",
-      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/03-agenda-semana.png",
-      "duration": 4,
-      "motion": "pan-left",
-      "motion_amount": 0.08,
-      "transition": { "type": "slideleft", "duration": 0.5 }
-    },
-    {
-      "type": "image",
-      "src": "C:/Users/Douglas Vasconcelos/Desktop/MedlyCare/Marketing/Prints do Produto/05-atendimento.png",
-      "duration": 4,
-      "motion": "zoom-out",
-      "transition": { "type": "fade", "duration": 0.5 }
+      "$for": "prints",
+      "as": "src",
+      "item": {
+        "type": "image",
+        "src": "{{src}}",
+        "duration": 4,
+        "motion": "zoom-in",
+        "transition": { "type": "fade", "duration": 0.5 }
+      }
     },
     {
       "type": "card",
-      "title": "Teste grátis por 3 meses, sem cartão",
-      "subtitle": "medlycare.com.br",
+      "title": "{{cta_titulo}}",
+      "subtitle": "{{cta_subtitulo}}",
       "variant": "dark",
       "duration": 4,
       "transition": { "type": "fade", "duration": 0.6 }
     }
   ],
   "overlays": [
-    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11, "start": 3.5, "end": 14 },
-    { "type": "text", "text": "Chega de agenda no papel", "role": "hook", "start": 3.2, "end": 7 },
-    { "type": "text", "text": "Agenda por profissional, com cor por tipo de consulta", "role": "subtitle", "position": "bottom", "start": 3.4, "end": 7 },
-    { "type": "text", "text": "Bloqueio de período com remarcação pelo WhatsApp", "role": "subtitle", "position": "bottom", "start": 7, "end": 10.5 },
-    { "type": "text", "text": "Prontuário e histórico lado a lado", "role": "subtitle", "position": "top", "start": 10.6, "end": 14 },
-    { "type": "text", "text": "medlycare.com.br", "role": "cta", "start": 11.2, "end": 14.2 },
+    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11, "start": 3.5 },
     { "type": "progress-bar" }
   ],
-  "audio": { "normalize": "two-pass" }
+  "captions": {
+    "$if": "{{legendas}}",
+    "source": "auto",
+    "language": "pt",
+    "model": "small",
+    "style": { "mode": "karaoke", "max_words": 4, "uppercase": true }
+  },
+  "audio": {
+    "music": { "$if": "{{musica}}", "src": "{{musica}}", "volume": 0.15, "ducking": true, "fade_out": 2 },
+    "normalize": "two-pass"
+  }
 }

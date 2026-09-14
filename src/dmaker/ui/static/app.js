@@ -38,8 +38,18 @@ const state = {
   syncResults: null,
 };
 
-const newProjectState = { name: "", preset: "", brand: "", sources: [], captions: true, logo: false };
+const newProjectState = {
+  name: "",
+  preset: "",
+  brand: "",
+  sources: [],
+  captions: true,
+  logo: false,
+  template: "",
+  templateParams: {},
+};
 const browseState = { path: "", multi: false, selected: [], onSelect: null };
+let templatesCatalog = null;
 
 /* ==================== 3. utilidades puras ==================== */
 
@@ -306,6 +316,19 @@ function onModalClick(e) {
   if (e.target.matches("[data-remove-source]")) {
     newProjectState.sources.splice(Number(e.target.dataset.removeSource), 1);
     renderNewProjectTags();
+    return;
+  }
+  const chooseTemplatePath = e.target.closest("[data-choose-template-path]");
+  if (chooseTemplatePath) { chooseTemplateParamPath(chooseTemplatePath.dataset.chooseTemplatePath); return; }
+  const chooseTemplatePaths = e.target.closest("[data-choose-template-paths]");
+  if (chooseTemplatePaths) { chooseTemplateParamPaths(chooseTemplatePaths.dataset.chooseTemplatePaths); return; }
+  if (e.target.matches("[data-remove-template-path]")) {
+    const [name, idxStr] = e.target.dataset.removeTemplatePath.split(":");
+    captureTemplateParamDraft(currentTemplate());
+    const list = Array.isArray(newProjectState.templateParams[name]) ? newProjectState.templateParams[name] : [];
+    list.splice(Number(idxStr), 1);
+    newProjectState.templateParams[name] = list;
+    openNewProjectModal();
     return;
   }
   if (e.target.id === "np-submit") { submitNewProject(); return; }
@@ -1513,7 +1536,21 @@ function loadOutputIntoPreview(output) {
   if (preset) video.classList.add(preset.width < preset.height ? "orientation-vertical" : "orientation-horizontal");
   document.getElementById("preview-meta").textContent = `${output.path} - ${output.size_mb} MB - ${output.preset || ""}`;
   document.getElementById("qa-result").innerHTML = "";
+  const reportEl = document.getElementById("qa-report-result");
+  reportEl.hidden = true;
+  reportEl.textContent = "";
 }
+
+document.getElementById("btn-qa-report").addEventListener("click", async () => {
+  if (!state.currentProject) { showAlert("Nenhum projeto carregado.", "error"); return; }
+  const btn = document.getElementById("btn-qa-report");
+  const result = await runAction(btn, () => api.post(`/api/projects/${encodeURIComponent(state.currentProject)}/qa`));
+  if (result.ok) {
+    const el = document.getElementById("qa-report-result");
+    el.textContent = result.value.text;
+    el.hidden = false;
+  }
+});
 
 document.getElementById("btn-qa-sheet").addEventListener("click", async () => {
   if (!state.previewOutput) { showAlert("Nenhuma saída carregada no preview.", "error"); return; }
@@ -1600,16 +1637,37 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 
 /* ==================== novo projeto ==================== */
 
-function openNewProjectModal() {
+async function ensureTemplatesCatalog() {
+  if (!templatesCatalog) templatesCatalog = await api.get("/api/templates");
+  return templatesCatalog;
+}
+
+function currentTemplate() {
+  return (templatesCatalog || []).find((t) => t.name === newProjectState.template) || null;
+}
+
+async function openNewProjectModal() {
+  await ensureTemplatesCatalog();
   if (!newProjectState.preset && state.stateInfo?.presets?.length) {
     newProjectState.preset = state.stateInfo.presets[0].id;
   }
   const presetOptions = (state.stateInfo?.presets || []).map((p) => `<option value="${p.id}" ${p.id === newProjectState.preset ? "selected" : ""}>${escHtml(p.platform)} - ${escHtml(p.name)} (${p.id})</option>`).join("");
   const brandOptions = ['<option value="">Nenhuma</option>'].concat((state.stateInfo?.brands || []).map((b) => `<option value="${b.key}" ${b.key === newProjectState.brand ? "selected" : ""}>${escHtml(b.name)}</option>`)).join("");
-  openModal(`
-    <h3>Novo projeto</h3>
+  const templateOptions = ['<option value="">Do zero (escolher arquivos)</option>']
+    .concat(
+      (templatesCatalog || []).map(
+        (t) =>
+          `<option value="${escAttr(t.name)}" ${t.name === newProjectState.template ? "selected" : ""}>${escHtml(t.name)}${t.description ? " - " + escHtml(t.description) : ""}</option>`
+      )
+    )
+    .join("");
+  const template = currentTemplate();
+  const bodyHtml = template
+    ? Object.entries(template.params)
+        .map(([name, param]) => templateParamFieldHtml(name, param))
+        .join("")
+    : `
     <div class="form-grid">
-      <div class="field"><label>Nome</label><input type="text" id="np-name" value="${escAttr(newProjectState.name)}"></div>
       <div class="field"><label>Preset</label><select id="np-preset">${presetOptions}</select></div>
       <div class="field"><label>Marca</label><select id="np-brand">${brandOptions}</select></div>
     </div>
@@ -1619,12 +1677,65 @@ function openNewProjectModal() {
       <div class="tag-list" id="np-sources-tags"></div>
     </div>
     <div class="checkbox-row"><input type="checkbox" id="np-captions" ${newProjectState.captions ? "checked" : ""}><label for="np-captions">Gerar legendas automáticas</label></div>
-    <div class="checkbox-row"><input type="checkbox" id="np-logo" ${newProjectState.logo ? "checked" : ""}><label for="np-logo">Incluir logo</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="np-logo" ${newProjectState.logo ? "checked" : ""}><label for="np-logo">Incluir logo</label></div>`;
+
+  openModal(`
+    <h3>Novo projeto</h3>
+    <div class="field" style="margin-bottom:10px"><label>Nome</label><input type="text" id="np-name" value="${escAttr(newProjectState.name)}"></div>
+    <div class="field" style="margin-bottom:10px">
+      <label>Template</label>
+      <select id="np-template">${templateOptions}</select>
+      ${template?.description ? `<div class="hint-text">${escHtml(template.description)}</div>` : ""}
+    </div>
+    ${bodyHtml}
     <div class="modal-actions">
       <button type="button" class="btn" id="np-cancel">Cancelar</button>
       <button type="button" class="btn btn-accent" id="np-submit">Criar</button>
     </div>`);
-  renderNewProjectTags();
+  if (!template) renderNewProjectTags();
+}
+
+function templateParamFieldHtml(name, param) {
+  const label = param.required ? `${name} *` : name;
+  const help = param.description ? `<div class="hint-text">${escHtml(param.description)}</div>` : "";
+  const current = newProjectState.templateParams[name];
+  if (param.type === "bool") {
+    const checked = current === undefined ? !!param.default : !!current;
+    return `<div class="checkbox-row"><input type="checkbox" data-param="${name}" ${checked ? "checked" : ""}><label>${escHtml(label)}</label></div>${help}`;
+  }
+  if (param.type === "paths") {
+    const list = Array.isArray(current) ? current : [];
+    const tags = list
+      .map((p, i) => `<span class="tag">${escHtml(baseName(p))}<button type="button" data-remove-template-path="${name}:${i}">&times;</button></span>`)
+      .join("");
+    return `<div class="field" style="margin-bottom:10px">
+      <label>${escHtml(label)}</label>
+      <button type="button" class="btn btn-small" data-choose-template-paths="${name}">Escolher arquivos...</button>
+      <div class="tag-list">${tags}</div>
+      ${help}
+    </div>`;
+  }
+  if (param.type === "path") {
+    const value = current === undefined ? param.default || "" : current;
+    return `<div class="field" style="margin-bottom:10px">
+      <label>${escHtml(label)}</label>
+      <div class="field-src">
+        <input type="text" data-param="${name}" value="${escAttr(value)}">
+        <button type="button" class="btn btn-small" data-choose-template-path="${name}">Escolher...</button>
+      </div>
+      ${help}
+    </div>`;
+  }
+  if (param.type === "number") {
+    const value = current === undefined ? (param.default ?? "") : current;
+    return `<div class="field" style="margin-bottom:10px"><label>${escHtml(label)}</label><input type="number" step="any" data-param="${name}" value="${escAttr(value)}">${help}</div>`;
+  }
+  if (param.type === "list") {
+    const value = Array.isArray(current) ? current.join(", ") : Array.isArray(param.default) ? param.default.join(", ") : "";
+    return `<div class="field" style="margin-bottom:10px"><label>${escHtml(label)} (separado por vírgula)</label><input type="text" data-param="${name}" value="${escAttr(value)}">${help}</div>`;
+  }
+  const value = current === undefined ? (param.default ?? "") : current;
+  return `<div class="field" style="margin-bottom:10px"><label>${escHtml(label)}</label><input type="text" data-param="${name}" value="${escAttr(value)}">${help}</div>`;
 }
 
 function renderNewProjectTags() {
@@ -1646,6 +1757,29 @@ function captureNewProjectDraft() {
   if (logo) newProjectState.logo = logo.checked;
 }
 
+function captureTemplateParamDraft(template) {
+  if (!template) return;
+  for (const [name, param] of Object.entries(template.params)) {
+    if (param.type === "paths") continue; // mantido em templateParams pela escolha de arquivos, não por input de texto
+    const el = document.querySelector(`[data-param="${name}"]`);
+    if (!el) continue;
+    if (param.type === "bool") newProjectState.templateParams[name] = el.checked;
+    else if (param.type === "number") newProjectState.templateParams[name] = el.value === "" ? undefined : Number(el.value);
+    else if (param.type === "list") newProjectState.templateParams[name] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+    else newProjectState.templateParams[name] = el.value;
+  }
+}
+
+function buildTemplateParamsPayload(template) {
+  const out = {};
+  for (const name of Object.keys(template.params)) {
+    const value = newProjectState.templateParams[name];
+    if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
 function chooseNewProjectSources() {
   captureNewProjectDraft();
   openFileBrowser({
@@ -1657,29 +1791,70 @@ function chooseNewProjectSources() {
   });
 }
 
+function chooseTemplateParamPath(name) {
+  captureNewProjectDraft();
+  captureTemplateParamDraft(currentTemplate());
+  openFileBrowser({
+    multi: false,
+    onSelect: (paths) => {
+      newProjectState.templateParams[name] = paths[0] || "";
+      openNewProjectModal();
+    },
+  });
+}
+
+function chooseTemplateParamPaths(name) {
+  captureNewProjectDraft();
+  captureTemplateParamDraft(currentTemplate());
+  openFileBrowser({
+    multi: true,
+    onSelect: (paths) => {
+      newProjectState.templateParams[name] = paths;
+      openNewProjectModal();
+    },
+  });
+}
+
 async function submitNewProject() {
   captureNewProjectDraft();
+  const template = currentTemplate();
+  captureTemplateParamDraft(template);
   if (!newProjectState.name.trim()) { showAlert("Informe um nome para o projeto.", "error"); return; }
   const btn = document.getElementById("np-submit");
-  const result = await runAction(btn, () => api.post("/api/projects", {
-    name: newProjectState.name.trim(),
-    preset: newProjectState.preset,
-    brand: newProjectState.brand || null,
-    sources: newProjectState.sources,
-    captions: newProjectState.captions,
-    logo: newProjectState.logo,
-  }));
+  const payload = template
+    ? { name: newProjectState.name.trim(), template: template.name, params: buildTemplateParamsPayload(template) }
+    : {
+        name: newProjectState.name.trim(),
+        preset: newProjectState.preset,
+        brand: newProjectState.brand || null,
+        sources: newProjectState.sources,
+        captions: newProjectState.captions,
+        logo: newProjectState.logo,
+      };
+  const result = await runAction(btn, () => api.post("/api/projects", payload));
   if (result.ok) {
     closeModal();
     newProjectState.name = "";
     newProjectState.sources = [];
+    newProjectState.template = "";
+    newProjectState.templateParams = {};
     await refreshProjectList();
     await openProject(result.value.name);
   }
 }
 
+function onModalChange(e) {
+  if (e.target.id === "np-template") {
+    captureNewProjectDraft();
+    captureTemplateParamDraft(currentTemplate());
+    newProjectState.template = e.target.value;
+    openNewProjectModal();
+  }
+}
+
 document.getElementById("btn-new-project").addEventListener("click", () => openNewProjectModal());
 document.getElementById("modal-box").addEventListener("click", onModalClick);
+document.getElementById("modal-box").addEventListener("change", onModalChange);
 
 /* ==================== abrir projeto ==================== */
 

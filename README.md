@@ -116,6 +116,31 @@ Edição rápida de um único vídeo, sem escrever spec:
 
 Outros: `ui` (interface gráfica), `mcp` (servidor para IAs), `sync` (sincronizar câmeras pelo áudio), `captions` (só transcrever), `thumbnail`, `frames`, `card`, `clean`, `setup`, `doctor`.
 
+## Relatório de QA
+
+Antes de gastar tokens olhando imagens (`sheet`/`frames`), `dmaker qa` confere em texto o que dá para checar sem olho humano: zona segura, contraste, ritmo de leitura, sobreposições, legendas e, com `--output`, a saída renderizada (duração, resolução, quadros pretos, silêncio, loudness).
+
+```powershell
+.\.venv\Scripts\dmaker.exe qa projects\meu-reel\spec.json
+.\.venv\Scripts\dmaker.exe qa projects\meu-reel\spec.json --output output\meu-reel__instagram-reels.mp4
+```
+
+`dmaker render` já imprime um resumo desse relatório ao final; pelo MCP, `render_project`/`export_project` devolvem o relatório completo no campo `qa`, e a ferramenta `qa_report` roda a checagem isolada a qualquer momento. Só vale a pena chamar `contact_sheet`/`frames` (que custam tokens de imagem) quando o relatório apontar algo ou o usuário pedir para olhar.
+
+## Templates parametrizados
+
+Em vez de escrever a spec inteira, dá para montar um projeto a partir de um template pronto (`templates/*.json`) passando só o que muda de vídeo para vídeo:
+
+```powershell
+.\.venv\Scripts\dmaker.exe templates                                              # lista os templates e os parâmetros de cada um
+.\.venv\Scripts\dmaker.exe new-from-template reel-medlycare-produto meu-reel `
+    --param titulo="Sua agenda organizada em um clique" `
+    --param prints="C:\prints\1.png,C:\prints\2.png,C:\prints\3.png" `
+    --param cta_titulo="Teste grátis por 3 meses"
+```
+
+Parâmetros também aceitam um JSON só com `--params-json`. Cada template documenta seus parâmetros (tipo, obrigatório, valor padrão); veja o formato completo e a lista de templates em [`templates/README.md`](templates/README.md).
+
 ## Falando com o editor
 
 Numa sessão do Claude Code em `D:\DMaker` (ou com a skill `dmaker` instalada), basta pedir:
@@ -142,7 +167,9 @@ Configuração para o cliente (o projeto já traz `.mcp.json` para o Claude Code
 }
 ```
 
-Ferramentas: `dmaker_guide` (manual), `spec_schema`, `presets`, `brands`, `probe_media`, `save_project`, `get_project`, `validate_project`, `list_projects`, `render_project` (com `job_id` para renders longos), `export_project`, `job_status`, `quick_edit`, `transcribe_media`, `read_captions`, `fix_captions`, `contact_sheet` e `frames` (devolvem **imagens**, para a IA ver o resultado), `render_card_preview`, `clean_cache`. Recursos `dmaker://guide` e `dmaker://schema`; prompt `editar-video`.
+Ferramentas: `dmaker_guide` (manual), `spec_schema`, `presets`, `brands`, `probe_media`, `save_project`, `list_templates` e `new_from_template` (criar projeto a partir de um template + parâmetros, o caminho preferido: veja [`templates/README.md`](templates/README.md)), `get_project`, `validate_project`, `edit_project` e `timeline_view` (edições pontuais sem reescrever a spec), `list_projects`, `render_project` (com `job_id` para renders longos), `export_project`, `job_status`, `quick_edit`, `sync_sources`, `transcribe_media`, `read_captions`, `fix_captions`, `qa_report`, `contact_sheet` e `frames` (devolvem **imagens**, para a IA ver o resultado), `render_card_preview`, `clean_cache`. Recursos `dmaker://guide` e `dmaker://schema`; prompt `editar-video`.
+
+`read_captions` e `transcribe_media` devolvem por padrão um modo compacto: um resumo (`digest`, com contagem de cues, palavras e confiança média) e só as cues suspeitas (baixa confiança, termo da marca ouvido errado, cue longa/curta, substituição pendente), em vez das centenas de cues com tempo por palavra de um vídeo longo; use `mode="full"`/`full=true` quando precisar mesmo de tudo.
 
 ## Acompanhando renders
 

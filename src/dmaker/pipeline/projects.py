@@ -22,6 +22,7 @@ from ..domain.spec import (
     TextOverlay,
     Transition,
 )
+from ..domain.templates import find_template, list_templates, render_template, template_summary
 from ..media.probe import probe
 from .context import Prober
 from .layout import project_layout
@@ -178,3 +179,37 @@ def quick_project(
         captions=Captions(source="auto") if captions else None,
         audio=AudioSettings(music=Music(src=str(music.resolve())) if music else None),
     )
+
+
+def project_from_template(template_name: str, name: str, params: dict, folder: Path | None = None) -> Project:
+    """Monta um projeto a partir de um template (`templates/*.json`) e parâmetros, sem exigir a spec
+    inteira: o jeito preferido de criar projetos quando um template já cobre o que se quer editar."""
+    template = find_template(template_name)
+    spec = dict(render_template(template, params))
+    spec["name"] = name
+    project = Project.model_validate(spec)
+    save_project(project, folder)
+    return project
+
+
+def describe_templates() -> list[dict]:
+    """Templates disponíveis com o resumo de parâmetros de cada um, para a IA escolher sem abrir o JSON."""
+    out = []
+    for t in list_templates():
+        out.append(
+            {
+                "name": t.name,
+                "description": t.description,
+                "summary": template_summary(t),
+                "params": {
+                    name: {
+                        "description": p.description,
+                        "type": p.type,
+                        "default": p.default,
+                        "required": p.required,
+                    }
+                    for name, p in t.params.items()
+                },
+            }
+        )
+    return out

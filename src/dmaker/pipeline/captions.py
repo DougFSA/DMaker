@@ -20,6 +20,10 @@ from .sources import Source
 
 TranscriberFactory = Callable[[Captions], Transcriber]
 
+CAPTIONS_CACHE_VERSION = (
+    "v2"  # muda quando o formato salvo em captions.auto.json muda (probability por palavra)
+)
+
 
 def default_transcriber_factory(captions: Captions) -> Transcriber:
     return WhisperTranscriber(model=captions.model, device=captions.device)
@@ -78,7 +82,14 @@ class CaptionPipeline:
             (seg.model_dump(mode="json"), str(src.path), src.stat_key())
             for seg, src in zip(ctx.project.timeline, sources, strict=True)
         ]
-        return cache_key(parts, ctx.project.audio.voice_gain, captions.language, captions.model, vocabulary)
+        return cache_key(
+            CAPTIONS_CACHE_VERSION,
+            parts,
+            ctx.project.audio.voice_gain,
+            captions.language,
+            captions.model,
+            vocabulary,
+        )
 
     def _auto(
         self,
