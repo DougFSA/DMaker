@@ -84,6 +84,15 @@ class CaptionsUpdate(BaseModel):
     cues: list[dict]
 
 
+class TimelineRequest(BaseModel):
+    spec: dict | None = None
+
+
+class EditRequest(BaseModel):
+    spec: dict
+    op: dict
+
+
 # ---------- utilidades ----------
 
 
@@ -137,6 +146,15 @@ def _summary_dict(summary: Any) -> dict:
             for s in summary.segments
         ],
         "warnings": summary.warnings,
+    }
+
+
+def _proxy_entry(status: Any) -> dict:
+    return {
+        "src": str(status.src),
+        "proxy": str(status.proxy),
+        "ready": status.ready,
+        "url": _file_url(status.proxy) if status.ready else None,
     }
 
 
@@ -354,6 +372,130 @@ def put_captions(name: str, update: CaptionsUpdate) -> dict:
     return {"ok": True, "cues": len(cues)}
 
 
+# ---------- edição multitrilha ----------
+
+
+def _project_from_body(name: str, spec: dict) -> Project:
+    spec = dict(spec)
+    spec["name"] = name
+    try:
+        project = Project.model_validate(spec)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=_validation_detail(exc)) from exc
+    project.base_dir = (config.PROJECTS_DIR / name).resolve()
+    return project
+
+
+@app.post("/api/projects/{name}/timeline")
+def project_timeline(name: str, req: TimelineRequest) -> dict:
+    from ..pipeline.layout import project_layout
+    from ..pipeline.projects import load_project
+    from ..pipeline.timeline_view import build_timeline_view
+
+    if req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+    layout = project_layout(project)
+    return build_timeline_view(project, layout).to_dict()
+
+
+@app.post("/api/projects/{name}/edit")
+def project_edit(name: str, req: EditRequest) -> dict:
+    from ..domain.edits import EditError
+    from ..pipeline.edits import apply_edit
+    from ..pipeline.layout import project_layout
+    from ..pipeline.timeline_view import build_timeline_view
+
+    project = _project_from_body(name, req.spec)
+    try:
+        new_project = apply_edit(project, req.op)
+    except EditError as exc:
+        raise _error(400, str(exc)) from exc
+    layout = project_layout(new_project)
+    view = build_timeline_view(new_project, layout)
+    return {
+        "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
+        "timeline": view.to_dict(),
+    }
+
+
+@app.get("/api/projects/{name}/theme")
+def project_theme(name: str) -> dict:
+    from ..pipeline.projects import load_project
+
+    try:
+        project = load_project(name)
+    except FileNotFoundError as exc:
+        raise _error(404, str(exc)) from exc
+    theme = load_theme(project.brand, project.theme)
+    return {
+        "colors": theme.colors,
+        "font": theme.font_family,
+        "logos": {kind: _file_url(path) for kind, path in theme.logos.items()},
+        "no_dash": theme.no_dash,
+    }
+
+
+@app.get("/api/card-preview")
+def card_preview(
+    title: str,
+    brand: str | None = None,
+    preset: str = "instagram/reels",
+    subtitle: str | None = None,
+    variant: str | None = None,
+    logo: bool = True,
+    background: str | None = None,
+    width: int = 540,
+) -> FileResponse:
+    """PNG de um cartão a partir só dos campos (sem depender de projeto salvo em disco), para a
+    prévia ao vivo da linha do tempo poder mostrar edições ainda não salvas. Cacheado por hash dos
+    parâmetros em cache/cards; `brand` vazio usa o tema padrão."""
+    import hashlib
+
+    from ..visuals.cards import render_card, save_card
+
+    try:
+        theme = load_theme(brand or None)
+    except FileNotFoundError as exc:
+        raise _error(404, str(exc)) from exc
+    try:
+        preset_obj = get_preset(preset).preview(width)
+    except KeyError as exc:
+        raise _error(404, str(exc)) from exc
+    key = "|".join(
+        [
+            title,
+            subtitle or "",
+            variant or "",
+            str(logo),
+            background or "",
+            brand or "default",
+            preset,
+            str(width),
+        ]
+    )
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
+    out = config.CACHE_DIR / "cards" / f"{digest}.png"
+    if not out.exists():
+        img = render_card(
+            theme,
+            preset_obj.width,
+            preset_obj.height,
+            title,
+            subtitle,
+            variant,
+            logo,
+            background,
+            preset_obj.safe,
+        )
+        save_card(img, out)
+    return FileResponse(out)
+
+
 # ---------- jobs ----------
 
 
@@ -440,6 +582,48 @@ def probe_media(req: ProbeRequest) -> list[dict]:
         except Exception as exc:  # noqa: BLE001 - erro por arquivo
             out.append({"path": str(p), "error": str(exc)})
     return out
+
+
+@app.get("/api/projects/{name}/proxies")
+def get_proxies(name: str) -> list[dict]:
+    """Status dos proxies 540p (prévia ao vivo) de cada fonte de vídeo do projeto."""
+    from ..media.ffmpeg import SubprocessRunner
+    from ..pipeline.projects import load_project
+    from ..pipeline.proxies import ProxyBuilder
+
+    try:
+        project = load_project(name)
+    except FileNotFoundError as exc:
+        raise _error(404, str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    status = ProxyBuilder(SubprocessRunner(quiet=True)).status(project)
+    return [_proxy_entry(s) for s in status]
+
+
+@app.post("/api/projects/{name}/proxies")
+def build_proxies(name: str) -> dict:
+    """Gera em segundo plano os proxies que ainda faltam para a prévia ao vivo."""
+    from ..media.ffmpeg import SubprocessRunner
+    from ..pipeline.projects import load_project
+    from ..pipeline.proxies import ProxyBuilder
+
+    try:
+        project = load_project(name)
+    except FileNotFoundError as exc:
+        raise _error(404, str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    status = ProxyBuilder(SubprocessRunner(quiet=True)).status(project)
+    if all(s.ready for s in status):
+        return {"job": None, "proxies": [_proxy_entry(s) for s in status]}
+
+    def work(job: Job) -> list[dict]:
+        builder = ProxyBuilder(SubprocessRunner(sink=job.sink()), log=job.log)
+        return [_proxy_entry(s) for s in builder.build(project)]
+
+    job = jobs.start(f"{name}: proxies de prévia", work)
+    return {"job": job.snapshot(), "proxies": [_proxy_entry(s) for s in status]}
 
 
 @app.get("/api/browse")

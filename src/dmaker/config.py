@@ -28,6 +28,7 @@ FONTS_DIR = ASSETS_DIR / "fonts"
 BRANDS_DIR = ASSETS_DIR / "brands"
 CACHE_DIR = ROOT / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
+PROXY_DIR = CACHE_DIR / "proxy"
 JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = ROOT / "output"
@@ -38,7 +39,17 @@ WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 
 
 def ensure_dirs() -> None:
-    for d in (BIN_DIR, FONTS_DIR, BRANDS_DIR, MEZ_DIR, JOBS_DIR, MODELS_DIR, OUTPUT_DIR, PROJECTS_DIR):
+    for d in (
+        BIN_DIR,
+        FONTS_DIR,
+        BRANDS_DIR,
+        MEZ_DIR,
+        PROXY_DIR,
+        JOBS_DIR,
+        MODELS_DIR,
+        OUTPUT_DIR,
+        PROJECTS_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
 

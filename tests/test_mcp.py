@@ -50,6 +50,8 @@ def test_lists_tools_and_prompt():
         "contact_sheet",
         "frames",
         "fix_captions",
+        "edit_project",
+        "timeline_view",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -85,5 +87,33 @@ def test_save_and_validate_project_via_mcp(tmp_path):
     assert "mcp-teste" in saved and json.loads(validated)["total_s"] == 2.0
     spec_path = config.PROJECTS_DIR / "mcp-teste" / "spec.json"
     assert spec_path.exists()
+    spec_path.unlink()
+    spec_path.parent.rmdir()
+
+
+def test_edit_project_and_timeline_view_via_mcp():
+    spec = {
+        "output": {"preset": "instagram/stories"},
+        "timeline": [{"type": "card", "title": "Editar via MCP", "duration": 1.0}],
+        "audio": {"normalize": "off"},
+    }
+
+    async def go(session):
+        await session.call_tool("save_project", {"name": "mcp-edit-teste", "spec": spec})
+        view = await session.call_tool("timeline_view", {"name": "mcp-edit-teste"})
+        edited = await session.call_tool(
+            "edit_project",
+            {"name": "mcp-edit-teste", "op": {"type": "split", "index": 0, "at": 0.5}},
+        )
+        return _text(view), _text(edited)
+
+    view, edited = asyncio.run(_session(go))
+    view_data = json.loads(view)
+    assert any(t["id"] == "V1" for t in view_data["tracks"])
+    assert json.loads(edited)["total_s"] == 1.0  # dividir não muda a duração total
+
+    spec_path = config.PROJECTS_DIR / "mcp-edit-teste" / "spec.json"
+    saved = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert len(saved["timeline"]) == 2
     spec_path.unlink()
     spec_path.parent.rmdir()

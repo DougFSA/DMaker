@@ -147,6 +147,34 @@ def still_mezzanine(
     return _finish(inputs, lines, fps, duration, out, label)
 
 
+def matte_mezzanine(
+    frames: Iterable[bytes],
+    src: Path,
+    start: float,
+    length: float,
+    W: int,
+    H: int,
+    fps: float,
+    out: Path,
+    *,
+    has_audio: bool = True,
+    audio_stream: int = 0,
+    label: str = "recorte",
+) -> FFmpegCommand:
+    """Fonte com o fundo trocado: os quadros recortados vêm pelo stdin e o áudio do mesmo intervalo do
+    arquivo original. O resultado substitui o arquivo fonte no resto do pipeline (corte, velocidade,
+    enquadramento e cor continuam no mezanino normal)."""
+    inputs = Inputs()
+    inputs.add("pipe:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", f"{fps:g}")
+    lines = ["[0:v]format=yuv420p[vout]"]
+    if has_audio:
+        idx = inputs.add(src, "-ss", f"{max(start, 0):.3f}", "-t", f"{length:.3f}")
+        lines.append(f"[{idx}:a:{audio_stream}]asetpts=PTS-STARTPTS,{AUDIO_FMT_MEZZ}[aout]")
+    else:
+        lines.append(f"[{inputs.add_silence(length)}:a]{AUDIO_FMT_MEZZ}[aout]")
+    return _finish(inputs, lines, fps, length, out, label, frames=frames)
+
+
 def frames_mezzanine(
     frames: Iterable[bytes],
     W: int,

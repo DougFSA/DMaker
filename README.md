@@ -14,6 +14,7 @@ Base open source: [FFmpeg](https://ffmpeg.org) (corte, transições, áudio, cod
 - Trilha sonora com **ducking** (abaixa quando há voz) e normalização de loudness em duas passadas (-14 LUFS, padrão das redes).
 - Logo/marca d'água, barra de progresso, fotos com movimento (Ken Burns).
 - **Picture-in-picture**: webcam ou segunda câmera sobre o vídeo, em retângulo, cantos redondos ou círculo, com borda, sombra e entrada deslizando (como o Size & Position + Crop Circle do Shotcut). Ideal para mostrar o sistema e aparecer ao mesmo tempo.
+- **Troca de fundo sem chroma key**: recorta a pessoa com uma rede neural de matting de vídeo (RVM, local, na CPU) e põe um fundo liso, branco ou na cor da marca. `"matte": {"background": "#FFFFFF"}` no trecho; o modelo (ResNet50, 100 MB; ou MobileNetV3, 15 MB e mais rápido) é baixado no `setup` ou no primeiro uso.
 - Codificação otimizada por plataforma (H.264 High, faststart, bitrate máximo por formato), preview rápido em baixa resolução, cache de trechos para reedições em segundos.
 
 ## Instalação (passo a passo)
@@ -52,10 +53,47 @@ cd D:\DMaker
 O navegador abre em <http://127.0.0.1:8765> (se não abrir, cole o endereço). Deixe a janela do PowerShell aberta enquanto usa; `Ctrl+C` encerra. Na interface você:
 
 1. Cria um projeto em **Novo projeto**: nome, formato (Reels, Shorts, YouTube...), marca e os vídeos/fotos, escolhidos no navegador de arquivos.
-2. Edita na aba **Editor**: cada trecho da linha do tempo é um cartão (vídeo, imagem ou cartão de texto) com corte, velocidade, transição e enquadramento; abaixo, sobreposições (gancho, CTA, logo, barra de progresso), legendas e áudio. A aba **JSON** mostra a mesma coisa como texto, para quem prefere.
-3. Clica em **Validar** para ver duração final e avisos, e em **Preview** para gerar uma versão rápida em baixa resolução. O painel **Andamento** mostra cada etapa e a barra de progresso em tempo real; ao terminar, o vídeo aparece na aba **Preview** para assistir, com grade de quadros e captura de quadro.
-4. Quando estiver bom, **Render final** (qualidade de entrega) e, se quiser outros formatos, **Exportar**. Os arquivos ficam em `D:\DMaker\output`.
-5. Se o projeto tem legendas automáticas, a aba **Legendas** deixa corrigir palavras; gere o preview de novo para ver.
+2. Ao abrir um projeto, a interface já entra na aba **Linha do tempo**: um editor multitrilha no estilo Shotcut, com um player em cima e as trilhas embaixo (arraste a alça entre os dois para redimensionar). De cima para baixo: `V2`, `V3`... (vídeos em picture-in-picture), `TX` (textos), `GR` (imagens e barra de progresso), `V1` (os trechos principais: vídeo, imagem ou cartão), `A1` (áudio de cada trecho da V1), `A2`... (faixas de áudio externas sincronizadas), `MUS` (música) e `CC` (legendas). Clique ou arraste na régua para mover o cursor; clique num item para selecioná-lo (Ctrl para selecionar vários); arraste o meio de um item para movê-lo (reordena na V1, desloca no tempo nas sobreposições) e as bordas para aparar, com encaixe (snap) nas bordas de outros itens. A barra de ferramentas acima tem cortar, remover, lift, duplicar, aparar até o cursor, snap e zoom; a tabela de atalhos (tecla `?`) tem a lista completa, resumida abaixo.
+3. O player mostra uma **prévia ao vivo aproximada** (sem precisar renderizar): toca o trecho sob o cursor, as sobreposições de texto e imagem, e o picture-in-picture, mas não mostra transições, Ken Burns, legendas nem correção de cor (isso só sai no render). Vídeos em formatos que o navegador não decodifica (HEVC, ProRes...) tocam por um proxy leve em 540p H.264 que a interface gera em segundo plano (`cache/proxy`) só para essa prévia, sem afetar o render final; enquanto o proxy não fica pronto, aparece um aviso na barra de ferramentas.
+4. Os campos "clássicos" (preset, fontes sincronizadas, cartões, sobreposições, legendas, áudio) continuam na aba **Propriedades**, como cartões e formulários. A aba **JSON** mostra a mesma spec como texto, para quem prefere.
+5. Clica em **Validar** para ver duração final e avisos, e em **Preview** para gerar uma versão rápida em baixa resolução. O painel **Andamento** mostra cada etapa e a barra de progresso em tempo real; ao terminar, o vídeo aparece na aba **Preview** para assistir, com grade de quadros e captura de quadro.
+6. Quando estiver bom, **Render final** (qualidade de entrega) e, se quiser outros formatos, **Exportar**. Os arquivos ficam em `D:\DMaker\output`.
+7. Se o projeto tem legendas automáticas, a aba **Legendas** deixa corrigir palavras; gere o preview de novo para ver.
+
+Um indicador **não salvo** aparece ao lado do nome do projeto sempre que a linha do tempo, o formulário ou o JSON mudam; `Salvar` (ou `Ctrl+S`) grava a spec em disco. Cortar, mover, aparar, duplicar e remover são "ripple": a V1 nunca fica com buracos.
+
+A aba Linha do tempo tem dois painéis laterais ocultáveis (botões `F`/`M` na barra de ferramentas, estado lembrado entre sessões):
+
+- **Filtros** (esquerda): mostra os grupos de campos do item selecionado (ou do projeto, se nada estiver selecionado) que já saem do padrão, prontos para editar; o botão `+` lista os grupos ainda não aplicados (reenquadrar, cor, velocidade, transição, posição, forma, estilo do texto...) e `Remover` devolve o grupo ao padrão. Edição em campo de texto/número tem um pequeno atraso antes de salvar; select e checkbox aplicam na hora.
+- **Mídia** (direita): lista as fontes sincronizadas e os arquivos já usados na linha do tempo, com miniatura e duração. Arraste um item para a V1 para inserir um trecho na posição solta, ou para uma trilha de vídeo acima da V1/TX/GR para criar uma sobreposição (picture-in-picture ou imagem) começando naquele instante; duplo clique acrescenta no fim da V1. Os botões **Texto**, **Cartão**, **Logo** e **Música** criam cada um no cursor (cartão vai para o fim da V1; música substitui a música de fundo do projeto).
+
+### Atalhos de teclado (aba Linha do tempo)
+
+Inspirados no Shotcut; a lista completa está sempre disponível pela tecla `?`, onde também dá para clicar numa tecla e trocá-la (a próxima combinação apertada vira o novo atalho; um botão **Restaurar padrões** desfaz tudo). As trocas ficam salvas no navegador (localStorage), não na spec do projeto.
+
+| Tecla | Ação |
+| --- | --- |
+| Espaço | Reproduzir / pausar |
+| `K` | Pausar |
+| `J` / `L` | Voltar / avançar (repetir acelera 2x, 4x, 8x) |
+| Setas esquerda/direita | Um quadro para trás/frente |
+| `Alt` + seta esquerda/direita | Edição anterior/seguinte |
+| `Home` / `End` | Ir ao início/fim |
+| `Page Up` / `Page Down` | Voltar/avançar 1 segundo |
+| `S` | Cortar no cursor |
+| `X` ou `Delete` | Remover (ripple) |
+| `Z` | Lift (remove; na V1 avisa que não há lacunas) |
+| `I` / `O` | Aparar entrada/saída até o cursor |
+| `A` | Acrescentar a mídia selecionada (painel Mídia) no fim da V1 |
+| `V` | Inserir a mídia selecionada no cursor |
+| `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
+| `Ctrl+S` | Salvar |
+| `Ctrl+D` | Duplicar |
+| `+` / `-` | Zoom |
+| `0` | Ajustar à janela |
+| `Ctrl+P` | Alternar encaixe (snap) |
+| `Escape` | Limpar seleção |
+| `?` | Mostrar esta lista (clique numa tecla para trocar) |
 
 ## Uso
 
@@ -165,7 +203,7 @@ Exemplos completos em [`templates/`](templates/). Marcas em `assets/brands/<nome
 DMaker/
   src/dmaker/
     domain/       spec (modelo Pydantic), presets, brand, timeline (contas puras)
-    media/        ffmpeg (comando + runner injetável), probe, fonts
+    media/        ffmpeg (comando + runner injetável), probe, fonts, matting (recorte de pessoa via ONNX)
     text/         ass, overlays (texto e legendas), captions (cues/SRT), transcribe (Whisper)
     visuals/      cards, motion (Ken Burns sub-pixel), reframe_image, geometry
     filtergraph/  grafos ffmpeg como funções puras (reframe, timeline, overlays, audio, encode, mezzanine)

@@ -78,9 +78,10 @@ Regras e valores:
 - **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior); tipos: `cut`, `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `smoothleft`, `circleopen`, `zoomin`, `fadeblack`, `fadewhite`, `pixelize`... (nomes do xfade). Transição consome tempo: duração final = soma dos trechos menos as transições (`validate` mostra).
 - **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; o movimento é sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; se for muito diferente, usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
+- **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, 100 MB, separa melhor cadeira/encosto que encosta na pessoa, ~0,7 s por quadro na CPU: 1 min de vídeo em 1080p leva uns 30 min) ou `mobilenetv3` (15 MB, ~0,3 s por quadro, bom para rascunho). O recorte fica em cache próprio: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos ou objetos na mão podem falhar na borda.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
 - **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `uppercase`, `align`, `max_width`, `font`, `weight`. `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição.
-- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `opacity`, `start`/`end`, `fade`.
+- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto do quadro, ignorando a zona coberta pela interface do app), `opacity`, `start`/`end`, `fade`.
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
 - **Picture-in-picture** (`type: "video"`): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y`; `width` (fração da largura, 0.18 a 0.3 para webcam); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do PiP (0 = mudo). Caso típico: tela gravada no OBS + webcam, ambos em `sources` com `sync: "auto"`, PiP em círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; modelo `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus).
@@ -103,6 +104,28 @@ Declare as fontes do mesmo evento em `sources` e diga qual é o relógio princip
 - Revisar sem renderizar tudo: `dmaker render spec.json --preview --segments 3-6` (só esses trechos, sem sobreposições/legendas).
 - Cronograma realista: mezaninos ~1x tempo real e render final ~1x em 1080p; um vídeo de 1 h leva ~2 h. Use `quality: high` (padrão) ou `medium` se a pressa for maior; `max` só para entrega final quando sobrar tempo.
 - Template: `templates/casamento-multicam.json`.
+
+## Edições pontuais
+
+Para ajustes finos (cortar no cursor, remover, mover, aparar entrada/saída, duplicar, inserir, ajustar
+sobreposição, mudar um campo qualquer) sem reescrever a spec inteira, use a ferramenta MCP
+`edit_project(name, op)`: ela carrega o projeto, aplica a operação e salva. `timeline_view(name)`
+devolve a vista multitrilha (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1
+trechos, A1 áudio dos clipes, A2... faixas externas, MUS música, CC legendas), útil para saber índices
+e tempos antes de editar.
+
+Operações (`op["type"]`): `split` (`index`, `at` em segundos desde o início do trecho), `remove`
+(`index`), `move` (`index`, `to`), `trim` (`index`, `side`: "in"/"out", `delta` em segundos),
+`duplicate` (`index`), `insert` (`index`, `segment`: dict do trecho novo), `overlay_span` (`index`,
+`start`, `end`), `overlay_remove` (`index`), `overlay_duplicate` (`index`), `set_field` (`path` com
+pontos e índices, ex.: `"timeline.2.speed"`, `"overlays.0.style.size"`, `"sources.cam1.sync"`; `value`
+= `None` volta ao padrão).
+
+```
+edit_project("meu-reel", {"type": "split", "index": 1, "at": 2.5})
+edit_project("meu-reel", {"type": "trim", "index": 0, "side": "out", "delta": -0.5})
+edit_project("meu-reel", {"type": "set_field", "path": "timeline.2.speed", "value": 1.5})
+```
 
 ## Regras da marca MedlyCare (quando `"brand": "medlycare"`)
 

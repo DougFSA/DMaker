@@ -1,0 +1,975 @@
+{
+ "language": "pt",
+ "cues": [
+  {
+   "start": 2.9,
+   "end": 9.9,
+   "text": "Olá pessoal, tudo bem? Meu nome é Douglas, eu sou cofundador da plataforma de gestão",
+   "words": [
+    {
+     "start": 2.9,
+     "end": 3.52,
+     "text": "Olá"
+    },
+    {
+     "start": 3.52,
+     "end": 4.12,
+     "text": "pessoal,"
+    },
+    {
+     "start": 4.28,
+     "end": 4.38,
+     "text": "tudo"
+    },
+    {
+     "start": 4.38,
+     "end": 4.86,
+     "text": "bem?"
+    },
+    {
+     "start": 5.06,
+     "end": 5.14,
+     "text": "Meu"
+    },
+    {
+     "start": 5.14,
+     "end": 5.34,
+     "text": "nome"
+    },
+    {
+     "start": 5.34,
+     "end": 5.5,
+     "text": "é"
+    },
+    {
+     "start": 5.5,
+     "end": 6.08,
+     "text": "Douglas,"
+    },
+    {
+     "start": 6.94,
+     "end": 7.0,
+     "text": "eu"
+    },
+    {
+     "start": 7.0,
+     "end": 7.2,
+     "text": "sou"
+    },
+    {
+     "start": 7.2,
+     "end": 8.28,
+     "text": "cofundador"
+    },
+    {
+     "start": 8.28,
+     "end": 8.88,
+     "text": "da"
+    },
+    {
+     "start": 8.88,
+     "end": 9.48,
+     "text": "plataforma"
+    },
+    {
+     "start": 9.48,
+     "end": 9.66,
+     "text": "de"
+    },
+    {
+     "start": 9.66,
+     "end": 9.9,
+     "text": "gestão"
+    }
+   ]
+  },
+  {
+   "start": 9.9,
+   "end": 16.18,
+   "text": "de atendimentos MedlyCare, tô aqui pra mostrar um pouco de um rosto humano também nesses",
+   "words": [
+    {
+     "start": 9.9,
+     "end": 10.02,
+     "text": "de"
+    },
+    {
+     "start": 10.02,
+     "end": 10.58,
+     "text": "atendimentos"
+    },
+    {
+     "start": 10.58,
+     "end": 11.62,
+     "text": "MedlyCare,"
+    },
+    {
+     "start": 13.14,
+     "end": 13.24,
+     "text": "tô"
+    },
+    {
+     "start": 13.24,
+     "end": 13.46,
+     "text": "aqui"
+    },
+    {
+     "start": 13.46,
+     "end": 13.64,
+     "text": "pra"
+    },
+    {
+     "start": 13.64,
+     "end": 13.94,
+     "text": "mostrar"
+    },
+    {
+     "start": 13.94,
+     "end": 14.12,
+     "text": "um"
+    },
+    {
+     "start": 14.12,
+     "end": 14.26,
+     "text": "pouco"
+    },
+    {
+     "start": 14.26,
+     "end": 14.44,
+     "text": "de"
+    },
+    {
+     "start": 14.44,
+     "end": 14.58,
+     "text": "um"
+    },
+    {
+     "start": 14.58,
+     "end": 14.74,
+     "text": "rosto"
+    },
+    {
+     "start": 14.74,
+     "end": 15.14,
+     "text": "humano"
+    },
+    {
+     "start": 15.14,
+     "end": 15.62,
+     "text": "também"
+    },
+    {
+     "start": 15.62,
+     "end": 16.18,
+     "text": "nesses"
+    }
+   ]
+  },
+  {
+   "start": 16.18,
+   "end": 22.6,
+   "text": "nossos perfis e eu gostaria de comentar um pouco sobre a nossa plataforma, uma plataforma",
+   "words": [
+    {
+     "start": 16.18,
+     "end": 16.52,
+     "text": "nossos"
+    },
+    {
+     "start": 16.52,
+     "end": 17.36,
+     "text": "perfis"
+    },
+    {
+     "start": 17.36,
+     "end": 18.7,
+     "text": "e"
+    },
+    {
+     "start": 18.7,
+     "end": 19.16,
+     "text": "eu"
+    },
+    {
+     "start": 19.16,
+     "end": 19.42,
+     "text": "gostaria"
+    },
+    {
+     "start": 19.42,
+     "end": 19.84,
+     "text": "de"
+    },
+    {
+     "start": 19.84,
+     "end": 20.18,
+     "text": "comentar"
+    },
+    {
+     "start": 20.18,
+     "end": 20.32,
+     "text": "um"
+    },
+    {
+     "start": 20.32,
+     "end": 20.46,
+     "text": "pouco"
+    },
+    {
+     "start": 20.46,
+     "end": 20.66,
+     "text": "sobre"
+    },
+    {
+     "start": 20.66,
+     "end": 20.82,
+     "text": "a"
+    },
+    {
+     "start": 20.82,
+     "end": 21.0,
+     "text": "nossa"
+    },
+    {
+     "start": 21.0,
+     "end": 21.66,
+     "text": "plataforma,"
+    },
+    {
+     "start": 21.86,
+     "end": 22.06,
+     "text": "uma"
+    },
+    {
+     "start": 22.06,
+     "end": 22.6,
+     "text": "plataforma"
+    }
+   ]
+  },
+  {
+   "start": 22.6,
+   "end": 28.26,
+   "text": "de gestão de atendimentos, então lá a gente tem a agenda, tem a parte do prontuário",
+   "words": [
+    {
+     "start": 22.6,
+     "end": 22.76,
+     "text": "de"
+    },
+    {
+     "start": 22.76,
+     "end": 23.16,
+     "text": "gestão"
+    },
+    {
+     "start": 23.16,
+     "end": 23.42,
+     "text": "de"
+    },
+    {
+     "start": 23.42,
+     "end": 24.38,
+     "text": "atendimentos,"
+    },
+    {
+     "start": 25.02,
+     "end": 25.12,
+     "text": "então"
+    },
+    {
+     "start": 25.12,
+     "end": 25.32,
+     "text": "lá"
+    },
+    {
+     "start": 25.32,
+     "end": 25.38,
+     "text": "a"
+    },
+    {
+     "start": 25.38,
+     "end": 25.48,
+     "text": "gente"
+    },
+    {
+     "start": 25.48,
+     "end": 25.74,
+     "text": "tem"
+    },
+    {
+     "start": 25.74,
+     "end": 25.98,
+     "text": "a"
+    },
+    {
+     "start": 25.98,
+     "end": 26.44,
+     "text": "agenda,"
+    },
+    {
+     "start": 26.78,
+     "end": 26.86,
+     "text": "tem"
+    },
+    {
+     "start": 26.86,
+     "end": 27.02,
+     "text": "a"
+    },
+    {
+     "start": 27.02,
+     "end": 27.32,
+     "text": "parte"
+    },
+    {
+     "start": 27.32,
+     "end": 27.86,
+     "text": "do"
+    },
+    {
+     "start": 27.86,
+     "end": 28.26,
+     "text": "prontuário"
+    }
+   ]
+  },
+  {
+   "start": 28.26,
+   "end": 35.34,
+   "text": "eletrônico, temos muitas outras funcionalidades também, que vocês podem estar conferindo",
+   "words": [
+    {
+     "start": 28.26,
+     "end": 29.5,
+     "text": "eletrônico,"
+    },
+    {
+     "start": 30.08,
+     "end": 30.28,
+     "text": "temos"
+    },
+    {
+     "start": 30.28,
+     "end": 30.68,
+     "text": "muitas"
+    },
+    {
+     "start": 30.68,
+     "end": 30.96,
+     "text": "outras"
+    },
+    {
+     "start": 30.96,
+     "end": 31.76,
+     "text": "funcionalidades"
+    },
+    {
+     "start": 31.76,
+     "end": 32.38,
+     "text": "também,"
+    },
+    {
+     "start": 33.7,
+     "end": 33.8,
+     "text": "que"
+    },
+    {
+     "start": 33.8,
+     "end": 34.14,
+     "text": "vocês"
+    },
+    {
+     "start": 34.14,
+     "end": 34.42,
+     "text": "podem"
+    },
+    {
+     "start": 34.42,
+     "end": 35.0,
+     "text": "estar"
+    },
+    {
+     "start": 35.0,
+     "end": 35.34,
+     "text": "conferindo"
+    }
+   ]
+  },
+  {
+   "start": 35.34,
+   "end": 42.62,
+   "text": "no nosso site, só você dar um Google aí e procurar por medlycare.com.br, tá certo?",
+   "words": [
+    {
+     "start": 35.34,
+     "end": 35.56,
+     "text": "no"
+    },
+    {
+     "start": 35.56,
+     "end": 35.78,
+     "text": "nosso"
+    },
+    {
+     "start": 35.78,
+     "end": 36.2,
+     "text": "site,"
+    },
+    {
+     "start": 36.72,
+     "end": 36.94,
+     "text": "só"
+    },
+    {
+     "start": 36.94,
+     "end": 37.2,
+     "text": "você"
+    },
+    {
+     "start": 37.2,
+     "end": 37.28,
+     "text": "dar"
+    },
+    {
+     "start": 37.28,
+     "end": 37.42,
+     "text": "um"
+    },
+    {
+     "start": 37.42,
+     "end": 37.82,
+     "text": "Google"
+    },
+    {
+     "start": 37.82,
+     "end": 38.8,
+     "text": "aí"
+    },
+    {
+     "start": 38.8,
+     "end": 39.1,
+     "text": "e"
+    },
+    {
+     "start": 39.1,
+     "end": 39.42,
+     "text": "procurar"
+    },
+    {
+     "start": 39.42,
+     "end": 39.74,
+     "text": "por"
+    },
+    {
+     "start": 39.74,
+     "end": 40.4,
+     "text": "medlycare"
+    },
+    {
+     "start": 40.4,
+     "end": 41.02,
+     "text": ".com"
+    },
+    {
+     "start": 41.02,
+     "end": 41.9,
+     "text": ".br,"
+    },
+    {
+     "start": 42.06,
+     "end": 42.18,
+     "text": "tá"
+    },
+    {
+     "start": 42.18,
+     "end": 42.62,
+     "text": "certo?"
+    }
+   ]
+  },
+  {
+   "start": 43.2,
+   "end": 48.58,
+   "text": "Dêem uma olhadinha lá, nossa empresa ainda é pequena, a gente tá crescendo agora",
+   "words": [
+    {
+     "start": 43.2,
+     "end": 43.36,
+     "text": "Dêem"
+    },
+    {
+     "start": 43.36,
+     "end": 43.5,
+     "text": "uma"
+    },
+    {
+     "start": 43.5,
+     "end": 43.92,
+     "text": "olhadinha"
+    },
+    {
+     "start": 43.92,
+     "end": 44.44,
+     "text": "lá,"
+    },
+    {
+     "start": 44.72,
+     "end": 44.94,
+     "text": "nossa"
+    },
+    {
+     "start": 44.94,
+     "end": 45.32,
+     "text": "empresa"
+    },
+    {
+     "start": 45.32,
+     "end": 45.62,
+     "text": "ainda"
+    },
+    {
+     "start": 45.62,
+     "end": 45.9,
+     "text": "é"
+    },
+    {
+     "start": 45.9,
+     "end": 46.66,
+     "text": "pequena,"
+    },
+    {
+     "start": 47.02,
+     "end": 47.08,
+     "text": "a"
+    },
+    {
+     "start": 47.08,
+     "end": 47.22,
+     "text": "gente"
+    },
+    {
+     "start": 47.22,
+     "end": 47.44,
+     "text": "tá"
+    },
+    {
+     "start": 47.44,
+     "end": 47.98,
+     "text": "crescendo"
+    },
+    {
+     "start": 47.98,
+     "end": 48.58,
+     "text": "agora"
+    }
+   ]
+  },
+  {
+   "start": 48.58,
+   "end": 55.72,
+   "text": "e isso é uma vantagem, vocês podem nos pedir, sugerir modificações do sistema,",
+   "words": [
+    {
+     "start": 48.58,
+     "end": 49.02,
+     "text": "e"
+    },
+    {
+     "start": 49.02,
+     "end": 49.2,
+     "text": "isso"
+    },
+    {
+     "start": 49.2,
+     "end": 49.32,
+     "text": "é"
+    },
+    {
+     "start": 49.32,
+     "end": 49.46,
+     "text": "uma"
+    },
+    {
+     "start": 49.46,
+     "end": 50.24,
+     "text": "vantagem,"
+    },
+    {
+     "start": 50.36,
+     "end": 50.62,
+     "text": "vocês"
+    },
+    {
+     "start": 50.62,
+     "end": 50.92,
+     "text": "podem"
+    },
+    {
+     "start": 50.92,
+     "end": 51.94,
+     "text": "nos"
+    },
+    {
+     "start": 51.94,
+     "end": 52.52,
+     "text": "pedir,"
+    },
+    {
+     "start": 52.74,
+     "end": 54.42,
+     "text": "sugerir"
+    },
+    {
+     "start": 54.42,
+     "end": 55.0,
+     "text": "modificações"
+    },
+    {
+     "start": 55.0,
+     "end": 55.12,
+     "text": "do"
+    },
+    {
+     "start": 55.12,
+     "end": 55.72,
+     "text": "sistema,"
+    }
+   ]
+  },
+  {
+   "start": 55.72,
+   "end": 61.92,
+   "text": "deixar algo melhor pra tua realidade e isso pode refletir pra todos os nossos clientes,",
+   "words": [
+    {
+     "start": 55.72,
+     "end": 56.32,
+     "text": "deixar"
+    },
+    {
+     "start": 56.32,
+     "end": 57.04,
+     "text": "algo"
+    },
+    {
+     "start": 57.04,
+     "end": 57.36,
+     "text": "melhor"
+    },
+    {
+     "start": 57.36,
+     "end": 57.66,
+     "text": "pra"
+    },
+    {
+     "start": 57.66,
+     "end": 57.86,
+     "text": "tua"
+    },
+    {
+     "start": 57.86,
+     "end": 58.46,
+     "text": "realidade"
+    },
+    {
+     "start": 58.46,
+     "end": 58.72,
+     "text": "e"
+    },
+    {
+     "start": 58.72,
+     "end": 58.86,
+     "text": "isso"
+    },
+    {
+     "start": 58.86,
+     "end": 59.08,
+     "text": "pode"
+    },
+    {
+     "start": 59.08,
+     "end": 59.56,
+     "text": "refletir"
+    },
+    {
+     "start": 59.56,
+     "end": 60.26,
+     "text": "pra"
+    },
+    {
+     "start": 60.26,
+     "end": 60.44,
+     "text": "todos"
+    },
+    {
+     "start": 60.44,
+     "end": 60.9,
+     "text": "os"
+    },
+    {
+     "start": 60.9,
+     "end": 61.04,
+     "text": "nossos"
+    },
+    {
+     "start": 61.04,
+     "end": 61.92,
+     "text": "clientes,"
+    }
+   ]
+  },
+  {
+   "start": 62.12,
+   "end": 68.38,
+   "text": "assim ajudando toda a nossa rede de clientes, tá certo? Então fica aqui, conheçam a",
+   "words": [
+    {
+     "start": 62.12,
+     "end": 62.22,
+     "text": "assim"
+    },
+    {
+     "start": 62.22,
+     "end": 63.02,
+     "text": "ajudando"
+    },
+    {
+     "start": 63.02,
+     "end": 63.38,
+     "text": "toda"
+    },
+    {
+     "start": 63.38,
+     "end": 63.8,
+     "text": "a"
+    },
+    {
+     "start": 63.8,
+     "end": 64.0,
+     "text": "nossa"
+    },
+    {
+     "start": 64.0,
+     "end": 64.26,
+     "text": "rede"
+    },
+    {
+     "start": 64.26,
+     "end": 64.64,
+     "text": "de"
+    },
+    {
+     "start": 64.64,
+     "end": 65.12,
+     "text": "clientes,"
+    },
+    {
+     "start": 65.26,
+     "end": 65.38,
+     "text": "tá"
+    },
+    {
+     "start": 65.38,
+     "end": 65.76,
+     "text": "certo?"
+    },
+    {
+     "start": 66.52,
+     "end": 67.0,
+     "text": "Então"
+    },
+    {
+     "start": 67.0,
+     "end": 67.18,
+     "text": "fica"
+    },
+    {
+     "start": 67.18,
+     "end": 67.6,
+     "text": "aqui,"
+    },
+    {
+     "start": 67.9,
+     "end": 68.28,
+     "text": "conheçam"
+    },
+    {
+     "start": 68.28,
+     "end": 68.38,
+     "text": "a"
+    }
+   ]
+  },
+  {
+   "start": 68.38,
+   "end": 73.46,
+   "text": "nossa plataforma, fiquem à vontade pra entrar em contato comigo, com meu sócio",
+   "words": [
+    {
+     "start": 68.38,
+     "end": 68.6,
+     "text": "nossa"
+    },
+    {
+     "start": 68.6,
+     "end": 69.3,
+     "text": "plataforma,"
+    },
+    {
+     "start": 70.1,
+     "end": 70.62,
+     "text": "fiquem"
+    },
+    {
+     "start": 70.62,
+     "end": 70.8,
+     "text": "à"
+    },
+    {
+     "start": 70.8,
+     "end": 71.24,
+     "text": "vontade"
+    },
+    {
+     "start": 71.24,
+     "end": 71.52,
+     "text": "pra"
+    },
+    {
+     "start": 71.52,
+     "end": 71.72,
+     "text": "entrar"
+    },
+    {
+     "start": 71.72,
+     "end": 71.9,
+     "text": "em"
+    },
+    {
+     "start": 71.9,
+     "end": 72.16,
+     "text": "contato"
+    },
+    {
+     "start": 72.16,
+     "end": 72.64,
+     "text": "comigo,"
+    },
+    {
+     "start": 72.78,
+     "end": 72.88,
+     "text": "com"
+    },
+    {
+     "start": 72.88,
+     "end": 73.1,
+     "text": "meu"
+    },
+    {
+     "start": 73.1,
+     "end": 73.46,
+     "text": "sócio"
+    }
+   ]
+  },
+  {
+   "start": 73.46,
+   "end": 80.88,
+   "text": "também, com o Matheus, né? E é isso, tá bom? Um grande abraço e até a próxima.",
+   "words": [
+    {
+     "start": 73.46,
+     "end": 73.76,
+     "text": "também,"
+    },
+    {
+     "start": 74.14,
+     "end": 74.24,
+     "text": "com"
+    },
+    {
+     "start": 74.24,
+     "end": 74.38,
+     "text": "o"
+    },
+    {
+     "start": 74.38,
+     "end": 75.04,
+     "text": "Matheus,"
+    },
+    {
+     "start": 75.38,
+     "end": 75.38,
+     "text": "né?"
+    },
+    {
+     "start": 76.7,
+     "end": 76.86,
+     "text": "E"
+    },
+    {
+     "start": 76.86,
+     "end": 76.98,
+     "text": "é"
+    },
+    {
+     "start": 76.98,
+     "end": 77.36,
+     "text": "isso,"
+    },
+    {
+     "start": 77.54,
+     "end": 77.64,
+     "text": "tá"
+    },
+    {
+     "start": 77.64,
+     "end": 77.92,
+     "text": "bom?"
+    },
+    {
+     "start": 78.3,
+     "end": 78.54,
+     "text": "Um"
+    },
+    {
+     "start": 78.54,
+     "end": 78.78,
+     "text": "grande"
+    },
+    {
+     "start": 78.78,
+     "end": 79.78,
+     "text": "abraço"
+    },
+    {
+     "start": 79.78,
+     "end": 80.16,
+     "text": "e"
+    },
+    {
+     "start": 80.16,
+     "end": 80.4,
+     "text": "até"
+    },
+    {
+     "start": 80.4,
+     "end": 80.6,
+     "text": "a"
+    },
+    {
+     "start": 80.6,
+     "end": 80.88,
+     "text": "próxima."
+    }
+   ]
+  }
+ ],
+ "hash": "f27d291b5c3e4ddf",
+ "meta": {
+  "language": "pt",
+  "language_probability": 1.0,
+  "model": "medium"
+ }
+}

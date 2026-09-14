@@ -73,6 +73,66 @@ def test_captions_read_and_update(client):
     assert "olá, tudo bem" in store.with_suffix(".srt").read_text(encoding="utf-8")
 
 
+def test_timeline_view_endpoint(client):
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    view = client.post(f"/api/projects/{PROJECT}/timeline", json={}).json()
+    v1 = next(t for t in view["tracks"] if t["id"] == "V1")
+    assert v1["items"][0]["kind"] == "card"
+
+    view_from_body = client.post(f"/api/projects/{PROJECT}/timeline", json={"spec": SPEC}).json()
+    assert view_from_body["total"] == view["total"] == 1.0
+
+    bad = dict(SPEC, timeline=[{"type": "clip", "src": "x.mp4", "start": 5, "end": 2}])
+    resp = client.post(f"/api/projects/{PROJECT}/timeline", json={"spec": bad})
+    assert resp.status_code == 400
+
+
+def test_edit_split_card_endpoint(client):
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    resp = client.post(
+        f"/api/projects/{PROJECT}/edit",
+        json={"spec": SPEC, "op": {"type": "split", "index": 0, "at": 0.5}},
+    )
+    body = resp.json()
+    assert len(body["spec"]["timeline"]) == 2
+    v1 = next(t for t in body["timeline"]["tracks"] if t["id"] == "V1")
+    assert len(v1["items"]) == 2
+
+    bad_op = client.post(
+        f"/api/projects/{PROJECT}/edit", json={"spec": SPEC, "op": {"type": "remove", "index": 0}}
+    )
+    assert bad_op.status_code == 400  # não pode remover o único trecho
+
+
+def test_theme_endpoint(client):
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    theme = client.get(f"/api/projects/{PROJECT}/theme").json()
+    assert theme["colors"]["accent"] and theme["font"] == "Poppins"
+    assert theme["no_dash"] is True  # regra da marca MedlyCare
+    assert client.get("/api/projects/nao-existe/theme").status_code == 404
+
+
+def test_card_preview_endpoint(client):
+    import hashlib
+
+    params = {"title": "Interface de teste do card-preview", "brand": "medlycare", "width": 200}
+    resp = client.get("/api/card-preview", params=params)
+    assert resp.status_code == 200 and resp.headers["content-type"] == "image/png"
+
+    key = "|".join([params["title"], "", "", "True", "", "medlycare", "instagram/reels", "200"])
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
+    cached = config.CACHE_DIR / "cards" / f"{digest}.png"
+    assert cached.is_file()
+    mtime_before = cached.stat().st_mtime_ns
+
+    again = client.get("/api/card-preview", params=params)
+    assert again.status_code == 200
+    assert cached.stat().st_mtime_ns == mtime_before  # mesmos parâmetros -> reaproveita o cache
+
+    assert client.get("/api/card-preview", params={"title": "x", "preset": "nao-existe"}).status_code == 404
+    assert client.get("/api/card-preview").status_code == 422  # title é obrigatório
+
+
 def test_browse_and_file_restrictions(client, tmp_path):
     root = client.get("/api/browse").json()
     assert root["dirs"] and root["parent"] is None

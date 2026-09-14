@@ -163,6 +163,26 @@ def test_overlay_position_respects_safe_zone():
     assert (x, y) == ("(W-w)/2", "H-h-460")
 
 
+def test_image_overlay_can_ignore_the_safe_zone(tmp_path: Path):
+    from dmaker.domain.spec import ImageOverlay
+    from dmaker.filtergraph.overlays import ResolvedImageOverlay, image_overlay_graph
+
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"png")
+    safe = SafeZone(220, 420, 60, 150)
+
+    def graph(safe_zone: bool) -> str:
+        lines: list[str] = []
+        ov = ImageOverlay(src=str(logo), position="top-right", margin=24, safe_zone=safe_zone)
+        image_overlay_graph(
+            lines, Inputs(), "[v]", [ResolvedImageOverlay(ov, logo, 0, 5)], 1080, 1920, 30, 5, 1.0, safe
+        )
+        return ";".join(lines)
+
+    assert "overlay=x=W-w-174:y=244" in graph(True)  # margem + zona segura
+    assert "overlay=x=W-w-24:y=24" in graph(False)  # só a margem: cola no canto
+
+
 def test_encode_args_by_platform():
     p = get_preset("youtube/video")
     args = encode_args(p, "high", "x264", 30)

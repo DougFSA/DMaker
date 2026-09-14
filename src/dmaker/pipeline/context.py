@@ -11,6 +11,7 @@ from ..domain.brand import Theme
 from ..domain.presets import Preset
 from ..domain.spec import Project
 from ..media.ffmpeg import FFmpegRunner
+from ..media.matting import Matter
 from ..media.probe import MediaInfo
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -59,6 +60,7 @@ class RenderContext:
     cache_dir: Path
     runner: FFmpegRunner
     prober: Prober
+    matter: Matter | None = None  # recorte de pessoa para trocar o fundo (só quando um trecho pede)
     warnings: list[str] = field(default_factory=list)
     log: Callable[[str], None] = lambda message: None  # noqa: E731 - etapas do render (terminal, interface)
     session: dict[str, Any] = field(

@@ -1,0 +1,140 @@
+{
+  "name": "medlycare-institucional",
+  "output": {
+    "preset": "instagram/reels",
+    "quality": "high",
+    "thumbnail_at": 5.0
+  },
+  "brand": "medlycare",
+  "timeline": [
+    {
+      "type": "card",
+      "title": "Quem cria o MedlyCare",
+      "subtitle": "Um recado direto do cofundador",
+      "variant": "light",
+      "duration": 3
+    },
+    {
+      "type": "clip",
+      "src": "C:/Users/Douglas Vasconcelos/Desktop/VID_20260913_152426.mp4",
+      "start": 0.3,
+      "end": 79.3,
+      "matte": {
+        "background": "#FFFFFF",
+        "model": "resnet50"
+      },
+      "reframe": {
+        "mode": "crop",
+        "focus": [
+          0.5,
+          0.35
+        ]
+      },
+      "color": {
+        "contrast": 1.03,
+        "saturation": 1.02
+      },
+      "transition": {
+        "type": "fade",
+        "duration": 0.5
+      }
+    },
+    {
+      "type": "card",
+      "title": "Conheça a plataforma",
+      "subtitle": "medlycare.com.br",
+      "variant": "dark",
+      "duration": 4,
+      "transition": {
+        "type": "fade",
+        "duration": 0.6
+      }
+    }
+  ],
+  "overlays": [
+    {
+      "type": "image",
+      "src": "logo:symbol",
+      "position": "top-right",
+      "width": 0.1,
+      "margin": 36,
+      "safe_zone": false,
+      "start": 3,
+      "end": 81.5
+    },
+    {
+      "type": "text",
+      "text": "Douglas Vasconcelos",
+      "secondary": "Cofundador do MedlyCare",
+      "role": "lower-third",
+      "start": 6.7,
+      "end": 13,
+      "y": 0.8
+    },
+    {
+      "type": "text",
+      "text": "Agenda, prontuário e muito mais",
+      "role": "subtitle",
+      "start": 25,
+      "end": 33,
+      "y": 0.8,
+      "style": {
+        "box": true,
+        "box_color": "mint",
+        "color": "primary",
+        "weight": "semibold",
+        "size": 52,
+        "box_alpha": 1.0
+      }
+    },
+    {
+      "type": "text",
+      "text": "medlycare.com.br",
+      "role": "cta",
+      "start": 36,
+      "end": 44,
+      "y": 0.8
+    },
+    {
+      "type": "text",
+      "text": "Suas sugestões viram melhorias",
+      "role": "subtitle",
+      "start": 51.5,
+      "end": 61.5,
+      "y": 0.8,
+      "style": {
+        "box": true,
+        "box_color": "mint",
+        "color": "primary",
+        "weight": "semibold",
+        "size": 52,
+        "box_alpha": 1.0
+      }
+    },
+    {
+      "type": "text",
+      "text": "Fale com a gente",
+      "role": "cta",
+      "start": 70.5,
+      "end": 77.5,
+      "y": 0.8
+    },
+    {
+      "type": "progress-bar"
+    }
+  ],
+  "captions": {
+    "source": "auto",
+    "language": "pt",
+    "model": "medium",
+    "style": {
+      "mode": "karaoke",
+      "max_words": 4,
+      "uppercase": true,
+      "y": 0.7
+    }
+  },
+  "audio": {
+    "normalize": "two-pass"
+  }
+}

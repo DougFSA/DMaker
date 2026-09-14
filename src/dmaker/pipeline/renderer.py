@@ -11,6 +11,7 @@ from ..domain.presets import Preset, get_preset
 from ..domain.spec import Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
+from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from .assembly import LoudnessMeter, build_assembly
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
@@ -39,6 +40,7 @@ class RenderPipeline:
         output_dir: Path = OUTPUT_DIR,
         log: Callable[[str], None] | None = None,
         offset_finder: OffsetFinder | None = None,
+        matter: Matter | None = None,
     ):
         self.project = project
         self.options = options or RenderOptions()
@@ -46,6 +48,7 @@ class RenderPipeline:
             runner = RecordingRunner() if self.options.dry_run else SubprocessRunner(quiet=self.options.quiet)
         self.runner = runner
         self.prober = prober
+        self.matter = matter or RvmMatter()
         self.mezzanines = mezzanines or MezzanineBuilder()
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
@@ -77,6 +80,7 @@ class RenderPipeline:
             cache_dir=self.cache_dir,
             runner=self.runner,
             prober=self.prober,
+            matter=self.matter,
             log=self.log,
         )
 

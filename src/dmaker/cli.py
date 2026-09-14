@@ -133,12 +133,16 @@ def doctor(
 
 @app.command()
 def setup(force: Annotated[bool, typer.Option(help="Baixa de novo mesmo se já existir.")] = False) -> None:
-    """Baixa FFmpeg (bin/ffmpeg) e a fonte Poppins (assets/fonts) para dentro do projeto."""
+    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa."""
+    from .media.matting import ensure_model, model_path
     from .setup_tools import install_ffmpeg, install_fonts
 
     config.ensure_dirs()
     install_ffmpeg(force=force)
     install_fonts(force=force)
+    if force and model_path().exists():
+        model_path().unlink()
+    console.print(f"[green]Modelo de recorte (RVM):[/green] {ensure_model()}")
 
 
 @app.command()
@@ -482,17 +486,47 @@ def clean(
         bool, typer.Option(help="Apaga também cache/jobs (grafos, ASS, áudio de transcrição).")
     ] = False,
 ) -> None:
-    """Limpa o cache de trechos intermediários (cache/mez)."""
+    """Limpa o cache de trechos intermediários (cache/mez) e os proxies de prévia (cache/proxy)."""
     import shutil
 
     n = 0
-    if config.MEZ_DIR.exists():
-        n = sum(1 for _ in config.MEZ_DIR.iterdir())
-        shutil.rmtree(config.MEZ_DIR)
+    for d in (config.MEZ_DIR, config.PROXY_DIR):
+        if d.exists():
+            n += sum(1 for _ in d.iterdir())
+            shutil.rmtree(d)
     if jobs and config.JOBS_DIR.exists():
         shutil.rmtree(config.JOBS_DIR)
     config.ensure_dirs()
     console.print(f"[green]Cache limpo[/green] ({n} arquivos).")
+
+
+@app.command()
+def proxies(
+    name: Annotated[str, typer.Argument(help="Nome do projeto (pasta em projects/).")],
+) -> None:
+    """Gera os proxies 540p H.264 para a prévia ao vivo na interface (cache/proxy) e mostra o status."""
+    from .media.ffmpeg import FFmpegError, RichSink, SubprocessRunner
+    from .pipeline.projects import load_project
+    from .pipeline.proxies import ProxyBuilder
+
+    try:
+        project = load_project(name)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    except ValidationError as exc:
+        _fail(f"Spec inválida ({name}):\n{exc}")
+    builder = ProxyBuilder(SubprocessRunner(quiet=True), log=lambda m: console.print(f"  {m}"))
+    try:
+        statuses = builder.build(project, sink=RichSink())
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    table = Table(title=f"Proxies de prévia: {project.name}")
+    for col in ("fonte", "proxy", "status"):
+        table.add_column(col)
+    for st in statuses:
+        status = "[green]pronto[/green]" if st.ready else "[red]faltou[/red]"
+        table.add_row(st.src.name, str(st.proxy), status)
+    console.print(table)
 
 
 @app.command()

@@ -16,9 +16,17 @@ from PIL import Image
 from ..domain.presets import SafeZone
 from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Segment
 from ..domain.timeline import segment_duration
-from ..filtergraph.mezzanine import TrackSlice, clip_mezzanine, frames_mezzanine, still_mezzanine
+from ..filtergraph.mezzanine import (
+    TrackSlice,
+    clip_mezzanine,
+    frames_mezzanine,
+    matte_mezzanine,
+    still_mezzanine,
+)
 from ..filtergraph.reframe import resolve_reframe_mode
 from ..media.ffmpeg import FFmpegCommand
+from ..media.matting import MATTE_VERSION, MatteRequest, hex_to_rgb, tone_of
+from ..media.probe import MediaInfo
 from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
@@ -42,6 +50,7 @@ class PreparedSegment:
     mezzanine: Path
     tone: str | None  # light/dark quando o fundo vem do tema; None para vídeo/foto real
     command: FFmpegCommand | None  # None quando o mezanino já está em cache
+    prerequisites: tuple[FFmpegCommand, ...] = ()  # gerados antes do mezanino (ex.: fonte com fundo trocado)
 
 
 class SegmentPreparer(Protocol):
@@ -77,8 +86,71 @@ def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice,
     return tuple(slices)
 
 
+@dataclass(frozen=True)
+class MattedSource:
+    """Fonte com o fundo já trocado, recortada ao intervalo que o trecho usa (o recorte é caro e fica
+    em cache próprio, independente das outras opções do trecho)."""
+
+    path: Path
+    info: MediaInfo
+    tone: str  # light/dark do fundo novo, para textos e legendas se adaptarem como sobre cartões
+    command: FFmpegCommand | None  # None quando já está em cache
+
+
+def matte_source(
+    index: int, segment: ClipSegment, source: Source, in_point: float, duration: float, ctx: RenderContext
+) -> MattedSource:
+    assert segment.matte is not None and source.path is not None and source.info is not None
+    if ctx.matter is None:
+        raise RuntimeError("timeline: trecho com `matte` precisa de um recortador (ctx.matter)")
+    info = source.info
+    length = max(duration * segment.speed, 0.01)
+    background = hex_to_rgb(ctx.theme.color(segment.matte.background, "#FFFFFF"))
+    key = cache_key(
+        MATTE_VERSION,
+        str(source.path),
+        source.stat_key(),
+        in_point,
+        length,
+        ctx.fps,
+        background,
+        segment.matte.model,
+        segment.matte.downsample,
+    )
+    out = ctx.cache_dir / f"{key}_matte.mov"
+    request = MatteRequest(
+        source.path,
+        in_point,
+        length,
+        info.width,
+        info.height,
+        ctx.fps,
+        background,
+        segment.matte.model,
+        segment.matte.downsample,
+    )
+    # no dry-run o comando é só registrado; os quadros nunca são pedidos ao modelo
+    frames = iter(()) if ctx.options.dry_run else ctx.matter.frames(request)
+    command = matte_mezzanine(
+        frames,
+        source.path,
+        in_point,
+        length,
+        info.width,
+        info.height,
+        ctx.fps,
+        out,
+        has_audio=info.has_audio,
+        audio_stream=source.audio_stream,
+        label=f"recorte do {_label(index, ctx)}",
+    )
+    matted_info = MediaInfo(out, length, info.width, info.height, ctx.fps, True, info.has_audio, False)
+    return MattedSource(out, matted_info, tone_of(background), command if _needs_render(out, ctx) else None)
+
+
 class ClipPreparer:
-    """Vídeo: corte, velocidade, enquadramento e cor ficam no FFmpeg."""
+    """Vídeo: corte, velocidade, enquadramento e cor ficam no FFmpeg. Com `matte`, a fonte passa
+    antes pelo recorte de pessoa e o mezanino parte do arquivo já com o fundo trocado."""
 
     def prepare(self, index: int, segment: Segment, source: Source, ctx: RenderContext) -> PreparedSegment:
         assert isinstance(segment, ClipSegment) and source.path is not None and source.info is not None
@@ -88,6 +160,12 @@ class ClipPreparer:
         theme_part = _theme_signature(ctx) if mode == "brand" else None
         in_point = source.in_point(segment.start) if segment.source else segment.start
         tracks = _track_slices(ctx, segment) if segment.source else ()
+        duration = segment_duration(segment, info, source.offset)
+        matted = (
+            matte_source(index, segment, source, in_point, duration, ctx)
+            if segment.matte is not None
+            else None
+        )
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),
@@ -100,11 +178,17 @@ class ClipPreparer:
             theme_part,
             in_point,
             [(str(t.path), t.in_point, t.volume, t.audio_stream) for t in tracks],
+            matted.path.name if matted else None,  # o nome carrega a chave do recorte
         )
         out = ctx.cache_dir / f"{key}.mov"
-        duration = segment_duration(segment, info, source.offset)
+        prerequisites: tuple[FFmpegCommand, ...] = ()
+        if matted is not None:
+            # o mezanino parte do recorte, que já começa no ponto de entrada e tem o áudio na faixa 0
+            source = Source(matted.path, matted.info)
+            info, in_point = matted.info, 0.0
+            prerequisites = (matted.command,) if matted.command else ()
         backdrop = None
-        tone = None
+        tone = matted.tone if matted else None
         if mode == "brand":
             tone = segment.reframe.variant or _default_variant(ctx)
             backdrop = ctx.cache_dir / f"{key}_bg.png"
@@ -128,7 +212,13 @@ class ClipPreparer:
             label=_label(index, ctx),
         )
         return PreparedSegment(
-            index, segment, duration, out, tone, command if _needs_render(out, ctx) else None
+            index,
+            segment,
+            duration,
+            out,
+            tone,
+            command if _needs_render(out, ctx) else None,
+            prerequisites,
         )
 
 
@@ -295,5 +385,7 @@ class MezzanineBuilder:
 
     def build(self, ctx: RenderContext, prepared: list[PreparedSegment]) -> None:
         for item in prepared:
+            for prerequisite in item.prerequisites:
+                ctx.runner.run(prerequisite)
             if item.command is not None:
                 ctx.runner.run(item.command)

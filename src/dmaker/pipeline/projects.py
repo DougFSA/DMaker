@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import PROJECTS_DIR
-from ..domain.brand import Theme, load_theme
+from ..domain.brand import Theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import (
     AudioSettings,
@@ -22,13 +22,11 @@ from ..domain.spec import (
     TextOverlay,
     Transition,
 )
-from ..domain.timeline import segment_duration, timeline_total, transitions_of
-from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
 from .context import Prober
+from .layout import project_layout
 from .lint import lint
-from .sources import resolve_session, resolve_sources
-from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
+from .sync import OffsetFinder
 
 
 def project_path(name_or_path: str | Path) -> Path:
@@ -87,25 +85,25 @@ def summarize(
 ) -> ProjectSummary:
     """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra).
     Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto)."""
-    theme = load_theme(project.brand, project.theme)
-    preset = get_preset(project.output.preset)
-    finder = offset_finder or ffmpeg_offset_finder(SubprocessRunner(quiet=True))
-    store = (project.base_dir / "sync.json") if project.base_dir else None
-    offsets = SyncResolver(finder).resolve(project, store)
-    session = resolve_session(project, prober, offsets)
-    sources = resolve_sources(project, prober, session)
-    infos = [s.info for s in sources]
-    durations = [
-        segment_duration(seg, s.info, s.offset) for seg, s in zip(project.timeline, sources, strict=True)
-    ]
-    total = timeline_total(durations, transitions_of(project.timeline))
-    warnings = lint(project, theme, preset, total, durations, infos, [s.offset for s in sources])
+    layout = project_layout(project, prober, offset_finder)
+    infos = [s.info for s in layout.sources]
+    warnings = lint(
+        project,
+        layout.theme,
+        layout.preset,
+        layout.total,
+        layout.durations,
+        infos,
+        [s.offset for s in layout.sources],
+    )
     segments = []
-    for i, (seg, d) in enumerate(zip(project.timeline, durations, strict=True)):
+    for i, (seg, d) in enumerate(zip(project.timeline, layout.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)
         label = label or getattr(seg, "title", "")
         segments.append(SegmentSummary(i, seg.type, d, str(label)))
-    return ProjectSummary(project.name, preset, theme, total, segments, warnings, offsets)
+    return ProjectSummary(
+        project.name, layout.preset, layout.theme, layout.total, segments, warnings, layout.offsets
+    )
 
 
 def scaffold_project(

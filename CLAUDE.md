@@ -11,7 +11,7 @@ Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 e
 
 ```
 domain/      spec.py (modelo Pydantic do projeto), presets.py, brand.py, timeline.py (contas puras)
-media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio)
+media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio), matting.py (Matter: RvmMatter, recorte de pessoa por ONNX)
 text/        ass.py (ASS), overlays.py (texto/legendas -> eventos), captions.py (cues, SRT, regroup), transcribe.py (Transcriber: WhisperTranscriber)
 visuals/     cards.py (cartões e fundos), motion.py (Ken Burns sub-pixel), reframe_image.py, geometry.py, pip.py (máscara/moldura do PiP)
 filtergraph/ grafos e comandos ffmpeg como funções puras: reframe, timeline (xfade), overlays, pip (picture-in-picture), audio, encode, mezzanine

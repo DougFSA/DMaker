@@ -17,6 +17,7 @@
     <div class="topbar-project">
       <span class="topbar-label">Projeto</span>
       <strong id="project-name">Nenhum projeto aberto</strong>
+      <span id="unsaved-indicator" class="unsaved-indicator" hidden>não salvo</span>
     </div>
     <div class="topbar-actions">
       <button id="btn-save" class="btn" type="button" disabled>Salvar</button>
@@ -57,14 +58,69 @@
 
     <main class="main-area">
       <nav class="tabs" id="tabs">
-        <button class="tab-btn active" data-tab="editor" type="button">Editor</button>
+        <button class="tab-btn active" data-tab="timeline" type="button">Linha do tempo</button>
+        <button class="tab-btn" data-tab="editor" type="button">Propriedades</button>
         <button class="tab-btn" data-tab="json" type="button">JSON</button>
         <button class="tab-btn" data-tab="preview" type="button">Preview</button>
         <button class="tab-btn" data-tab="captions" type="button" hidden id="tab-btn-captions">Legendas</button>
       </nav>
 
       <div class="tab-panels">
-        <section class="tab-panel active" id="panel-editor">
+        <section class="tab-panel active" id="panel-timeline">
+          <div id="timeline-empty" class="empty-state">Abra ou crie um projeto para ver a linha do tempo.</div>
+          <div id="timeline-editor" class="timeline-editor" hidden>
+            <div class="player-pane" id="live-player"></div>
+            <div class="timeline-resizer" id="timeline-resizer" title="Arraste para redimensionar"></div>
+            <div class="timeline-pane">
+              <div class="timeline-toolbar" id="timeline-toolbar">
+                <button class="btn btn-small" id="btn-split" type="button" title="Cortar no cursor (S)">Cortar</button>
+                <button class="btn btn-small" id="btn-remove" type="button" title="Remover, com ripple (X ou Delete)">Remover</button>
+                <button class="btn btn-small" id="btn-lift" type="button" title="Lift (Z)">Lift</button>
+                <button class="btn btn-small" id="btn-duplicate" type="button" title="Duplicar (Ctrl+D)">Duplicar</button>
+                <button class="btn btn-small" id="btn-trim-in" type="button" title="Aparar entrada até o cursor (I)">Aparar entrada</button>
+                <button class="btn btn-small" id="btn-trim-out" type="button" title="Aparar saída até o cursor (O)">Aparar saída</button>
+                <button class="btn btn-small" id="btn-snap" type="button" title="Alternar encaixe, snap (Ctrl+P)">Snap</button>
+                <button class="btn btn-small" id="btn-ripple" type="button" title="A V1 é sempre ripple (Ctrl+R)">Ripple: V1</button>
+                <button class="icon-btn" id="btn-zoom-out" type="button" title="Afastar (-)">&minus;</button>
+                <button class="icon-btn" id="btn-zoom-in" type="button" title="Aproximar (=)">+</button>
+                <button class="btn btn-small" id="btn-zoom-fit" type="button" title="Ajustar à janela (0)">Ajustar</button>
+                <span class="timeline-timecode" id="timeline-timecode">00:00:00:00</span>
+                <span class="hint-text" id="proxies-status"></span>
+                <button class="icon-btn" id="btn-toggle-filters" type="button" title="Mostrar/ocultar filtros">F</button>
+                <button class="icon-btn" id="btn-toggle-media" type="button" title="Mostrar/ocultar mídia">M</button>
+                <button class="icon-btn" id="btn-shortcuts" type="button" title="Mostrar atalhos (?)">?</button>
+              </div>
+              <div class="timeline-grid">
+                <div class="timeline-side timeline-side-left" id="panel-filters">
+                  <div class="side-panel-header">
+                    <h3>Filtros</h3>
+                    <div class="dropdown" id="filters-add-dropdown">
+                      <button class="icon-btn" id="btn-add-filter" type="button" title="Adicionar filtro">+</button>
+                      <div class="dropdown-menu" id="filters-add-menu" hidden></div>
+                    </div>
+                  </div>
+                  <div id="filters-body" class="side-panel-body"></div>
+                </div>
+                <div class="timeline-tracks" id="timeline-tracks"></div>
+                <div class="timeline-side timeline-side-right" id="panel-media">
+                  <div class="side-panel-header">
+                    <h3>Mídia</h3>
+                    <button class="btn btn-small" id="btn-add-media" type="button" title="Adicionar arquivo">+ Arquivo</button>
+                  </div>
+                  <div class="media-toolbar" id="media-toolbar">
+                    <button class="btn btn-small" id="btn-media-text" type="button" title="Sobreposição de texto no cursor">Texto</button>
+                    <button class="btn btn-small" id="btn-media-card" type="button" title="Cartão no fim da V1">Cartão</button>
+                    <button class="btn btn-small" id="btn-media-logo" type="button" title="Logo da marca no cursor">Logo</button>
+                    <button class="btn btn-small" id="btn-media-music" type="button" title="Música de fundo">Música</button>
+                  </div>
+                  <div id="media-body" class="side-panel-body"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="panel-editor">
           <div id="editor-empty" class="empty-state">Abra ou crie um projeto para começar a editar.</div>
           <div id="editor-form" class="editor-form" hidden>
             <fieldset class="form-block" id="block-output">
@@ -192,6 +248,13 @@
   <div class="modal" id="modal-box"></div>
 </div>
 
+<script src="/static/options.js"></script>
+<script src="/static/keymap.js"></script>
+<script src="/static/timeline.js"></script>
+<script src="/static/player.js"></script>
+<script src="/static/filters.js"></script>
+<script src="/static/media.js"></script>
+<script src="/static/editor.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

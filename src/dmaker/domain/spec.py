@@ -38,6 +38,16 @@ class Reframe(Strict):
     variant: Literal["light", "dark"] | None = None  # fundo claro/escuro; None = padrão do tema
 
 
+class Matte(Strict):
+    """Troca o fundo atrás da pessoa por uma cor lisa (matting de vídeo por rede neural, sem chroma key).
+    Serve para quem gravou em casa e quer o fundo branco ou na cor da marca."""
+
+    background: str = "#FFFFFF"  # hex ou chave do tema (primary, accent, mint, white)
+    # resnet50 separa melhor o que encosta na pessoa (cadeira, encosto); mobilenetv3 é 2,5x mais rápido
+    model: Literal["resnet50", "mobilenetv3"] = "resnet50"
+    downsample: float | None = Field(None, gt=0, le=1)  # None = escolhido pela resolução
+
+
 class ColorAdjust(Strict):
     brightness: float = Field(0.0, ge=-1, le=1)
     contrast: float = Field(1.0, ge=0, le=3)
@@ -154,6 +164,7 @@ class ClipSegment(SegmentBase):
     speed: float = Field(1.0, gt=0, le=8)
     volume: float = Field(1.0, ge=0, le=4)  # áudio da própria câmera
     mute: bool = False
+    matte: Matte | None = None  # fundo substituído por cor lisa (pessoa recortada)
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
@@ -239,6 +250,7 @@ class ImageOverlay(Strict):
     )
     width: float = Field(0.22, gt=0, le=1)  # fração da largura do vídeo
     margin: float = Field(40, ge=0)  # px na base 1080
+    safe_zone: bool = True  # False cola no canto do quadro, só com a margem (ignora a interface do app)
     opacity: float = Field(1.0, ge=0, le=1)
     start: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)

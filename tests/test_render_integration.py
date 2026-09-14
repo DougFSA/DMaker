@@ -120,6 +120,24 @@ def test_landscape_preset_with_pad_and_no_extras(synthetic_media, tmp_path):
     assert info.width > info.height
 
 
+def test_proxy_build_generates_playable_540p_file(synthetic_media, tmp_path):
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.pipeline.proxies import ProxyBuilder
+
+    project = Project.model_validate(
+        {"name": "teste_proxy", "timeline": [{"type": "clip", "src": str(synthetic_media["clip_a"])}]}
+    )
+    project.base_dir = tmp_path
+    builder = ProxyBuilder(SubprocessRunner(quiet=True))
+    statuses = builder.build(project)
+    assert len(statuses) == 1 and statuses[0].ready
+    proxy = statuses[0].proxy
+    assert proxy.exists()
+    info = probe(proxy)
+    assert info.height == 540 and info.width > 0
+    assert info.video_codec == "h264" and info.has_audio
+
+
 def test_missing_source_fails_clearly(tmp_path):
     project = Project.model_validate({"name": "x", "timeline": [{"type": "clip", "src": "nao_existe.mp4"}]})
     project.base_dir = tmp_path
@@ -247,3 +265,34 @@ def test_picture_in_picture_render(synthetic_media, tmp_path):
     mask = Image.open(result.job_dir / "pip0_mask.png")
     assert mask.size[0] == mask.size[1]  # círculo é 1:1
     assert img.getpixel((w - 40, h - 40)) != img.getpixel((w // 2, 10))
+
+
+def test_matte_render_with_real_model(synthetic_media, tmp_path):
+    """Recorte de pessoa de verdade (RVM): o clipe sintético não tem pessoa, então o que se verifica é
+    o encadeamento decodificador -> modelo -> codificador e a duração exata do trecho."""
+    from dmaker.media.matting import model_path
+
+    if not model_path("mobilenetv3").exists():
+        pytest.skip("modelo do RVM não baixado (é baixado no primeiro uso de `matte`)")
+    project = Project.model_validate(
+        {
+            "name": "matte_teste",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [
+                {
+                    "type": "clip",
+                    "src": str(synthetic_media["clip_a"]),
+                    "start": 0.5,
+                    "end": 1.5,
+                    "matte": {"background": "#FFFFFF", "model": "mobilenetv3"},
+                }
+            ],
+            "audio": {"normalize": "off"},
+        }
+    )
+    project.base_dir = tmp_path
+    out = tmp_path / "matte.mp4"
+    result = RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True)).run()
+    assert out.exists() and abs(result.duration - 1.0) < 0.01
+    info = probe(out)
+    assert info.has_audio and abs(info.duration - 1.0) < 0.15

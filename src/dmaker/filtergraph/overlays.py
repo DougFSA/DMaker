@@ -63,7 +63,7 @@ def image_overlay_graph(
                     f"fade=t=out:st={max(item.end - ov.fade, item.start):.3f}:d={ov.fade:.3f}:alpha=1"
                 )
         lines.append(",".join(chain) + f"[ov{k}]")
-        x, y = overlay_position(ov.position, W, H, ov.margin * scale, safe)
+        x, y = overlay_position(ov.position, W, H, ov.margin * scale, safe if ov.safe_zone else SafeZone())
         lines.append(
             f"{cur_v}[ov{k}]overlay=x={x}:y={y}:enable='between(t,{item.start:.3f},{item.end:.3f})':format=auto[vo{k}]"
         )

@@ -178,6 +178,43 @@ def validate_project(name_or_path: str) -> dict:
     return _summary_dict(summarize(load_project(name_or_path)))
 
 
+@server.tool(
+    description=(
+        "Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, "
+        "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate "
+        'e set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"). `op` é um dict com '
+        '"type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}.'
+    )
+)
+def edit_project(name: str, op: dict) -> dict:
+    from .pipeline.edits import apply_edit
+    from .pipeline.projects import load_project, summarize
+    from .pipeline.projects import save_project as _save
+
+    project = load_project(name)
+    new_project = apply_edit(project, op)
+    path = _save(new_project)
+    summary = summarize(new_project)
+    return {"spec_path": str(path), **_summary_dict(summary)}
+
+
+@server.tool(
+    description=(
+        "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
+        "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
+        "MUS música, CC legendas), com o intervalo de cada item já calculado."
+    )
+)
+def timeline_view(name: str) -> dict:
+    from .pipeline.layout import project_layout
+    from .pipeline.projects import load_project
+    from .pipeline.timeline_view import build_timeline_view
+
+    project = load_project(name)
+    layout = project_layout(project)
+    return build_timeline_view(project, layout).to_dict()
+
+
 @server.tool(description="Projetos existentes em projects/.")
 def list_projects() -> list[dict]:
     out = []
