@@ -10,6 +10,8 @@ Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 e
 ## Arquitetura (pacotes por responsabilidade)
 
 ```
+agent/       llm.py (OllamaChat), tools.py (McpToolHost), prompt.py, loop.py (AgentLoop): operador local
+             por um modelo do Ollama sobre as ferramentas MCP, para tarefas mecânicas (dmaker agent)
 domain/      spec.py (modelo Pydantic do projeto), presets.py, brand.py, timeline.py (contas puras)
 media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio), matting.py (Matter: RvmMatter, recorte de pessoa por ONNX)
 text/        ass.py (ASS), overlays.py (texto/legendas -> eventos), captions.py (cues, SRT, regroup), transcribe.py (Transcriber: WhisperTranscriber)

@@ -762,5 +762,92 @@ def mcp() -> None:
     main()
 
 
+def _agent_tool_call_line(name: str, arguments: dict) -> str:
+    parts = []
+    for key, value in arguments.items():
+        try:
+            rendered = json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            rendered = str(value)
+        parts.append(f"{key}={rendered}")
+    return f"  -> {name}({', '.join(parts)})"
+
+
+def _agent_on_event(kind: str, data: dict) -> None:
+    if kind == "tool_call":
+        console.print(_agent_tool_call_line(data["name"], data["arguments"]), style="dim", markup=False)
+    elif kind == "tool_result":
+        first_line = (data["result"] or "").splitlines()[0] if data["result"] else ""
+        console.print(f"  <- {first_line}", style="dim", markup=False)
+
+
+@app.command()
+def agent(
+    model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
+    num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    once: Annotated[str | None, typer.Option(help="Executa um único pedido e sai.")] = None,
+) -> None:
+    """Opera o DMaker por um modelo local do Ollama: tarefas mecânicas (template, render, QA, legendas).
+
+    Cortes, ritmo, multicâmera e textos da marca continuam sendo trabalho de uma IA maior ou de uma
+    pessoa; veja a seção "Operador local com Ollama" do README.
+    """
+    import os
+
+    from .agent import AgentLoop, McpToolHost, OllamaChat, system_prompt
+    from .agent.llm import OLLAMA_URL_ENV
+
+    base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
+    chat = OllamaChat(model=model, base_url=base_url, num_ctx=num_ctx)
+
+    if not chat.is_alive():
+        _fail(f"Ollama não está rodando em {base_url}; abra o app do Ollama ou rode `ollama serve`.")
+    if not chat.has_model():
+        _fail(f"Modelo '{model}' não encontrado no Ollama; rode `ollama pull {model}`.")
+
+    loop = AgentLoop(model=chat, tools=McpToolHost(), system=system_prompt(), on_event=_agent_on_event)
+
+    def _ask(message: str) -> str | None:
+        try:
+            with console.status("pensando...", spinner="dots"):
+                return loop.ask(message)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Erro de comunicação com o Ollama: {exc}[/red]")
+            return None
+
+    if once is not None:
+        answer = _ask(once)
+        if answer is not None:
+            console.print(answer, markup=False)
+        return
+
+    console.print(
+        "[bold]Agente DMaker[/bold] (modelo local via Ollama). "
+        "/sair encerra, /limpar reinicia a conversa, /ferramentas lista o que ele pode usar."
+    )
+    while True:
+        try:
+            message = console.input("[bold]você>[/bold] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            break
+        if not message:
+            continue
+        if message == "/sair":
+            break
+        if message == "/limpar":
+            loop.reset()
+            console.print("[dim]histórico limpo.[/dim]")
+            continue
+        if message == "/ferramentas":
+            for spec in McpToolHost().specs():
+                console.print(f"  {spec.name}: {spec.description}", markup=False, highlight=False)
+            continue
+        answer = _ask(message)
+        if answer is not None:
+            console.print(answer, markup=False)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

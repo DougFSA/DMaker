@@ -171,6 +171,28 @@ Ferramentas: `dmaker_guide` (manual), `spec_schema`, `presets`, `brands`, `probe
 
 `read_captions` e `transcribe_media` devolvem por padrão um modo compacto: um resumo (`digest`, com contagem de cues, palavras e confiança média) e só as cues suspeitas (baixa confiança, termo da marca ouvido errado, cue longa/curta, substituição pendente), em vez das centenas de cues com tempo por palavra de um vídeo longo; use `mode="full"`/`full=true` quando precisar mesmo de tudo.
 
+## Operador local com Ollama
+
+Para tarefas mecânicas (criar projeto por template, renderizar, ler o relatório de QA, corrigir legendas, exportar) dá para usar um modelo pequeno rodando na própria máquina, sem depender de nenhuma sessão de IA em nuvem: `dmaker agent` liga um modelo do [Ollama](https://ollama.com) às mesmas ferramentas do servidor MCP.
+
+Requisitos:
+
+- Ollama instalado e no ar (`ollama serve`, ou o app do Ollama aberto).
+- O modelo baixado: `ollama pull gpt-oss:20b`.
+- 16 GB ou mais de RAM livres; sem GPU a inferência roda na CPU e é lenta (minutos por resposta num pedido com várias ferramentas).
+
+Como usar:
+
+```powershell
+.\.venv\Scripts\dmaker.exe agent                              # conversa no terminal
+.\.venv\Scripts\dmaker.exe agent --once "liste os templates disponíveis"  # um pedido só
+.\.venv\Scripts\dmaker.exe agent --model gpt-oss:20b --url http://127.0.0.1:11434 --num-ctx 16384
+```
+
+No modo de conversa: `/sair` encerra, `/limpar` reinicia o histórico, `/ferramentas` lista o que o agente pode usar. Cada chamada de ferramenta aparece numa linha discreta (`-> render_project(...)`) com o resultado resumido logo abaixo.
+
+O que funciona bem com um modelo pequeno: criar projeto a partir de um template, validar, renderizar (prévia e final), ler `qa_report`, corrigir legendas com `fix_captions` e exportar. O que deixar para um modelo maior (Claude, por exemplo) ou para uma pessoa: decidir cortes e ritmo, montar multicâmera na mão, escrever spec do zero e aplicar as regras finas de texto da marca; o agente local não tem julgamento para essas decisões.
+
 ## Acompanhando renders
 
 Por padrão, **todo render** (pela CLI, pelo MCP ou pela própria interface) aparece na interface gráfica, com barra de progresso, etapa em execução e log: se ela não estiver aberta, sobe sozinha em segundo plano e o navegador abre direto no projeto e no job.
