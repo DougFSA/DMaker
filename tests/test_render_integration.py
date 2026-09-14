@@ -138,6 +138,35 @@ def test_proxy_build_generates_playable_540p_file(synthetic_media, tmp_path):
     assert info.video_codec == "h264" and info.has_audio
 
 
+def test_waveform_builder_reflects_tone_and_silence(tmp_path):
+    """Um wav real (ffmpeg de verdade) com 1s de tom e 1s de silêncio: os picos calculados devem
+    refletir isso, altos no trecho do tom e ~0 no trecho de silêncio."""
+    from dmaker.media import ffmpeg
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.media.waveform import WaveformBuilder
+
+    media = tmp_path / "tom_e_silencio.wav"
+    ffmpeg.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=2",
+            "-af",
+            "volume=0:enable='gte(t,1)'",
+            "-c:a",
+            "pcm_s16le",
+            str(media),
+        ],
+        quiet=True,
+    )
+    waveform = WaveformBuilder(SubprocessRunner(quiet=True)).build(media)
+    assert waveform.duration == pytest.approx(2.0, abs=0.05)
+    half = len(waveform.peaks) // 2
+    assert min(waveform.peaks[: half - 2]) > 0.5  # primeiro segundo: tom
+    assert max(waveform.peaks[half + 2 :]) < 0.05  # segundo segundo: silêncio
+
+
 def test_missing_source_fails_clearly(tmp_path):
     project = Project.model_validate({"name": "x", "timeline": [{"type": "clip", "src": "nao_existe.mp4"}]})
     project.base_dir = tmp_path

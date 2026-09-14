@@ -27,6 +27,7 @@ class Job:
     finished_at: float | None = None
     events: list[dict] = field(default_factory=list)
     progress: dict = field(default_factory=dict)  # {"label", "done", "total", "percent"}
+    meta: dict = field(default_factory=dict)  # dados de quem criou o job (ex.: focus, project)
     _listeners: list[queue.Queue] = field(default_factory=list, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -38,6 +39,8 @@ class Job:
             "elapsed_s": round((self.finished_at or time.time()) - self.started_at, 1),
             "progress": self.progress,
             "error": self.error,
+            "focus": bool(self.meta.get("focus", False)),
+            "project": self.meta.get("project"),
         }
 
     def emit(self, kind: str, **data: Any) -> None:
@@ -112,9 +115,9 @@ class JobManager:
         self._lock = threading.Lock()
         self.keep = keep
 
-    def start(self, description: str, work: Callable[[Job], Any]) -> Job:
+    def start(self, description: str, work: Callable[[Job], Any], meta: dict | None = None) -> Job:
         """`work` recebe o job para emitir eventos (job.log, job.sink()) e devolve o resultado."""
-        job = Job(id=uuid.uuid4().hex[:10], description=description)
+        job = Job(id=uuid.uuid4().hex[:10], description=description, meta=meta or {})
         with self._lock:
             self._jobs[job.id] = job
             self._trim()

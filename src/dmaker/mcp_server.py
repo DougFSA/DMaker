@@ -7,6 +7,7 @@ ver o resultado. Renders longos rodam em segundo plano com `job_id` (ver `job_st
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from .domain.brand import available_brands, load_theme
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
+from .pipeline.remote import RenderDispatcher, UIClient
 
 GUIDE_PATH = config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md"
 
@@ -236,6 +238,52 @@ def list_projects() -> list[dict]:
 # ---------- render (jobs) ----------
 
 
+def _dispatcher() -> RenderDispatcher:
+    return RenderDispatcher(UIClient())
+
+
+def _ui_job_url(client: UIClient, name_or_path: str, job_id: str) -> str:
+    return f"{client.base_url}/#project={name_or_path}&job={job_id}"
+
+
+def _wait_ui_job(client: UIClient, job_id: str, timeout: float) -> dict:
+    """Espera até `timeout`, como `JobManager.wait`, mas consultando o snapshot na interface."""
+    deadline = time.time() + timeout
+    snapshot = client.job(job_id)
+    while snapshot.get("status") == "running" and time.time() < deadline:
+        time.sleep(0.25)
+        snapshot = client.job(job_id)
+    return snapshot
+
+
+def _render_via_ui(name_or_path: str, options: dict, wait_seconds: float) -> dict | None:
+    """Sobe a interface se preciso e dispara o render nela; None se a interface não puder ser usada,
+    para quem chamou cair no job local de sempre."""
+    dispatcher = _dispatcher()
+    try:
+        dispatcher.ensure_ui()
+    except RuntimeError:
+        return None
+    started = dispatcher.client.render(name_or_path, options)
+    job_id = started["job_id"]
+    dispatcher.open_browser_if_needed(name_or_path, job_id)
+    snapshot = _wait_ui_job(dispatcher.client, job_id, wait_seconds)
+    return {**snapshot, "where": "ui", "url": _ui_job_url(dispatcher.client, name_or_path, job_id)}
+
+
+def _export_via_ui(name_or_path: str, presets: list[str], wait_seconds: float) -> dict | None:
+    dispatcher = _dispatcher()
+    try:
+        dispatcher.ensure_ui()
+    except RuntimeError:
+        return None
+    started = dispatcher.client.export(name_or_path, presets)
+    job_id = started["job_id"]
+    dispatcher.open_browser_if_needed(name_or_path, job_id)
+    snapshot = _wait_ui_job(dispatcher.client, job_id, wait_seconds)
+    return {**snapshot, "where": "ui", "url": _ui_job_url(dispatcher.client, name_or_path, job_id)}
+
+
 def _render(
     job: Job,
     name_or_path: str,
@@ -268,7 +316,9 @@ def _render(
 @server.tool(
     description=(
         "Renderiza o projeto. preview=true gera uma versão rápida em baixa resolução para conferir. "
-        "Espera até wait_seconds; se ainda estiver rodando devolve job_id para consultar com job_status."
+        "show_ui=true (padrão) abre a interface gráfica para o usuário acompanhar o andamento; use "
+        "show_ui=false só se ele pedir para não abrir. Espera até wait_seconds; se ainda estiver "
+        "rodando devolve job_id para consultar com job_status."
     )
 )
 def render_project(
@@ -280,10 +330,26 @@ def render_project(
     no_captions: bool = False,
     segments: str | None = None,
     wait_seconds: float = 600,
+    show_ui: bool = True,
 ) -> dict:
     """`segments` = "12-20" renderiza só esses trechos (sem sobreposições/legendas), para revisar vídeos longos."""
     if preset:
         get_preset(preset)
+    if show_ui:
+        via_ui = _render_via_ui(
+            name_or_path,
+            {
+                "preview": preview,
+                "preset": preset,
+                "force": force,
+                "guides": guides,
+                "no_captions": no_captions,
+                "segments": segments,
+            },
+            wait_seconds,
+        )
+        if via_ui is not None:
+            return via_ui
     job = jobs.start(
         f"render {name_or_path} ({'preview' if preview else preset or 'final'})",
         lambda job: _render(job, name_or_path, preview, preset, force, guides, no_captions, segments),
@@ -293,11 +359,20 @@ def render_project(
 
 
 @server.tool(
-    description="Exporta o projeto para vários presets (ex.: instagram/reels, youtube/shorts). Devolve um job."
+    description=(
+        "Exporta o projeto para vários presets (ex.: instagram/reels, youtube/shorts). Devolve um job. "
+        "show_ui=true (padrão) abre a interface gráfica para acompanhar; show_ui=false só se pedido."
+    )
 )
-def export_project(name_or_path: str, presets: list[str], wait_seconds: float = 900) -> dict:
+def export_project(
+    name_or_path: str, presets: list[str], wait_seconds: float = 900, show_ui: bool = True
+) -> dict:
     for p in presets:
         get_preset(p)
+    if show_ui:
+        via_ui = _export_via_ui(name_or_path, presets, wait_seconds)
+        if via_ui is not None:
+            return via_ui
 
     def work(job: Job) -> list[dict]:
         return [_render(job, name_or_path, False, p) for p in presets]
@@ -312,14 +387,22 @@ def export_project(name_or_path: str, presets: list[str], wait_seconds: float = 
 )
 def job_status(job_id: str) -> dict:
     job = jobs.get(job_id)
-    if job is None:
+    if job is not None:
+        return {**job.snapshot(), "result": job.result}
+    try:
+        return {**UIClient().job(job_id), "where": "ui"}
+    except (OSError, ValueError):
         return {"error": f"job desconhecido: {job_id}"}
-    return {**job.snapshot(), "result": job.result}
 
 
-@server.tool(description="Jobs de render desta sessão.")
+@server.tool(description="Jobs de render desta sessão e, se a interface estiver aberta, os dela também.")
 def list_jobs() -> list[dict]:
-    return jobs.list()
+    out = jobs.list()
+    try:
+        out += [{**j, "where": "ui"} for j in UIClient().jobs()]
+    except (OSError, ValueError):
+        pass
+    return out
 
 
 @server.tool(

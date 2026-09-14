@@ -65,6 +65,48 @@ def _print_result(result) -> None:
         console.print(f"[yellow]aviso:[/yellow] {w}")
 
 
+def _project_name_for_ui(spec: Path, project) -> str | None:
+    """Nome do projeto para a interface: só quando a spec está no layout padrão projects/<nome>/spec.json
+    (a interface só conhece projetos por nome, não caminhos de spec avulsos)."""
+    from .pipeline.projects import project_path
+
+    try:
+        return project.name if project_path(project.name).resolve() == spec.resolve() else None
+    except OSError:
+        return None
+
+
+def _console_log(message: str) -> None:
+    console.print(f"  {message}", markup=False, highlight=False)
+
+
+def _make_dispatcher():
+    from .pipeline.remote import RenderDispatcher, UIClient
+
+    return RenderDispatcher(UIClient(), log=_console_log)
+
+
+def _render_options_body(options) -> dict:
+    return {
+        "preview": options.preview,
+        "preset": options.preset,
+        "force": options.force,
+        "guides": bool(options.guides),
+        "no_captions": options.no_captions,
+        "segments": f"{options.segments[0]}-{options.segments[1]}" if options.segments else None,
+    }
+
+
+def _print_ui_result(result: dict) -> None:
+    console.print(f"[green]Pronto (pela interface):[/green] {result.get('output')}")
+    if result.get("thumbnail"):
+        console.print(f"  thumbnail: {result['thumbnail']}")
+    if result.get("captions_file"):
+        console.print(f"  legendas: {result['captions_file']}")
+    for w in result.get("warnings") or []:
+        console.print(f"[yellow]aviso:[/yellow] {w}")
+
+
 @app.callback()
 def _main(version: Annotated[bool, typer.Option("--version", help="Mostra a versão.")] = False) -> None:
     if version:
@@ -257,9 +299,12 @@ def render(
         str | None,
         typer.Option(help="Render parcial só destes trechos, ex.: 12-20 (para revisar vídeos longos)."),
     ] = None,
+    no_ui: Annotated[
+        bool, typer.Option("--no-ui", help="Roda só no terminal; não usa a interface gráfica.")
+    ] = False,
 ) -> None:
-    """Renderiza o projeto no formato da plataforma."""
-    from .media.ffmpeg import FFmpegError
+    """Renderiza o projeto no formato da plataforma. Por padrão abre a interface para acompanhar."""
+    from .media.ffmpeg import FFmpegError, NullSink, RichSink
     from .pipeline import RenderOptions, RenderPipeline
     from .pipeline.projects import parse_segments
 
@@ -275,6 +320,24 @@ def render(
         no_captions=no_captions,
         segments=parse_segments(segments),
     )
+    dispatcher = None
+    ui_name = None if (dry_run or no_ui or out) else _project_name_for_ui(spec, project)
+    if ui_name:
+        dispatcher = _make_dispatcher()
+        try:
+            dispatcher.ensure_ui()
+        except RuntimeError as exc:
+            console.print(f"[yellow]{exc} Rodando localmente.[/yellow]")
+            dispatcher = None
+    if dispatcher:
+        sink = NullSink() if quiet else RichSink()
+        try:
+            snapshot = dispatcher.render(ui_name, _render_options_body(options), sink, _console_log)
+        except RuntimeError as exc:
+            _fail(str(exc))
+        _print_ui_result(snapshot.get("result") or {})
+        return
+
     try:
         result = RenderPipeline(project, options).run()
     except (FFmpegError, *RENDER_ERRORS) as exc:
@@ -294,16 +357,39 @@ def export(
         list[str], typer.Argument(help="Presets de saída (ex.: instagram/reels youtube/shorts).")
     ],
     preview: Annotated[bool, typer.Option(help="Versões rápidas de conferência.")] = False,
+    no_ui: Annotated[
+        bool, typer.Option("--no-ui", help="Roda só no terminal; não usa a interface gráfica.")
+    ] = False,
 ) -> None:
-    """Exporta o mesmo projeto para vários formatos de uma vez."""
-    from .media.ffmpeg import FFmpegError
+    """Exporta o mesmo projeto para vários formatos de uma vez. Por padrão abre a interface para acompanhar."""
+    from .media.ffmpeg import FFmpegError, RichSink
     from .pipeline import RenderOptions, RenderPipeline
 
     project = _load(spec)
     for p in presets:
         get_preset(p)
+
+    dispatcher = None
+    ui_name = None if no_ui else _project_name_for_ui(spec, project)
+    if ui_name:
+        dispatcher = _make_dispatcher()
+        try:
+            dispatcher.ensure_ui()
+        except RuntimeError as exc:
+            console.print(f"[yellow]{exc} Rodando localmente.[/yellow]")
+            dispatcher = None
+
     for p in presets:
         console.rule(p)
+        if dispatcher:
+            try:
+                snapshot = dispatcher.render(
+                    ui_name, {"preview": preview, "preset": p}, RichSink(), _console_log
+                )
+            except RuntimeError as exc:
+                _fail(str(exc))
+            _print_ui_result(snapshot.get("result") or {})
+            continue
         try:
             result = RenderPipeline(project, RenderOptions(preview=preview, preset=p)).run()
         except (FFmpegError, *RENDER_ERRORS) as exc:
@@ -486,11 +572,12 @@ def clean(
         bool, typer.Option(help="Apaga também cache/jobs (grafos, ASS, áudio de transcrição).")
     ] = False,
 ) -> None:
-    """Limpa o cache de trechos intermediários (cache/mez) e os proxies de prévia (cache/proxy)."""
+    """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy) e formas
+    de onda (cache/waveform)."""
     import shutil
 
     n = 0
-    for d in (config.MEZ_DIR, config.PROXY_DIR):
+    for d in (config.MEZ_DIR, config.PROXY_DIR, config.WAVEFORM_DIR):
         if d.exists():
             n += sum(1 for _ in d.iterdir())
             shutil.rmtree(d)

@@ -176,6 +176,39 @@ def test_job_events_stream(client):
     assert client.get("/api/jobs/zzz").status_code == 404
 
 
+def test_clients_ping_and_status(client):
+    assert client.get("/api/clients").json()["active"] is False
+    assert client.post("/api/clients/ping").json()["ok"] is True
+    assert client.get("/api/clients").json()["active"] is True
+
+
+def test_clients_status_expires_with_clock(client, monkeypatch):
+    import time as time_module
+
+    client.post("/api/clients/ping")
+    assert client.get("/api/clients").json()["active"] is True
+    later = time_module.time() + 3600
+    monkeypatch.setattr(server.time, "time", lambda: later)
+    assert client.get("/api/clients").json()["active"] is False
+
+
+def test_render_with_focus_appears_in_job_snapshot(client, monkeypatch):
+    # dublê sem ffmpeg: só interessa aqui se focus/project chegam ao snapshot do job
+    monkeypatch.setattr(server, "_run_render", lambda job, name, req, preset=None: {"ok": True})
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+
+    job_id = client.post(f"/api/projects/{PROJECT}/render", json={"preview": True, "focus": True}).json()[
+        "job_id"
+    ]
+    server.jobs.wait(server.jobs.get(job_id), 5)
+    snapshot = client.get(f"/api/jobs/{job_id}").json()
+    assert snapshot["focus"] is True and snapshot["project"] == PROJECT and snapshot["status"] == "done"
+
+    job_id_default = client.post(f"/api/projects/{PROJECT}/render", json={"preview": True}).json()["job_id"]
+    server.jobs.wait(server.jobs.get(job_id_default), 5)
+    assert client.get(f"/api/jobs/{job_id_default}").json()["focus"] is False
+
+
 @requires_ffmpeg
 def test_render_preview_via_api(client):
     client.put(f"/api/projects/{PROJECT}", json=SPEC)

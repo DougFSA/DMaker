@@ -17,11 +17,12 @@ dependencies = [
     "mcp>=2.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 captions = ["faster-whisper>=1.0"]
-dev = ["pytest>=8", "ruff>=0.5", "numpy>=1.26", "httpx>=0.27"]
+dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
 dmaker = "dmaker.cli:app"

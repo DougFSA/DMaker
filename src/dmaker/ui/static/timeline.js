@@ -31,6 +31,8 @@ const TL_MIN_PX_PER_SEC = 4;
 const TL_MAX_PX_PER_SEC = 400;
 const TL_SNAP_PX = 8;
 const TL_MIN_ITEM_SECONDS = 0.1;
+const TL_WAVEFORM_MAX_PX = 4000; // largura máxima de um canvas: cobre só o trecho visível do item
+const TL_WAVEFORM_FALLBACK_HEIGHT = 28; // altura do item (linha de 34px menos as margens de 3px)
 
 function tlEsc(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({
@@ -89,6 +91,55 @@ function tlDisplayLabel(label) {
 function tlTrackLabel(track) {
   const icon = track.kind === "audio" ? " ♪" : "";
   return `${track.label}${icon}`;
+}
+
+/** Um item tem forma de onda quando é áudio de clipe (A1), faixa externa (A2, A3...), música (MUS)
+ * ou um PiP (V2+, item de vídeo): os únicos tipos com som na linha do tempo. Função pura. */
+function tlWaveformEligible(track, item) {
+  if (track.id === "A1") return item.kind === "clip-audio";
+  if (track.id === "MUS") return item.kind === "music";
+  if (track.kind === "audio") return item.kind === "track";
+  if (track.kind === "video" && track.id !== "V1") return item.kind === "video";
+  return false;
+}
+
+/** Caminho do arquivo de áudio de um item: o dele mesmo (`src`) ou o da fonte nomeada (`source`),
+ * como em `view.sources`. Função pura. */
+function tlSourcePath(view, item) {
+  if (item.src) return item.src;
+  if (item.source) {
+    const src = view.sources && view.sources[item.source];
+    return src ? src.src : null;
+  }
+  return null;
+}
+
+/** Velocidade do clipe (A1 usa `spec.timeline[index].speed`, guardado em `extra.speed` pela vista);
+ * as demais trilhas de áudio tocam na velocidade normal. Função pura. */
+function tlItemAudioRate(track, item) {
+  const speed = item.extra && item.extra.speed;
+  return track.id === "A1" && typeof speed === "number" && speed > 0 ? speed : 1;
+}
+
+/** Deslocamento da fonte no relógio da sessão: o de `view.sources[item.source]` (A2+, PiP por fonte
+ * sincronizada) ou o já calculado em `extra.offset`; 0 para arquivos avulsos. Função pura. */
+function tlItemAudioOffset(view, item) {
+  if (item.source) {
+    const src = view.sources && view.sources[item.source];
+    return src ? src.offset || 0 : 0;
+  }
+  return (item.extra && item.extra.offset) || 0;
+}
+
+function tlItemLoops(item) {
+  return !!(item.extra && item.extra.loop);
+}
+
+/** Tempo no arquivo de origem para um tempo da sessão (mesma conta usada pela prévia em player.js):
+ * ponto de entrada do item mais o avanço desde o início, na velocidade do item, menos o deslocamento
+ * da fonte. Função pura. */
+function tlFileTimeAt(item, sessionTime, rate, offset) {
+  return item.in_point + (sessionTime - item.start) * rate - offset;
 }
 
 function createTimeline(container, callbacks) {
@@ -195,10 +246,11 @@ function createTimeline(container, callbacks) {
     const handles = draggable
       ? '<div class="tl-item-handle tl-item-handle-in" data-handle="in"></div><div class="tl-item-handle tl-item-handle-out" data-handle="out"></div>'
       : "";
+    const waveform = tlWaveformEligible(track, item) ? '<canvas class="tl-waveform"></canvas>' : "";
     return `<div class="${classes}" data-item-id="${tlEsc(item.id)}" data-track-id="${tlEsc(track.id)}"
         data-draggable="${draggable ? "1" : "0"}" style="left:${left}px;width:${width}px"
         title="${tlEsc(item.label || item.kind)}">
-        ${handles}<span class="tl-item-label">${tlEsc(tlDisplayLabel(item.label) || item.kind)}</span>
+        ${waveform}${handles}<span class="tl-item-label">${tlEsc(tlDisplayLabel(item.label) || item.kind)}</span>
       </div>`;
   }
 
@@ -216,6 +268,68 @@ function createTimeline(container, callbacks) {
   function render() {
     const rows = view.tracks.map(renderTrack).join("");
     scrollEl.innerHTML = `${renderRuler()}${rows}<div class="tl-playhead" style="left:${TL_HEADER_WIDTH + playhead * pxPerSec}px"></div>`;
+    scheduleWaveformUpdate();
+  }
+
+  /* ---- formas de onda: só o trecho visível de cada item, redesenhado ao rolar/dar zoom ---- */
+
+  let waveformFrame = null;
+
+  function scheduleWaveformUpdate() {
+    if (waveformFrame !== null) return;
+    waveformFrame = requestAnimationFrame(() => {
+      waveformFrame = null;
+      updateWaveforms();
+    });
+  }
+
+  function updateWaveforms() {
+    if (!window.DMakerWaveform) return;
+    const viewLeft = scrollEl.scrollLeft - TL_HEADER_WIDTH;
+    const viewRight = viewLeft + scrollEl.clientWidth;
+    const dpr = window.devicePixelRatio || 1;
+    for (const canvas of scrollEl.querySelectorAll(".tl-waveform")) {
+      const itemEl = canvas.closest(".tl-item");
+      const track = itemEl && view.tracks.find((t) => t.id === itemEl.dataset.trackId);
+      const item = track && track.items.find((it) => it.id === itemEl.dataset.itemId);
+      if (!track || !item) continue;
+
+      const itemLeft = item.start * pxPerSec;
+      const itemWidth = (item.end - item.start) * pxPerSec;
+      const visStart = Math.max(itemLeft, viewLeft);
+      const visEnd = Math.min(itemLeft + itemWidth, viewRight);
+      if (visEnd <= visStart) {
+        canvas.hidden = true;
+        continue;
+      }
+      canvas.hidden = false;
+      const widthPx = Math.min(TL_WAVEFORM_MAX_PX, visEnd - visStart);
+      const leftInItem = visStart - itemLeft;
+      canvas.style.left = `${leftInItem}px`;
+      canvas.style.width = `${widthPx}px`;
+      const heightPx = canvas.clientHeight || TL_WAVEFORM_FALLBACK_HEIGHT;
+      const backingWidth = Math.max(1, Math.round(widthPx * dpr));
+      const backingHeight = Math.max(1, Math.round(heightPx * dpr));
+      if (canvas.width !== backingWidth) canvas.width = backingWidth;
+      if (canvas.height !== backingHeight) canvas.height = backingHeight;
+
+      const path = tlSourcePath(view, item);
+      if (!path) continue;
+      const rate = tlItemAudioRate(track, item);
+      const offset = tlItemAudioOffset(view, item);
+      const sessionAtLeft = item.start + leftInItem / pxPerSec;
+      const sessionAtRight = item.start + (leftInItem + widthPx) / pxPerSec;
+      const fileStart = tlFileTimeAt(item, sessionAtLeft, rate, offset);
+      const fileEnd = tlFileTimeAt(item, sessionAtRight, rate, offset);
+      const drawOptions = {
+        loop: tlItemLoops(item),
+        muted: !!item.muted,
+        color: selectedIds.has(item.id) ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.5)",
+      };
+      window.DMakerWaveform.fetchPeaks(path, 0).then((waveform) => {
+        window.DMakerWaveform.draw(canvas, waveform, fileStart, fileEnd, drawOptions);
+      });
+    }
   }
 
   function updatePlayheadPosition() {
@@ -398,6 +512,8 @@ function createTimeline(container, callbacks) {
     },
     { passive: false }
   );
+
+  scrollEl.addEventListener("scroll", scheduleWaveformUpdate, { passive: true });
 
   return {
     setView(newView) {

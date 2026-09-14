@@ -13,7 +13,7 @@ D:\DMaker\.venv\Scripts\dmaker.exe <comando>
 
 (ou `cd D:\DMaker` e `.venv\Scripts\dmaker.exe`). Se der "ffmpeg não encontrado", rode `dmaker setup`.
 
-Interface gráfica para o usuário acompanhar e editar: `dmaker ui` (http://127.0.0.1:8765). Se o servidor MCP `dmaker` estiver conectado na sessão, as mesmas operações existem como ferramentas (`probe_media`, `save_project`, `validate_project`, `render_project`, `contact_sheet`, `frames`...); `contact_sheet` e `frames` já devolvem as imagens para conferir.
+Interface gráfica para o usuário acompanhar e editar: `dmaker ui` (http://127.0.0.1:8765). Se o servidor MCP `dmaker` estiver conectado na sessão, as mesmas operações existem como ferramentas (`probe_media`, `save_project`, `validate_project`, `render_project`, `contact_sheet`, `frames`...); `contact_sheet` e `frames` já devolvem as imagens para conferir. `render_project`/`export_project` já abrem a interface sozinhos para o usuário acompanhar o andamento (sobem o servidor se preciso); use `show_ui=false` só se o usuário pedir para não abrir.
 
 ## Fluxo de trabalho (sempre nessa ordem)
 

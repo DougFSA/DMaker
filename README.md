@@ -54,7 +54,7 @@ O navegador abre em <http://127.0.0.1:8765> (se não abrir, cole o endereço). D
 
 1. Cria um projeto em **Novo projeto**: nome, formato (Reels, Shorts, YouTube...), marca e os vídeos/fotos, escolhidos no navegador de arquivos.
 2. Ao abrir um projeto, a interface já entra na aba **Linha do tempo**: um editor multitrilha no estilo Shotcut, com um player em cima e as trilhas embaixo (arraste a alça entre os dois para redimensionar). De cima para baixo: `V2`, `V3`... (vídeos em picture-in-picture), `TX` (textos), `GR` (imagens e barra de progresso), `V1` (os trechos principais: vídeo, imagem ou cartão), `A1` (áudio de cada trecho da V1), `A2`... (faixas de áudio externas sincronizadas), `MUS` (música) e `CC` (legendas). Clique ou arraste na régua para mover o cursor; clique num item para selecioná-lo (Ctrl para selecionar vários); arraste o meio de um item para movê-lo (reordena na V1, desloca no tempo nas sobreposições) e as bordas para aparar, com encaixe (snap) nas bordas de outros itens. A barra de ferramentas acima tem cortar, remover, lift, duplicar, aparar até o cursor, snap e zoom; a tabela de atalhos (tecla `?`) tem a lista completa, resumida abaixo.
-3. O player mostra uma **prévia ao vivo aproximada** (sem precisar renderizar): toca o trecho sob o cursor, as sobreposições de texto e imagem, e o picture-in-picture, mas não mostra transições, Ken Burns, legendas nem correção de cor (isso só sai no render). Vídeos em formatos que o navegador não decodifica (HEVC, ProRes...) tocam por um proxy leve em 540p H.264 que a interface gera em segundo plano (`cache/proxy`) só para essa prévia, sem afetar o render final; enquanto o proxy não fica pronto, aparece um aviso na barra de ferramentas.
+3. O player mostra uma **prévia ao vivo aproximada** (sem precisar renderizar): toca o trecho sob o cursor, as sobreposições de texto e imagem, e o picture-in-picture, mas não mostra transições, Ken Burns, legendas nem correção de cor (isso só sai no render). Vídeos em formatos que o navegador não decodifica (HEVC, ProRes...) tocam por um proxy leve em 540p H.264 que a interface gera em segundo plano (`cache/proxy`) só para essa prévia, sem afetar o render final; enquanto o proxy não fica pronto, aparece um aviso na barra de ferramentas. As trilhas de áudio (`A1`, `A2`..., `MUS` e os PiPs com som) mostram a forma de onda, calculada e guardada em cache (`cache/waveform`) na primeira vez que cada arquivo aparece na linha do tempo.
 4. Os campos "clássicos" (preset, fontes sincronizadas, cartões, sobreposições, legendas, áudio) continuam na aba **Propriedades**, como cartões e formulários. A aba **JSON** mostra a mesma spec como texto, para quem prefere.
 5. Clica em **Validar** para ver duração final e avisos, e em **Preview** para gerar uma versão rápida em baixa resolução. O painel **Andamento** mostra cada etapa e a barra de progresso em tempo real; ao terminar, o vídeo aparece na aba **Preview** para assistir, com grade de quadros e captura de quadro.
 6. Quando estiver bom, **Render final** (qualidade de entrega) e, se quiser outros formatos, **Exportar**. Os arquivos ficam em `D:\DMaker\output`.
@@ -143,6 +143,15 @@ Configuração para o cliente (o projeto já traz `.mcp.json` para o Claude Code
 ```
 
 Ferramentas: `dmaker_guide` (manual), `spec_schema`, `presets`, `brands`, `probe_media`, `save_project`, `get_project`, `validate_project`, `list_projects`, `render_project` (com `job_id` para renders longos), `export_project`, `job_status`, `quick_edit`, `transcribe_media`, `read_captions`, `fix_captions`, `contact_sheet` e `frames` (devolvem **imagens**, para a IA ver o resultado), `render_card_preview`, `clean_cache`. Recursos `dmaker://guide` e `dmaker://schema`; prompt `editar-video`.
+
+## Acompanhando renders
+
+Por padrão, **todo render** (pela CLI, pelo MCP ou pela própria interface) aparece na interface gráfica, com barra de progresso, etapa em execução e log: se ela não estiver aberta, sobe sozinha em segundo plano e o navegador abre direto no projeto e no job.
+
+- `dmaker render`/`dmaker export`: some com `--no-ui` para rodar só no terminal, sem tocar na interface.
+- `render_project`/`export_project` (MCP): têm o parâmetro `show_ui` (padrão `true`); a IA só deve usar `show_ui=false` se o usuário pedir para não abrir a interface. Com a interface indisponível (não conseguiu subir), o render cai sozinho no caminho local de sempre.
+- `job_status`/`list_jobs` (MCP) também consultam a interface, então a IA continua acompanhando um job que foi para lá.
+- A variável `DMAKER_UI_URL` (padrão `http://127.0.0.1:8765`) diz onde a interface está ou deve subir; útil se a porta padrão estiver ocupada ou a interface já estiver rodando em outro lugar.
 
 ## Vídeos longos, multicâmera e áudio externo
 

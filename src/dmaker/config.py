@@ -29,6 +29,7 @@ BRANDS_DIR = ASSETS_DIR / "brands"
 CACHE_DIR = ROOT / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
+WAVEFORM_DIR = CACHE_DIR / "waveform"
 JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = ROOT / "output"
@@ -45,6 +46,7 @@ def ensure_dirs() -> None:
         BRANDS_DIR,
         MEZ_DIR,
         PROXY_DIR,
+        WAVEFORM_DIR,
         JOBS_DIR,
         MODELS_DIR,
         OUTPUT_DIR,

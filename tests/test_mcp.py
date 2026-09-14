@@ -91,6 +91,99 @@ def test_save_and_validate_project_via_mcp(tmp_path):
     spec_path.parent.rmdir()
 
 
+class _FakeUIClient:
+    """Dublê de UIClient: nunca fala HTTP de verdade, só registra o que recebeu."""
+
+    def __init__(self):
+        self.base_url = "http://127.0.0.1:9"
+        self.rendered = None
+        self.exported = None
+
+    def render(self, name, options):
+        self.rendered = (name, options)
+        return {"job_id": "abc123"}
+
+    def export(self, name, presets):
+        self.exported = (name, presets)
+        return {"job_id": "abc123"}
+
+    def job(self, job_id):
+        return {"job_id": job_id, "status": "done", "result": {"output": "x.mp4"}}
+
+
+class _FakeDispatcher:
+    """Dispatcher que sempre "consegue" abrir a interface, sem subir nenhum processo de verdade."""
+
+    def __init__(self):
+        self.client = _FakeUIClient()
+        self.opened: list[tuple[str, str]] = []
+
+    def ensure_ui(self):
+        return True
+
+    def open_browser_if_needed(self, name, job_id):
+        self.opened.append((name, job_id))
+
+
+class _FailingDispatcher:
+    """Simula a interface indisponível: ensure_ui() sempre lança, como o dispatcher de verdade faria
+    se `dmaker ui` não conseguisse subir."""
+
+    def ensure_ui(self):
+        raise RuntimeError("interface indisponível (teste)")
+
+
+def test_render_project_show_ui_false_keeps_local_job_behavior():
+    # importado direto (não via stdio): o decorator @server.tool devolve a função original, chamável
+    # como Python puro, o que evita depender de um subprocesso para testar o roteamento show_ui.
+    import dmaker.mcp_server as mcp_server
+
+    result = mcp_server.render_project("projeto-inexistente-xyz", show_ui=False, wait_seconds=5)
+    assert "where" not in result
+    assert result["status"] == "error" and "não encontrada" in result["error"]
+
+
+def test_render_project_show_ui_true_falls_back_to_local_when_ui_unavailable(monkeypatch):
+    import dmaker.mcp_server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_dispatcher", lambda: _FailingDispatcher())
+    result = mcp_server.render_project("projeto-inexistente-xyz", show_ui=True, wait_seconds=5)
+    assert "where" not in result  # caiu no job local de sempre, igual ao show_ui=False
+    assert result["status"] == "error" and "não encontrada" in result["error"]
+
+
+def test_render_project_show_ui_true_delegates_to_ui_when_available(monkeypatch):
+    import dmaker.mcp_server as mcp_server
+
+    fake = _FakeDispatcher()
+    monkeypatch.setattr(mcp_server, "_dispatcher", lambda: fake)
+    result = mcp_server.render_project("qualquer-projeto", show_ui=True, wait_seconds=5)
+    assert result["where"] == "ui" and result["status"] == "done"
+    assert result["url"] == "http://127.0.0.1:9/#project=qualquer-projeto&job=abc123"
+    assert fake.client.rendered[0] == "qualquer-projeto"
+    assert fake.opened == [("qualquer-projeto", "abc123")]
+
+
+def test_export_project_show_ui_true_delegates_to_ui_when_available(monkeypatch):
+    import dmaker.mcp_server as mcp_server
+
+    fake = _FakeDispatcher()
+    monkeypatch.setattr(mcp_server, "_dispatcher", lambda: fake)
+    result = mcp_server.export_project(
+        "qualquer-projeto", ["instagram/reels", "youtube/shorts"], show_ui=True, wait_seconds=5
+    )
+    assert result["where"] == "ui" and result["status"] == "done"
+    assert fake.client.exported == ("qualquer-projeto", ["instagram/reels", "youtube/shorts"])
+
+
+def test_export_project_show_ui_false_keeps_local_job_behavior():
+    import dmaker.mcp_server as mcp_server
+
+    result = mcp_server.export_project("projeto-inexistente-xyz", ["instagram/reels"], show_ui=False)
+    assert "where" not in result
+    assert result["status"] == "error"
+
+
 def test_edit_project_and_timeline_view_via_mcp():
     spec = {
         "output": {"preset": "instagram/stories"},

@@ -241,7 +241,7 @@ def _a1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
                 source=segment.source,
                 transition=None,
                 muted=muted,
-                extra={},
+                extra={"speed": segment.speed},
             )
         )
     return items
@@ -287,7 +287,7 @@ def _music_track(project: Project, layout: ProjectLayout) -> Track | None:
         source=None,
         transition=None,
         muted=music.volume <= 0,
-        extra={},
+        extra={"loop": music.loop},
     )
     return Track(id="MUS", kind="audio", label="MUS", items=[item])
 

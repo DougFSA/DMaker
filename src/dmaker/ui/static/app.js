@@ -343,16 +343,36 @@ function statusLabel(status) {
 }
 
 let jobsPollTimer = null;
+const seenJobIds = new Set();
+let jobsSeeded = false;
 
+/** Sondagem de /api/jobs continua sempre rodando (mais devagar sem job ativo), para captar renders
+ * disparados por fora da interface (CLI, MCP) mesmo com a página já aberta. */
 async function refreshJobs() {
   state.jobs = await api.get("/api/jobs");
   renderJobList();
+  if (!jobsSeeded) {
+    state.jobs.forEach((j) => seenJobIds.add(j.job_id));
+    jobsSeeded = true;
+  } else {
+    await focusNewJobs();
+  }
   const running = state.jobs.some((j) => j.status === "running");
-  if (running && !jobsPollTimer) {
-    jobsPollTimer = setInterval(() => { refreshJobs().catch(handleError); }, 3000);
-  } else if (!running && jobsPollTimer) {
-    clearInterval(jobsPollTimer);
-    jobsPollTimer = null;
+  clearTimeout(jobsPollTimer);
+  jobsPollTimer = setTimeout(() => { refreshJobs().catch(handleError); }, running ? 3000 : 5000);
+}
+
+/** Abre sozinho o projeto/painel de um job novo marcado com focus (render disparado pela CLI/MCP). */
+async function focusNewJobs() {
+  const fresh = state.jobs.filter((j) => j.focus && j.project && !seenJobIds.has(j.job_id));
+  state.jobs.forEach((j) => seenJobIds.add(j.job_id));
+  const target = fresh.find((j) => j.status === "running") || fresh[fresh.length - 1];
+  if (!target || state.activeJobId[target.project] === target.job_id) return;
+  try {
+    if (target.project !== state.currentProject) await openProject(target.project);
+    openJobEvents(target.project, target.job_id, "render");
+  } catch (err) {
+    handleError(err);
   }
 }
 
@@ -506,8 +526,23 @@ async function submitExportFromModal() {
 
 /* -- painel de andamento (SSE) -- */
 
+let progressState = window.DMakerProgress.initialState();
+let progressTicker = null;
+
 function showProgressPanel() {
   document.getElementById("progress-panel").classList.remove("collapsed");
+}
+
+function stopProgressTicker() {
+  if (progressTicker) {
+    clearInterval(progressTicker);
+    progressTicker = null;
+  }
+}
+
+function renderProgressSteps() {
+  document.getElementById("progress-steps").innerHTML = window.DMakerProgress.stepsHtml(progressState);
+  document.getElementById("progress-elapsed").textContent = window.DMakerProgress.elapsedLabel(progressState, Date.now());
 }
 
 function resetProgressPanel() {
@@ -515,6 +550,10 @@ function resetProgressPanel() {
   document.getElementById("progress-bar-fill").style.width = "0%";
   document.getElementById("progress-bar-label").textContent = "";
   document.getElementById("progress-status").textContent = "Em andamento";
+  progressState = window.DMakerProgress.initialState();
+  renderProgressSteps();
+  stopProgressTicker();
+  progressTicker = setInterval(renderProgressSteps, 1000);
 }
 
 function appendLog(message, isError) {
@@ -533,6 +572,7 @@ function updateProgressBar(label, percent) {
 
 function openJobEvents(projectName, jobId, kind) {
   state.activeJobId[projectName] = jobId;
+  seenJobIds.add(jobId);
   if (state.eventSource) state.eventSource.close();
   showProgressPanel();
   resetProgressPanel();
@@ -551,6 +591,8 @@ function openJobEvents(projectName, jobId, kind) {
 }
 
 function handleJobEvent(evt, projectName, kind) {
+  progressState = window.DMakerProgress.nextState(progressState, evt);
+  renderProgressSteps();
   if (evt.kind === "start") {
     appendLog(`Iniciado: ${evt.description || ""}`);
   } else if (evt.kind === "log") {
@@ -558,6 +600,7 @@ function handleJobEvent(evt, projectName, kind) {
   } else if (evt.kind === "progress") {
     updateProgressBar(evt.label, evt.percent ?? 0);
   } else if (evt.kind === "end") {
+    stopProgressTicker();
     document.getElementById("progress-status").textContent = evt.status === "done" ? "Concluído" : "Erro";
     if (evt.status === "done") {
       appendLog("Concluído.");
@@ -1663,6 +1706,38 @@ async function openProject(name) {
   switchTab("timeline");
 }
 
+/* ==================== hash da URL: #project=<nome>&job=<id> ==================== */
+
+/** Um render disparado pela CLI/MCP abre a interface com o hash apontando para o projeto e o job,
+ * para o painel de andamento conectar sozinho (ver pipeline/remote.py RenderDispatcher). */
+function parseRouteHash() {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return { project: params.get("project"), job: params.get("job") };
+}
+
+async function applyRouteHash() {
+  const { project, job } = parseRouteHash();
+  if (!project) return;
+  if (project !== state.currentProject) {
+    try { await openProject(project); } catch (err) { handleError(err); return; }
+  }
+  if (job) openJobEvents(project, job, "render");
+}
+
+window.addEventListener("hashchange", () => { applyRouteHash().catch(handleError); });
+
+/* ==================== heartbeat: quem está com a página aberta ==================== */
+
+/** Avisa o backend a cada 5s enquanto a aba está visível, para um render disparado por fora não abrir
+ * outra aba quando já tem alguém olhando esta (ver RenderDispatcher.open_browser_if_needed). */
+function startHeartbeat() {
+  const ping = () => {
+    if (document.visibilityState === "visible") api.post("/api/clients/ping").catch(() => {});
+  };
+  ping();
+  setInterval(ping, 5000);
+}
+
 /* ==================== 12. inicialização ==================== */
 
 async function init() {
@@ -1678,10 +1753,15 @@ async function init() {
   try {
     await refreshJobs();
   } catch (err) { handleError(err); }
-  const last = localStorage.getItem("dmaker.lastProject");
+  const { project: hashProject } = parseRouteHash();
+  const last = hashProject || localStorage.getItem("dmaker.lastProject");
   if (last && state.projects.some((p) => p.name === last)) {
     try { await openProject(last); } catch (err) { handleError(err); }
   }
+  try {
+    await applyRouteHash();
+  } catch (err) { handleError(err); }
+  startHeartbeat();
 }
 
 init();

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import queue
 import string
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ class RenderRequest(BaseModel):
     guides: bool = False
     no_captions: bool = False
     segments: str | None = None  # "12-20": render parcial
+    focus: bool = False  # pedido por CLI/MCP: a interface deve abrir o painel deste job sozinha
 
 
 class SyncRequest(BaseModel):
@@ -326,6 +328,7 @@ def render_project(name: str, req: RenderRequest) -> dict:
     job = jobs.start(
         f"{name}: {'preview' if req.preview else 'render ' + (req.preset or 'final')}",
         lambda job: _run_render(job, name, req),
+        meta={"focus": req.focus, "project": name},
     )
     return {"job_id": job.id}
 
@@ -341,7 +344,7 @@ def export_project(name: str, req: ExportRequest) -> dict:
     def work(job: Job) -> list[dict]:
         return [_run_render(job, name, RenderRequest(), preset=p) for p in req.presets]
 
-    job = jobs.start(f"{name}: export {', '.join(req.presets)}", work)
+    job = jobs.start(f"{name}: export {', '.join(req.presets)}", work, meta={"project": name})
     return {"job_id": job.id}
 
 
@@ -536,6 +539,24 @@ def job_events(job_id: str) -> StreamingResponse:
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+# a página manda um "ping" a cada 5s enquanto está visível; se o último ping foi há pouco, alguém está
+# olhando a interface, e um render disparado por fora (CLI/MCP) não precisa abrir outra aba sozinho.
+_CLIENT_ACTIVE_WINDOW_S = 15.0
+_last_client_ping: float = 0.0
+
+
+@app.post("/api/clients/ping")
+def ping_client() -> dict:
+    global _last_client_ping
+    _last_client_ping = time.time()
+    return {"ok": True}
+
+
+@app.get("/api/clients")
+def clients_status() -> dict:
+    return {"active": (time.time() - _last_client_ping) < _CLIENT_ACTIVE_WINDOW_S}
+
+
 # ---------- mídia e conferência ----------
 
 
@@ -624,6 +645,23 @@ def build_proxies(name: str) -> dict:
 
     job = jobs.start(f"{name}: proxies de prévia", work)
     return {"job": job.snapshot(), "proxies": [_proxy_entry(s) for s in status]}
+
+
+@app.get("/api/waveform")
+def get_waveform(path: str, stream: int = 0) -> dict:
+    """Picos da forma de onda (cache/waveform) de um arquivo de áudio/vídeo permitido, gerados sob
+    demanda: o cliente chama isto ao precisar desenhar a trilha e mostra "..." enquanto espera."""
+    from ..media.ffmpeg import FFmpegError, SubprocessRunner
+    from ..media.waveform import WaveformBuilder
+
+    p = Path(path)
+    if not _allowed_file(p):
+        raise _error(404, "arquivo não encontrado ou não permitido")
+    try:
+        waveform = WaveformBuilder(SubprocessRunner(quiet=True)).load_or_build(p, stream)
+    except FFmpegError as exc:
+        raise _error(404, "não foi possível ler o áudio deste arquivo") from exc
+    return waveform.to_dict()
 
 
 @app.get("/api/browse")

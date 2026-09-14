@@ -12,13 +12,15 @@ CSS = STATIC_DIR / "app.css"
 JS = STATIC_DIR / "app.js"
 KEYMAP = STATIC_DIR / "keymap.js"
 TIMELINE = STATIC_DIR / "timeline.js"
+WAVEFORM = STATIC_DIR / "waveform.js"
 PLAYER = STATIC_DIR / "player.js"
 EDITOR = STATIC_DIR / "editor.js"
 OPTIONS = STATIC_DIR / "options.js"
 FILTERS = STATIC_DIR / "filters.js"
 MEDIA = STATIC_DIR / "media.js"
+PROGRESS = STATIC_DIR / "progress.js"
 
-ALL_JS = (JS, KEYMAP, TIMELINE, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA)
+ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS)
 
 # domínios externos permitidos só dentro de comentários JS; fora deles é proibido
 EXTERNAL_URL_RE = re.compile(r"https?://")
@@ -113,3 +115,35 @@ def test_filter_catalog_covers_main_types():
     js = FILTERS.read_text(encoding="utf-8")
     for applies_type in ("clip", "card", "video", "text"):
         assert f'"{applies_type}"' in js, f"FILTER_CATALOG não cobre o tipo {applies_type!r}"
+
+
+def test_waveform_file_exists_and_is_referenced():
+    assert WAVEFORM.is_file(), "waveform.js não encontrado"
+    html = INDEX.read_text(encoding="utf-8")
+    assert "/static/waveform.js" in html, "index.html não referencia waveform.js"
+    js = WAVEFORM.read_text(encoding="utf-8")
+    assert "window.DMakerWaveform" in js
+    assert "fetchPeaks" in js and "draw" in js
+    assert "/api/waveform" in TIMELINE.read_text(encoding="utf-8") or "/api/waveform" in js
+
+
+def test_progress_file_exists_and_is_referenced():
+    assert PROGRESS.is_file(), "progress.js não encontrado"
+    html = INDEX.read_text(encoding="utf-8")
+    assert "/static/progress.js" in html, "index.html não referencia progress.js"
+    js = PROGRESS.read_text(encoding="utf-8")
+    assert "window.DMakerProgress" in js
+    assert "montagem final" in js  # etapa derivada do log/label que o renderer emite
+
+
+def test_index_has_progress_panel_step_and_elapsed_ids():
+    html = INDEX.read_text(encoding="utf-8")
+    for element_id in ("progress-steps", "progress-elapsed", "progress-panel", "progress-bar-fill"):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+
+
+def test_app_js_supports_hash_routing_and_heartbeat():
+    js = JS.read_text(encoding="utf-8")
+    assert "hashchange" in js
+    assert "/api/clients/ping" in js
+    assert "DMakerProgress" in js

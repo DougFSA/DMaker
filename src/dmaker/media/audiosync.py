@@ -32,8 +32,10 @@ class SyncResult:
         return self.confidence >= 4.0
 
 
-def extract_pcm(runner: FFmpegRunner, src: Path, dst: Path, stream: int = 0) -> Path:
-    """Mono 8 kHz PCM 16 bits, o suficiente para correlacionar e leve para arquivos longos."""
+def extract_pcm(runner: FFmpegRunner, src: Path, dst: Path, stream: int = 0, rate: int = RATE) -> Path:
+    """Mono PCM 16 bits em `rate` Hz, leve o bastante para correlacionar ou calcular picos mesmo em
+    arquivos longos. `rate` por padrão é o da sincronização (8 kHz); a forma de onda (`waveform.py`)
+    usa o mesmo valor por coincidência de necessidade, não por acoplamento entre os dois módulos."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     args = [
         "-i",
@@ -44,12 +46,12 @@ def extract_pcm(runner: FFmpegRunner, src: Path, dst: Path, stream: int = 0) -> 
         "-ac",
         "1",
         "-ar",
-        str(RATE),
+        str(rate),
         "-c:a",
         "pcm_s16le",
         str(dst),
     ]
-    runner.run(FFmpegCommand(args, label=f"áudio para sincronizar ({src.name})"))
+    runner.run(FFmpegCommand(args, label=f"áudio para análise ({src.name})"))
     return dst
 
 
