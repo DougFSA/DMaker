@@ -76,14 +76,25 @@ def _default_variant(ctx: RenderContext) -> str:
 
 
 def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice, ...]:
-    """Fatias das faixas externas alinhadas ao início do trecho (tempo da sessão -> tempo na faixa)."""
+    """Fatias das faixas externas alinhadas ao início do trecho (tempo da sessão -> tempo na faixa).
+    Faixa que não cobre nenhum instante do trecho fica de fora: um gravador em vários arquivos
+    (câmera que parte a gravação a cada 30 min) vira várias faixas, e só a que grava aquele
+    momento entra na mistura."""
     slices = []
     for track in ctx.project.audio.tracks:
         source = ctx.session[track.source]
+        if not _source_covers(source, segment):
+            continue
         slices.append(
             TrackSlice(source.path, source.in_point(segment.start), track.volume, source.audio_stream)
         )
     return tuple(slices)
+
+
+def _source_covers(source: Source, segment: ClipSegment) -> bool:
+    """Se o arquivo da fonte grava algum instante entre o início e o fim do trecho."""
+    end = segment.end if segment.end is not None else float("inf")
+    return source.offset < end and source.offset + source.info.duration > segment.start
 
 
 @dataclass(frozen=True)

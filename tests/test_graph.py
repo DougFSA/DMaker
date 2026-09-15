@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from dmaker.domain.presets import SafeZone, get_preset
-from dmaker.domain.spec import AudioSettings, ClipSegment, Music, Reframe, Transition
+from dmaker.domain.spec import AudioSettings, ClipSegment, Music, MusicSpan, Reframe, Transition
 from dmaker.domain.timeline import timeline_spans, timeline_total
 from dmaker.filtergraph import (
     Inputs,
@@ -249,3 +249,27 @@ def test_clip_mezzanine_muted_camera_keeps_tracks(tmp_path):
     )
     fc = _filter_complex(cmd.args)
     assert "[mz_cam]" not in fc and "[mz_trk0]atempo=2" in fc and "anullsrc" not in " ".join(cmd.args)
+
+
+def test_audio_graph_music_spans_play_only_in_their_windows():
+    """Trilha só na abertura (0-20 s) e no encerramento (100 s até o fim): duas entradas, a segunda
+    atrasada até o instante em que entra e com fade de saída no fim do vídeo."""
+    inputs = Inputs()
+    inputs.add("a.mov")
+    lines: list[str] = []
+    music = Music(
+        src="m.m4a",
+        volume=0.3,
+        ducking=False,
+        spans=[
+            MusicSpan(start=0, end=20, fade_in=0, fade_out=6),
+            MusicSpan(start=100, end=None, start_at=170, fade_in=4, fade_out=5),
+        ],
+    )
+    audio_graph(lines, inputs, "[ta0]", AudioSettings(music=music, normalize="off"), Path("m.m4a"), 130.0)
+    text = ";".join(lines)
+    assert inputs.count == 3
+    assert "atrim=start=0.000:duration=20.000" in text and "afade=t=out:st=14.000:d=6.000" in text
+    assert "atrim=start=170.000:duration=30.000" in text and "adelay=100000:all=1" in text
+    assert "afade=t=in:st=0:d=4.000" in text and "afade=t=out:st=25.000:d=5.000" in text
+    assert "[mus0][mus1]amix=inputs=2:duration=longest" in text and "[ta0][mus]amix=inputs=2" in text

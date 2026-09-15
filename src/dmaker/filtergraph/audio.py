@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..domain.spec import AudioSettings, Music
+from ..domain.spec import AudioSettings, Music, MusicSpan
 from .common import Inputs
 
 
@@ -38,29 +38,16 @@ def audio_graph(
 
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
-        pre = ["-stream_loop", "-1"] if music.loop else []
-        idx = inputs.add(music_path, *pre)
-        chain = [
-            f"[{idx}:a]atrim=start={music.start_at:.3f}:duration={total:.3f}",
-            "asetpts=PTS-STARTPTS",
-            "aresample=48000",
-            "aformat=sample_fmts=fltp:channel_layouts=stereo",
-            f"volume={music.volume:.3f}",
-        ]
-        if music.fade_in:
-            chain.append(f"afade=t=in:st=0:d={music.fade_in:.3f}")
-        if music.fade_out:
-            chain.append(f"afade=t=out:st={max(total - music.fade_out, 0):.3f}:d={music.fade_out:.3f}")
-        lines.append(",".join(chain) + "[mus]")
+        mus = music_stream(lines, inputs, music, music_path, total)
         if music.ducking and not audio.mute_clips:
             lines.append(f"{a}asplit=2[voice][sc]")
             lines.append(
-                f"[mus][sc]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
+                f"{mus}[sc]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
                 f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
             )
             lines.append("[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         else:
-            lines.append(f"{a}[mus]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
+            lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         a = "[amix]"
 
     if audio.normalize != "off" and include_norm:
@@ -80,3 +67,42 @@ def audio_graph(
 
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
     return f"{cur_a}loudnorm=I={target_lufs:g}:TP=-1.5:LRA=11:print_format=json{out}"
+
+
+def music_stream(lines: list[str], inputs: Inputs, music: Music, music_path: Path, total: float) -> str:
+    """Música alinhada à linha do tempo: uma entrada por janela (`spans`), cada uma aparada, com
+    ganho e fades, atrasada até o instante em que entra; sem janelas, uma só cobrindo o vídeo
+    inteiro. Devolve o rótulo da mistura das janelas."""
+    spans = music.spans or [
+        MusicSpan(
+            start=0.0, end=None, start_at=music.start_at, fade_in=music.fade_in, fade_out=music.fade_out
+        )
+    ]
+    labels = []
+    for k, span in enumerate(spans):
+        end = total if span.end is None else min(span.end, total)
+        length = max(end - span.start, 0.0)
+        pre = ["-stream_loop", "-1"] if music.loop else []
+        idx = inputs.add(music_path, *pre)
+        chain = [
+            f"[{idx}:a]atrim=start={span.start_at:.3f}:duration={length:.3f}",
+            "asetpts=PTS-STARTPTS",
+            "aresample=48000",
+            "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            f"volume={music.volume:.3f}",
+        ]
+        if span.fade_in:
+            chain.append(f"afade=t=in:st=0:d={span.fade_in:.3f}")
+        if span.fade_out:
+            chain.append(f"afade=t=out:st={max(length - span.fade_out, 0):.3f}:d={span.fade_out:.3f}")
+        if span.start > 0:
+            chain.append(f"adelay={int(round(span.start * 1000))}:all=1")
+        label = f"[mus{k}]"
+        lines.append(",".join(chain) + label)
+        labels.append(label)
+    if len(labels) == 1:
+        return labels[0]
+    lines.append(
+        "".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0[mus]"
+    )
+    return "[mus]"

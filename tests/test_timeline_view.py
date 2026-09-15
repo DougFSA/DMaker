@@ -186,3 +186,20 @@ def test_to_dict_is_json_ready(tmp_path):
     data = view.to_dict()
     assert data["width"] and data["height"] and data["fps"]
     assert isinstance(data["tracks"], list) and isinstance(data["tracks"][0]["items"], list)
+
+
+def test_music_spans_become_one_item_each(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    (tmp_path / "trilha.mp3").write_bytes(b"x")
+    spec = {
+        "name": "trilha-em-janelas",
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 20}],
+        "audio": {
+            "music": {"src": "trilha.mp3", "spans": [{"start": 0, "end": 10}, {"start": 15, "start_at": 30}]}
+        },
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    mus = next(t for t in view.tracks if t.id == "MUS")
+    assert [(i.start, i.end, i.in_point) for i in mus.items] == [(0.0, 10.0, 0.0), (15.0, 20.0, 30.0)]

@@ -150,3 +150,47 @@ def test_lint_rejects_clip_outside_source_coverage(wedding):
     )  # cam2 só começa em 12.5
     with pytest.raises(ValueError, match="fora da fonte"):
         summarize(wedding, prober=fake_prober, offset_finder=fake_finder)
+
+
+def test_track_outside_segment_is_left_out_of_the_mix(tmp_path):
+    """Gravador em dois arquivos (0-120 s e 200-320 s da sessão): cada trecho mistura só o que cobre."""
+    for name in ("cam1.mp4", "rec_a.wav", "rec_b.wav"):
+        (tmp_path / name).write_bytes(b"x")
+    project = Project.model_validate(
+        {
+            "name": "dois-gravadores",
+            "output": {"preset": "youtube/video"},
+            "sources": {
+                "cam1": {"src": "cam1.mp4"},
+                "rec_a": {"src": "rec_a.wav"},
+                "rec_b": {"src": "rec_b.wav", "sync": 200.0},
+            },
+            "timeline": [
+                {"type": "clip", "source": "cam1", "start": 10, "end": 20},
+                {"type": "clip", "source": "cam1", "start": 150, "end": 160, "transition": {"type": "cut"}},
+                {"type": "clip", "source": "cam1", "start": 110, "end": 210, "transition": {"type": "cut"}},
+            ],
+            "audio": {"tracks": [{"source": "rec_a"}, {"source": "rec_b"}], "normalize": "fast"},
+        }
+    )
+    project.base_dir = tmp_path
+
+    def prober(path: Path) -> MediaInfo:
+        if path.suffix == ".wav":
+            return MediaInfo(path, 120.0, 0, 0, 0.0, False, True, False)
+        return MediaInfo(path, 400.0, 1920, 1080, 30.0, True, True, False)
+
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    RenderPipeline(
+        project,
+        RenderOptions(preview=True, quiet=True, out=tmp_path / "out.mp4"),
+        runner=runner,
+        prober=prober,
+        cache_dir=tmp_path / "mez",
+        jobs_dir=tmp_path / "jobs",
+    ).run()
+    mezz = [c for c in runner.commands if "-filter_complex" in c and "pcm_s16le" in c][:3]
+    inputs = [[c[i + 1] for i, a in enumerate(c) if a == "-i"] for c in mezz]
+    assert [Path(p).name for p in inputs[0]] == ["cam1.mp4", "rec_a.wav"]  # 10-20 s: só o primeiro
+    assert [Path(p).name for p in inputs[1]] == ["cam1.mp4"]  # 150-160 s: nenhum gravador
+    assert [Path(p).name for p in inputs[2]] == ["cam1.mp4", "rec_a.wav", "rec_b.wav"]  # 110-210 s: os dois

@@ -274,22 +274,26 @@ def _music_track(project: Project, layout: ProjectLayout) -> Track | None:
     music = project.audio.music
     if music is None:
         return None
-    item = TrackItem(
-        id=_item_id("MUS", 0),
-        kind="music",
-        index=0,
-        label=music.src,
-        start=0.0,
-        end=layout.total,
-        in_point=music.start_at,
-        out_point=None,
-        src=music.src,
-        source=None,
-        transition=None,
-        muted=music.volume <= 0,
-        extra={"loop": music.loop},
-    )
-    return Track(id="MUS", kind="audio", label="MUS", items=[item])
+    windows = [(s.start, s.end, s.start_at) for s in music.spans] or [(0.0, None, music.start_at)]
+    items = [
+        TrackItem(
+            id=_item_id("MUS", i),
+            kind="music",
+            index=i,
+            label=music.src,
+            start=start,
+            end=layout.total if end is None else min(end, layout.total),
+            in_point=start_at,
+            out_point=None,
+            src=music.src,
+            source=None,
+            transition=None,
+            muted=music.volume <= 0,
+            extra={"loop": music.loop},
+        )
+        for i, (start, end, start_at) in enumerate(windows)
+    ]
+    return Track(id="MUS", kind="audio", label="MUS", items=items)
 
 
 def _captions_track(project: Project, layout: ProjectLayout) -> Track | None:

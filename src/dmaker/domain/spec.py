@@ -357,12 +357,30 @@ class Captions(Strict):
 # ---------- áudio ----------
 
 
+class MusicSpan(Strict):
+    """Janela da linha do tempo em que a música toca (trilha só na abertura e no encerramento, por
+    exemplo). `start`/`end` são instantes do vídeo final; `start_at` é de onde começar na música."""
+
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)  # None = até o fim do vídeo
+    start_at: float = Field(0.0, ge=0)
+    fade_in: float = Field(1.0, ge=0)
+    fade_out: float = Field(2.0, ge=0)
+
+    @model_validator(mode="after")
+    def _check_window(self):
+        if self.end is not None and self.end <= self.start:
+            raise ValueError(f"música: end ({self.end}) precisa ser maior que start ({self.start})")
+        return self
+
+
 class Music(Strict):
     src: str
     volume: float = Field(0.18, ge=0, le=2)
     fade_in: float = Field(1.0, ge=0)
     fade_out: float = Field(2.0, ge=0)
     start_at: float = Field(0.0, ge=0)  # de onde começar dentro da música
+    spans: list[MusicSpan] = []  # vazio = a música cobre o vídeo inteiro
     loop: bool = True
     ducking: bool = True  # abaixa a música quando há voz
     duck_threshold: float = Field(0.02, gt=0, le=1)
