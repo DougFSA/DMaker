@@ -34,8 +34,10 @@ const edState = {
   keymapController: null,
   selection: { typeKey: null, base: null },
   proxyEventSource: null,
+  activeProxyJobProject: null,
   playDirection: 0,
   playLevel: 1,
+  hoverTrackId: null,
 };
 
 function edProjectPath(suffix) {
@@ -74,7 +76,7 @@ function setSelectionContext(typeKey, base) {
 
 function refreshSidePanels() {
   if (edState.filters) edState.filters.refresh();
-  if (edState.media) edState.media.setSpec(state.spec);
+  if (edState.media) edState.media.setSpec(state.spec, edState.view);
 }
 
 /* ---------- snapshots (desfazer/refazer) ---------- */
@@ -258,6 +260,26 @@ function selectAllV1() {
   if (v1) edState.timeline.setSelection(v1.items.map((it) => it.id));
 }
 
+/* ---------- mudo/oculto/bloqueio por trilha (cabeçalho e Ctrl+M/H/L) ---------- */
+
+/** Trilha alvo de um atalho de trilha: a do item selecionado ou, sem seleção, a que está sob o
+ * mouse (`hoverTrackId`, atualizado em `setupMediaDrop`/`setupHoverTracking`). */
+function currentTrackId() {
+  const sel = selectionWithTrack()[0];
+  return (sel && sel.trackId) || edState.hoverTrackId || null;
+}
+
+function setTrackField(trackId, field, value) {
+  applyOp({ type: "set_field", path: `tracks.${trackId}.${field}`, value });
+}
+
+function toggleCurrentTrack(field) {
+  const trackId = currentTrackId();
+  const track = trackId && edState.view.tracks.find((t) => t.id === trackId);
+  if (!track) { showAlert("Selecione um item ou passe o mouse sobre uma trilha.", "error"); return; }
+  setTrackField(trackId, field, !track[field]);
+}
+
 /* ---------- reprodução e timecode ---------- */
 
 function seekTo(t) {
@@ -308,16 +330,20 @@ async function ensureProxies() {
     const status = await api.get(edProjectPath("/proxies"));
     applyProxyStatus(status);
     if (!status.length || status.every((s) => s.ready)) return;
+    // já tem um job de proxies rodando para este projeto (a página pode chamar ensureProxies duas
+    // vezes seguidas, ex.: abrir pelo hash e depois pelo clique); não dispara outro POST.
+    if (edState.proxyEventSource && edState.activeProxyJobProject === state.currentProject) return;
     const result = await api.post(edProjectPath("/proxies"));
     applyProxyStatus(result.proxies);
-    if (result.job && result.job.job_id) watchProxyJob(result.job.job_id);
+    if (result.job && result.job.job_id) watchProxyJob(result.job.job_id, state.currentProject);
   } catch (err) {
     console.error(err);
   }
 }
 
-function watchProxyJob(jobId) {
+function watchProxyJob(jobId, projectName) {
   if (edState.proxyEventSource) edState.proxyEventSource.close();
+  edState.activeProxyJobProject = projectName;
   const source = new EventSource(`/api/jobs/${jobId}/events`);
   edState.proxyEventSource = source;
   source.onmessage = (evt) => {
@@ -325,6 +351,8 @@ function watchProxyJob(jobId) {
     try { data = JSON.parse(evt.data); } catch { return; }
     if (data.kind === "end") {
       source.close();
+      edState.proxyEventSource = null;
+      edState.activeProxyJobProject = null;
       ensureProxies();
     }
   };
@@ -409,7 +437,13 @@ function initWidgets() {
     onSelect(item, trackId) { const ctx = contextForItem(trackId, item); setSelectionContext(ctx.typeKey, ctx.base); },
     onClearSelection() { setSelectionContext(null, null); },
     onOp(op) { applyOp(op); },
+    onTrackToggle(trackId, field, value) { setTrackField(trackId, field, value); },
+    onLockedAttempt(trackId) { showAlert(`A trilha ${trackId} está bloqueada (cadeado no cabeçalho).`, "error"); },
   });
+  tracksEl.addEventListener("mousemove", (e) => {
+    edState.hoverTrackId = edState.timeline.hitTest(e.clientX, e.clientY).trackId;
+  });
+  tracksEl.addEventListener("mouseleave", () => { edState.hoverTrackId = null; });
 
   edState.player = window.DMakerPlayer.create(playerEl, {
     onTick(t, rate) {
@@ -429,7 +463,7 @@ function initWidgets() {
   edState.media = window.DMakerMedia.create(document.getElementById("media-body"), {
     onInsertEnd(entry) { appendMediaEntry(entry); },
   });
-  edState.media.setSpec(state.spec);
+  edState.media.setSpec(state.spec, edState.view);
 
   setupMediaDrop(tracksEl);
   setupMediaToolbar();
@@ -466,6 +500,9 @@ function initWidgets() {
     show_shortcuts() { openShortcutsModal(); },
     media_append() { const entry = edState.media.getSelected(); if (entry) appendMediaEntry(entry); else showAlert("Selecione um arquivo no painel de mídia.", "error"); },
     media_insert() { const entry = edState.media.getSelected(); if (entry) insertMediaEntryAtPlayhead(entry); else showAlert("Selecione um arquivo no painel de mídia.", "error"); },
+    track_mute() { toggleCurrentTrack("muted"); },
+    track_hide() { toggleCurrentTrack("hidden"); },
+    track_lock() { toggleCurrentTrack("locked"); },
   };
   edState.keymapController = window.DMakerKeymap.bindKeymap(handlers);
 
@@ -488,7 +525,6 @@ function initWidgets() {
     if (btn) btn.addEventListener("click", () => fn({ repeat: false }));
   }
   updateSnapButton();
-  setupResizer();
 }
 
 /* ---------- painel de mídia: inserir na linha do tempo ---------- */
@@ -664,25 +700,15 @@ function toggleRippleLabel() {
   if (btn) btn.textContent = rippleLabelOn ? "Ripple: V1" : "Ripple: V1 (sempre)";
 }
 
-function setupResizer() {
-  const resizer = document.getElementById("timeline-resizer");
-  const editorEl = document.getElementById("timeline-editor");
-  if (!resizer || !editorEl) return;
-  let dragging = false;
-  resizer.addEventListener("mousedown", (e) => {
-    dragging = true;
-    e.preventDefault();
-  });
-  document.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const rect = editorEl.getBoundingClientRect();
-    const ratio = Math.min(0.8, Math.max(0.15, (e.clientY - rect.top) / rect.height));
-    editorEl.style.setProperty("--player-h", `${(ratio * 100).toFixed(1)}%`);
-  });
-  document.addEventListener("mouseup", () => {
-    dragging = false;
-  });
-}
+/* ---------- reorganização da tela (layout.js) ---------- */
+
+/** O player e a linha do tempo calculam o próprio tamanho quando o contêiner muda; um "resize" da
+ * janela cobre a maioria dos casos, mas trocar de painel de slot não move a janela. Forçar
+ * setView/setData de novo é barato (só redesenha) e garante que não fiquem com o tamanho antigo. */
+document.addEventListener("dmaker:layout-applied", () => {
+  if (edState.timeline) edState.timeline.setView(edState.view);
+  if (edState.player) edState.player.setData({ view: edState.view, spec: state.spec, theme: edState.theme, proxyUrls: edState.proxyUrls });
+});
 
 /* ---------- ponto de entrada ---------- */
 

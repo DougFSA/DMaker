@@ -8,6 +8,9 @@ guardado em `cache/proxy`.
 from __future__ import annotations
 
 import hashlib
+import os
+import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +25,11 @@ from .context import Prober
 PROXY_VERSION = "p1"  # muda quando a receita do proxy muda (invalida o cache; ver filtergraph/proxy.py)
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
+# tentativas de troca do tmp pelo proxy final antes de desistir; no Windows o ffmpeg às vezes ainda
+# segura o handle do arquivo por um instante depois de o processo sair (PermissionError WinError 32)
+REPLACE_ATTEMPTS = 3
+REPLACE_RETRY_DELAY_S = 0.3
+
 
 def proxy_path(src: Path) -> Path:
     """Nome do proxy no cache: hash do caminho resolvido, data de modificação, tamanho e versão da
@@ -34,11 +42,12 @@ def proxy_path(src: Path) -> Path:
 
 
 def _origin_path(project: Project, src: str | None, source: str | None) -> str:
-    """Caminho (ainda relativo ao projeto) de um clipe ou PiP: `src` direto ou o de uma fonte nomeada."""
+    """Caminho (ainda relativo ao projeto) de um clipe ou PiP: `src` direto ou o de uma fonte nomeada.
+    Fonte com `parts` entra pelo primeiro arquivo (a prévia troca de parte não é feita aqui)."""
     if src:
         return src
     assert source is not None  # garantido pelo validador de ClipSegment/VideoOverlay (um dos dois)
-    return project.sources[source].src
+    return project.sources[source].files[0]
 
 
 def project_video_sources(project: Project) -> list[Path]:
@@ -88,9 +97,10 @@ class ProxyBuilder:
         return out
 
     def build(self, project: Project, sink: ProgressSink | None = None) -> list[ProxyStatus]:
-        """Gera os proxies que faltam (pula os já prontos). Cada um nasce num arquivo temporário no
-        próprio cache e só vira o nome final depois de pronto, para nunca deixar um proxy pela metade
-        se o processo for interrompido no meio. Informa o progresso por fonte concluída em `sink`."""
+        """Gera os proxies que faltam (pula os já prontos). Cada um nasce num arquivo temporário
+        exclusivo desta execução e só vira o nome final depois de pronto, para nunca deixar um proxy
+        pela metade nem colidir com outro job de proxies gerando a mesma fonte ao mesmo tempo.
+        Informa o progresso por fonte concluída em `sink`."""
         statuses = self.status(project)
         todo = [item for item in statuses if not item.ready]
         if sink:
@@ -98,14 +108,41 @@ class ProxyBuilder:
         for done, item in enumerate(todo):
             if self.log:
                 self.log(f"gerando proxy: {item.src.name}")
-            info = self.prober(item.src)
-            item.proxy.parent.mkdir(parents=True, exist_ok=True)
-            tmp = item.proxy.with_name(f"{item.proxy.stem}.tmp{item.proxy.suffix}")
-            self.runner.run(proxy_command(item.src, tmp, info))
-            tmp.replace(item.proxy)
-            item.ready = True
+            self._build_one(item)
             if sink:
                 sink.update(done + 1)
         if sink:
             sink.finish()
         return statuses
+
+    def _build_one(self, item: ProxyStatus) -> None:
+        """Gera um proxy num `.tmp` só desta execução (pid + id aleatório, nunca reaproveitado entre
+        chamadas); se o proxy final já existir quando terminar (outro processo terminou antes), o
+        nosso tmp é descartado em vez de sobrescrevê-lo. Nunca deixa um `.tmp` para trás, mesmo com
+        erro no meio (finally)."""
+        info = self.prober(item.src)
+        item.proxy.parent.mkdir(parents=True, exist_ok=True)
+        tmp = item.proxy.with_name(
+            f"{item.proxy.stem}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}{item.proxy.suffix}"
+        )
+        try:
+            self.runner.run(proxy_command(item.src, tmp, info))
+            if item.proxy.exists():
+                pass  # outro processo já terminou este mesmo proxy; o nosso tmp é redundante
+            else:
+                self._replace_with_retry(tmp, item.proxy)
+        finally:
+            tmp.unlink(missing_ok=True)
+        item.ready = True
+
+    def _replace_with_retry(self, tmp: Path, proxy: Path) -> None:
+        """Poucas tentativas curtas absorvem o caso comum no Windows de o arquivo ainda estar em uso
+        por um instante depois do ffmpeg sair, sem mascarar um `PermissionError` persistente."""
+        for attempt in range(REPLACE_ATTEMPTS):
+            try:
+                tmp.replace(proxy)
+                return
+            except PermissionError:
+                if attempt == REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(REPLACE_RETRY_DELAY_S)

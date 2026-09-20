@@ -7,7 +7,8 @@ topo, removidas do resultado renderizado:
 - `"description"`: frase curta dizendo para que serve o template.
 - `"params"`: `{nome: {"description", "default" (opcional), "type" (opcional, inferido do default),
   "required" (opcional, inferido: obrigatório quando não há default)}}`. Tipos: text, path, paths
-  (lista de caminhos), number, bool, list.
+  (lista de caminhos), dir (pasta: vira a lista dos arquivos de mídia dela, em ordem natural), number,
+  bool, list.
 
 Placeholders no resto do JSON:
 
@@ -31,12 +32,46 @@ from typing import Any
 
 from .. import config
 
-_VALID_TYPES = {"text", "path", "paths", "number", "bool", "list"}
+_VALID_TYPES = {"text", "path", "paths", "dir", "number", "bool", "list"}
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+
+_MEDIA_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".mts",
+    ".m4v",
+    ".mkv",
+    ".avi",
+    ".m4a",
+    ".wav",
+    ".mp3",
+    ".aac",
+}
+_NATURAL_KEY_RE = re.compile(r"(\d+)")
 
 
 class TemplateError(ValueError):
     """Template não encontrado, ou parâmetros faltando/errados para renderizá-lo."""
+
+
+def _natural_key(name: str) -> list[tuple[int, int | str]]:
+    """Chave de ordenação natural: dígitos comparam como número, o resto como texto (`0002` antes de
+    `0010`; `VID_..._101` antes de `VID_..._102`). Tupla `(0|1, valor)` para nunca comparar str com int."""
+    parts = [p for p in _NATURAL_KEY_RE.split(name) if p]
+    return [(1, int(p)) if p.isdigit() else (0, p.lower()) for p in parts]
+
+
+def expand_dir(path: Path | str) -> list[str]:
+    """Lista os arquivos de vídeo/áudio de uma pasta (parâmetro de template `type: "dir"`), em ordem
+    natural pelo nome, como caminhos absolutos."""
+    folder = Path(path)
+    if not folder.is_dir():
+        raise TemplateError(f'pasta não encontrada: "{folder}"')
+    files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTENSIONS]
+    if not files:
+        raise TemplateError(f'pasta sem arquivos de vídeo/áudio: "{folder}"')
+    files.sort(key=lambda f: _natural_key(f.name))
+    return [str(f.resolve()) for f in files]
 
 
 @dataclass
@@ -123,6 +158,7 @@ def _check_type(name: str, param_type: str, value: Any) -> None:
     checks = {
         "text": isinstance(value, str),
         "path": isinstance(value, str),
+        "dir": isinstance(value, str),
         "paths": isinstance(value, list) and all(isinstance(v, str) for v in value),
         "number": is_number,
         "bool": isinstance(value, bool),
@@ -215,6 +251,8 @@ def render_template(template: Template, params: dict[str, Any] | None = None) ->
     for name, p in template.params.items():
         value = params[name] if name in params else p.default
         _check_type(name, p.type, value)
+        if p.type == "dir" and value is not None:
+            value = expand_dir(value)
         context[name] = value
     return _substitute(template.body, context)
 

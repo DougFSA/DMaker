@@ -3,7 +3,13 @@
 import numpy as np
 import pytest
 
-from dmaker.media.audiosync import RATE, SyncResult, estimate_offset
+from dmaker.media.audiosync import (
+    MIN_GUIDED_OVERLAP_S,
+    RATE,
+    SyncResult,
+    estimate_offset,
+    estimate_offset_near,
+)
 
 
 def _event_audio(seconds: float, seed: int = 1) -> np.ndarray:
@@ -16,6 +22,19 @@ def _event_audio(seconds: float, seed: int = 1) -> np.ndarray:
         burst = rng.normal(0, 0.4, int(0.15 * RATE)) * np.hanning(int(0.15 * RATE))
         signal[i : i + len(burst)] += burst.astype(np.float32)
     return signal
+
+
+def _noise(seconds: float, seed: int) -> np.ndarray:
+    return np.random.default_rng(seed).normal(0, 0.02, int(seconds * RATE)).astype(np.float32)
+
+
+def _embed(base: np.ndarray, event: np.ndarray, start_s: float) -> np.ndarray:
+    """Substitui (não soma) um trecho de `base` por `event`, como se fosse o mesmo som captado
+    pelas duas câmeras naquele instante."""
+    base = base.copy()
+    i = int(start_s * RATE)
+    base[i : i + len(event)] = event
+    return base
 
 
 @pytest.mark.parametrize("offset", [1.234, 17.5, -3.75])
@@ -45,3 +64,35 @@ def test_unrelated_audio_has_low_confidence():
     b = _event_audio(30, seed=99)
     assert isinstance(estimate_offset(a, b), SyncResult)
     assert estimate_offset(a, b).confidence < estimate_offset(a, a).confidence
+
+
+def test_guided_offset_finds_link_that_blind_correlation_misses():
+    """Um arquivo longo com o MESMO trecho de evento repetido duas vezes (a posição verdadeira e
+    uma "decoy" em outro ponto, como um aplauso parecido em outro momento da festa) engana a
+    correlação cega, que não tem como saber qual das duas repetições é a de verdade; a guiada,
+    sabendo a vizinhança esperada, ignora a decoy e acha o alinhamento certo (posição absoluta,
+    não a do corte)."""
+    event = _event_audio(20, seed=5)
+    master = _embed(_embed(_noise(1200, seed=1), event, 200.0), event, 1000.0)  # decoy em 200s
+    other = _embed(_noise(600, seed=2), event, 100.0)
+    true_offset = 1000.0 - 100.0
+    decoy_offset = 200.0 - 100.0
+
+    blind = estimate_offset(master, other)
+    assert blind.offset == pytest.approx(decoy_offset, abs=0.5)  # cega cai na decoy
+
+    guided = estimate_offset_near(master, other, expected=910.0, tolerance=90.0)
+    assert guided.reliable
+    assert guided.offset == pytest.approx(true_offset, abs=0.05)
+
+
+def test_guided_offset_reports_no_confidence_when_overlap_too_small():
+    """Se o deslocamento esperado deixa quase nenhuma sobreposição prevista entre os arquivos, não
+    há o que correlacionar: devolve o próprio `expected`, sem confiança."""
+    master = np.zeros(int(100 * RATE), dtype=np.float32)
+    other = np.zeros(int(50 * RATE), dtype=np.float32)
+    result = estimate_offset_near(master, other, expected=99.0, tolerance=5.0)
+    assert result.offset == 99.0
+    assert result.confidence == 0.0
+    assert not result.reliable
+    assert MIN_GUIDED_OVERLAP_S > 100 - 99  # a sobreposição prevista (1s) fica abaixo do limiar

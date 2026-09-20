@@ -35,6 +35,7 @@ MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = ROOT / "output"
 PROJECTS_DIR = ROOT / "projects"
 TEMPLATES_DIR = ROOT / "templates"
+LAYOUTS_FILE = ROOT / "layouts.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 

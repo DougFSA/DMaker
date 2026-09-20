@@ -1,9 +1,13 @@
 """Sincronização de fontes pelo áudio (câmeras e gravadores que captaram o mesmo evento).
 
-Duas etapas de correlação cruzada: uma grosseira sobre o envelope (100 Hz) do áudio inteiro, que
-encontra o deslocamento aproximado mesmo em horas de gravação, e uma fina em 8 kHz numa janela
-ao redor desse ponto, que refina para ~1 ms. O resultado é o instante, no relógio da fonte
-principal, em que a outra fonte começa.
+Duas formas de buscar o deslocamento: cega (`estimate_offset`), com uma etapa grosseira sobre o
+envelope (100 Hz) do áudio inteiro, que encontra o alinhamento aproximado mesmo em horas de
+gravação, seguida de uma fina em 8 kHz que refina para ~1 ms; e guiada (`estimate_offset_near`),
+que já sabe a vizinhança esperada e por isso correlaciona direto em 8 kHz, sem a etapa grosseira —
+o envelope de 100 Hz existe para tornar viável um arquivo inteiro de horas, mas amassa demais um
+recorte de minutos, a ponto de a rajada de áudio certa perder para uma coincidência de ruído em
+outro ponto do recorte. O resultado é o instante, no relógio da fonte principal, em que a outra
+fonte começa.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ RATE = 8000  # Hz do áudio extraído para a correlação
 ENVELOPE_HZ = 100  # resolução da etapa grosseira
 FINE_WINDOW_S = 2.0  # busca fina ao redor do resultado grosseiro
 FINE_EXCERPT_S = 90.0  # trecho usado na etapa fina (basta para refinar)
+MIN_GUIDED_OVERLAP_S = 8.0  # abaixo disso não há sinal suficiente para correlacionar com confiança
+MAX_GUIDED_OVERLAP_S = 600.0  # teto do trecho correlacionado na busca guiada, para a FFT ficar rápida
 
 
 @dataclass(frozen=True)
@@ -122,3 +128,54 @@ def sync_offset(
     m = extract_pcm(runner, master, workdir / f"{master.stem}.sync.wav", master_stream)
     o = extract_pcm(runner, other, workdir / f"{other.stem}.sync.wav", other_stream)
     return estimate_offset(read_pcm(m), read_pcm(o))
+
+
+def estimate_offset_near(
+    master: np.ndarray, other: np.ndarray, expected: float, tolerance: float, rate: int = RATE
+) -> SyncResult:
+    """Correlaciona só a região onde `other` deveria cair se o deslocamento for `expected ± tolerance`,
+    para achar um alinhamento confiável entre dois arquivos longos com pouca sobreposição em comum
+    (a correlação cega dilui o sinal real no ruído do resto do arquivo)."""
+    master_duration = len(master) / rate
+    other_duration = len(other) / rate
+    overlap_start = max(0.0, expected)
+    overlap_end = min(master_duration, expected + other_duration)
+    if overlap_end - overlap_start < MIN_GUIDED_OVERLAP_S:
+        return SyncResult(round(expected, 4), 0.0)
+
+    m_lo = max(0.0, expected - tolerance)
+    m_hi = min(master_duration, expected + other_duration + tolerance)
+    if m_hi - m_lo > MAX_GUIDED_OVERLAP_S:
+        center = (overlap_start + overlap_end) / 2
+        half = MAX_GUIDED_OVERLAP_S / 2
+        m_lo = max(0.0, center - half)
+        m_hi = min(master_duration, center + half)
+
+    o_lo = max(0.0, m_lo - expected)
+    o_hi = min(other_duration, m_hi - expected)
+    seg_m = master[int(round(m_lo * rate)) : int(round(m_hi * rate))]
+    seg_o = other[int(round(o_lo * rate)) : int(round(o_hi * rate))]
+    if len(seg_m) < rate or len(seg_o) < rate:  # menos de 1s em algum lado: nada para correlacionar
+        return SyncResult(round(expected, 4), 0.0)
+
+    # correlação direta em `rate` (sem o envelope grosseiro): o recorte já é pequeno o bastante
+    # (no máximo `MAX_GUIDED_OVERLAP_S`) para a FFT ficar rápida mesmo na resolução plena
+    lag, confidence = _xcorr_lag(seg_m - seg_m.mean(), seg_o - seg_o.mean())
+    absolute = lag / rate + m_lo - o_lo  # compensa o corte: os dois trechos começam depois de 0
+    return SyncResult(round(absolute, 4), round(confidence, 2))
+
+
+def sync_offset_near(
+    runner: FFmpegRunner,
+    master: Path,
+    other: Path,
+    workdir: Path,
+    expected: float,
+    tolerance: float,
+    master_stream: int = 0,
+    other_stream: int = 0,
+) -> SyncResult:
+    """Como `sync_offset`, mas guiado por um deslocamento esperado; reaproveita o PCM já extraído."""
+    m = extract_pcm(runner, master, workdir / f"{master.stem}.sync.wav", master_stream)
+    o = extract_pcm(runner, other, workdir / f"{other.stem}.sync.wav", other_stream)
+    return estimate_offset_near(read_pcm(m), read_pcm(o), expected, tolerance)

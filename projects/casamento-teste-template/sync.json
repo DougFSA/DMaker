@@ -1,0 +1,124 @@
+{
+ "_parts": {
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7830.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4|blind": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7830.MP4",
+    633252576,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4",
+    1023351177
+   ],
+   "offset": -19.5261,
+   "confidence": 31.91
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4|D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|blind": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4",
+    1023351177,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664
+   ],
+   "offset": 66.39,
+   "confidence": 3.25
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4|D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7832.MP4|blind": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4",
+    1023351177,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7832.MP4",
+    1802364584
+   ],
+   "offset": -296.1,
+   "confidence": 2.67
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4|D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|436.1": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_110334.mp4",
+    1023351177,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664
+   ],
+   "offset": 469.8371,
+   "confidence": 39.42
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111336.mp4|165.7": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111336.mp4",
+    112486825
+   ],
+   "offset": 132.0183,
+   "confidence": 29.15
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111503.mp4|251.7": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111503.mp4",
+    106765261
+   ],
+   "offset": 218.7339,
+   "confidence": 22.69
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111628.mp4|337.4": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111628.mp4",
+    72499195
+   ],
+   "offset": 303.9747,
+   "confidence": 24.22
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4|409.9": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7831-003.MP4",
+    2806282664,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4",
+    4881715804
+   ],
+   "offset": 376.3227,
+   "confidence": 79.42
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4|D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7832.MP4|1424.1": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4",
+    4881715804,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7832.MP4",
+    1802364584
+   ],
+   "offset": 1457.7465,
+   "confidence": 88.27
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4|D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4|2584.1": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_111740.mp4",
+    4881715804,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4",
+    2744974128
+   ],
+   "offset": 2618.0844,
+   "confidence": 77.48
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_120431.mp4|225.9": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4",
+    2744974128,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_120431.mp4",
+    1950238619
+   ],
+   "offset": 192.0924,
+   "confidence": 245.88
+  },
+  "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4|D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_122328.mp4|1363.4": {
+   "key": [
+    "D:\\casamento comunitario 15-08\\Videos\\Camera2\\MVI_7833-002.MP4",
+    2744974128,
+    "D:\\casamento comunitario 15-08\\Videos\\Camera1\\20260815_122328.mp4",
+    937732215
+   ],
+   "offset": 1329.497,
+   "confidence": 83.78
+  }
+ }
+}

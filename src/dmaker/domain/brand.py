@@ -42,6 +42,7 @@ DEFAULT_THEME = {
         "cta_text": "primary",
         "card_variant": "dark",
     },
+    "card_layouts": {},
 }
 
 
@@ -62,6 +63,8 @@ class Theme:
     cta: dict = field(default_factory=dict)
     style: dict = field(default_factory=dict)
     captions: dict = field(default_factory=dict)
+    card_layouts: dict[str, dict] = field(default_factory=dict)
+    base_dir: Path | None = None  # pasta da marca, para resolver fundos, imagens e fontes de layout
     key: str = "default"
 
     @property
@@ -92,10 +95,19 @@ class Theme:
     def no_dash(self) -> bool:
         return bool(self.rules.get("no_dash"))
 
+    def resolve_asset(self, rel: str | Path) -> Path:
+        """Caminho de um arquivo da marca (fundo ou imagem de um layout de cartão); absoluto passa direto."""
+        p = Path(rel)
+        if p.is_absolute():
+            return p
+        if self.base_dir is None:
+            raise FileNotFoundError(f"caminho relativo {str(rel)!r} sem pasta de marca para resolver")
+        return self.base_dir / p
+
 
 def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
     merged = json.loads(json.dumps(DEFAULT_THEME))
-    for section in ("colors", "fonts", "rules", "cta", "style", "captions"):
+    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts"):
         merged[section].update(data.get(section, {}))
     merged["name"] = data.get("name", merged["name"])
     logos = {}
@@ -104,6 +116,15 @@ def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
         if not p.is_absolute() and base is not None:
             p = base / p
         logos[k] = p
+    # arquivo .ttf por papel de fonte (script, date, serif...): caminho candidato na pasta da marca;
+    # media.fonts.resolve_file cai para as fontes do Windows se não existir ali
+    font_files = {}
+    for role, filename in data.get("fonts", {}).get("files", {}).items():
+        p = Path(filename)
+        if not p.is_absolute() and base is not None:
+            p = base / "fonts" / p
+        font_files[role] = p
+    merged["fonts"]["files"] = font_files
     return Theme(
         name=merged["name"],
         colors={k: normalize_hex(v) for k, v in merged["colors"].items()},
@@ -113,6 +134,8 @@ def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
         cta=merged["cta"],
         style=merged["style"],
         captions=merged["captions"],
+        card_layouts=merged["card_layouts"],
+        base_dir=base,
         key=key,
     )
 

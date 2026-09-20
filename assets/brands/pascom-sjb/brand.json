@@ -1,0 +1,125 @@
+{
+  "name": "PASCOM São João Batista",
+  "colors": {
+    "primary": "#1a1a1a",
+    "text": "#1a1a1a",
+    "bg": "#ffffff",
+    "bg_dark": "#1a1a1a"
+  },
+  "fonts": {
+    "family": "Poppins",
+    "title": "bold",
+    "body": "regular",
+    "highlight": "medium",
+    "light": "light",
+    "files": {
+      "script": "GreatVibes-Regular.ttf",
+      "date": "PlayfairDisplay-Italic.ttf",
+      "serif": "georgia.ttf"
+    }
+  },
+  "logos": {
+    "paroquia": "psjb.png",
+    "pascom": "logopascom.png"
+  },
+  "rules": {
+    "no_dash": true
+  },
+  "style": {
+    "card_variant": "light"
+  },
+  "card_layouts": {
+    "abertura": {
+      "background": "cards/placa.png",
+      "elements": [
+        {
+          "kind": "text",
+          "text": "{{data}}",
+          "font": "date",
+          "size": 118,
+          "y": 190,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "align": "center"
+        },
+        {
+          "kind": "text",
+          "text": "{{titulo}}",
+          "font": "script",
+          "size": 200,
+          "y": 400,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "align": "center"
+        },
+        {
+          "kind": "lines",
+          "field": "nomes",
+          "font": "script",
+          "size": 75,
+          "y": 632,
+          "x": 850,
+          "line_gap": 88,
+          "per_line": 2,
+          "join": "   ·   ",
+          "color": "#1a1a1a",
+          "shadow": true,
+          "single_size": 140,
+          "single_y": 640
+        },
+        {
+          "kind": "text",
+          "text": "{{igreja}}",
+          "font": "serif",
+          "size": 54,
+          "y": 880,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "align": "center"
+        },
+        {
+          "kind": "text",
+          "text": "{{cidade}}",
+          "font": "serif",
+          "size": 54,
+          "y": 945,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "align": "center"
+        }
+      ]
+    },
+    "creditos": {
+      "background": "cards/placa.png",
+      "elements": [
+        {
+          "kind": "blocks",
+          "title_font": "serif",
+          "title_size": 52,
+          "text_font": "serif",
+          "text_size": 38,
+          "title_gap": 66,
+          "line_gap": 46,
+          "block_gap": 34,
+          "center_y": true,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "items": [
+            { "title": "Presidente da Celebração", "text": "{{celebrante}}" },
+            { "title": "Diácono", "text": "{{diacono}}" },
+            { "title": "Cerimonial", "text": "{{cerimonial}}" },
+            { "title": "Fotos e Filmagem", "text": "Equipe Pastoral da Comunicação\n(PASCOM)" },
+            { "title": "Música", "text": "{{musicos}}" }
+          ]
+        }
+      ]
+    },
+    "encerramento": {
+      "background": "cards/placa.png",
+      "elements": [
+        { "kind": "image", "src": "logo:paroquia", "width": 760, "x": 880, "y": 40, "blend": "multiply" },
+        { "kind": "image", "src": "logo:pascom", "width": 600, "x": 440, "y": 420, "blend": "multiply" }
+      ]
+    }
+  }
+}

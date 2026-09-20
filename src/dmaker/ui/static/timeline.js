@@ -21,7 +21,9 @@
  *   ensurePlayheadVisible()
  *
  * callbacks: { onSeek(t), onSelect(item, trackId, additive), onClearSelection(),
- *              onOp(op) }  -- op é o corpo de POST /api/projects/{nome}/edit (campo "op")
+ *              onOp(op),   -- op é o corpo de POST /api/projects/{nome}/edit (campo "op")
+ *              onTrackToggle(trackId, field, value),  -- clique em M/H/cadeado do cabeçalho
+ *              onLockedAttempt(trackId) }              -- tentativa de mexer num item de trilha bloqueada
  */
 
 const TL_HEADER_WIDTH = 92;
@@ -93,6 +95,27 @@ function tlTrackLabel(track) {
   return `${track.label}${icon}`;
 }
 
+/** M (mudo) aparece nas trilhas de áudio; H (ocultar) nas de vídeo além da V1, texto, gráficos
+ * e legendas (V1 é a linha do tempo principal: não daria pra renderizar sem ela); o cadeado
+ * aparece em todas. Função pura, só decide o que mostrar no cabeçalho da trilha. */
+function tlHeaderButtonsHtml(track) {
+  const buttons = [];
+  if (track.kind === "audio") {
+    buttons.push(tlHeaderButton(track, "muted", "track-mute", "M", "Mudo (Ctrl+M)"));
+  }
+  if (track.id !== "V1" && (track.kind === "video" || ["TX", "GR", "CC"].includes(track.id))) {
+    buttons.push(tlHeaderButton(track, "hidden", "track-hide", "H", "Ocultar (Ctrl+H)"));
+  }
+  buttons.push(tlHeaderButton(track, "locked", "track-lock", "L", "Bloquear edição (Ctrl+L)"));
+  return buttons.join("");
+}
+
+function tlHeaderButton(track, field, className, letter, title) {
+  const active = track[field] ? "active" : "";
+  return `<button type="button" class="tl-track-btn ${className} ${active}"
+      data-track-action="${field}" data-track-id="${tlEsc(track.id)}" title="${tlEsc(title)}">${letter}</button>`;
+}
+
 /** Um item tem forma de onda quando é áudio de clipe (A1), faixa externa (A2, A3...), música (MUS)
  * ou um PiP (V2+, item de vídeo): os únicos tipos com som na linha do tempo. Função pura. */
 function tlWaveformEligible(track, item) {
@@ -103,13 +126,15 @@ function tlWaveformEligible(track, item) {
   return false;
 }
 
-/** Caminho do arquivo de áudio de um item: o dele mesmo (`src`) ou o da fonte nomeada (`source`),
- * como em `view.sources`. Função pura. */
+/** Caminho absoluto do arquivo de áudio de um item: `item.path` (já resolvido pela spec, ver
+ * `pipeline.timeline_view`) ou, na falta dele, `src`/a fonte nomeada em `view.sources` (mantido só
+ * como reforço; toda trilha com áudio já vem com `path` da vista). Função pura. */
 function tlSourcePath(view, item) {
+  if (item.path) return item.path;
   if (item.src) return item.src;
   if (item.source) {
     const src = view.sources && view.sources[item.source];
-    return src ? src.src : null;
+    return src ? src.path || src.src : null;
   }
   return null;
 }
@@ -143,7 +168,10 @@ function tlFileTimeAt(item, sessionTime, rate, offset) {
 }
 
 function createTimeline(container, callbacks) {
-  const cb = Object.assign({ onSeek() {}, onSelect() {}, onClearSelection() {}, onOp() {} }, callbacks || {});
+  const cb = Object.assign(
+    { onSeek() {}, onSelect() {}, onClearSelection() {}, onOp() {}, onTrackToggle() {}, onLockedAttempt() {} },
+    callbacks || {}
+  );
   let view = { total: 0, fps: 30, tracks: [] };
   let pxPerSec = 60;
   let snapEnabled = true;
@@ -256,9 +284,20 @@ function createTimeline(container, callbacks) {
 
   function renderTrack(track) {
     const items = track.items.map((item) => itemHtml(track, item)).join("");
+    const rowClasses = [
+      "tl-row",
+      track.muted ? "tl-row-muted" : "",
+      track.hidden ? "tl-row-hidden" : "",
+      track.locked ? "tl-row-locked" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     return `
-      <div class="tl-row" data-track-id="${tlEsc(track.id)}">
-        <div class="tl-row-header" title="${tlEsc(track.label)}">${tlEsc(tlTrackLabel(track))}</div>
+      <div class="${rowClasses}" data-track-id="${tlEsc(track.id)}">
+        <div class="tl-row-header" title="${tlEsc(track.label)}">
+          <span class="tl-row-title">${tlEsc(tlTrackLabel(track))}</span>
+          <span class="tl-track-buttons">${tlHeaderButtonsHtml(track)}</span>
+        </div>
         <div class="tl-row-lane" data-track-id="${tlEsc(track.id)}" style="width:${totalWidthPx()}px">
           ${renderTransitions(track)}${items}
         </div>
@@ -468,6 +507,7 @@ function createTimeline(container, callbacks) {
       const trackId = itemEl.dataset.trackId;
       const track = view.tracks.find((t) => t.id === trackId);
       const item = track && track.items.find((it) => it.id === itemEl.dataset.itemId);
+      if (track && track.locked) { cb.onLockedAttempt(trackId); return; }
       if (track && item && tlIsDraggable(trackId, item)) {
         e.preventDefault();
         startItemDrag(e, track, item, handleEl.dataset.handle);
@@ -479,6 +519,7 @@ function createTimeline(container, callbacks) {
       const track = view.tracks.find((t) => t.id === trackId);
       const item = track && track.items.find((it) => it.id === itemEl.dataset.itemId);
       if (!track || !item) return;
+      if (track.locked) { cb.onLockedAttempt(trackId); return; }
       selectSingle(item.id, e.ctrlKey || e.metaKey);
       cb.onSelect(item, trackId, e.ctrlKey || e.metaKey);
       if (itemEl.dataset.draggable === "1") {
@@ -492,6 +533,15 @@ function createTimeline(container, callbacks) {
       cb.onClearSelection();
       startSeekDrag(e);
     }
+  });
+
+  scrollEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-track-action]");
+    if (!btn) return;
+    const track = view.tracks.find((t) => t.id === btn.dataset.trackId);
+    if (!track) return;
+    const field = btn.dataset.trackAction;
+    cb.onTrackToggle(track.id, field, !track[field]);
   });
 
   function zoomTo(next, focusSeconds) {

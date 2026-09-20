@@ -47,6 +47,9 @@ const KEYMAP_DEFAULTS = [
   { id: "show_shortcuts", label: "Mostrar atalhos", keys: ["?"], category: "geral" },
   { id: "media_append", label: "Acrescentar a mídia selecionada no fim da V1", keys: ["a"], category: "midia" },
   { id: "media_insert", label: "Inserir a mídia selecionada no cursor", keys: ["v"], category: "midia" },
+  { id: "track_mute", label: "Mudo na trilha atual", keys: ["Ctrl+m"], category: "edicao" },
+  { id: "track_hide", label: "Ocultar a trilha atual", keys: ["Ctrl+h"], category: "edicao" },
+  { id: "track_lock", label: "Bloquear a trilha atual", keys: ["Ctrl+l"], category: "edicao" },
 ];
 
 function isTypingTarget(el) {

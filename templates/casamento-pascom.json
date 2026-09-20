@@ -1,0 +1,124 @@
+{
+  "description": "Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (multicam), cartões da marca pascom-sjb e trilha na abertura e no encerramento.",
+  "params": {
+    "camera_altar": {
+      "description": "pasta com os arquivos da câmera do altar (Canon), referência de áudio e de tempo",
+      "type": "dir",
+      "required": true
+    },
+    "camera_lateral": {
+      "description": "pasta com os arquivos da câmera lateral/aberta (celular)",
+      "type": "dir",
+      "required": true
+    },
+    "nomes": {
+      "description": "nomes dos casais, um item por casal no formato \"Nome & Nome\"",
+      "type": "list",
+      "required": true
+    },
+    "data": {
+      "description": "data da cerimônia, ex.: 15.08.2026",
+      "type": "text",
+      "required": true
+    },
+    "titulo": {
+      "description": "título do cartão de abertura",
+      "default": "Casamento Comunitário",
+      "type": "text"
+    },
+    "igreja": {
+      "description": "igreja da cerimônia",
+      "default": "Matriz da Paróquia São João Batista",
+      "type": "text"
+    },
+    "cidade": {
+      "default": "Amparo-SP",
+      "type": "text"
+    },
+    "celebrante": {
+      "default": "Pe. Reginaldo Aparecido Grilo",
+      "type": "text"
+    },
+    "diacono": {
+      "default": "Jorge Márcio Alves",
+      "type": "text"
+    },
+    "cerimonial": {
+      "default": "Pastoral da Família",
+      "type": "text"
+    },
+    "musicos": {
+      "default": "Rodrigo Arantes, Cláudio Diogo Rodrigues,\nIvan Lorandi e Eliana Lorandi",
+      "type": "text"
+    },
+    "trilha": {
+      "description": "música da abertura e do encerramento",
+      "default": "C:\\Users\\Douglas Vasconcelos\\Videos\\4K Video Downloader+\\Can't Help Falling In Love.m4a",
+      "type": "path"
+    },
+    "inicio": {
+      "description": "relógio da sessão (segundos, no arquivo da câmera do altar) onde a cerimônia começa; null = cobertura inteira",
+      "default": null,
+      "type": "number"
+    },
+    "fim": {
+      "description": "relógio da sessão (segundos) onde a cerimônia termina; null = cobertura inteira",
+      "default": null,
+      "type": "number"
+    }
+  },
+
+  "name": "casamento-pascom",
+  "brand": "pascom-sjb",
+  "output": { "preset": "youtube/video", "quality": "high" },
+  "sources": {
+    "altar": { "parts": "{{camera_altar}}", "label": "Altar (Canon)" },
+    "lateral": { "parts": "{{camera_lateral}}", "sync": "auto", "label": "Lateral (celular)" }
+  },
+  "master": "altar",
+  "timeline": [
+    {
+      "type": "card",
+      "layout": "abertura",
+      "fields": { "data": "{{data}}", "titulo": "{{titulo}}", "nomes": "{{nomes}}", "igreja": "{{igreja}}", "cidade": "{{cidade}}" },
+      "duration": 4.5
+    },
+    {
+      "type": "card",
+      "layout": "creditos",
+      "fields": { "celebrante": "{{celebrante}}", "diacono": "{{diacono}}", "cerimonial": "{{cerimonial}}", "musicos": "{{musicos}}" },
+      "duration": 6.5,
+      "transition": { "type": "dissolve", "duration": 1.5 }
+    },
+    {
+      "type": "card",
+      "layout": "encerramento",
+      "duration": 15.0,
+      "transition": { "type": "dissolve", "duration": 1.5 }
+    }
+  ],
+  "multicam": {
+    "at": 2,
+    "cameras": ["altar", "lateral"],
+    "main": "altar",
+    "audio": "altar",
+    "phases": "casamento",
+    "start": "{{inicio}}",
+    "end": "{{fim}}",
+    "transition_in": { "type": "dissolve", "duration": 2.0 }
+  },
+  "audio": {
+    "tracks": [{ "source": "altar", "volume": 1.0 }],
+    "music": {
+      "src": "{{trilha}}",
+      "volume": 0.8,
+      "loop": false,
+      "ducking": false,
+      "spans": [
+        { "start": 0, "end": 16, "start_at": 0, "fade_in": 0.5, "fade_out": 7 },
+        { "start": 33.5, "from_end": true, "tail": true, "start_at": 0.5, "fade_in": 5, "fade_out": 5 }
+      ]
+    },
+    "normalize": "two-pass"
+  }
+}

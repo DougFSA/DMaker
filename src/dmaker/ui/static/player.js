@@ -120,11 +120,16 @@ function createPlayer(container, callbacks) {
     return src ? src.offset || 0 : 0;
   }
 
+  /** Caminho absoluto do arquivo por trás de um item: `item.path`, já resolvido pela spec
+   * (`pipeline.timeline_view._resolve_item_path`), com `src`/a fonte nomeada como reforço. É por
+   * causa deste caminho (em vez do `src` cru, que podia ser relativo à pasta do projeto) que a
+   * prévia mostra qualquer projeto, não só os que têm tudo em caminho absoluto. */
   function sourcePath(item) {
+    if (item.path) return item.path;
     if (item.src) return item.src;
     if (item.source) {
       const src = view.sources && view.sources[item.source];
-      return src ? src.src : null;
+      return src ? src.path || src.src : null;
     }
     return null;
   }
@@ -160,12 +165,17 @@ function createPlayer(container, callbacks) {
     return sessionTime - offset;
   }
 
+  /** Um `<video>`/`<audio>` por URL única (proxy ou arquivo original), criado uma vez e reaproveitado
+   * enquanto o item mostrar essa mesma URL. Bug real encontrado aqui: o elemento nunca tinha `src`
+   * atribuído (só ficava no DOM, mudo e sem quadro nenhum) - por isso nenhum clipe tocava na prévia,
+   * mesmo com o caminho já certo. */
   function getMediaEntry(url, kind) {
     let entry = mediaCache.get(url);
     if (!entry) {
       const el = document.createElement(kind);
       el.preload = "auto";
       el.playsInline = true;
+      el.src = url;
       el.addEventListener("error", () => {
         entry.errored = true;
         showNotice("sem proxy: gerando...");
@@ -202,7 +212,7 @@ function createPlayer(container, callbacks) {
       return;
     }
     if (item.kind === "image") {
-      layerV1.innerHTML = `<img class="player-media" src="${plEsc(plResolveMediaUrl(item.src, proxyUrls))}" alt="">`;
+      layerV1.innerHTML = `<img class="player-media" src="${plEsc(plResolveMediaUrl(sourcePath(item), proxyUrls))}" alt="">`;
     } else if (item.kind === "card") {
       const url = cardPreviewUrl(item);
       layerV1.innerHTML = url ? `<img class="player-media" src="${plEsc(url)}" alt="">` : "";
@@ -246,7 +256,7 @@ function createPlayer(container, callbacks) {
 
   function renderGr() {
     const track = view.tracks.find((t) => t.id === "GR");
-    if (!track) { layerGr.innerHTML = ""; return; }
+    if (!track || track.hidden) { layerGr.innerHTML = ""; return; }
     const active = track.items.filter((it) => currentTime >= it.start && currentTime < it.end);
     layerGr.innerHTML = active.map((item) => grItemHtml(item)).join("");
   }
@@ -269,24 +279,28 @@ function createPlayer(container, callbacks) {
     const position = (item.extra && item.extra.position) || "top-right";
     const marginPctX = view.width ? (margin / view.width) * 100 : 3;
     const marginPctY = view.height ? (margin / view.height) * 100 : 3;
-    const url = resolveImageSrc(item.src);
+    const url = resolveImageSrc(item);
     if (!url) return "";
     return `<img class="player-overlay-image" style="width:${(width * 100).toFixed(2)}%;opacity:${opacity};${plCornerStyle(position, marginPctX, marginPctY)}" src="${plEsc(url)}" alt="">`;
   }
 
-  function resolveImageSrc(src) {
+  /** "logo"/"logo:variante" resolve pelo tema (não é arquivo); qualquer outra imagem usa `item.path`
+   * (caminho absoluto já resolvido pela spec) e só cai para `plFileUrl(item.src)` se a vista, por
+   * algum motivo, não tiver mandado o path. */
+  function resolveImageSrc(item) {
+    const src = item.src;
     if (!src) return null;
     if (src === "logo" || src.startsWith("logo:")) {
       const kind = src.includes(":") ? src.split(":")[1] : "horizontal";
       return theme.logos && theme.logos[kind];
     }
-    return plFileUrl(src);
+    return item.path ? plFileUrl(item.path) : plFileUrl(src);
   }
 
   /* ---------- camada PiP (V2, V3...) ---------- */
 
   function renderPip() {
-    const pipTracks = view.tracks.filter((t) => t.kind === "video" && t.id !== "V1");
+    const pipTracks = view.tracks.filter((t) => t.kind === "video" && t.id !== "V1" && !t.hidden);
     const activeItems = [];
     for (const track of pipTracks) {
       const item = track.items.find((it) => currentTime >= it.start && currentTime < it.end);
@@ -341,7 +355,7 @@ function createPlayer(container, callbacks) {
   }
 
   function syncPip() {
-    const pipTracks = view.tracks.filter((t) => t.kind === "video" && t.id !== "V1");
+    const pipTracks = view.tracks.filter((t) => t.kind === "video" && t.id !== "V1" && !t.hidden);
     for (const track of pipTracks) {
       const item = track.items.find((it) => currentTime >= it.start && currentTime < it.end);
       if (!item) continue;
@@ -371,7 +385,7 @@ function createPlayer(container, callbacks) {
 
   function renderTx() {
     const track = view.tracks.find((t) => t.id === "TX");
-    if (!track) { layerTx.innerHTML = ""; return; }
+    if (!track || track.hidden) { layerTx.innerHTML = ""; return; }
     const active = track.items.filter((it) => currentTime >= it.start && currentTime < it.end);
     layerTx.innerHTML = active.map((item) => txItemHtml(item)).join("");
   }
@@ -416,11 +430,10 @@ function createPlayer(container, callbacks) {
       if (track.id !== "MUS" && !/^A[2-9]\d*$/.test(track.id)) continue;
       const item = track.items[0];
       if (!item) continue;
-      const path = item.src || (item.source ? sourcePath(item) : null);
-      const url = plResolveMediaUrl(path, proxyUrls);
+      const url = plResolveMediaUrl(sourcePath(item), proxyUrls);
       if (!url) continue;
       const entry = getMediaEntry(url, "audio");
-      entry.path = path;
+      entry.path = sourcePath(item);
       const el = entry.el;
       const target = fileTimeFor(item, currentTime, 1);
       activeChannel.set(`audio:${track.id}`, url);

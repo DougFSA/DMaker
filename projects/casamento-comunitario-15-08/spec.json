@@ -1,0 +1,1515 @@
+{
+  "name": "casamento-comunitario-15-08",
+  "output": {
+    "preset": "youtube/video",
+    "quality": "high"
+  },
+  "sources": {
+    "c1a": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_110334.mp4",
+      "sync": 0.0,
+      "label": "20260815_110334.mp4"
+    },
+    "c1b": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_111336.mp4",
+      "sync": 601.738,
+      "label": "20260815_111336.mp4"
+    },
+    "c1c": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_111503.mp4",
+      "sync": 688.454,
+      "label": "20260815_111503.mp4"
+    },
+    "c1d": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_111628.mp4",
+      "sync": 773.695,
+      "label": "20260815_111628.mp4"
+    },
+    "c1e": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_111740.mp4",
+      "sync": 846.06,
+      "label": "20260815_111740.mp4"
+    },
+    "c1f": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_120431.mp4",
+      "sync": 3656.239,
+      "label": "20260815_120431.mp4"
+    },
+    "c1g": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera1/20260815_122328.mp4",
+      "sync": 4793.599,
+      "label": "20260815_122328.mp4"
+    },
+    "c2a": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera2/MVI_7830.MP4",
+      "sync": 19.526,
+      "label": "MVI_7830.MP4"
+    },
+    "c2b": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera2/MVI_7831-003.MP4",
+      "sync": 469.72,
+      "label": "MVI_7831-003.MP4"
+    },
+    "c2c": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera2/MVI_7832.MP4",
+      "sync": 2303.787,
+      "label": "MVI_7832.MP4"
+    },
+    "c2d": {
+      "src": "D:/casamento comunitario 15-08/Videos/Camera2/MVI_7833-002.MP4",
+      "sync": 3464.148,
+      "label": "MVI_7833-002.MP4"
+    }
+  },
+  "master": "c1a",
+  "timeline": [
+    {
+      "type": "image",
+      "src": "cards/abertura.png",
+      "duration": 4.5,
+      "motion": "none",
+      "label": "cartao de abertura"
+    },
+    {
+      "type": "image",
+      "src": "cards/creditos.png",
+      "duration": 6.5,
+      "motion": "none",
+      "transition": {
+        "type": "dissolve",
+        "duration": 1.5
+      },
+      "label": "creditos"
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 12,
+      "end": 19.526,
+      "label": "acolhida",
+      "transition": {
+        "type": "dissolve",
+        "duration": 2.0
+      },
+      "volume": 1.35
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 19.526,
+      "end": 95,
+      "label": "acolhida",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2a",
+      "start": 95,
+      "end": 125,
+      "label": "acolhida",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 125,
+      "end": 200,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2a",
+      "start": 200,
+      "end": 212,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 212,
+      "end": 240,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2a",
+      "start": 240,
+      "end": 262,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 262,
+      "end": 398,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2a",
+      "start": 398,
+      "end": 425.298,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 425.3,
+      "end": 469.72,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "volume": 1.45
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 469.72,
+      "end": 512,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1a",
+      "start": 512,
+      "end": 585,
+      "label": "entrada noiva 1",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 585,
+      "end": 612,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1b",
+      "start": 612,
+      "end": 666.989,
+      "label": "entrada noiva 2",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 667,
+      "end": 690,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1c",
+      "start": 690,
+      "end": 749.5,
+      "label": "entrada noiva 3",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 749.5,
+      "end": 775,
+      "label": "entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1d",
+      "start": 775,
+      "end": 815,
+      "label": "entrada noiva 4",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 815,
+      "end": 846.5,
+      "label": "saudacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 846.5,
+      "end": 876,
+      "label": "saudacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 876,
+      "end": 935,
+      "label": "saudacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 935,
+      "end": 958,
+      "label": "saudacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 958,
+      "end": 982,
+      "label": "saudacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 982,
+      "end": 1000,
+      "label": "primeira leitura",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1000,
+      "end": 1060,
+      "label": "primeira leitura",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1060,
+      "end": 1095,
+      "label": "primeira leitura",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1095,
+      "end": 1110,
+      "label": "salmo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1110,
+      "end": 1160,
+      "label": "salmo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1160,
+      "end": 1230,
+      "label": "salmo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1230,
+      "end": 1280,
+      "label": "salmo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1280,
+      "end": 1345,
+      "label": "salmo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1345,
+      "end": 1385,
+      "label": "evangelho",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1385,
+      "end": 1450,
+      "label": "evangelho",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1450,
+      "end": 1490,
+      "label": "evangelho",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1490,
+      "end": 1510,
+      "label": "evangelho",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1510,
+      "end": 1548,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1548,
+      "end": 1575,
+      "label": "homilia reacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1575,
+      "end": 1640,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1640,
+      "end": 1665,
+      "label": "homilia reacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1665,
+      "end": 1730,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1730,
+      "end": 1750,
+      "label": "homilia reacao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1750,
+      "end": 1810,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1810,
+      "end": 1860,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1860,
+      "end": 1930,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 1930,
+      "end": 1980,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 1980,
+      "end": 2050,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 2050,
+      "end": 2100,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2100,
+      "end": 2170,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2b",
+      "start": 2170,
+      "end": 2220,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2220,
+      "end": 2268.784,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2268.784,
+      "end": 2303.787,
+      "label": "homilia",
+      "transition": {
+        "type": "cut"
+      },
+      "volume": 1.55
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2303.787,
+      "end": 2325,
+      "label": "consentimento",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2325,
+      "end": 2360,
+      "label": "consentimento",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2360,
+      "end": 2394,
+      "label": "consentimento Daniel e Bruna",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2394,
+      "end": 2455,
+      "label": "consentimento Matheus e Gabriele, Antonio Carlos e Giovana",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2455,
+      "end": 2478,
+      "label": "consentimento",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2478,
+      "end": 2498,
+      "label": "consentimento Luis Carlos e Debora",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2498,
+      "end": 2547,
+      "label": "consentimento Luis Carlos e Debora",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2547,
+      "end": 2600,
+      "label": "votos Daniel e Bruna",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2600,
+      "end": 2616,
+      "label": "votos Daniel e Bruna",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2616,
+      "end": 2684,
+      "label": "votos Matheus e Gabriele",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2684,
+      "end": 2700,
+      "label": "votos Antonio Carlos e Giovana",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2700,
+      "end": 2722,
+      "label": "votos Giovana",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2722,
+      "end": 2765,
+      "label": "votos Luis Carlos e Debora",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2765,
+      "end": 2825,
+      "label": "votos e bencao",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2825,
+      "end": 2848,
+      "label": "aliancas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2848,
+      "end": 2870,
+      "label": "aliancas entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2870,
+      "end": 2905,
+      "label": "aliancas entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2905,
+      "end": 2925,
+      "label": "aliancas entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 2925,
+      "end": 2995,
+      "label": "aliancas entrada",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 2995,
+      "end": 3062,
+      "label": "bencao das aliancas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3062,
+      "end": 3125,
+      "label": "aliancas Daniel e Bruna",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 3125,
+      "end": 3160,
+      "label": "aliancas Bruna",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3160,
+      "end": 3210,
+      "label": "aliancas Matheus e Gabriele",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 3210,
+      "end": 3265,
+      "label": "aliancas Gabriele, Antonio Carlos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3265,
+      "end": 3340,
+      "label": "aliancas Giovana, Luis Carlos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2c",
+      "start": 3340,
+      "end": 3420,
+      "label": "aliancas Debora e aplausos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3420,
+      "end": 3459.175,
+      "label": "preces",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3459.175,
+      "end": 3464.148,
+      "label": "preces",
+      "transition": {
+        "type": "cut"
+      },
+      "volume": 2.6
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3464.148,
+      "end": 3470,
+      "label": "preces",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3470,
+      "end": 3500,
+      "label": "preces",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3500,
+      "end": 3532,
+      "label": "preces",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3532,
+      "end": 3575,
+      "label": "bencao nupcial",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1e",
+      "start": 3575,
+      "end": 3635,
+      "label": "bencao nupcial",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3635,
+      "end": 3700,
+      "label": "bencao nupcial",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 3700,
+      "end": 3735,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3735,
+      "end": 3765,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 3765,
+      "end": 3800,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3800,
+      "end": 3830,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 3830,
+      "end": 3870,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3870,
+      "end": 3900,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 3900,
+      "end": 3945,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3945,
+      "end": 3968,
+      "label": "assinaturas",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 3968,
+      "end": 4000,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4000,
+      "end": 4015,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4015,
+      "end": 4032,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4032,
+      "end": 4070,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4070,
+      "end": 4105,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4105,
+      "end": 4135,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4135,
+      "end": 4160,
+      "label": "Sagrada Familia",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4160,
+      "end": 4200,
+      "label": "Ave Maria",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4200,
+      "end": 4240,
+      "label": "Ave Maria",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4240,
+      "end": 4275,
+      "label": "bencao final",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4275,
+      "end": 4306,
+      "label": "bencao final",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4306,
+      "end": 4330,
+      "label": "beijo",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4330,
+      "end": 4365,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4365,
+      "end": 4395,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4395,
+      "end": 4430,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4430,
+      "end": 4460,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4460,
+      "end": 4520,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4520,
+      "end": 4550,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4550,
+      "end": 4610,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4610,
+      "end": 4640,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4640,
+      "end": 4700,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1f",
+      "start": 4700,
+      "end": 4730,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4730,
+      "end": 4800,
+      "label": "abracos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1g",
+      "start": 4800,
+      "end": 4860,
+      "label": "fotos no altar",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4860,
+      "end": 4900,
+      "label": "cumprimentos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1g",
+      "start": 4900,
+      "end": 4960,
+      "label": "fotos no altar",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 4960,
+      "end": 5000,
+      "label": "cumprimentos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1g",
+      "start": 5000,
+      "end": 5060,
+      "label": "fotos no altar",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 5060,
+      "end": 5100,
+      "label": "cumprimentos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1g",
+      "start": 5100,
+      "end": 5180,
+      "label": "fotos no altar",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c2d",
+      "start": 5180,
+      "end": 5223.839,
+      "label": "cumprimentos",
+      "transition": {
+        "type": "cut"
+      },
+      "mute": true
+    },
+    {
+      "type": "clip",
+      "source": "c1g",
+      "start": 5223.839,
+      "end": 5312,
+      "label": "saida do ultimo casal",
+      "transition": {
+        "type": "cut"
+      },
+      "volume": 0.9
+    },
+    {
+      "type": "image",
+      "src": "cards/encerramento.png",
+      "duration": 15.0,
+      "motion": "none",
+      "transition": {
+        "type": "dissolve",
+        "duration": 1.5
+      },
+      "label": "cartao de encerramento"
+    }
+  ],
+  "audio": {
+    "tracks": [
+      {
+        "source": "c2a",
+        "volume": 1.0
+      },
+      {
+        "source": "c2b",
+        "volume": 1.0
+      },
+      {
+        "source": "c2c",
+        "volume": 1.0
+      },
+      {
+        "source": "c2d",
+        "volume": 1.0
+      }
+    ],
+    "music": {
+      "src": "C:/Users/Douglas Vasconcelos/Videos/4K Video Downloader+/Can't Help Falling In Love.m4a",
+      "volume": 0.8,
+      "loop": false,
+      "ducking": false,
+      "spans": [
+        {
+          "start": 0,
+          "end": 16,
+          "start_at": 0,
+          "fade_in": 0.5,
+          "fade_out": 7.0
+        },
+        {
+          "start": 5287.5,
+          "end": null,
+          "start_at": 167.76,
+          "fade_in": 5.0,
+          "fade_out": 5.0
+        }
+      ]
+    },
+    "normalize": "two-pass"
+  }
+}

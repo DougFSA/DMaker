@@ -155,3 +155,24 @@ class JobManager:
     def list(self) -> list[dict]:
         with self._lock:
             return [j.snapshot() for j in self._jobs.values()]
+
+    def running(self) -> list[Job]:
+        """Jobs ainda em andamento, para decidir se é seguro encerrar o processo ou trocar de versão."""
+        with self._lock:
+            return [j for j in self._jobs.values() if j.status == "running"]
+
+    def find_running(self, predicate: Callable[[Job], bool]) -> Job | None:
+        """Primeiro job rodando que satisfaz `predicate` (ex.: mesmo projeto e tipo), para reaproveitar
+        em vez de disparar um duplicado (dois pedidos de proxies para a mesma fonte, por exemplo)."""
+        for job in self.running():
+            if predicate(job):
+                return job
+        return None
+
+    def clear_finished(self) -> int:
+        """Remove da lista os jobs que não estão mais rodando (concluídos ou com erro); devolve quantos."""
+        with self._lock:
+            finished_ids = [job_id for job_id, job in self._jobs.items() if job.status != "running"]
+            for job_id in finished_ids:
+                del self._jobs[job_id]
+            return len(finished_ids)

@@ -6,14 +6,16 @@ Só escuta em 127.0.0.1. Progresso dos renders sai por SSE em /api/jobs/{id}/eve
 from __future__ import annotations
 
 import json
+import os
 import queue
 import string
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -22,14 +24,27 @@ from ..domain.brand import available_brands, load_theme
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
 from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
+from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
+from . import layouts as layout_files
 
 STATIC_DIR = Path(__file__).parent / "static"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
+# painéis conhecidos pelo seletor de layouts da interface (espelha KNOWN_PANELS em layout.js).
+LAYOUT_PANELS = {"player", "filters", "media", "timeline", "progress", "properties", "sidebar"}
+
+# calculado uma vez, na importação: representa o código que este processo carregou. O RenderDispatcher
+# (pipeline/remote.py) compara com o build_id() do disco para saber se este servidor está desatualizado.
+SERVER_BUILD_ID = build_id()
+
+# tempo entre a resposta do POST /api/shutdown e o encerramento de fato do processo (ver rota abaixo).
+SHUTDOWN_DELAY_S = 0.3
+
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
+layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
 
 
 # ---------- modelos de entrada ----------
@@ -95,6 +110,15 @@ class TimelineRequest(BaseModel):
 class EditRequest(BaseModel):
     spec: dict
     op: dict
+
+
+class LayoutModel(BaseModel):
+    """Layout salvo da interface: onde cada painel fica, o tamanho dos divisores e o que está oculto."""
+
+    version: int = 1
+    areas: dict[str, str] = Field(default_factory=dict)
+    sizes: dict[str, float] = Field(default_factory=dict)
+    hidden: list[str] = Field(default_factory=list)
 
 
 # ---------- utilidades ----------
@@ -203,6 +227,8 @@ def _run_render(job: Job, name: str, req: RenderRequest, preset: str | None = No
 def state() -> dict:
     return {
         "version": __version__,
+        "build_id": SERVER_BUILD_ID,
+        "running_jobs": len(jobs.running()),
         "root": str(config.ROOT),
         "output_dir": str(config.OUTPUT_DIR),
         "projects_dir": str(config.PROJECTS_DIR),
@@ -286,8 +312,8 @@ def create_project(req: NewProject) -> dict:
     }
 
 
-@app.get("/api/projects/{name}")
-def get_project(name: str) -> dict:
+@app.get("/api/projects/{name}", response_model=None)
+def get_project(name: str) -> dict | JSONResponse:
     from ..pipeline.projects import load_project, project_path
 
     try:
@@ -295,7 +321,17 @@ def get_project(name: str) -> dict:
     except FileNotFoundError as exc:
         raise _error(404, str(exc)) from exc
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+        # a spec no disco não bate com o schema atual (ex.: este servidor está com código antigo e um
+        # campo novo veio "extra"); devolve o JSON cru junto para a página mostrar na aba JSON em vez
+        # de travar ao abrir o projeto.
+        spec_path = project_path(name)
+        try:
+            raw_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw_spec = None
+        return JSONResponse(
+            status_code=422, content={"detail": _validation_detail(exc), "raw_spec": raw_spec}
+        )
     folder = project_path(name).parent
     return {
         "name": project.name,
@@ -546,6 +582,11 @@ def list_jobs() -> list[dict]:
     return sorted(jobs.list(), key=lambda j: j["job_id"])
 
 
+@app.delete("/api/jobs/finished")
+def clear_finished_jobs() -> dict:
+    return {"removed": jobs.clear_finished()}
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -594,6 +635,19 @@ def ping_client() -> dict:
 @app.get("/api/clients")
 def clients_status() -> dict:
     return {"active": (time.time() - _last_client_ping) < _CLIENT_ACTIVE_WINDOW_S}
+
+
+@app.post("/api/shutdown")
+def shutdown() -> dict:
+    """Encerra este processo, usado pelo RenderDispatcher para religar a interface com código
+    atualizado. Recusa (409) se algum job ainda está rodando, para nunca derrubar um render no meio.
+    Responde antes de sair: `os._exit` roda pouco depois, numa thread separada, porque não há um jeito
+    limpo de o uvicorn se encerrar de dentro da própria rota que respondeu ao pedido."""
+    running = jobs.running()
+    if running:
+        raise _error(409, f"Há {len(running)} job(s) rodando; não vou encerrar agora.")
+    threading.Timer(SHUTDOWN_DELAY_S, lambda: os._exit(0)).start()
+    return {"ok": True}
 
 
 # ---------- mídia e conferência ----------
@@ -678,11 +732,18 @@ def build_proxies(name: str) -> dict:
     if all(s.ready for s in status):
         return {"job": None, "proxies": [_proxy_entry(s) for s in status]}
 
+    # a página pode chamar isto duas vezes para o mesmo projeto (hash da URL + clique ao mesmo tempo,
+    # por exemplo); reaproveita o job em andamento em vez de disparar dois processos escrevendo o
+    # mesmo .tmp e disputando o `replace` final.
+    existing = jobs.find_running(lambda j: j.meta.get("project") == name and j.meta.get("kind") == "proxies")
+    if existing is not None:
+        return {"job": existing.snapshot(), "proxies": [_proxy_entry(s) for s in status]}
+
     def work(job: Job) -> list[dict]:
         builder = ProxyBuilder(SubprocessRunner(sink=job.sink()), log=job.log)
         return [_proxy_entry(s) for s in builder.build(project)]
 
-    job = jobs.start(f"{name}: proxies de prévia", work)
+    job = jobs.start(f"{name}: proxies de prévia", work, meta={"project": name, "kind": "proxies"})
     return {"job": job.snapshot(), "proxies": [_proxy_entry(s) for s in status]}
 
 
@@ -789,6 +850,34 @@ def list_outputs() -> list[dict]:
     return [_output_entry(p) for p in files]
 
 
+# ---------- layouts salvos da interface ----------
+
+
+def _validate_layout_panels(layout: LayoutModel) -> None:
+    unknown = (set(layout.areas.values()) | set(layout.hidden)) - LAYOUT_PANELS
+    if unknown:
+        raise _error(400, f"painel desconhecido: {', '.join(sorted(unknown))}")
+
+
+@app.get("/api/layouts")
+def list_layouts() -> dict:
+    return {"layouts": layout_store.list()}
+
+
+@app.put("/api/layouts/{name}")
+def save_layout(name: str, layout: LayoutModel) -> dict:
+    _validate_layout_panels(layout)
+    layout_store.save(name, layout.model_dump())
+    return {"ok": True}
+
+
+@app.delete("/api/layouts/{name}")
+def delete_layout(name: str) -> dict:
+    if not layout_store.delete(name):
+        raise _error(404, "layout não encontrado")
+    return {"ok": True}
+
+
 # ---------- frontend ----------
 
 
@@ -802,7 +891,6 @@ if STATIC_DIR.exists():
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
-    import threading
     import webbrowser
 
     import uvicorn

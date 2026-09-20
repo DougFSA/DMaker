@@ -25,3 +25,6 @@ dist/
 # sistema
 Thumbs.db
 desktop.ini
+
+# layouts salvos da interface (dado da pessoa usando, não do repositório)
+layouts.json

@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -23,6 +24,7 @@ from typing import Any
 
 from .. import config
 from ..media.ffmpeg import ProgressSink
+from .build import build_id
 
 UI_URL_ENV = "DMAKER_UI_URL"
 DEFAULT_UI_URL = "http://127.0.0.1:8765"
@@ -33,6 +35,9 @@ EVENTS_READ_TIMEOUT = 30.0
 
 # Quanto esperar o processo desacoplado da interface responder antes de desistir.
 LAUNCH_TIMEOUT = 15.0
+
+# Quanto esperar o processo antigo da interface sair antes de religar, ao reiniciar por código desatualizado.
+STALE_RESTART_TIMEOUT = 10.0
 
 
 def ui_url() -> str:
@@ -63,6 +68,23 @@ class UIClient:
         try:
             self._request("GET", "/api/state")
             return True
+        except (OSError, ValueError):
+            return False
+
+    def state(self) -> dict:
+        """`/api/state`: versão, `build_id` do código carregado e quantos jobs estão rodando."""
+        return self._request("GET", "/api/state")
+
+    def shutdown(self) -> bool:
+        """Pede para a interface encerrar; True se ela aceitou (nenhum job rodando), False se recusou
+        (409, algum job em andamento) ou se não respondeu."""
+        try:
+            self._request("POST", "/api/shutdown")
+            return True
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                return False
+            raise
         except (OSError, ValueError):
             return False
 
@@ -158,8 +180,11 @@ class RenderDispatcher:
             self.log(message)
 
     def ensure_ui(self) -> bool:
-        """Verifica se a interface está no ar; se não estiver, sobe. Lança RuntimeError se não conseguir."""
+        """Verifica se a interface está no ar; se não estiver, sobe. Se estiver com código desatualizado
+        (subiu antes de uma mudança no pacote), reinicia sozinha quando for seguro (ver `_restart_if_stale`).
+        Lança RuntimeError se não conseguir abrir."""
         if self.client.is_alive():
+            self._restart_if_stale()
             return True
         self._emit(f"Interface não está aberta; subindo em segundo plano ({self.client.base_url})...")
         self.launcher()
@@ -167,6 +192,35 @@ class RenderDispatcher:
         if not self.client.is_alive():
             raise RuntimeError(f"Não consegui abrir a interface DMaker em {self.client.base_url}.")
         return True
+
+    def _restart_if_stale(self) -> None:
+        """Compara o `build_id` do processo no ar com o do código em disco. Iguais: segue como está.
+        Diferentes e sem job rodando: encerra e relança, para o processo passar a rodar o código atual
+        (ex.: um campo novo na spec que o processo antigo rejeitaria). Diferentes e com job rodando:
+        só avisa, para não derrubar um render em andamento."""
+        try:
+            remote_state = self.client.state()
+        except (OSError, ValueError):
+            return  # não deu para checar a versão agora; segue usando a interface como está
+        remote_build_id = remote_state.get("build_id")
+        if remote_build_id is None or remote_build_id == build_id():
+            return
+        running_jobs = remote_state.get("running_jobs", 0)
+        if running_jobs:
+            self._emit(
+                f"A interface está com código antigo mas tem {running_jobs} job(s) rodando; "
+                "não vou reiniciar agora."
+            )
+            return
+        if not self.client.shutdown():
+            return  # recusou (um job pode ter começado entre a checagem e o pedido); segue como está
+        deadline = time.time() + STALE_RESTART_TIMEOUT
+        while self.client.is_alive() and time.time() < deadline:
+            time.sleep(0.2)
+        self.launcher()
+        self._just_launched = True
+        if self.client.is_alive():
+            self._emit("Interface reiniciada com o código atualizado.")
 
     def open_browser_if_needed(self, name: str, job_id: str) -> None:
         """Abre a aba do projeto/job só se acabou de subir o servidor ou se não há ninguém olhando a

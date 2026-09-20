@@ -13,6 +13,7 @@ from dmaker.media.ffmpeg import RecordingRunner
 from dmaker.media.probe import MediaInfo
 from dmaker.pipeline import RenderOptions, RenderPipeline
 from dmaker.pipeline.projects import summarize
+from dmaker.pipeline.sources import expand_parts, resolve_session
 from dmaker.pipeline.sync import SyncResolver
 
 from .test_pipeline_unit import LOUDNORM_JSON, touch_output
@@ -79,13 +80,14 @@ def test_sync_resolver_caches_auto_offsets(wedding, tmp_path):
         calls.append(other.name)
         return fake_finder(master, other, ms, os_)
 
-    offsets = SyncResolver(finder).resolve(wedding, store)
-    assert offsets == {"cam1": 0.0, "cam2": 12.5, "altar": -3.0}
+    resolution = SyncResolver(finder).resolve(wedding, store)
+    assert resolution.offsets == {"cam1": 0.0, "cam2": 12.5, "altar": -3.0}
+    assert resolution.parts == {} and resolution.warnings == []
     assert sorted(calls) == ["altar.wav", "cam2.mp4"]
     cached = json.loads(store.read_text(encoding="utf-8"))
     assert cached["cam2"]["offset"] == 12.5 and cached["cam2"]["confidence"] == 9.0
     # segunda vez: tudo do cache
-    assert SyncResolver(finder).resolve(wedding, store) == offsets and len(calls) == 2
+    assert SyncResolver(finder).resolve(wedding, store).offsets == resolution.offsets and len(calls) == 2
 
 
 def test_summary_uses_session_clock(wedding):
@@ -194,3 +196,130 @@ def test_track_outside_segment_is_left_out_of_the_mix(tmp_path):
     assert [Path(p).name for p in inputs[0]] == ["cam1.mp4", "rec_a.wav"]  # 10-20 s: só o primeiro
     assert [Path(p).name for p in inputs[1]] == ["cam1.mp4"]  # 150-160 s: nenhum gravador
     assert [Path(p).name for p in inputs[2]] == ["cam1.mp4", "rec_a.wav", "rec_b.wav"]  # 110-210 s: os dois
+
+
+# ---------- fonte com `parts` (câmera em vários arquivos) ----------
+
+
+def _parts_fake_prober(path: Path) -> MediaInfo:
+    return MediaInfo(path, 60.0, 1920, 1080, 30.0, True, True, False)
+
+
+def _parts_project(tmp_path: Path, timeline: list, tracks: list | None = None) -> Project:
+    for name in ("cam1_a.mp4", "cam1_b.mp4"):
+        (tmp_path / name).write_bytes(b"x")
+    project = Project.model_validate(
+        {
+            "name": "multiarquivo",
+            "output": {"preset": "youtube/video"},
+            "sources": {"cam1": {"parts": ["cam1_a.mp4", "cam1_b.mp4"]}},
+            "timeline": timeline,
+            "audio": {"tracks": tracks or []},
+        }
+    )
+    project.base_dir = tmp_path
+    return project
+
+
+def test_expand_parts_splits_clip_at_the_file_boundary(tmp_path):
+    """Um clipe que atravessa a fronteira das duas partes vira dois pedaços físicos, um por arquivo;
+    transição e fades ficam só na primeira/última peça (o corte interno não é uma transição)."""
+    project = _parts_project(
+        tmp_path,
+        [
+            {
+                "type": "clip",
+                "source": "cam1",
+                "start": 50,
+                "end": 70,
+                "transition": {"type": "fade", "duration": 0.3},
+                "fade_in": 0.5,
+                "fade_out": 0.8,
+            }
+        ],
+    )
+    session = resolve_session(project, _parts_fake_prober, {}, {"cam1": [0.0, 60.0]})
+
+    physical, origin = expand_parts(project, session, {"cam1": [0.0, 60.0]})
+
+    assert origin == [0, 0]
+    assert [seg.source for seg in physical.timeline] == ["cam1#0", "cam1#1"]
+    assert (physical.timeline[0].start, physical.timeline[0].end) == (50.0, 60.0)
+    assert (physical.timeline[1].start, physical.timeline[1].end) == (60.0, 70.0)
+    assert physical.timeline[0].transition.type == "fade"
+    assert physical.timeline[1].transition is None
+    assert physical.timeline[0].fade_in == 0.5 and physical.timeline[0].fade_out == 0.0
+    assert physical.timeline[1].fade_in == 0.0 and physical.timeline[1].fade_out == 0.8
+
+
+def test_expand_parts_splits_audio_tracks_one_per_part(tmp_path):
+    project = _parts_project(
+        tmp_path,
+        [{"type": "clip", "source": "cam1", "start": 0, "end": 20}],
+        tracks=[{"source": "cam1", "volume": 0.7}],
+    )
+    session = resolve_session(project, _parts_fake_prober, {}, {"cam1": [0.0, 60.0]})
+
+    physical, _ = expand_parts(project, session, {"cam1": [0.0, 60.0]})
+
+    assert [(t.source, t.volume) for t in physical.audio.tracks] == [("cam1#0", 0.7), ("cam1#1", 0.7)]
+
+
+def test_expand_parts_rejects_a_clip_that_falls_in_a_gap_between_parts(tmp_path):
+    """Partes com um buraco entre elas (a câmera parou de gravar um tempo antes de voltar): um clipe
+    inteiramente no buraco não tem como ser montado."""
+    project = _parts_project(tmp_path, [{"type": "clip", "source": "cam1", "start": 61, "end": 64}])
+    # parte 0: 0-60s; parte 1 começa só em 65s (buraco de 61-65s da sessão)
+    session = resolve_session(project, _parts_fake_prober, {}, {"cam1": [0.0, 65.0]})
+
+    with pytest.raises(ValueError, match="não cobre"):
+        expand_parts(project, session, {"cam1": [0.0, 65.0]})
+
+
+def test_expand_parts_is_identity_without_any_source_with_parts(wedding):
+    session = resolve_session(wedding, fake_prober, {"cam1": 0.0, "cam2": 12.5, "altar": -3.0})
+    physical, origin = expand_parts(wedding, session, {})
+    assert physical is wedding
+    assert origin == list(range(len(wedding.timeline)))
+
+
+def test_summarize_aggregates_duration_of_a_clip_split_across_parts(tmp_path):
+    """Um trecho que atravessa a fronteira das partes mostra, no resumo, a duração somada dos dois
+    pedaços; o corte interno some por trás do trecho original."""
+    project = _parts_project(
+        tmp_path,
+        [
+            {"type": "clip", "source": "cam1", "start": 0, "end": 50},
+            {"type": "clip", "source": "cam1", "start": 50, "end": 70, "transition": {"type": "cut"}},
+        ],
+    )
+
+    summary = summarize(project, prober=_parts_fake_prober)
+
+    assert [s.duration for s in summary.segments] == [50.0, 20.0]
+    assert summary.total == pytest.approx(70.0)
+    assert any("sem link de áudio nem relógio" in w for w in summary.warnings)
+
+
+def test_render_uses_correct_ss_for_each_physical_part(tmp_path):
+    """No render de verdade, cada pedaço físico usa o `-ss` da parte que ele veio (o arquivo certo,
+    no ponto certo dentro dele)."""
+    project = _parts_project(
+        tmp_path, [{"type": "clip", "source": "cam1", "start": 50, "end": 70, "transition": {"type": "cut"}}]
+    )
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = RenderPipeline(
+        project,
+        RenderOptions(preview=True, quiet=True, out=tmp_path / "out.mp4"),
+        runner=runner,
+        prober=_parts_fake_prober,
+        cache_dir=tmp_path / "mez",
+        jobs_dir=tmp_path / "jobs",
+    ).run()
+
+    assert result.duration == pytest.approx(20.0)
+    mezz = [c for c in runner.commands if "-filter_complex" in c and "pcm_s16le" in c][:2]
+    inputs = [[c[i + 1] for i, a in enumerate(c) if a == "-i"][0] for c in mezz]
+    ss = [c[c.index("-ss") + 1] for c in mezz]
+    assert [Path(p).name for p in inputs] == ["cam1_a.mp4", "cam1_b.mp4"]
+    assert ss == ["50.000", "0.000"]  # 50s na parte 0 (começa em 0); a parte 1 começa em 60s da sessão

@@ -27,7 +27,7 @@ from ..media.probe import probe
 from ..text.captions import from_json, suspicious_cues
 from ..text.overlays import ROLE_DEFAULTS, Canvas, effective_style, wrap_lines
 from .context import Prober
-from .layout import ProjectLayout, project_layout
+from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
 
@@ -638,7 +638,7 @@ def build_report(
     runner: FFmpegRunner | None = None,
 ) -> QAReport:
     """Roda as checagens estáticas sempre; as da saída renderizada só quando `output` é informado."""
-    layout = project_layout(project, prober, offset_finder)
+    layout = to_presentation(project, project_layout(project, prober, offset_finder))
     findings: list[Finding] = []
     checks: list[str] = []
     for check in STATIC_CHECKS:

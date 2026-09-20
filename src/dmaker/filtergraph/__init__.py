@@ -1,6 +1,6 @@
 """Grafos e comandos do FFmpeg como funções puras (sem executar nada)."""
 
-from .audio import audio_graph, loudnorm_measure_graph
+from .audio import audio_graph, loudnorm_measure_graph, resolve_span
 from .common import Inputs, atempo_chain, color_chain, even, ffq
 from .encode import encode_args
 from .mezzanine import TrackSlice, clip_mezzanine, frames_mezzanine, still_mezzanine
@@ -32,6 +32,7 @@ __all__ = [
     "proxy_command",
     "reframe_graph",
     "resolve_reframe_mode",
+    "resolve_span",
     "still_mezzanine",
     "timeline_graph",
     "video_overlay_graph",

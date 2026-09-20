@@ -35,16 +35,18 @@ Cada parâmetro em `params` aceita:
 - `description`: frase curta (a IA lê isso antes de preencher).
 - `default`: valor usado quando o parâmetro não é passado. Sem `default`, o parâmetro é
   obrigatório (a não ser que `required` diga o contrário).
-- `type`: `text`, `path` (um caminho), `paths` (lista de caminhos), `number`, `bool` ou `list`
-  (lista genérica). Se omitido, é inferido do `default` (texto vira `text`, `true`/`false` vira
-  `bool`, lista vira `list`, número vira `number`); sem `default` também, o padrão é `text`.
+- `type`: `text`, `path` (um caminho), `paths` (lista de caminhos), `dir` (uma pasta: vira a lista dos
+  arquivos de vídeo/áudio dela, em ordem natural pelo nome, `0002` antes de `0010`), `number`, `bool`
+  ou `list` (lista genérica). Se omitido, é inferido do `default` (texto vira `text`, `true`/`false`
+  vira `bool`, lista vira `list`, número vira `number`); sem `default` também, o padrão é `text`.
 - `required`: `true`/`false`. Se omitido, é `true` quando não há `default` e `false` quando há.
 
 ## Placeholders
 
 - `"{{nome}}"` sozinho como o valor inteiro de uma chave: vira o valor com o tipo original
   (número, lista, booleano, string), não uma substituição de texto. Exemplo: `"duration": "{{duracao}}"`
-  com `duracao` do tipo `number` vira `"duration": 4` (número, não a string `"4"`).
+  com `duracao` do tipo `number` vira `"duration": 4` (número, não a string `"4"`). Um parâmetro `dir`
+  já chega expandido: `"parts": "{{pasta}}"` vira a lista dos arquivos daquela pasta.
 - `"{{nome}}"` dentro de um texto maior: interpolação simples (`str(valor)`). Exemplo:
   `"text": "Oi, {{nome}}!"`.
 
@@ -121,6 +123,7 @@ falta ou o que está errado, e chega assim até a CLI e o MCP.
 | `youtube-longo.json` | Vídeo longo para YouTube: abertura, gravação principal, CTA. | `titulo`, `video` (obrigatório) |
 | `casamento-multicam.json` | Cerimônia multicâmera sincronizada por áudio. | `cam_principal`, `cam_secundaria`, `audio_externo` (obrigatórios), `nomes`, `data` |
 | `tutorial-tela-webcam.json` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
+| `casamento-pascom.json` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (bloco `multicam`), cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data` (obrigatórios), `titulo`, `igreja`, `cidade`, `celebrante`, `diacono`, `cerimonial`, `musicos`, `trilha`, `inicio`, `fim` |
 
 Todos validam como `Project` quando renderizados com os valores padrão (mais valores fictícios
 para os parâmetros obrigatórios) — é o que `tests/test_templates.py` confere a cada mudança.
@@ -139,6 +142,15 @@ Alguns templates simplificam o exemplo original para caber num conjunto pequeno 
 - `casamento-multicam`: reduzido a duas câmeras e um áudio externo (o exemplo original tinha 5
   fontes e cortes com tempos específicos daquela gravação); os cortes ainda precisam de ajuste
   manual depois de criado, já que o template não sabe onde ficam os momentos da cerimônia.
+- `casamento-pascom`: ao contrário do `casamento-multicam`, o corte entre as câmeras é automático:
+  o template só monta os cartões e um bloco `multicam` (câmeras, fase da cerimônia, janela de
+  `inicio`/`fim`); depois de `new_from_template`, rodar `plan_multicam` uma vez para transcrever a
+  câmera de áudio, reconhecer as fases da cerimônia e substituir o bloco pelos clipes de verdade,
+  antes de validar ou renderizar. Os cartões (abertura, créditos, encerramento) vêm dos
+  `card_layouts` da marca `pascom-sjb` (`assets/brands/pascom-sjb/brand.json`), não do visual
+  genérico do tema. A música usa `from_end`/`tail` em `MusicSpan` porque a duração final só se sabe
+  depois do `plan_multicam`: a segunda janela conta a partir do fim do vídeo e toca o final da
+  faixa.
 
 Caminhos de mídia que mudam a cada uso (vídeos, prints, gravações) ficam sempre `required`, sem
 `default`. Textos e caminhos que servem de exemplo claro (trilha padrão, nomes de exemplo) ficam

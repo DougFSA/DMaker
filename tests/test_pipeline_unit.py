@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from dmaker.domain.spec import Project
+from dmaker.domain.spec import AudioTrack, Project, SourceRef, TrackState
 from dmaker.media.ffmpeg import FFmpegCommand, RecordingRunner
 from dmaker.media.probe import MediaInfo
 from dmaker.pipeline import RenderOptions, RenderPipeline
@@ -185,3 +185,109 @@ def test_missing_source_fails_clearly(workspace):
         RenderPipeline(
             project, RenderOptions(dry_run=True), runner=RecordingRunner(), prober=fake_prober
         ).run()
+
+
+def test_render_respects_muted_and_hidden_tracks(workspace):
+    """`apply_track_state` roda antes de resolver as fontes (pipeline/renderer.py): uma faixa de
+    áudio externa muda não pode entrar na mixagem, e uma sobreposição de texto oculta não pode
+    gerar evento nenhum no ASS. Prova ponta a ponta com RecordingRunner (sem ffmpeg de verdade)."""
+    d = workspace["dir"]
+    (d / "rec.wav").write_bytes(b"x")
+    project = workspace["project"].model_copy(
+        update={
+            "sources": {"rec": SourceRef(src="rec.wav")},
+            "audio": workspace["project"].audio.model_copy(update={"tracks": [AudioTrack(source="rec")]}),
+            "tracks": {"A2": TrackState(muted=True), "TX": TrackState(hidden=True)},
+        }
+    )
+    project.base_dir = d
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    pipeline = RenderPipeline(
+        project,
+        RenderOptions(preview=True, quiet=True, out=d / "out.mp4"),
+        runner=runner,
+        prober=fake_prober,
+        transcriber_factory=lambda captions: FakeTranscriber(),
+        cache_dir=d / "mez",
+        jobs_dir=d / "jobs",
+        output_dir=d / "output",
+    )
+    result = pipeline.run()
+
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "rec.wav" not in graph  # A2 muda: a faixa externa nunca entra na mixagem
+
+    ass = (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+    assert "Gancho" not in ass  # TX oculta: a sobreposição de texto não gera evento nenhum
+
+
+def _project_with_pending_multicam(base_dir: Path) -> Project:
+    for name in ("cam1.mp4", "cam2.mp4"):
+        target = base_dir / name
+        if not target.exists():
+            target.write_bytes(b"x")
+    project = Project.model_validate(
+        {
+            "name": "pendente",
+            "sources": {"cam1": {"src": "cam1.mp4"}, "cam2": {"src": "cam2.mp4"}},
+            "timeline": [{"type": "clip", "source": "cam1", "start": 0, "end": 5}],
+            "multicam": {"at": 1, "cameras": ["cam1", "cam2"], "main": "cam1", "audio": "cam1"},
+        }
+    )
+    project.base_dir = base_dir
+    return project
+
+
+def test_summarize_warns_about_pending_multicam_block_without_failing(workspace):
+    from dmaker.pipeline.projects import summarize
+
+    project = _project_with_pending_multicam(workspace["dir"])
+    summary = summarize(project, prober=fake_prober)
+
+    assert any("bloco multicam" in w and "plan_multicam" in w for w in summary.warnings)
+
+
+def test_render_pipeline_refuses_project_with_pending_multicam_block(workspace):
+    project = _project_with_pending_multicam(workspace["dir"])
+    with pytest.raises(ValueError, match="bloco multicam.*plan_multicam"):
+        RenderPipeline(
+            project, RenderOptions(dry_run=True), runner=RecordingRunner(), prober=fake_prober
+        ).run()
+
+
+def test_music_tail_span_uses_probed_duration_for_start_at(tmp_path):
+    """`MusicSpan` com `tail` precisa da duração da música: `assembly.py` busca com `ctx.prober` (aqui,
+    o falso, que devolve 8.0 s para qualquer arquivo que não seja `.png`)."""
+    (tmp_path / "take.mp4").write_bytes(b"x")
+    (tmp_path / "trilha.m4a").write_bytes(b"x")
+    spec = {
+        "name": "musica-no-fim",
+        "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+        "audio": {
+            "music": {
+                "src": "trilha.m4a",
+                "volume": 0.5,
+                "loop": False,
+                "ducking": False,
+                "spans": [{"start": 2, "from_end": True, "tail": True, "start_at": 0.5}],
+            },
+            "normalize": "off",
+        },
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    runner = RecordingRunner(on_run=touch_output)
+    result = RenderPipeline(
+        project,
+        RenderOptions(preview=True, quiet=True, out=tmp_path / "out.mp4"),
+        runner=runner,
+        prober=fake_prober,
+        cache_dir=tmp_path / "mez",
+        jobs_dir=tmp_path / "jobs",
+        output_dir=tmp_path / "output",
+    ).run()
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    # total = 4.0 (o clipe inteiro); from_end: start = 4 - 2 = 2.0; tail: comprimento = 4 - 2 = 2.0;
+    # start_at efetivo = duração da música (8.0, do prober falso) - 2.0 - 0.5 (folga) = 5.5
+    assert "atrim=start=5.500:duration=2.000" in graph
+    assert "adelay=2000:all=1" in graph

@@ -6,7 +6,11 @@
  * foi solto e onde; quem decide é o editor.js, que conhece a spec inteira.
  *
  * window.DMakerMedia.create(container, callbacks) -> controlador:
- *   setSpec(spec)     atualiza a lista (fontes + arquivos referenciados na spec)
+ *   setSpec(spec, view)   atualiza a lista (fontes + arquivos referenciados na spec); `view` é a
+ *     vista mais recente (build_timeline_view), usada só para achar o caminho ABSOLUTO de cada
+ *     arquivo (`item.path`/`sources[nome].path`, já resolvidos pela spec): a lista guarda o `src`
+ *     cru (o que entra na spec ao inserir) e o `path` resolvido (o que vai para /api/probe e para
+ *     a miniatura, que não sabem nada sobre a pasta do projeto).
  *   getSelected()      entrada da mídia selecionada (clique simples) ou null
  *
  * callbacks: { onInsertEnd(entry), onDragStart(entry) (opcional, só para log/depuração) }
@@ -31,19 +35,35 @@ function mdKindFromExt(path) {
   return "clip";
 }
 
+/** Caminho cru (`src`, como escrito na spec) -> caminho absoluto já resolvido (`item.path`), lido
+ * dos itens da vista (qualquer trilha: todas resolvem pelo mesmo `project.resolve`). Função pura. */
+function buildResolvedPathMap(view) {
+  const map = new Map();
+  for (const track of (view && view.tracks) || []) {
+    for (const item of track.items) {
+      if (item.src && item.path) map.set(item.src, item.path);
+    }
+  }
+  return map;
+}
+
 /** Fontes sincronizadas e arquivos avulsos referenciados na spec (trechos, sobreposições, música),
- * sem repetir o mesmo caminho duas vezes. Função pura. */
-function collectMediaEntries(spec) {
+ * sem repetir o mesmo caminho duas vezes. `path` sai já resolvido (absoluto) quando a vista tem essa
+ * informação; `src`/`source` continuam crus, como vão para a spec ao inserir. Função pura. */
+function collectMediaEntries(spec, view) {
   const entries = [];
   const seen = new Set();
+  const resolved = buildResolvedPathMap(view);
+  const sourcesView = (view && view.sources) || {};
   for (const [name, ref] of Object.entries(spec.sources || {})) {
-    entries.push({ id: `source:${name}`, kind: "clip", label: name, path: ref.src, source: name });
+    const path = (sourcesView[name] && sourcesView[name].path) || ref.src;
+    entries.push({ id: `source:${name}`, kind: "clip", label: name, path, source: name });
     seen.add(ref.src);
   }
   const addFile = (path, kind) => {
     if (!path || seen.has(path)) return;
     seen.add(path);
-    entries.push({ id: `file:${path}`, kind, label: baseName(path), path, src: path });
+    entries.push({ id: `file:${path}`, kind, label: baseName(path), path: resolved.get(path) || path, src: path });
   };
   for (const seg of spec.timeline || []) {
     if (seg.type === "clip" && seg.src) addFile(seg.src, "clip");
@@ -131,9 +151,9 @@ function createMedia(container, callbacks) {
   });
 
   return {
-    setSpec(newSpec) {
+    setSpec(newSpec, view) {
       spec = newSpec || spec;
-      entries = collectMediaEntries(spec);
+      entries = collectMediaEntries(spec, view);
       if (!entries.some((e) => e.id === selectedId)) selectedId = null;
       render();
       probeMissingDurations();

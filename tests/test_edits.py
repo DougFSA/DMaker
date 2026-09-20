@@ -258,6 +258,19 @@ def test_set_field_invalid_path_errors(tmp_path):
         set_field(project, "nao_existe.campo", 1.0)
 
 
+def test_set_field_creates_missing_track_state(tmp_path):
+    """`tracks.<id>` normalmente não existe até a primeira vez que a interface muda/oculta uma
+    trilha: set_field precisa criar o dicionário no caminho, não só o campo final."""
+    project = make_project(tmp_path)
+    assert project.tracks == {}
+    new = set_field(project, "tracks.A2.muted", True)
+    assert new.tracks["A2"].muted is True
+    assert new.tracks["A2"].hidden is False
+    newer = set_field(new, "tracks.TX.hidden", True)
+    assert newer.tracks["A2"].muted is True  # a trilha existente não se perde
+    assert newer.tracks["TX"].hidden is True
+
+
 def test_set_field_source_sync(tmp_path):
     spec = {
         "name": "multi",

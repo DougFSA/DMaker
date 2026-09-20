@@ -190,17 +190,28 @@ class ImageSegment(SegmentBase):
 
 
 class CardSegment(SegmentBase):
-    """Cartão gerado (abertura, CTA, encerramento) com o visual do tema."""
+    """Cartão gerado (abertura, CTA, encerramento) com o visual do tema, ou por um layout da marca
+    (`layout` + `fields`; ver seção "card_layouts" do brand.json)."""
 
     type: Literal["card"] = "card"
     duration: float = Field(3.0, gt=0)
-    title: str
+    title: str = ""
     subtitle: str | None = None
     variant: Literal["light", "dark"] | None = None  # None = padrão do tema
     logo: bool = True
     background: str | None = None
     motion: Literal["none", "zoom-in"] = "zoom-in"
     motion_amount: float = Field(0.04, ge=0, le=0.3)
+    layout: str | None = None  # nome de um layout em `card_layouts` do brand.json da marca
+    fields: dict[str, str | list[str]] = {}  # campos que preenchem o layout ({{campo}} e listas)
+
+    @model_validator(mode="after")
+    def _title_or_layout(self) -> CardSegment:
+        if not self.layout and not self.title.strip():
+            raise ValueError(
+                "cartão precisa de `title` (ou `layout` com `fields`, cartão por layout da marca)"
+            )
+        return self
 
 
 Segment = Annotated[ClipSegment | ImageSegment | CardSegment, Field(discriminator="type")]
@@ -359,17 +370,34 @@ class Captions(Strict):
 
 class MusicSpan(Strict):
     """Janela da linha do tempo em que a música toca (trilha só na abertura e no encerramento, por
-    exemplo). `start`/`end` são instantes do vídeo final; `start_at` é de onde começar na música."""
+    exemplo). `start`/`end` são instantes do vídeo final; `start_at` é de onde começar na música.
+
+    `from_end` conta `start`/`end` a partir do fim do vídeo (útil quando a duração final só se sabe
+    depois de planejada, como num casamento com corte automático): `start: 33.5, from_end: true` começa
+    33.5 s antes do fim; `end` continua None = até o fim do vídeo, ou, informado, também contado do fim
+    (por isso `end` menor que `start` é o normal nesse modo, não um erro). `tail` toca o FINAL da
+    música, terminando junto com a janela: `start_at` deixa de ser o ponto de entrada e vira uma folga
+    a partir do fim da faixa (padrão 0)."""
 
     start: float = Field(0.0, ge=0)
-    end: float | None = Field(None, ge=0)  # None = até o fim do vídeo
-    start_at: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)  # None = até o fim do vídeo (ou, com from_end, o próprio fim)
+    start_at: float = Field(0.0, ge=0)  # com tail=true, vira a folga antes do fim da música
     fade_in: float = Field(1.0, ge=0)
     fade_out: float = Field(2.0, ge=0)
+    from_end: bool = False  # start/end contados a partir do fim do vídeo, não do começo
+    tail: bool = False  # ancora start_at no final da música (precisa da duração da música para resolver)
 
     @model_validator(mode="after")
     def _check_window(self):
-        if self.end is not None and self.end <= self.start:
+        if self.end is None:
+            return self
+        if self.from_end:
+            if self.end >= self.start:
+                raise ValueError(
+                    f"música: com from_end, end ({self.end}) precisa ser menor que start ({self.start}) "
+                    "(contados a partir do fim do vídeo, quanto menor mais perto do fim)"
+                )
+        elif self.end <= self.start:
             raise ValueError(f"música: end ({self.end}) precisa ser maior que start ({self.start})")
         return self
 
@@ -420,12 +448,69 @@ class Output(Strict):
 
 class SourceRef(Strict):
     """Câmera ou gravador que captou o mesmo evento. `sync` é o instante, no relógio da fonte
-    principal, em que esta fonte começa; "auto" descobre pelo áudio (correlação)."""
+    principal, em que esta fonte (ou, com `parts`, a primeira parte dela) começa; "auto" descobre
+    pelo áudio (correlação). Uma câmera que grava em vários arquivos em sequência (a Canon parte a
+    cada 30 min, o celular para e volta) usa `parts` em vez de `src`: o pipeline liga as partes em
+    cadeia pelo áudio sozinho, sem precisar declarar uma fonte por arquivo."""
 
-    src: str
+    src: str | None = None
+    parts: list[str] = []  # arquivos da mesma câmera, em sequência (alternativa a `src`)
     sync: Literal["auto"] | float = 0.0
     audio_stream: int = Field(0, ge=0)
     label: str | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> SourceRef:
+        if bool(self.src) == bool(self.parts):
+            raise ValueError(
+                "fonte precisa de `src` (um arquivo) ou `parts` (arquivos em sequência), um dos dois"
+            )
+        return self
+
+    @property
+    def files(self) -> list[str]:
+        """Arquivos da fonte, em ordem (uma lista de um elemento só quando é `src`)."""
+        return list(self.parts) if self.parts else [self.src]  # type: ignore[list-item]
+
+
+class PhaseRuleSpec(Strict):
+    """Regra de reconhecimento de uma fase da cerimônia pelos termos ditos na fala (ver `PhaseRule`
+    em `domain/multicam.py`, que esta classe espelha na spec)."""
+
+    name: str
+    match: list[str] = Field(min_length=1)
+    main: str | None = None  # None = câmera principal do bloco
+    cadence: tuple[float, float] = (40.0, 30.0)
+    max_duration: float | None = Field(None, gt=0)
+
+
+class MulticamBlock(Strict):
+    """Trecho da linha do tempo ainda por planejar: `plan_multicam` transcreve a câmera de áudio,
+    reconhece as fases pela fala e substitui o bloco por clipes alternando as câmeras."""
+
+    at: int = Field(ge=0)  # índice da timeline onde os clipes planejados entram (o resto desloca)
+    cameras: list[str] = Field(min_length=1)  # nomes em `sources`
+    main: str  # câmera principal (mais tempo em tela)
+    audio: str  # fonte cujo áudio é a referência (fala transcrita); clipes ficam mute onde ela cobre
+    cadence: tuple[float, float] = (40.0, 30.0)
+    phases: Literal["casamento"] | list[PhaseRuleSpec] = "casamento"
+    min_clip: float = Field(4.0, gt=0)
+    snap_window: float = Field(5.0, ge=0)
+    pause: float = Field(0.6, ge=0)
+    start: float | None = None  # relógio da sessão; None = início da cobertura mais cedo das câmeras
+    end: float | None = None  # None = fim da cobertura mais tarde
+    transition_in: Transition | None = None  # transição do primeiro clipe planejado
+    label: str | None = None  # rótulo dos clipes (padrão: nome da fase)
+
+
+class TrackState(Strict):
+    """Mudo/oculto/bloqueio de uma trilha da vista multitrilha (interface), estilo Shotcut. `muted`
+    e `hidden` valem para a prévia E para o render (`domain.tracks.apply_track_state`); `locked` só
+    trava a edição na interface, o render ignora."""
+
+    muted: bool = False
+    hidden: bool = False
+    locked: bool = False
 
 
 class Project(Strict):
@@ -440,6 +525,9 @@ class Project(Strict):
     overlays: list[Overlay] = []
     captions: Captions | None = None
     audio: AudioSettings = AudioSettings()
+    multicam: MulticamBlock | None = None  # trecho ainda por planejar; `plan_multicam` o substitui
+    tracks: dict[str, TrackState] = {}  # mudo/oculto/bloqueio por trilha (ids da vista: V1, A1, A2...,
+    # MUS, CC, TX, GR, V2, V3...); ver `domain.tracks.apply_track_state`
     base_dir: Path | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
@@ -458,10 +546,20 @@ class Project(Strict):
             for ov in self.overlays
             if isinstance(ov, VideoOverlay) and ov.source and ov.source not in names
         ]
+        if self.multicam:
+            missing += [c for c in self.multicam.cameras if c not in names]
+            missing += [s for s in (self.multicam.main, self.multicam.audio) if s not in names]
         if missing:
             raise ValueError(
                 f"fonte(s) desconhecida(s): {', '.join(sorted(set(missing)))} (declare em sources)"
             )
+        if self.multicam:
+            if self.multicam.main not in self.multicam.cameras:
+                raise ValueError(f"multicam.main {self.multicam.main!r} precisa estar em multicam.cameras")
+            if self.multicam.at > len(self.timeline):
+                raise ValueError(
+                    f"multicam.at ({self.multicam.at}) além do fim da timeline ({len(self.timeline)})"
+                )
         return self
 
     @property
@@ -508,9 +606,13 @@ class Project(Strict):
         out: list[tuple[str, str]] = []
         for i, seg in enumerate(self.timeline):
             if isinstance(seg, CardSegment):
-                out.append((f"timeline[{i}].title", seg.title))
+                if seg.title:
+                    out.append((f"timeline[{i}].title", seg.title))
                 if seg.subtitle:
                     out.append((f"timeline[{i}].subtitle", seg.subtitle))
+                for field_name, value in seg.fields.items():
+                    if isinstance(value, str):
+                        out.append((f"timeline[{i}].fields.{field_name}", value))
         for i, ov in enumerate(self.overlays):
             if isinstance(ov, TextOverlay):
                 out.append((f"overlays[{i}].text", ov.text))

@@ -129,6 +129,20 @@ h2 {
   font-size: 15px;
 }
 
+.topbar-layout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-layout select {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: var(--radius);
+}
+
 .topbar-actions {
   display: flex;
   gap: 8px;
@@ -238,13 +252,24 @@ h2 {
 }
 
 .sidebar {
-  width: 300px;
+  width: var(--col-sidebar, 300px);
   flex-shrink: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+}
+
+.sidebar-divider {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--panel-alt);
+}
+
+.sidebar-divider:hover {
+  background: var(--teal);
 }
 
 .side-section {
@@ -1138,26 +1163,119 @@ h2 {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+/* grade de organização da aba Linha do tempo (layout.js): uma linha "top-center" (player) em
+   cima, cheia; embaixo, três colunas "top-left" (filtros), "bottom" (linha do tempo) e
+   "top-right" (mídia). --row-top/--col-left/--col-right vêm dos tamanhos salvos do layout;
+   os painéis de verdade (.panel) são movidos para dentro de cada .tl-slot por applyLayout. */
+.tl-layout-grid {
+  display: grid;
+  grid-template-columns: var(--col-left, 240px) 6px minmax(0, 1fr) 6px var(--col-right, 240px);
+  grid-template-rows: var(--row-top, 42%) 6px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.tl-slot {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tl-slot[data-slot="top-center"] { grid-column: 1 / -1; grid-row: 1; }
+.tl-slot[data-slot="top-left"] { grid-column: 1; grid-row: 3; }
+.tl-slot[data-slot="bottom"] { grid-column: 3; grid-row: 3; }
+.tl-slot[data-slot="top-right"] { grid-column: 5; grid-row: 3; }
+
+.tl-divider {
+  background: var(--panel-alt);
+}
+
+.tl-divider:hover {
+  background: var(--teal);
+}
+
+.tl-divider-row {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  cursor: row-resize;
+}
+
+.tl-divider-col {
+  grid-row: 3;
+  cursor: col-resize;
+}
+
+#tl-divider-col-left { grid-column: 2; }
+#tl-divider-col-right { grid-column: 4; }
+
+/* painel arrastável: barra de título (arrasto + ocultar) sobre o conteúdo de verdade, que fica
+   por conta de outro módulo (player.js, timeline.js, filters.js, media.js) */
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.panel-title:active {
+  cursor: grabbing;
+}
+
+/* o painel de Andamento reaproveita o próprio botão de recolher como .panel-title (não é
+   arrastável: fica sempre encaixado embaixo), então mantém o cursor de clique normal. */
+.progress-toggle.panel-title {
+  cursor: pointer;
+}
+
+.panel-hide-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.panel-hide-btn:hover {
+  color: var(--text);
+}
+
+.panel-dragging {
+  opacity: 0.4;
+}
+
+.panel-drop-target {
+  outline: 2px dashed var(--mint);
+  outline-offset: -2px;
 }
 
 .player-pane {
-  flex: 0 0 var(--player-h, 42%);
-  min-height: 140px;
+  flex: 1;
+  min-height: 0;
   background: #05090a;
-  border-bottom: 1px solid var(--border);
   overflow: hidden;
-}
-
-.timeline-resizer {
-  height: 6px;
-  flex-shrink: 0;
-  cursor: row-resize;
-  background: var(--panel-alt);
-  border-bottom: 1px solid var(--border);
-}
-
-.timeline-resizer:hover {
-  background: var(--teal);
 }
 
 .timeline-pane {
@@ -1191,25 +1309,14 @@ h2 {
   border: 1px solid var(--border);
 }
 
-.timeline-grid {
+.timeline-side {
+  width: 100%;
   flex: 1;
   min-height: 0;
-  display: flex;
-}
-
-.timeline-side {
-  width: 240px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   background: var(--panel);
-}
-
-.timeline-side-right {
-  border-right: none;
-  border-left: 1px solid var(--border);
 }
 
 .side-panel-header {
@@ -1402,14 +1509,60 @@ h2 {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 0 6px;
   font-size: 11.5px;
   color: var(--text-muted);
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow: hidden;
   white-space: nowrap;
+}
+
+.tl-row-title {
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tl-track-buttons {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tl-track-btn {
+  width: 15px;
+  height: 15px;
+  line-height: 15px;
+  padding: 0;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tl-track-btn:hover {
+  color: var(--text);
+}
+
+.tl-track-btn.active {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.tl-row-muted .tl-row-lane,
+.tl-row-hidden .tl-row-lane {
+  opacity: 0.45;
+}
+
+.tl-row-locked .tl-row-header {
+  color: var(--text);
 }
 
 .tl-ruler-corner {

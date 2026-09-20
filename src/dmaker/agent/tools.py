@@ -2,7 +2,8 @@
 
 `McpToolHost` chama `mcp_server.server` direto em processo (sem stdio): mesmas ferramentas que qualquer
 outra IA usa, só que num subconjunto curado (`AGENT_TOOLS`) para caber num modelo pequeno e sem abrir
-espaço para operações que exigem mais julgamento (cortes, multicâmera, picture-in-picture na mão).
+espaço para operações que exigem mais julgamento (cortes na mão, picture-in-picture). Multicâmera entra
+só pelo caminho automático (`plan_multicam` expande o bloco de um template).
 """
 
 from __future__ import annotations
@@ -17,10 +18,11 @@ from typing import Any, Protocol
 from .. import config
 
 # Subconjunto de ferramentas do servidor MCP liberado para o agente local: tarefas mecânicas só (ver
-# CLAUDE.md/skill). Fora daqui: cortes, ritmo, multicâmera, picture-in-picture e edição de marca na mão.
+# CLAUDE.md/skill). Fora daqui: cortes, ritmo, picture-in-picture e edição de marca na mão.
 AGENT_TOOLS: list[str] = [
     "list_templates",
     "new_from_template",
+    "plan_multicam",
     "list_projects",
     "get_project",
     "validate_project",

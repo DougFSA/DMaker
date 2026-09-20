@@ -19,6 +19,10 @@
       <strong id="project-name">Nenhum projeto aberto</strong>
       <span id="unsaved-indicator" class="unsaved-indicator" hidden>não salvo</span>
     </div>
+    <div class="topbar-layout">
+      <span class="topbar-label">Tela</span>
+      <select id="layout-select" title="Organização dos painéis"></select>
+    </div>
     <div class="topbar-actions">
       <button id="btn-save" class="btn" type="button" disabled>Salvar</button>
       <button id="btn-validate" class="btn" type="button" disabled>Validar</button>
@@ -36,7 +40,8 @@
   <div id="validate-banner" class="validate-banner" hidden></div>
 
   <div class="layout">
-    <aside class="sidebar">
+    <aside class="sidebar" data-panel="sidebar">
+      <div class="panel-title"><span class="panel-title-name">Barra lateral</span></div>
       <section class="side-section">
         <div class="side-section-header">
           <h2>Projetos</h2>
@@ -46,7 +51,10 @@
       </section>
 
       <section class="side-section">
-        <h2>Jobs</h2>
+        <div class="side-section-header">
+          <h2>Jobs</h2>
+          <button id="btn-clear-jobs" class="btn btn-small" type="button">Limpar concluídos</button>
+        </div>
         <ul id="job-list" class="job-list"><li class="empty-hint">Nenhum job ainda</li></ul>
       </section>
 
@@ -55,6 +63,7 @@
         <ul id="output-list" class="output-list"><li class="empty-hint">Nenhuma saída ainda</li></ul>
       </section>
     </aside>
+    <div class="sidebar-divider" id="sidebar-divider" title="Arraste para redimensionar"></div>
 
     <main class="main-area">
       <nav class="tabs" id="tabs">
@@ -69,52 +78,86 @@
         <section class="tab-panel active" id="panel-timeline">
           <div id="timeline-empty" class="empty-state">Abra ou crie um projeto para ver a linha do tempo.</div>
           <div id="timeline-editor" class="timeline-editor" hidden>
-            <div class="player-pane" id="live-player"></div>
-            <div class="timeline-resizer" id="timeline-resizer" title="Arraste para redimensionar"></div>
-            <div class="timeline-pane">
-              <div class="timeline-toolbar" id="timeline-toolbar">
-                <button class="btn btn-small" id="btn-split" type="button" title="Cortar no cursor (S)">Cortar</button>
-                <button class="btn btn-small" id="btn-remove" type="button" title="Remover, com ripple (X ou Delete)">Remover</button>
-                <button class="btn btn-small" id="btn-lift" type="button" title="Lift (Z)">Lift</button>
-                <button class="btn btn-small" id="btn-duplicate" type="button" title="Duplicar (Ctrl+D)">Duplicar</button>
-                <button class="btn btn-small" id="btn-trim-in" type="button" title="Aparar entrada até o cursor (I)">Aparar entrada</button>
-                <button class="btn btn-small" id="btn-trim-out" type="button" title="Aparar saída até o cursor (O)">Aparar saída</button>
-                <button class="btn btn-small" id="btn-snap" type="button" title="Alternar encaixe, snap (Ctrl+P)">Snap</button>
-                <button class="btn btn-small" id="btn-ripple" type="button" title="A V1 é sempre ripple (Ctrl+R)">Ripple: V1</button>
-                <button class="icon-btn" id="btn-zoom-out" type="button" title="Afastar (-)">&minus;</button>
-                <button class="icon-btn" id="btn-zoom-in" type="button" title="Aproximar (=)">+</button>
-                <button class="btn btn-small" id="btn-zoom-fit" type="button" title="Ajustar à janela (0)">Ajustar</button>
-                <span class="timeline-timecode" id="timeline-timecode">00:00:00:00</span>
-                <span class="hint-text" id="proxies-status"></span>
-                <button class="icon-btn" id="btn-toggle-filters" type="button" title="Mostrar/ocultar filtros">F</button>
-                <button class="icon-btn" id="btn-toggle-media" type="button" title="Mostrar/ocultar mídia">M</button>
-                <button class="icon-btn" id="btn-shortcuts" type="button" title="Mostrar atalhos (?)">?</button>
+            <div class="tl-layout-grid" id="tl-layout-grid">
+              <div class="tl-slot" data-slot="top-center"></div>
+              <div class="tl-divider tl-divider-row" id="tl-divider-row" title="Arraste para redimensionar"></div>
+              <div class="tl-slot" data-slot="top-left"></div>
+              <div class="tl-divider tl-divider-col" id="tl-divider-col-left" title="Arraste para redimensionar"></div>
+              <div class="tl-slot" data-slot="bottom"></div>
+              <div class="tl-divider tl-divider-col" id="tl-divider-col-right" title="Arraste para redimensionar"></div>
+              <div class="tl-slot" data-slot="top-right"></div>
+            </div>
+
+            <div class="panel" data-panel="player">
+              <div class="panel-title">
+                <span class="panel-title-name">Player</span>
+                <button class="panel-hide-btn" type="button" data-panel-hide="player" title="Ocultar painel">&times;</button>
               </div>
-              <div class="timeline-grid">
-                <div class="timeline-side timeline-side-left" id="panel-filters">
-                  <div class="side-panel-header">
-                    <h3>Filtros</h3>
-                    <div class="dropdown" id="filters-add-dropdown">
-                      <button class="icon-btn" id="btn-add-filter" type="button" title="Adicionar filtro">+</button>
-                      <div class="dropdown-menu" id="filters-add-menu" hidden></div>
-                    </div>
+              <div class="player-pane" id="live-player"></div>
+            </div>
+
+            <div class="panel" data-panel="filters">
+              <div class="panel-title">
+                <span class="panel-title-name">Filtros</span>
+                <button class="panel-hide-btn" type="button" data-panel-hide="filters" title="Ocultar painel">&times;</button>
+              </div>
+              <div class="timeline-side timeline-side-left" id="panel-filters">
+                <div class="side-panel-header">
+                  <h3>Filtros</h3>
+                  <div class="dropdown" id="filters-add-dropdown">
+                    <button class="icon-btn" id="btn-add-filter" type="button" title="Adicionar filtro">+</button>
+                    <div class="dropdown-menu" id="filters-add-menu" hidden></div>
                   </div>
-                  <div id="filters-body" class="side-panel-body"></div>
+                </div>
+                <div id="filters-body" class="side-panel-body"></div>
+              </div>
+            </div>
+
+            <div class="panel" data-panel="timeline">
+              <div class="panel-title">
+                <span class="panel-title-name">Linha do tempo</span>
+                <button class="panel-hide-btn" type="button" data-panel-hide="timeline" title="Ocultar painel">&times;</button>
+              </div>
+              <div class="timeline-pane">
+                <div class="timeline-toolbar" id="timeline-toolbar">
+                  <button class="btn btn-small" id="btn-split" type="button" title="Cortar no cursor (S)">Cortar</button>
+                  <button class="btn btn-small" id="btn-remove" type="button" title="Remover, com ripple (X ou Delete)">Remover</button>
+                  <button class="btn btn-small" id="btn-lift" type="button" title="Lift (Z)">Lift</button>
+                  <button class="btn btn-small" id="btn-duplicate" type="button" title="Duplicar (Ctrl+D)">Duplicar</button>
+                  <button class="btn btn-small" id="btn-trim-in" type="button" title="Aparar entrada até o cursor (I)">Aparar entrada</button>
+                  <button class="btn btn-small" id="btn-trim-out" type="button" title="Aparar saída até o cursor (O)">Aparar saída</button>
+                  <button class="btn btn-small" id="btn-snap" type="button" title="Alternar encaixe, snap (Ctrl+P)">Snap</button>
+                  <button class="btn btn-small" id="btn-ripple" type="button" title="A V1 é sempre ripple (Ctrl+R)">Ripple: V1</button>
+                  <button class="icon-btn" id="btn-zoom-out" type="button" title="Afastar (-)">&minus;</button>
+                  <button class="icon-btn" id="btn-zoom-in" type="button" title="Aproximar (=)">+</button>
+                  <button class="btn btn-small" id="btn-zoom-fit" type="button" title="Ajustar à janela (0)">Ajustar</button>
+                  <span class="timeline-timecode" id="timeline-timecode">00:00:00:00</span>
+                  <span class="hint-text" id="proxies-status"></span>
+                  <button class="icon-btn" id="btn-toggle-filters" type="button" title="Mostrar/ocultar filtros">F</button>
+                  <button class="icon-btn" id="btn-toggle-media" type="button" title="Mostrar/ocultar mídia">M</button>
+                  <button class="icon-btn" id="btn-shortcuts" type="button" title="Mostrar atalhos (?)">?</button>
                 </div>
                 <div class="timeline-tracks" id="timeline-tracks"></div>
-                <div class="timeline-side timeline-side-right" id="panel-media">
-                  <div class="side-panel-header">
-                    <h3>Mídia</h3>
-                    <button class="btn btn-small" id="btn-add-media" type="button" title="Adicionar arquivo">+ Arquivo</button>
-                  </div>
-                  <div class="media-toolbar" id="media-toolbar">
-                    <button class="btn btn-small" id="btn-media-text" type="button" title="Sobreposição de texto no cursor">Texto</button>
-                    <button class="btn btn-small" id="btn-media-card" type="button" title="Cartão no fim da V1">Cartão</button>
-                    <button class="btn btn-small" id="btn-media-logo" type="button" title="Logo da marca no cursor">Logo</button>
-                    <button class="btn btn-small" id="btn-media-music" type="button" title="Música de fundo">Música</button>
-                  </div>
-                  <div id="media-body" class="side-panel-body"></div>
+              </div>
+            </div>
+
+            <div class="panel" data-panel="media">
+              <div class="panel-title">
+                <span class="panel-title-name">Mídia</span>
+                <button class="panel-hide-btn" type="button" data-panel-hide="media" title="Ocultar painel">&times;</button>
+              </div>
+              <div class="timeline-side timeline-side-right" id="panel-media">
+                <div class="side-panel-header">
+                  <h3>Mídia</h3>
+                  <button class="btn btn-small" id="btn-add-media" type="button" title="Adicionar arquivo">+ Arquivo</button>
                 </div>
+                <div class="media-toolbar" id="media-toolbar">
+                  <button class="btn btn-small" id="btn-media-text" type="button" title="Sobreposição de texto no cursor">Texto</button>
+                  <button class="btn btn-small" id="btn-media-card" type="button" title="Cartão no fim da V1">Cartão</button>
+                  <button class="btn btn-small" id="btn-media-logo" type="button" title="Logo da marca no cursor">Logo</button>
+                  <button class="btn btn-small" id="btn-media-music" type="button" title="Música de fundo">Música</button>
+                </div>
+                <div id="media-body" class="side-panel-body"></div>
               </div>
             </div>
           </div>
@@ -229,9 +272,9 @@
         </section>
       </div>
 
-      <section class="progress-panel collapsed" id="progress-panel">
-        <button class="progress-toggle" id="progress-toggle" type="button">
-          <span>Andamento</span>
+      <section class="progress-panel collapsed" id="progress-panel" data-panel="progress">
+        <button class="progress-toggle panel-title" id="progress-toggle" type="button">
+          <span class="panel-title-name">Andamento</span>
           <span id="progress-status" class="progress-status"></span>
         </button>
         <div class="progress-body" id="progress-body">
@@ -263,6 +306,7 @@
 <script src="/static/media.js"></script>
 <script src="/static/editor.js"></script>
 <script src="/static/progress.js"></script>
+<script src="/static/layout.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

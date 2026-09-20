@@ -27,6 +27,7 @@ from ..filtergraph.reframe import resolve_reframe_mode
 from ..media.ffmpeg import FFmpegCommand
 from ..media.matting import MATTE_VERSION, MatteRequest, hex_to_rgb, tone_of
 from ..media.probe import MediaInfo
+from ..visuals.card_layouts import render_layout_card
 from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
@@ -307,13 +308,27 @@ class CardPreparer:
     def prepare(self, index: int, segment: Segment, source: Source, ctx: RenderContext) -> PreparedSegment:
         assert isinstance(segment, CardSegment)
         W, H = ctx.width, ctx.height
-        key = cache_key(MEZZ_VERSION, segment.model_dump(mode="json"), W, H, ctx.fps, _theme_signature(ctx))
+        theme, safe = ctx.theme, ctx.preset.safe
+        bg_mtime = None
+        if segment.layout:
+            layout = theme.card_layouts.get(segment.layout)
+            if layout is None:
+                raise ValueError(
+                    f"timeline[{index}]: layout de cartão desconhecido na marca {theme.name!r}: "
+                    f"{segment.layout!r}"
+                )
+            bg_path = theme.resolve_asset(layout["background"])
+            bg_mtime = bg_path.stat().st_mtime if bg_path.exists() else None
+        key = cache_key(
+            MEZZ_VERSION, segment.model_dump(mode="json"), W, H, ctx.fps, _theme_signature(ctx), bg_mtime
+        )
         out = ctx.cache_dir / f"{key}.mov"
         tone = segment.variant or _default_variant(ctx)
         duration = segment.duration
-        theme, safe = ctx.theme, ctx.preset.safe
 
         def draw(width: int, height: int, supersample: int) -> Image.Image:
+            if segment.layout:
+                return render_layout_card(theme, segment.layout, segment.fields, width, height, supersample)
             k = width / W
             scaled_safe = SafeZone(
                 *(int(round(v * k)) for v in (safe.top, safe.bottom, safe.left, safe.right))

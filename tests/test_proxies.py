@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 from dmaker import config
 from dmaker.domain.spec import Project
 from dmaker.filtergraph.proxy import PROXY_HEIGHT, proxy_command
-from dmaker.media.ffmpeg import FFmpegCommand, RecordingRunner
+from dmaker.media.ffmpeg import FFmpegCommand, FFmpegError, RecordingRunner
 from dmaker.media.probe import MediaInfo
 from dmaker.pipeline import proxies as proxies_module
 from dmaker.pipeline.proxies import ProxyBuilder, ProxyStatus, project_video_sources, proxy_path
@@ -160,6 +161,103 @@ def test_proxy_builder_builds_only_missing_and_status_reflects(tmp_path, monkeyp
     assert {s.ready for s in after} == {True}
 
 
+def test_proxy_builder_uses_a_unique_tmp_name_per_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROXY_DIR", tmp_path / "proxy")
+    (tmp_path / "a.mp4").write_bytes(b"a")
+    project = _project(tmp_path, timeline=[{"type": "clip", "src": "a.mp4"}])
+    tmp_names = []
+
+    def on_run(command: FFmpegCommand) -> None:
+        tmp_names.append(Path(command.args[-1]).name)
+        _create_output(command)
+
+    builder = ProxyBuilder(
+        RecordingRunner(on_run=on_run),
+        prober=lambda path: MediaInfo(path, 1.0, 1920, 1080, 30.0, True, True, False),
+    )
+    builder.build(project)
+    assert len(tmp_names) == 1
+    name = tmp_names[0]
+    assert f".tmp-{os.getpid()}-" in name
+    assert list((tmp_path / "proxy").glob("*.tmp-*")) == []  # nada de tmp sobrando
+
+
+def test_proxy_builder_discards_tmp_when_another_process_already_finished_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROXY_DIR", tmp_path / "proxy")
+    (tmp_path / "a.mp4").write_bytes(b"a")
+    project = _project(tmp_path, timeline=[{"type": "clip", "src": "a.mp4"}])
+    final_path = proxy_path(tmp_path / "a.mp4")
+
+    def on_run(command: FFmpegCommand) -> None:
+        # simula outro job de proxies terminando o mesmo proxy enquanto este ainda rodava
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        final_path.write_bytes(b"proxy do outro processo")
+        Path(command.args[-1]).write_bytes(b"\x00" * 16)  # o nosso tmp tambem fica pronto
+
+    builder = ProxyBuilder(
+        RecordingRunner(on_run=on_run),
+        prober=lambda path: MediaInfo(path, 1.0, 1920, 1080, 30.0, True, True, False),
+    )
+    built = builder.build(project)
+    assert built[0].ready is True
+    assert built[0].proxy.read_bytes() == b"proxy do outro processo"  # não sobrescreveu o do outro
+    assert list((tmp_path / "proxy").glob("*.tmp-*")) == []  # o nosso tmp foi descartado
+
+
+def test_proxy_builder_leaves_no_tmp_when_the_runner_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROXY_DIR", tmp_path / "proxy")
+    (tmp_path / "a.mp4").write_bytes(b"a")
+    project = _project(tmp_path, timeline=[{"type": "clip", "src": "a.mp4"}])
+
+    def on_run(command: FFmpegCommand) -> None:
+        Path(command.args[-1]).write_bytes(b"\x00" * 16)  # ffmpeg chegou a escrever algo...
+        raise FFmpegError("ffmpeg explodiu")  # ...mas falhou antes do fim
+
+    builder = ProxyBuilder(
+        RecordingRunner(on_run=on_run),
+        prober=lambda path: MediaInfo(path, 1.0, 1920, 1080, 30.0, True, True, False),
+    )
+    with pytest.raises(FFmpegError):
+        builder.build(project)
+    assert list((tmp_path / "proxy").glob("**/*.tmp-*")) == []
+
+
+def test_replace_with_retry_survives_a_transient_permission_error(tmp_path, monkeypatch):
+    proxy = tmp_path / "out.mp4"
+    tmp = tmp_path / "out.tmp-1-aaaaaaaa.mp4"
+    tmp.write_bytes(b"conteudo")
+    real_replace = Path.replace
+    calls = {"n": 0}
+
+    def flaky_replace(self, target):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError("[WinError 32] arquivo em uso por outro processo")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    monkeypatch.setattr(proxies_module.time, "sleep", lambda seconds: None)
+
+    ProxyBuilder(RecordingRunner())._replace_with_retry(tmp, proxy)
+    assert calls["n"] == 3
+    assert proxy.read_bytes() == b"conteudo"
+
+
+def test_replace_with_retry_gives_up_after_max_attempts(tmp_path, monkeypatch):
+    proxy = tmp_path / "out.mp4"
+    tmp = tmp_path / "out.tmp-1-aaaaaaaa.mp4"
+    tmp.write_bytes(b"conteudo")
+
+    def always_fails(self, target):
+        raise PermissionError("[WinError 32] arquivo em uso por outro processo")
+
+    monkeypatch.setattr(Path, "replace", always_fails)
+    monkeypatch.setattr(proxies_module.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(PermissionError):
+        ProxyBuilder(RecordingRunner())._replace_with_retry(tmp, proxy)
+
+
 def test_proxy_builder_reports_progress_per_source(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROXY_DIR", tmp_path / "proxy")
     (tmp_path / "a.mp4").write_bytes(b"a")
@@ -270,3 +368,40 @@ def test_post_proxies_skips_job_when_everything_is_ready(client, monkeypatch):
             "url": server._file_url(config.PROXY_DIR / "fake.mp4"),
         }
     ]
+
+
+def _slow_missing_builder(gate: threading.Event):
+    """Como `_MissingProxyBuilder`, mas `build` só termina quando o teste libera `gate`: dá tempo de
+    disparar um segundo POST /proxies enquanto o primeiro job ainda está rodando."""
+
+    class _SlowMissingProxyBuilder:
+        def __init__(self, runner, prober=None, log=None):
+            pass
+
+        def status(self, project: Project) -> list[ProxyStatus]:
+            return [ProxyStatus(Path("clip.mp4"), config.PROXY_DIR / "fake.mp4", False)]
+
+        def build(self, project: Project, sink=None) -> list[ProxyStatus]:
+            gate.wait(5)
+            return [ProxyStatus(Path("clip.mp4"), config.PROXY_DIR / "fake.mp4", True)]
+
+    return _SlowMissingProxyBuilder
+
+
+def test_post_proxies_reuses_running_job_for_the_same_project(client, monkeypatch):
+    """Abrir o projeto duas vezes (ex.: pelo hash e por um clique) não deve disparar dois jobs de
+    proxies para a mesma fonte, o que fazia os dois escreverem o mesmo .tmp e o segundo `replace`
+    falhar com PermissionError."""
+    client.put(f"/api/projects/{PROXY_PROJECT}", json=PROXY_SPEC)
+    gate = threading.Event()
+    monkeypatch.setattr(proxies_module, "ProxyBuilder", _slow_missing_builder(gate))
+    try:
+        first = client.post(f"/api/projects/{PROXY_PROJECT}/proxies").json()
+        second = client.post(f"/api/projects/{PROXY_PROJECT}/proxies").json()
+        assert first["job"] is not None and second["job"] is not None
+        assert first["job"]["job_id"] == second["job"]["job_id"]
+    finally:
+        gate.set()
+        job = server.jobs.get(first["job"]["job_id"])
+        if job:
+            server.jobs.wait(job, 5)

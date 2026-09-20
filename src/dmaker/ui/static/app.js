@@ -193,6 +193,7 @@ const api = {
   get: (path) => apiRequest("GET", path),
   post: (path, body) => apiRequest("POST", path, body ?? {}),
   put: (path, body) => apiRequest("PUT", path, body ?? {}),
+  del: (path) => apiRequest("DELETE", path),
 };
 
 function handleError(err) {
@@ -406,7 +407,7 @@ function renderJobList() {
     return;
   }
   ul.innerHTML = state.jobs.slice().reverse().map((j) => `
-    <li class="job-item">
+    <li class="job-item" data-job="${escAttr(j.job_id)}"${j.error ? ` title="${escAttr(j.error)}"` : ""}>
       <div class="job-item-desc">${escHtml(j.description)}<span class="job-status job-status-${j.status}">${statusLabel(j.status)}</span></div>
       ${j.progress && j.progress.total ? `
         <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${j.progress.percent || 0}%"></div></div>
@@ -414,6 +415,29 @@ function renderJobList() {
       ${j.error ? `<div class="project-item-meta" style="color:var(--danger)">${escHtml(j.error.split("\n")[0])}</div>` : ""}
     </li>`).join("");
 }
+
+/** Clica num job da lista abre (ou reabre) o painel de andamento dele, mesmo que já tenha terminado. */
+document.getElementById("job-list").addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-job]");
+  if (!item) return;
+  const job = state.jobs.find((j) => j.job_id === item.dataset.job);
+  if (!job) return;
+  try {
+    if (job.project && job.project !== state.currentProject) await openProject(job.project);
+  } catch (err) {
+    handleError(err);
+  }
+  openJobEvents(job.project || state.currentProject, job.job_id, "render");
+});
+
+document.getElementById("btn-clear-jobs").addEventListener("click", async () => {
+  try {
+    await api.del("/api/jobs/finished");
+    await refreshJobs();
+  } catch (err) {
+    handleError(err);
+  }
+});
 
 async function refreshOutputsGlobal() {
   state.outputs = await api.get("/api/outputs");
@@ -1627,6 +1651,7 @@ function switchTab(tab) {
   if (tab === "editor" && state.spec) renderEditorForm();
   if (tab === "captions") loadCaptionsTab();
   if (tab === "timeline" && state.spec && window.DMakerEditor) DMakerEditor.refreshView();
+  if (window.DMakerLayout) DMakerLayout.refresh();
 }
 
 document.getElementById("tabs").addEventListener("click", (e) => {
@@ -1858,8 +1883,45 @@ document.getElementById("modal-box").addEventListener("change", onModalChange);
 
 /* ==================== abrir projeto ==================== */
 
+/** 422 com `raw_spec`: a spec no disco não bate com o schema deste processo (ex.: a interface subiu
+ * antes de uma mudança na spec e está com código antigo). */
+function isInvalidSpecError(err) {
+  return err instanceof ApiError && err.status === 422 && err.data && typeof err.data === "object" && "raw_spec" in err.data;
+}
+
+function describeValidationErrors(detail) {
+  if (Array.isArray(detail)) return detail.map((d) => `${d.loc}: ${d.msg}`).join("; ");
+  return String(detail || "");
+}
+
+/** Abre o projeto mesmo com a spec inválida: mostra o JSON cru na aba JSON para o usuário corrigir e
+ * salvar, sem travar o resto da interface (jobs e saídas continuam funcionando). */
+function openProjectWithInvalidSpec(name, data) {
+  state.currentProject = name;
+  state.spec = data.raw_spec;
+  state.captionsExists = false;
+  state.projectOutputs = [];
+  localStorage.setItem("dmaker.lastProject", name);
+  document.getElementById("project-name").textContent = name;
+  setTopbarEnabled(true);
+  renderProjectList();
+  switchTab("json");
+  document.getElementById("json-error").textContent =
+    `Spec inválida (corrija e salve): ${describeValidationErrors(data.detail)}`;
+  showAlert("Este projeto tem uma spec inválida; veja a aba JSON.", "error");
+}
+
 async function openProject(name) {
-  const data = await api.get(`/api/projects/${encodeURIComponent(name)}`);
+  let data;
+  try {
+    data = await api.get(`/api/projects/${encodeURIComponent(name)}`);
+  } catch (err) {
+    if (isInvalidSpecError(err)) {
+      openProjectWithInvalidSpec(name, err.data);
+      return;
+    }
+    throw err;
+  }
   state.currentProject = name;
   state.spec = normalizeSpec(data.spec);
   state.captionsExists = data.captions_exists;
@@ -1894,7 +1956,9 @@ async function applyRouteHash() {
   const { project, job } = parseRouteHash();
   if (!project) return;
   if (project !== state.currentProject) {
-    try { await openProject(project); } catch (err) { handleError(err); return; }
+    // mesmo se abrir o projeto falhar (spec inválida por outro motivo, projeto apagado etc.), o
+    // painel de andamento deve conectar ao job do hash de qualquer forma.
+    try { await openProject(project); } catch (err) { handleError(err); }
   }
   if (job) openJobEvents(project, job, "render");
 }
@@ -1916,6 +1980,7 @@ function startHeartbeat() {
 /* ==================== 12. inicialização ==================== */
 
 async function init() {
+  if (window.DMakerLayout) DMakerLayout.init();
   try {
     state.stateInfo = await api.get("/api/state");
   } catch (err) { handleError(err); }

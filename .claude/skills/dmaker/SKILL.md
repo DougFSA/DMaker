@@ -19,7 +19,8 @@ mecânicas (template, render, QA, legendas) com um modelo local do Ollama, sem d
 1. **Entender o pedido**: plataforma(s), duração alvo, fontes (vídeos/fotos/prints/música), se tem fala
    (legenda automática), se é MedlyCare (`"brand": "medlycare"`) ou pessoal (sem brand).
 2. **Ver os templates**: `list_templates()`. Um template já cobre a maioria dos pedidos (produto,
-   depoimento, stories, vlog, tutorial, casamento...).
+   depoimento, stories, vlog, tutorial, casamento...). Casamento da PASCOM: template `casamento-pascom`
+   (duas câmeras, corte automático) seguido de `plan_multicam` (ver `dmaker://guide`).
 3. **Criar o projeto**: `new_from_template(template, name, params)` é o caminho preferido; erro nomeia o
    parâmetro que falta. Sem template que sirva, inspecione as fontes (`probe_media`, nunca chute duração)
    e escreva a spec com `save_project` (referência completa em `dmaker://guide`).
@@ -38,7 +39,10 @@ mecânicas (template, render, QA, legendas) com um modelo local do Ollama, sem d
 
 O software não decide sozinho: escolher os cortes, o ritmo (quando cada trecho troca), qual câmera aparece
 em cada momento (multicâmera) e quais tomadas usar são chamadas de edição, não do DMaker. Peça os
-instantes ao usuário ou avalie com `contact_sheet`/`frames` nas fontes antes de montar a timeline.
+instantes ao usuário ou avalie com `contact_sheet`/`frames` nas fontes antes de montar a timeline. A
+exceção é o corte automático de cerimônia (bloco `multicam` + `plan_multicam`): ele dá um ritmo
+plausível por fase reconhecida na fala, e o ajuste fino (qual casal está de frente para qual câmera)
+continua sendo feito com `edit_project` a partir dos avisos e da conferência do usuário.
 
 ## Regras da marca MedlyCare (`"brand": "medlycare"`)
 
@@ -63,3 +67,5 @@ operação de `edit_project` que não lembra o formato.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status`/`list_jobs` acompanham um render em segundo plano, local ou na interface.
 - Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade, uns 2 min).
+- Trilha muda/oculta na interface (botões M/H/cadeado, campo `tracks` da spec) some do render final
+  também, não só da prévia: se uma faixa de áudio ou sobreposição não aparece no vídeo, confira `tracks`.

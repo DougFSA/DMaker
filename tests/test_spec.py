@@ -3,7 +3,17 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from dmaker.domain.spec import CardSegment, ClipSegment, Output, Project, TextOverlay, Transition
+from dmaker.domain.spec import (
+    CardSegment,
+    ClipSegment,
+    MulticamBlock,
+    Output,
+    Project,
+    SourceRef,
+    TextOverlay,
+    TrackState,
+    Transition,
+)
 
 MINIMAL = {
     "name": "teste",
@@ -85,3 +95,136 @@ def test_resolve_relative_to_spec_dir(tmp_path):
     p.base_dir = tmp_path
     assert p.resolve("video.mp4") == (tmp_path / "video.mp4").resolve()
     assert p.resolve("C:/x/y.mp4").is_absolute()
+
+
+MULTICAM_BASE = {
+    "name": "casamento",
+    "sources": {
+        "cam1": {"src": "cam1.mp4"},
+        "cam2": {"src": "cam2.mp4", "sync": "auto"},
+        "altar": {"src": "altar.wav", "sync": "auto"},
+    },
+    "timeline": [{"type": "clip", "source": "cam1", "start": 0, "end": 5}],
+}
+
+
+def test_multicam_block_accepts_known_sources():
+    p = Project.model_validate(
+        {
+            **MULTICAM_BASE,
+            "multicam": {"at": 1, "cameras": ["cam1", "cam2"], "main": "cam1", "audio": "altar"},
+        }
+    )
+    assert isinstance(p.multicam, MulticamBlock)
+    assert p.multicam.phases == "casamento"
+
+
+def test_multicam_block_rejects_unknown_camera():
+    with pytest.raises(ValidationError, match="desconhecida"):
+        Project.model_validate(
+            {
+                **MULTICAM_BASE,
+                "multicam": {"at": 1, "cameras": ["cam1", "cam9"], "main": "cam1", "audio": "altar"},
+            }
+        )
+
+
+def test_multicam_block_rejects_main_outside_cameras():
+    with pytest.raises(ValidationError, match="multicam.main"):
+        Project.model_validate(
+            {
+                **MULTICAM_BASE,
+                "multicam": {"at": 1, "cameras": ["cam1", "cam2"], "main": "altar", "audio": "altar"},
+            }
+        )
+
+
+def test_multicam_block_accepts_audio_only_source_outside_cameras():
+    """`audio` pode ser uma fonte só de áudio, que não precisa estar em `cameras`."""
+    p = Project.model_validate(
+        {
+            **MULTICAM_BASE,
+            "multicam": {"at": 1, "cameras": ["cam1", "cam2"], "main": "cam1", "audio": "altar"},
+        }
+    )
+    assert p.multicam.audio == "altar"
+
+
+def test_multicam_block_rejects_at_beyond_timeline():
+    with pytest.raises(ValidationError, match="multicam.at"):
+        Project.model_validate(
+            {
+                **MULTICAM_BASE,
+                "multicam": {"at": 5, "cameras": ["cam1", "cam2"], "main": "cam1", "audio": "altar"},
+            }
+        )
+
+
+def test_multicam_block_accepts_custom_phase_rules():
+    p = Project.model_validate(
+        {
+            **MULTICAM_BASE,
+            "multicam": {
+                "at": 1,
+                "cameras": ["cam1", "cam2"],
+                "main": "cam1",
+                "audio": "altar",
+                "phases": [{"name": "votos", "match": ["te recebo"], "cadence": [60.0, 15.0]}],
+            },
+        }
+    )
+    assert p.multicam.phases[0].name == "votos"
+
+
+def test_source_ref_requires_src_or_parts():
+    with pytest.raises(ValidationError, match="um dos dois"):
+        SourceRef.model_validate({})
+    with pytest.raises(ValidationError, match="um dos dois"):
+        SourceRef.model_validate({"src": "a.mp4", "parts": ["b.mp4", "c.mp4"]})
+    with pytest.raises(ValidationError, match="um dos dois"):
+        SourceRef.model_validate({"parts": []})
+
+
+def test_source_ref_files_property():
+    assert SourceRef.model_validate({"src": "a.mp4"}).files == ["a.mp4"]
+    parted = SourceRef.model_validate({"parts": ["a1.mp4", "a2.mp4", "a3.mp4"]})
+    assert parted.files == ["a1.mp4", "a2.mp4", "a3.mp4"]
+
+
+def test_project_accepts_source_with_parts():
+    spec = dict(
+        MINIMAL,
+        sources={"cam1": {"parts": ["a1.mp4", "a2.mp4"]}},
+        timeline=[{"type": "clip", "source": "cam1", "start": 0, "end": 10}],
+    )
+    project = Project.model_validate(spec)
+    assert project.sources["cam1"].parts == ["a1.mp4", "a2.mp4"]
+    assert project.master_source == "cam1"
+
+
+# ---------- tracks (mudo/oculto/bloqueio por trilha) ----------
+
+
+def test_track_state_defaults_to_all_false():
+    state = TrackState()
+    assert (state.muted, state.hidden, state.locked) == (False, False, False)
+
+
+def test_project_tracks_defaults_to_empty_dict():
+    project = Project.model_validate(MINIMAL)
+    assert project.tracks == {}
+
+
+def test_project_accepts_track_state_by_id():
+    spec = dict(MINIMAL, tracks={"A2": {"muted": True}, "TX": {"hidden": True}, "V1": {"locked": True}})
+    project = Project.model_validate(spec)
+    assert project.tracks["A2"].muted is True
+    assert project.tracks["TX"].hidden is True
+    assert project.tracks["V1"].locked is True
+    assert project.tracks["A2"].hidden is False
+
+
+def test_track_state_rejects_unknown_field():
+    spec = dict(MINIMAL, tracks={"A2": {"invalid": True}})
+    with pytest.raises(ValidationError):
+        Project.model_validate(spec)

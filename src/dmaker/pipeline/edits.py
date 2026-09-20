@@ -22,63 +22,60 @@ from ..domain.edits import (
 from ..domain.spec import ClipSegment, Project
 from ..media.probe import probe
 from .context import Prober
-from .layout import ProjectLayout, project_layout
+from .layout import OriginAggregate, aggregate_by_origin, project_layout
 from .sync import OffsetFinder
 
-Operation = Callable[[Project, dict, ProjectLayout], Project]
+Operation = Callable[[Project, dict, OriginAggregate], Project]
 
 
-def _clip_media_duration(project: Project, layout: ProjectLayout, index: int) -> float | None:
+def _clip_media_duration(project: Project, layout: OriginAggregate, index: int) -> float | None:
     """Limite de `end` do trecho (tempo do arquivo; tempo da sessão quando a fonte é sincronizada,
-    já que `offset` é 0 para arquivos avulsos)."""
+    já que `offset` é 0 para arquivos avulsos; para fonte com `parts`, o fim da última parte)."""
     segment = project.timeline[index]
     if not isinstance(segment, ClipSegment):
         return None
-    source = layout.sources[index]
-    if source.info is None or not source.info.duration:
-        return None
-    return source.offset + source.info.duration
+    return layout.media_limits[index]
 
 
-def _op_split(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_split(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return split_segment(project, op["index"], op["at"], layout.durations)
 
 
-def _op_remove(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_remove(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return remove_segment(project, op["index"])
 
 
-def _op_move(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_move(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return move_segment(project, op["index"], op["to"])
 
 
-def _op_trim(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_trim(project: Project, op: dict, layout: OriginAggregate) -> Project:
     index = op["index"]
     media_duration = _clip_media_duration(project, layout, index)
     return trim_segment(project, index, op["side"], op["delta"], layout.durations, media_duration)
 
 
-def _op_duplicate(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_duplicate(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return duplicate_segment(project, op["index"])
 
 
-def _op_insert(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_insert(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return insert_segment(project, op["index"], op["segment"])
 
 
-def _op_overlay_span(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_overlay_span(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return set_overlay_span(project, op["index"], op["start"], op.get("end"))
 
 
-def _op_overlay_remove(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_overlay_remove(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return remove_overlay(project, op["index"])
 
 
-def _op_overlay_duplicate(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_overlay_duplicate(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return duplicate_overlay(project, op["index"])
 
 
-def _op_set_field(project: Project, op: dict, layout: ProjectLayout) -> Project:
+def _op_set_field(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return set_field(project, op["path"], op.get("value"))
 
 
@@ -107,7 +104,7 @@ def apply_edit(
         raise EditError(
             f"operação de edição desconhecida: {op_type!r}. Use uma de: {', '.join(sorted(EDIT_OPERATIONS))}"
         )
-    layout = project_layout(project, prober, offset_finder)
+    layout = aggregate_by_origin(project, project_layout(project, prober, offset_finder))
     try:
         return handler(project, op, layout)
     except EditError:

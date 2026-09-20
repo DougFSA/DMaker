@@ -56,6 +56,7 @@ def test_chat_sends_model_tools_stream_false_and_num_ctx():
     assert body["tools"] == [{"type": "function"}]
     assert body["stream"] is False
     assert body["options"] == {"num_ctx": 8192}
+    assert body["keep_alive"] == "60m"  # ferramentas longas não podem descarregar o modelo
     assert req.get_full_url().endswith("/api/chat")
     assert timeout == chat.timeout
 
@@ -245,6 +246,14 @@ def test_default_system_prompt_uses_real_skill_and_is_dash_free():
 
     assert "—" not in prompt and "–" not in prompt
     assert "DMaker" in prompt
+
+
+def test_default_system_prompt_has_pascom_wedding_rules():
+    prompt = system_prompt()
+
+    assert "casamento-pascom" in prompt
+    assert "plan_multicam" in prompt
+    assert "camera_altar" in prompt and "camera_lateral" in prompt
 
 
 # ---------- AgentLoop ----------

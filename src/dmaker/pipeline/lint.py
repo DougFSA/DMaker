@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..domain.brand import Theme
 from ..domain.presets import Preset
 from ..domain.spec import ClipSegment, Project
+from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
 
 DASHES = ("—", "–")
@@ -69,4 +70,12 @@ def lint(
     captions = project.captions
     if captions and captions.enabled and captions.source == "auto" and project.audio.mute_clips:
         warnings.append("Legendas automáticas com audio.mute_clips: não há voz para transcrever.")
+    if project.tracks:
+        known = known_track_ids(project)
+        for track_id in project.tracks:
+            if track_id not in known:
+                warnings.append(f"tracks.{track_id}: id de trilha desconhecido (ignorado no render).")
+        v1_state = project.tracks.get("V1")
+        if v1_state and v1_state.hidden:
+            warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
     return warnings

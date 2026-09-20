@@ -72,7 +72,7 @@ Regras e valores:
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
 - **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y`; `width` (fração da largura, 0.18 a 0.3 para webcam); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
-- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
+- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
 - **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa encoder de hardware quando `dmaker doctor` detectar um, mais rápido e com qualidade um pouco menor), `fps`, `thumbnail_at`, `path`.
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.
 
@@ -97,6 +97,90 @@ Faixas de `audio.tracks` seguem os cortes automaticamente e são misturadas ao �
 - Cronograma realista: mezaninos ~1x tempo real e render final ~1x em 1080p; um vídeo de 1 h leva ~2 h.
 - Template: `templates/casamento-multicam.json`.
 
+### Câmera que grava em vários arquivos (`parts`)
+
+Câmera que parte a gravação sozinha (a Canon corta a cada 30 min; o celular para e volta) usa `parts`
+em vez de `src`: a lista dos arquivos, em ordem. O pipeline encadeia as partes pelo áudio sozinho, sem
+precisar declarar uma fonte por arquivo nem calcular pontos de corte na mão:
+
+```json
+"sources": {
+  "cam1": {"parts": ["cam1_0001.mp4", "cam1_0002.mp4", "cam1_0003.mp4", "cam1_0004.mp4"]},
+  "cam2": {"src": "celular.mp4", "sync": "auto"}
+}
+```
+
+Um clipe com `source: "cam1"` pode atravessar a fronteira entre dois arquivos sem que isso mude nada na
+spec: `start`/`end` continuam no relógio da sessão inteira, e o pipeline parte o trecho sozinho no ponto
+certo (o corte é interno, sem transição visível). Um trecho que cai num intervalo que nenhuma parte cobre
+(arquivo faltando, gravação com buraco) dá erro claro na validação, com os intervalos que as partes cobrem.
+
+Cada parte é ligada por áudio a uma parte já posicionada de QUALQUER outra fonte da sessão (não só à
+principal); sem link confiável, o pipeline cai para o `creation_time` do próprio arquivo (detecta sozinho
+se a câmera grava esse relógio no início ou no fim da gravação) e avisa "posicionada pelo relógio, confira"
+em `dmaker validate`: vale a pena conferir esse trecho com `sync_sources` ou olhando os quadros
+(`contact_sheet`) antes de renderizar tudo.
+
+### Casamento padrão PASCOM (template `casamento-pascom`)
+
+Fluxo completo, do pedido ao render final:
+
+1. `new_from_template("casamento-pascom", nome, params)` com `camera_altar`/`camera_lateral` (as
+   pastas das duas câmeras, tipo `dir`: viram sozinhas a lista dos arquivos, em ordem), `nomes` (lista
+   de casais, "Nome & Nome") e `data`; o resto tem padrão (marca `pascom-sjb`, celebrante, diácono,
+   cerimonial, músicos, trilha).
+2. `plan_multicam(nome)` (CLI: `dmaker plan <nome>`): transcreve a câmera de áudio do bloco `multicam`,
+   reconhece as fases da cerimônia pela fala e substitui o bloco pelos clipes de verdade, alternando as
+   câmeras. Devolve avisos e a lista de fases reconhecidas com o instante de cada uma.
+3. `validate_project`: confere a duração final e os avisos (o bloco expandido já não avisa mais nada
+   sobre si mesmo).
+4. `render_project(preview=true)`: prévia rápida para conferir o corte.
+5. Conferir as fases reconhecidas e os avisos do passo 2 (buracos de cobertura entre as câmeras, partes
+   posicionadas pelo relógio do arquivo em vez de um link de áudio confiável); ajustar com
+   `edit_project` se precisar (trocar um trecho de câmera, mover um corte).
+6. Render final (`render_project`).
+
+**Formato do bloco `multicam`** (campo de topo da spec, ainda por planejar):
+
+```json
+"multicam": {
+  "at": 2,
+  "cameras": ["altar", "lateral"],
+  "main": "altar",
+  "audio": "altar",
+  "cadence": [40, 30],
+  "phases": "casamento",
+  "min_clip": 4,
+  "snap_window": 5,
+  "pause": 0.6,
+  "start": null,
+  "end": null,
+  "transition_in": { "type": "dissolve", "duration": 2.0 }
+}
+```
+
+- `at`: índice da timeline onde os clipes planejados entram (o resto desloca; os cartões antes desse
+  índice não mudam de lugar).
+- `cameras`: nomes em `sources` que podem aparecer nos clipes; `main` é a que fica mais tempo em tela;
+  `audio` é a fonte cuja fala é transcrita e usada para reconhecer as fases (os clipes de outras câmeras
+  ficam mudos onde ela cobre, para não duplicar o áudio).
+- `cadence`: `[tempo_na_principal, tempo_na_secundaria]` em segundos, o ritmo de troca de câmera fora de
+  uma fase com regra própria.
+- `phases`: `"casamento"` usa as fases padrão do rito (entrada, liturgia da palavra, votos, bênção das
+  alianças, assinatura, saída...), cada uma reconhecida por termos ditos na fala; uma lista de regras
+  próprias substitui isso: `[{"name": "...", "match": ["termo1", "termo2"], "main": "altar", "cadence":
+  [60, 15], "max_duration": 300}]` (`match` é o que procurar na transcrição; `main`/`cadence` sobrescrevem
+  os do bloco só nessa fase; `max_duration` limita o quanto essa fase pode durar).
+- `min_clip`: menor duração aceitável de um clipe (evita cortes picotados); `snap_window`: encaixa um
+  corte planejado numa pausa da fala a até essa distância, em vez de cortar no meio de uma frase;
+  `pause`: silêncio mínimo (segundos) para contar como uma pausa.
+- `start`/`end`: relógio da sessão (o da câmera `audio`) onde a cerimônia começa/termina; `null` cobre
+  do início ao fim do que as câmeras gravaram.
+- `transition_in`: transição do primeiro clipe planejado (o dos seguintes é decidido pelo planejador).
+
+`validate_project` só avisa que o bloco ainda não foi expandido; `render_project` recusa renderizar com
+um bloco `multicam` pendente (chame `plan_multicam` antes).
+
 ## Edições pontuais e linha do tempo
 
 `edit_project(name, op)` carrega o projeto, aplica uma operação e salva, sem reescrever a spec inteira.
@@ -116,6 +200,10 @@ edit_project("meu-reel", {"type": "trim", "index": 0, "side": "out", "delta": -0
 edit_project("meu-reel", {"type": "set_field", "path": "timeline.2.speed", "value": 1.5})
 ```
 
+`project.tracks` (`dict[id da trilha] -> {"muted", "hidden", "locked"}`, ex.: `{"A2": {"muted": true}}`)
+guarda o mudo/oculto/bloqueio por trilha da interface (botões M/H/cadeado); vale para a prévia E para o
+render final (`domain.tracks.apply_track_state`), então uma faixa marcada aqui some do vídeo exportado.
+
 ## Legendas automáticas
 
 `captions.source = "auto"` transcreve com Whisper e grava `projects/<nome>/captions.auto.json` (com
@@ -125,6 +213,47 @@ cue longa/curta, substituição pendente); `mode=full` devolve tudo, com tempo p
 precisar inspecionar de verdade. `fix_captions(name, {"errado": "certo"})` corrige o texto de todas as
 cues (o próximo render usa o corrigido); o cache de transcrição é reaproveitado enquanto as fontes não
 mudarem, `force=true` refaz tudo.
+
+## Cartões por layout (brand.json)
+
+Marcas com identidade visual própria (placa floral, fontes cursivas) podem definir cartões fixos no
+`brand.json` em vez do visual genérico do tema: `{"type": "card", "layout": "abertura", "fields": {...},
+"duration": 4}` (sem `title`; `layout` e `fields` são exclusivos com o cartão genérico). O brand.json
+ganha uma seção `card_layouts`:
+
+```json
+"fonts": { "family": "Poppins", "files": { "script": "GreatVibes-Regular.ttf", "serif": "georgia.ttf" } },
+"card_layouts": {
+  "abertura": {
+    "background": "cards/placa.png",
+    "elements": [
+      { "kind": "text", "text": "{{data}}", "font": "date", "size": 118, "y": 190, "color": "#1a1a1a", "shadow": true },
+      { "kind": "lines", "field": "nomes", "font": "script", "size": 75, "y": 632, "x": 850, "line_gap": 88, "per_line": 2, "join": "   ·   " },
+      { "kind": "blocks", "title_font": "serif", "text_font": "serif", "title_size": 52, "text_size": 38,
+        "items": [ { "title": "Celebrante", "text": "{{celebrante}}" } ] },
+      { "kind": "image", "src": "logo:paroquia", "width": 760, "x": 880, "y": 40, "blend": "multiply" }
+    ]
+  }
+}
+```
+
+- `fonts.files`: papel de fonte (usado no `font` de cada elemento) -> arquivo `.ttf` em
+  `assets/brands/<marca>/fonts/`; se não estiver lá, cai para a mesma fonte em `C:\Windows\Fonts`
+  (útil para Georgia, Arial etc., sem precisar copiar).
+- `background` e caminhos de `image` (fora de `logo:...`) são relativos à pasta da marca.
+- Posições e tamanhos são px na base 1920x1080, escalados para a resolução do vídeo.
+- `text`: interpola `{{campo}}` de `fields`; texto vazio depois de interpolar = elemento omitido.
+  `x` é opcional (centro do quadro quando ausente); `shadow` desenha a sombra suave do cartão de
+  referência da PASCOM (texto preto a 43%, deslocado (4,5), blur 4).
+- `lines`: `field` é uma lista em `fields`, quebrada em linhas de `per_line` itens unidos por `join`;
+  lista de 1 item usa `single_size`/`single_y` quando definidos (nome de casal único vs. vários).
+- `blocks`: lista de `{"title", "text"}` (título + texto, `text` pode ter `\n`) empilhados e
+  centralizados verticalmente; item com texto vazio (campo não preenchido) é omitido, sem deixar buraco.
+- `image`: `src` é `logo:<nome>` (de `logos` do brand.json) ou caminho relativo à marca; `x`/`y` são o
+  canto superior esquerdo (não o centro); `blend: "multiply"` escurece a placa clara com um logo de
+  fundo branco (como na placa floral); `"alpha"` é a sobreposição transparente normal.
+- Exemplo completo: marca `pascom-sjb` (`assets/brands/pascom-sjb/brand.json`), layouts `abertura`,
+  `creditos` e `encerramento` do casamento comunitário da PASCOM (Paróquia São João Batista, Amparo-SP).
 
 ## Regras da marca MedlyCare (`"brand": "medlycare"`)
 

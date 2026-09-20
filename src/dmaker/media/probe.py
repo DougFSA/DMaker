@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
@@ -29,6 +30,7 @@ class MediaInfo:
     sample_rate: int | None = None
     channels: int | None = None
     size_bytes: int = 0
+    creation_time: float | None = None  # início da gravação (epoch, segundos), se o arquivo informar
 
     @property
     def aspect(self) -> float:
@@ -59,6 +61,21 @@ def _parse_rate(value: str | None) -> float:
         return float(Fraction(value))
     except (ValueError, ZeroDivisionError):
         return 0.0
+
+
+def _creation_time(fmt: dict) -> float | None:
+    """`format.tags.creation_time` (ISO 8601, normalmente UTC) convertido para epoch; usado para
+    encadear partes de uma fonte pelo relógio de gravação quando o áudio não dá um link confiável."""
+    raw = (fmt.get("tags") or {}).get("creation_time")
+    if not raw:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.timestamp()
 
 
 def _rotation(stream: dict) -> int:
@@ -120,6 +137,7 @@ def _probe_cached(path_str: str, mtime_ns: int, size: int) -> MediaInfo:
         sample_rate=int(a["sample_rate"]) if a and a.get("sample_rate") else None,
         channels=int(a["channels"]) if a and a.get("channels") else None,
         size_bytes=size,
+        creation_time=_creation_time(fmt),
     )
 
 

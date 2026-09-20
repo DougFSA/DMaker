@@ -39,6 +39,14 @@ def _finite(value: object) -> float | None:
     return f if f == f and abs(f) != float("inf") else None
 
 
+def _music_duration(ctx: RenderContext, music_path: Path | None) -> float | None:
+    """Duração da música, só quando algum span usa `tail` (evita uma sondagem desnecessária)."""
+    music = ctx.project.audio.music
+    if music_path is None or music is None or not any(span.tail for span in music.spans):
+        return None
+    return ctx.prober(music_path).duration
+
+
 @dataclass
 class LoudnessMeasure:
     """Resultado da passada de medição do loudnorm (None = silêncio ou medição indisponível)."""
@@ -70,7 +78,14 @@ class LoudnessMeter:
         )
         lines = list(graph.lines)
         aout = audio_graph(
-            lines, inputs, graph.audio, ctx.project.audio, music_path, total, include_norm=False
+            lines,
+            inputs,
+            graph.audio,
+            ctx.project.audio,
+            music_path,
+            total,
+            include_norm=False,
+            music_duration=_music_duration(ctx, music_path),
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[ameas]", "-f", "null", "-"]
@@ -151,6 +166,7 @@ def build_assembly(
         measured=measured,
         include_norm=normalize,
         extra_voices=pip_audio,
+        music_duration=_music_duration(ctx, music_path),
     )
 
     quality = "draft" if o.preview else p.output.quality

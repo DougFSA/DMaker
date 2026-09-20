@@ -1,5 +1,7 @@
 """Jobs em segundo plano: eventos, progresso e assinantes (o que a interface e o MCP consomem)."""
 
+import threading
+
 from dmaker.media.ffmpeg import NullSink, RichSink
 from dmaker.pipeline.jobs import JobManager
 
@@ -76,3 +78,48 @@ def test_terminal_sinks_are_safe_without_total():
         sink.start("x", None)
         sink.update(1.0)
         sink.finish()
+
+
+def test_running_lists_only_jobs_in_progress():
+    manager = JobManager()
+    gate = threading.Event()
+    running_job = manager.start("lento", lambda job: gate.wait(5))
+    finished_job = manager.wait(manager.start("rapido", lambda job: None), timeout=5)
+    try:
+        running_ids = {j.id for j in manager.running()}
+        assert running_ids == {running_job.id}
+        assert finished_job.id not in running_ids
+    finally:
+        gate.set()
+        manager.wait(running_job, timeout=5)
+
+
+def test_find_running_matches_by_predicate():
+    manager = JobManager()
+    gate = threading.Event()
+    job = manager.start("proxies", lambda job: gate.wait(5), meta={"project": "p1", "kind": "proxies"})
+    try:
+        found = manager.find_running(
+            lambda j: j.meta.get("project") == "p1" and j.meta.get("kind") == "proxies"
+        )
+        assert found is not None and found.id == job.id
+        assert manager.find_running(lambda j: j.meta.get("project") == "outro") is None
+    finally:
+        gate.set()
+        manager.wait(job, timeout=5)
+
+
+def test_clear_finished_removes_only_jobs_not_running():
+    manager = JobManager()
+    gate = threading.Event()
+    running_job = manager.start("lento", lambda job: gate.wait(5))
+    manager.wait(manager.start("rapido1", lambda job: None), timeout=5)
+    manager.wait(manager.start("rapido2", lambda job: None), timeout=5)
+    try:
+        removed = manager.clear_finished()
+        assert removed == 2
+        assert {j["job_id"] for j in manager.list()} == {running_job.id}
+        assert manager.clear_finished() == 0  # nada mais para limpar
+    finally:
+        gate.set()
+        manager.wait(running_job, timeout=5)

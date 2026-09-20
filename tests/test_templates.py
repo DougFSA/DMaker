@@ -9,6 +9,7 @@ from dmaker.domain.templates import (
     Template,
     TemplateError,
     TemplateParam,
+    expand_dir,
     find_template,
     list_templates,
     render_template,
@@ -18,8 +19,14 @@ from dmaker.domain.templates import (
 TEMPLATES = list_templates()
 
 
-def _fake_value(param: TemplateParam):
-    """Um valor plausível do tipo certo, para preencher parâmetros obrigatórios em teste."""
+def _fake_value(param: TemplateParam, tmp_path: Path):
+    """Um valor plausível do tipo certo, para preencher parâmetros obrigatórios em teste. `dir` cria
+    uma pastinha de verdade em `tmp_path` com um arquivo de mídia vazio dentro."""
+    if param.type == "dir":
+        folder = tmp_path / param.name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "0001.mp4").write_bytes(b"")
+        return str(folder)
     return {
         "text": "valor de teste",
         "path": "D:/teste/arquivo.mp4",
@@ -30,13 +37,13 @@ def _fake_value(param: TemplateParam):
     }[param.type]
 
 
-def _params_with_fakes(template: Template) -> dict:
-    return {name: _fake_value(p) for name, p in template.params.items() if p.required}
+def _params_with_fakes(template: Template, tmp_path: Path) -> dict:
+    return {name: _fake_value(p, tmp_path) for name, p in template.params.items() if p.required}
 
 
 @pytest.mark.parametrize("template", TEMPLATES, ids=[t.name for t in TEMPLATES])
-def test_template_renders_with_defaults_and_validates(template: Template):
-    rendered = render_template(template, _params_with_fakes(template))
+def test_template_renders_with_defaults_and_validates(template: Template, tmp_path):
+    rendered = render_template(template, _params_with_fakes(template, tmp_path))
     assert "params" not in rendered and "description" not in rendered
     project = Project.model_validate(rendered)
     assert project.timeline
@@ -165,6 +172,59 @@ def test_template_summary_lists_params():
     assert "teste" in summary
     assert "titulo" in summary and "padrão='Oi'" in summary
     assert "video" in summary and "obrigatório" in summary
+
+
+# ---------- parâmetro "dir" / expand_dir (domain/templates.py) ----------
+
+
+def test_expand_dir_lists_media_files_in_natural_order(tmp_path):
+    for name in ["cam1_0010.mp4", "cam1_0002.mp4", "cam1_0001.mp4", "notas.txt", "capa.png"]:
+        (tmp_path / name).write_bytes(b"")
+    files = expand_dir(tmp_path)
+    assert [Path(f).name for f in files] == ["cam1_0001.mp4", "cam1_0002.mp4", "cam1_0010.mp4"]
+    assert all(Path(f).is_absolute() for f in files)
+
+
+def test_expand_dir_natural_order_with_camera_style_names(tmp_path):
+    for name in ["VID_20250815_102.mp4", "VID_20250815_101.mp4", "VID_20250815_110.mp4"]:
+        (tmp_path / name).write_bytes(b"")
+    files = expand_dir(tmp_path)
+    assert [Path(f).name for f in files] == [
+        "VID_20250815_101.mp4",
+        "VID_20250815_102.mp4",
+        "VID_20250815_110.mp4",
+    ]
+
+
+def test_expand_dir_is_case_insensitive_about_extension(tmp_path):
+    (tmp_path / "a.MP4").write_bytes(b"")
+    (tmp_path / "b.M4A").write_bytes(b"")
+    assert len(expand_dir(tmp_path)) == 2
+
+
+def test_expand_dir_raises_on_missing_folder(tmp_path):
+    with pytest.raises(TemplateError, match="não encontrada"):
+        expand_dir(tmp_path / "nao-existe")
+
+
+def test_expand_dir_raises_on_empty_folder(tmp_path):
+    (tmp_path / "leia-me.txt").write_bytes(b"")
+    with pytest.raises(TemplateError, match="sem arquivos"):
+        expand_dir(tmp_path)
+
+
+def test_dir_param_becomes_list_of_absolute_paths(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"")
+    (tmp_path / "a.mp4").write_bytes(b"")
+    template = _template({"pasta": {"type": "dir", "required": True}}, {"arquivos": "{{pasta}}"})
+    out = render_template(template, {"pasta": str(tmp_path)})
+    assert out["arquivos"] == [str((tmp_path / "a.mp4").resolve()), str((tmp_path / "b.mp4").resolve())]
+
+
+def test_dir_param_wrong_type_raises_template_error():
+    template = _template({"pasta": {"type": "dir", "required": True}}, {"x": "{{pasta}}"})
+    with pytest.raises(TemplateError, match='"dir"'):
+        render_template(template, {"pasta": 123})
 
 
 def test_all_template_files_are_valid_json_with_params_and_description():

@@ -49,6 +49,11 @@ def _result_dict(result: Any) -> dict:
     }
 
 
+def _format_mmss(seconds: float) -> str:
+    total = max(0, int(seconds))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
 def _summary_dict(summary: Any) -> dict:
     return {
         "name": summary.name,
@@ -250,6 +255,31 @@ def timeline_view(name: str) -> dict:
     project = load_project(name)
     layout = project_layout(project)
     return build_timeline_view(project, layout).to_dict()
+
+
+@server.tool(
+    description=(
+        "Planeja o corte automático de um bloco `multicam` da spec: transcreve a câmera de áudio, "
+        "reconhece as fases da cerimônia pela fala (termos ditos, ex.: consentimento, votos, alianças) "
+        "e substitui o bloco pelos clipes concretos, alternando as câmeras pela cadência e atraindo "
+        "os cortes para pausas da fala. Salva o projeto já expandido; devolve quantos clipes saíram, "
+        "as fases reconhecidas (com o instante em que abriram) e os avisos (buracos de cobertura etc.)."
+    )
+)
+def plan_multicam(name_or_path: str) -> dict:
+    from .pipeline.multicam_plan import plan_multicam as _plan_multicam
+
+    result = _plan_multicam(name_or_path)
+    return {
+        "clips": result.clips,
+        "warnings": result.warnings,
+        "phases": [
+            {"name": name, "at_s": round(at, 2), "at": _format_mmss(at)} for name, at in result.phases
+        ],
+        "speech_seconds": round(result.speech_seconds, 1),
+        "start_s": round(result.start, 2),
+        "end_s": round(result.end, 2),
+    }
 
 
 @server.tool(description="Projetos existentes em projects/.")

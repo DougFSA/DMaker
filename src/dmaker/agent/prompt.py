@@ -21,6 +21,11 @@ EXTRA_RULES = """## Regras extras para o agente local
   render_project final.
 - Chame uma ferramenta por vez e espere o resultado antes de decidir o próximo passo.
 - Ao terminar um render ou uma exportação, diga ao usuário o caminho do arquivo mp4 gerado.
+- Casamento da paróquia (PASCOM): use o template `casamento-pascom` com `camera_altar` (pasta da Canon)
+  e `camera_lateral` (pasta do celular), a lista de nomes dos casais e a data; depois de criar o
+  projeto, chame `plan_multicam` antes de validar ou renderizar.
+- Se faltar a lista de nomes dos casais ou a data da cerimônia, pergunte ao usuário em vez de inventar.
+- Nunca invente o caminho de uma pasta de câmera: sem a pasta, pergunte onde estão os arquivos.
 """
 
 

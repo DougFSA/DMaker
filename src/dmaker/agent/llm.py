@@ -80,7 +80,8 @@ class OllamaChat:
     model: str
     base_url: str = DEFAULT_OLLAMA_URL
     num_ctx: int = 16384
-    timeout: float = 600.0
+    timeout: float = 1800.0  # um modelo de 20b em CPU leva minutos só para ler o prompt de sistema
+    keep_alive: str = "60m"  # segura o modelo carregado enquanto uma ferramenta longa (sync, render) roda
     opener: Callable[..., Any] = urllib.request.urlopen
 
     def _request(self, method: str, path: str, body: dict | None, timeout: float) -> dict:
@@ -99,6 +100,7 @@ class OllamaChat:
             "messages": messages,
             "tools": tools,
             "stream": False,
+            "keep_alive": self.keep_alive,
             "options": {"num_ctx": self.num_ctx},
         }
         data = self._request("POST", "/api/chat", body, self.timeout)

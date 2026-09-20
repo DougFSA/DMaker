@@ -7,6 +7,20 @@ from dmaker import config
 
 SKILL_PATH = config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md"
 GUIDE_PATH = config.PACKAGE_DIR / "resources" / "guide.md"
+MANUAL_PATH = config.ROOT / "docs" / "MANUAL.md"
+
+MANUAL_SECTION_TITLES = (
+    "O que é o DMaker",
+    "Instalação passo a passo no Windows",
+    "Conceitos",
+    "Usando com o Claude (Claude Code)",
+    "Usando com LLM local (Ollama)",
+    "Usando manualmente pela interface gráfica",
+    "Usando manualmente pela linha de comando",
+    "Marca MedlyCare",
+    "Solução de problemas",
+    "Anexos",
+)
 
 
 def test_skill_is_short_and_dash_free():
@@ -36,3 +50,11 @@ def test_guide_covers_reference_topics():
 def test_guide_is_package_data_for_wheel_installs():
     pyproject = (config.ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "resources/*.md" in pyproject
+
+
+def test_manual_exists_is_dash_free_and_covers_all_sections():
+    assert MANUAL_PATH.exists()
+    text = MANUAL_PATH.read_text(encoding="utf-8")
+    assert "—" not in text and "–" not in text
+    for title in MANUAL_SECTION_TITLES:
+        assert title in text

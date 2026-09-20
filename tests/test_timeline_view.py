@@ -203,3 +203,114 @@ def test_music_spans_become_one_item_each(tmp_path):
     view = build_timeline_view(project, project_layout(project, prober=fake_prober))
     mus = next(t for t in view.tracks if t.id == "MUS")
     assert [(i.start, i.end, i.in_point) for i in mus.items] == [(0.0, 10.0, 0.0), (15.0, 20.0, 30.0)]
+
+
+def test_music_span_from_end_and_tail_resolved_with_total_and_music_duration(tmp_path):
+    """Span ancorado no fim do vídeo (`from_end`) e no fim da música (`tail`): a vista mostra o
+    instante absoluto (não os 33.5 s brutos) e, com a duração da música, a folga já ancorada."""
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    (tmp_path / "trilha.mp3").write_bytes(b"x")
+    spec = {
+        "name": "trilha-no-fim",
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 20}],
+        "audio": {
+            "music": {
+                "src": "trilha.mp3",
+                "spans": [{"start": 5, "from_end": True, "tail": True, "start_at": 0.5}],
+            }
+        },
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    layout = project_layout(project, prober=fake_prober)  # total = 20.0 (o clipe inteiro)
+    view = build_timeline_view(project, layout, music_duration=12.0)
+    mus = next(t for t in view.tracks if t.id == "MUS")
+    item = mus.items[0]
+    assert (item.start, item.end) == (15.0, 20.0)  # 20 - 5 (from_end) até o fim
+    assert item.in_point == 12.0 - 5.0 - 0.5  # duração - comprimento da janela (5s) - folga
+
+
+# ---------- path resolvido (caminho absoluto) e estado de trilha ----------
+
+
+def test_v1_item_path_resolves_relative_src_against_project_dir(tmp_path):
+    """O bug real: um trecho como `{"type": "image", "src": "cards/abertura.png"}` é relativo à
+    pasta do projeto, não ao diretório de trabalho do servidor; `item.path` já vem resolvido."""
+    cards_dir = tmp_path / "cards"
+    cards_dir.mkdir()
+    (cards_dir / "abertura.png").write_bytes(b"x")
+    spec = {
+        "name": "caminho-relativo",
+        "timeline": [{"type": "image", "src": "cards/abertura.png", "duration": 2}],
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    v1 = next(t for t in view.tracks if t.id == "V1")
+    assert v1.items[0].path == str((cards_dir / "abertura.png").resolve())
+
+
+def test_clip_item_path_resolves_named_source(tmp_path):
+    project = make_project(tmp_path)  # já tem overlays com src="webcam.mp4"
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    v1 = next(t for t in view.tracks if t.id == "V1")
+    assert v1.items[0].path == str((tmp_path / "a.mp4").resolve())
+    v2 = next(t for t in view.tracks if t.id == "V2")
+    assert v2.items[0].path == str((tmp_path / "webcam.mp4").resolve())
+
+
+def test_card_and_text_items_have_no_path(tmp_path):
+    project = make_project(tmp_path)
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    v1 = next(t for t in view.tracks if t.id == "V1")
+    assert v1.items[1].kind == "card" and v1.items[1].path is None
+    tx = next(t for t in view.tracks if t.id == "TX")
+    assert tx.items[0].path is None
+
+
+def test_sources_dict_has_resolved_path(tmp_path):
+    (tmp_path / "cam1.mp4").write_bytes(b"x")
+    spec = {
+        "name": "fonte-sync",
+        "sources": {"cam1": {"src": "cam1.mp4"}},
+        "timeline": [{"type": "clip", "source": "cam1", "start": 0, "end": 2}],
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    assert view.sources["cam1"]["path"] == str((tmp_path / "cam1.mp4").resolve())
+
+
+def test_track_state_flows_into_view(tmp_path):
+    (tmp_path / "rec.wav").write_bytes(b"x")
+    spec = {
+        "name": "trilha-marcada",
+        "sources": {"rec": {"src": "rec.wav"}},
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 2}],
+        "audio": {"tracks": [{"source": "rec"}]},
+        "tracks": {"A2": {"muted": True}, "V1": {"locked": True}},
+    }
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    a2 = next(t for t in view.tracks if t.id == "A2")
+    assert a2.muted is True
+    assert a2.items[0].muted is True  # o item também reflete a trilha, não só o cabeçalho
+    v1 = next(t for t in view.tracks if t.id == "V1")
+    assert v1.locked is True and v1.hidden is False
+
+
+def test_music_span_tail_without_music_duration_keeps_raw_gap(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    (tmp_path / "trilha.mp3").write_bytes(b"x")
+    spec = {
+        "name": "trilha-sem-duracao",
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 20}],
+        "audio": {"music": {"src": "trilha.mp3", "spans": [{"start": 5, "tail": True, "start_at": 0.5}]}},
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    mus = next(t for t in view.tracks if t.id == "MUS")
+    assert mus.items[0].in_point == 0.5

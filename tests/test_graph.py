@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from dmaker.domain.presets import SafeZone, get_preset
 from dmaker.domain.spec import AudioSettings, ClipSegment, Music, MusicSpan, Reframe, Transition
 from dmaker.domain.timeline import timeline_spans, timeline_total
@@ -14,9 +16,11 @@ from dmaker.filtergraph import (
     overlay_position,
     reframe_graph,
     resolve_reframe_mode,
+    resolve_span,
     still_mezzanine,
     timeline_graph,
 )
+from dmaker.filtergraph.audio import music_stream
 from dmaker.media.probe import MediaInfo
 
 
@@ -273,3 +277,65 @@ def test_audio_graph_music_spans_play_only_in_their_windows():
     assert "atrim=start=170.000:duration=30.000" in text and "adelay=100000:all=1" in text
     assert "afade=t=in:st=0:d=4.000" in text and "afade=t=out:st=25.000:d=5.000" in text
     assert "[mus0][mus1]amix=inputs=2:duration=longest" in text and "[ta0][mus]amix=inputs=2" in text
+
+
+# ---------- resolve_span (from_end / tail) ----------
+
+
+def test_resolve_span_without_from_end_or_tail_is_a_passthrough():
+    span = MusicSpan(start=10, end=40, start_at=2.0)
+    assert resolve_span(span, total=130.0) == (10.0, 40.0, 2.0)
+
+
+def test_resolve_span_from_end_counts_from_the_end_of_the_video():
+    span = MusicSpan(start=33.5, end=None, from_end=True)
+    assert resolve_span(span, total=130.0) == (96.5, None, 0.0)
+
+
+def test_resolve_span_from_end_with_explicit_end_also_counts_from_the_end():
+    span = MusicSpan(start=40, end=10, from_end=True)
+    assert resolve_span(span, total=130.0) == (90.0, 120.0, 0.0)
+
+
+def test_resolve_span_tail_anchors_start_at_on_the_end_of_the_music():
+    span = MusicSpan(start=33.5, end=None, from_end=True, tail=True, start_at=0.5)
+    start, end, start_at = resolve_span(span, total=130.0, music_duration=200.0)
+    assert (start, end) == (96.5, None)
+    assert start_at == 200.0 - 33.5 - 0.5  # duração - comprimento da janela - folga
+
+
+def test_resolve_span_tail_without_music_duration_keeps_raw_start_at():
+    """Sem duração da música (vista da linha do tempo, por exemplo), tail não é ancorado: a folga
+    bruta passa direto, sem levantar erro (quem exige a duração é `music_stream`)."""
+    span = MusicSpan(start=10, tail=True, start_at=0.5)
+    assert resolve_span(span, total=130.0) == (10.0, None, 0.5)
+
+
+def test_music_span_from_end_end_must_be_smaller_than_start():
+    with pytest.raises(ValueError, match="from_end"):
+        MusicSpan(start=10, end=40, from_end=True)
+
+
+def test_music_stream_resolves_from_end_and_tail_spans():
+    """Reproduz a janela de encerramento do template casamento-pascom: começa 33.5 s antes do fim e
+    toca o final da trilha, com 0.5 s de folga."""
+    inputs = Inputs()
+    lines: list[str] = []
+    music = Music(
+        src="m.m4a",
+        volume=0.8,
+        loop=False,
+        ducking=False,
+        spans=[MusicSpan(start=33.5, from_end=True, tail=True, start_at=0.5, fade_in=5, fade_out=5)],
+    )
+    music_stream(lines, inputs, music, Path("m.m4a"), total=130.0, music_duration=200.0)
+    text = ";".join(lines)
+    assert "atrim=start=166.000:duration=33.500" in text
+    assert "adelay=96500:all=1" in text
+
+
+def test_music_stream_raises_clear_error_when_tail_has_no_music_duration():
+    inputs = Inputs()
+    music = Music(src="m.m4a", spans=[MusicSpan(start=10, tail=True)])
+    with pytest.raises(ValueError, match="tail"):
+        music_stream([], inputs, music, Path("m.m4a"), total=60.0)

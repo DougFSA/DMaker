@@ -1,5 +1,7 @@
 # DMaker
 
+Manual completo: [docs/MANUAL.md](docs/MANUAL.md)
+
 Editor de vídeos curtos **por comando**: você descreve a edição (para o Claude ou direto num JSON), o DMaker monta e renderiza no formato certo de cada plataforma: Instagram (Reels, Stories, Feed), Facebook (Reels, Stories, Feed), YouTube (Shorts, vídeo 1080p/4K), TikTok, WhatsApp Status e LinkedIn.
 
 Base open source: [FFmpeg](https://ffmpeg.org) (corte, transições, áudio, codificação), [libass](https://github.com/libass/libass) (texto e legendas animadas), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (legendas automáticas, roda local) e [Pillow](https://python-pillow.org) (cartões e fundos gerados). Tudo fica dentro desta pasta: FFmpeg em `bin/`, fontes em `assets/`, modelos e cache em `cache/`, renders em `output/`.
@@ -92,8 +94,31 @@ Inspirados no Shotcut; a lista completa está sempre disponível pela tecla `?`,
 | `+` / `-` | Zoom |
 | `0` | Ajustar à janela |
 | `Ctrl+P` | Alternar encaixe (snap) |
+| `Ctrl+M` | Mudo na trilha atual (a do item selecionado, ou a que o mouse está sobre) |
+| `Ctrl+H` | Ocultar a trilha atual |
+| `Ctrl+L` | Bloquear a trilha atual |
 | `Escape` | Limpar seleção |
 | `?` | Mostrar esta lista (clique numa tecla para trocar) |
+
+### Mudo, oculto e bloqueio por trilha
+
+Como no Shotcut, o cabeçalho de cada trilha tem botões `M` (mudo, nas trilhas de áudio: `A1`, `A2`...,
+`MUS`), `H` (ocultar, em `V2`, `V3`..., `TX`, `GR` e `CC`; a `V1` não pode ser ocultada, é a linha do
+tempo principal) e um cadeado (bloqueia seleção e arraste dos itens da trilha, em qualquer uma). O
+estado fica salvo na spec (campo `tracks`, por id de trilha) e vale tanto para a prévia ao vivo quanto
+para o **render final**: uma trilha muda ou oculta na interface não aparece no vídeo exportado. O
+bloqueio só existe na interface, o render ignora.
+
+### Organizando a tela
+
+Como no menu **Layout** do Shotcut, dá para reorganizar a aba Linha do tempo:
+
+- **Arrastar**: segure a barra de título de um painel (Player, Filtros, Linha do tempo ou Mídia) e solte sobre outro para trocar os dois de lugar.
+- **Redimensionar**: arraste os divisores entre o player e a linha do tempo, entre os painéis laterais e o centro, ou entre a barra lateral e o resto da tela.
+- **Ocultar**: o `×` na barra de título de cada painel oculta e mostra (os atalhos `F`/`M` continuam funcionando para Filtros/Mídia).
+- **Trocar de layout**: o seletor **Tela**, na barra superior, tem os layouts embutidos (Edição, Efeitos, Áudio, Player e Revisão) e os que você salvar. **Salvar layout como...** guarda a organização atual com um nome; **Excluir layout atual** remove um layout salvo; **Restaurar padrão** volta para Edição.
+
+O layout em uso fica no navegador (localStorage) e é aplicado ao abrir a página de novo; os layouts salvos com nome ficam no servidor, em `layouts.json` na raiz do projeto (arquivo de dados da pessoa usando, fora do controle de versão).
 
 ## Uso
 
@@ -191,7 +216,7 @@ Como usar:
 
 No modo de conversa: `/sair` encerra, `/limpar` reinicia o histórico, `/ferramentas` lista o que o agente pode usar. Cada chamada de ferramenta aparece numa linha discreta (`-> render_project(...)`) com o resultado resumido logo abaixo.
 
-O que funciona bem com um modelo pequeno: criar projeto a partir de um template, validar, renderizar (prévia e final), ler `qa_report`, corrigir legendas com `fix_captions` e exportar. O que deixar para um modelo maior (Claude, por exemplo) ou para uma pessoa: decidir cortes e ritmo, montar multicâmera na mão, escrever spec do zero e aplicar as regras finas de texto da marca; o agente local não tem julgamento para essas decisões.
+O que funciona bem com um modelo pequeno: criar projeto a partir de um template, validar, renderizar (prévia e final), ler `qa_report`, corrigir legendas com `fix_captions` e exportar. Também funciona o casamento padrão da PASCOM: template `casamento-pascom` (duas pastas de câmera, nomes dos casais e data) seguido de `plan_multicam`, que transcreve a câmera do altar, reconhece as fases do rito e monta o corte alternando as câmeras. O que deixar para um modelo maior (Claude, por exemplo) ou para uma pessoa: decidir cortes e ritmo na mão, escolher qual casal fica de frente para qual câmera, escrever spec do zero e aplicar as regras finas de texto da marca; o agente local não tem julgamento para essas decisões.
 
 ## Acompanhando renders
 
@@ -201,6 +226,7 @@ Por padrão, **todo render** (pela CLI, pelo MCP ou pela própria interface) apa
 - `render_project`/`export_project` (MCP): têm o parâmetro `show_ui` (padrão `true`); a IA só deve usar `show_ui=false` se o usuário pedir para não abrir a interface. Com a interface indisponível (não conseguiu subir), o render cai sozinho no caminho local de sempre.
 - `job_status`/`list_jobs` (MCP) também consultam a interface, então a IA continua acompanhando um job que foi para lá.
 - A variável `DMAKER_UI_URL` (padrão `http://127.0.0.1:8765`) diz onde a interface está ou deve subir; útil se a porta padrão estiver ocupada ou a interface já estiver rodando em outro lugar.
+- Se a interface já estiver aberta com uma versão antiga do código (ex.: subiu antes de uma mudança na spec), o próximo render a detecta e a reinicia sozinha, desde que não haja nenhum job em andamento nela; com um job rodando, ela avisa e segue usando a versão antiga em vez de derrubar o render. Na barra lateral, o botão "Limpar concluídos" da seção Jobs remove da lista os jobs já terminados (feitos ou com erro).
 
 ## Vídeos longos, multicâmera e áudio externo
 

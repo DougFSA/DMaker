@@ -15,18 +15,25 @@ from rich.table import Table
 from . import __version__, config
 from .domain.presets import get_preset, list_presets
 
-for _stream in (sys.stdout, sys.stderr):
-    try:  # acentos no console do Windows
-        _stream.reconfigure(encoding="utf-8")
-    except (AttributeError, ValueError):
-        pass
-
 app = typer.Typer(
     help="DMaker: editor de vídeos curtos por comando (Instagram, Facebook, YouTube, TikTok, WhatsApp).",
     no_args_is_help=True,
     rich_markup_mode="rich",
     add_completion=False,
 )
+
+
+@app.callback()
+def _console_utf8() -> None:
+    """Acentos no console do Windows: só quando a CLI roda de verdade, não ao importar o módulo
+    (um teste que importa `dmaker.cli` não pode mudar a codificação do stderr do processo)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 console = Console()
 err = Console(stderr=True, style="bold red")
 
@@ -355,12 +362,43 @@ def _coerce_param(template, key: str, value: str):
     """Converte o texto vindo de `--param chave=valor` para o tipo declarado no template."""
     param_type = template.params[key].type if key in template.params else None
     if param_type in ("list", "paths"):
+        if value.lstrip().startswith("["):  # lista em JSON, para itens que têm vírgula dentro
+            return json.loads(value)
         return [v.strip() for v in value.split(",")] if "," in value else [value]
     if param_type == "number":
         return float(value) if "." in value else int(value)
     if param_type == "bool":
         return value.strip().lower() in ("1", "true", "sim", "yes")
     return value
+
+
+def _format_mmss(seconds: float) -> str:
+    total = max(0, int(seconds))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+@app.command()
+def plan(
+    name: Annotated[
+        str, typer.Argument(help="Nome do projeto (pasta em projects/) ou caminho da spec.json.")
+    ],
+) -> None:
+    """Planeja o corte automático de um bloco `multicam`: transcreve a câmera de áudio, reconhece as
+    fases da cerimônia pela fala e substitui o bloco pelos clipes concretos, alternando as câmeras."""
+    from .pipeline.multicam_plan import plan_multicam as _plan_multicam
+
+    try:
+        result = _plan_multicam(name, log=lambda m: console.print(f"  {m}", markup=False, highlight=False))
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Corte planejado:[/green] {result.clips} clipes, {result.speech_seconds:.0f}s de fala "
+        f"({result.start:.1f}s a {result.end:.1f}s da sessão)"
+    )
+    for label, at in result.phases:
+        console.print(f"  {_format_mmss(at)}  {label}", markup=False, highlight=False)
+    for w in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {w}")
 
 
 @app.command()
@@ -786,12 +824,16 @@ def agent(
     model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
     url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
     num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    timeout: Annotated[
+        float, typer.Option(help="Espera máxima por resposta do modelo (s); modelo em CPU demora.")
+    ] = 1800.0,
     once: Annotated[str | None, typer.Option(help="Executa um único pedido e sai.")] = None,
 ) -> None:
     """Opera o DMaker por um modelo local do Ollama: tarefas mecânicas (template, render, QA, legendas).
 
-    Cortes, ritmo, multicâmera e textos da marca continuam sendo trabalho de uma IA maior ou de uma
-    pessoa; veja a seção "Operador local com Ollama" do README.
+    Cortes na mão, ritmo e textos da marca continuam sendo trabalho de uma IA maior ou de uma pessoa;
+    multicâmera entra só pelo caminho automático (template com bloco `multicam` + `plan_multicam`).
+    Veja a seção "Operador local com Ollama" do README.
     """
     import os
 
@@ -799,7 +841,7 @@ def agent(
     from .agent.llm import OLLAMA_URL_ENV
 
     base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
-    chat = OllamaChat(model=model, base_url=base_url, num_ctx=num_ctx)
+    chat = OllamaChat(model=model, base_url=base_url, num_ctx=num_ctx, timeout=timeout)
 
     if not chat.is_alive():
         _fail(f"Ollama não está rodando em {base_url}; abra o app do Ollama ou rode `ollama serve`.")

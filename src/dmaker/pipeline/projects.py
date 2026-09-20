@@ -25,7 +25,7 @@ from ..domain.spec import (
 from ..domain.templates import find_template, list_templates, render_template, template_summary
 from ..media.probe import probe
 from .context import Prober
-from .layout import project_layout
+from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
 
@@ -85,25 +85,39 @@ def summarize(
     project: Project, prober: Prober = probe, offset_finder: OffsetFinder | None = None
 ) -> ProjectSummary:
     """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra).
-    Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto)."""
+    Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto);
+    fontes com `parts` são encadeadas pelo áudio, e os trechos que usam mostram a duração somada
+    de todos os pedaços físicos."""
     layout = project_layout(project, prober, offset_finder)
-    infos = [s.info for s in layout.sources]
-    warnings = lint(
+    presentation = to_presentation(project, layout)
+    infos = [s.info for s in presentation.sources]
+    warnings = list(layout.warnings)
+    if project.multicam is not None:
+        warnings.append(
+            f"bloco multicam em timeline[{project.multicam.at}] ainda não planejado: rode plan_multicam"
+        )
+    warnings += lint(
         project,
-        layout.theme,
-        layout.preset,
-        layout.total,
-        layout.durations,
+        presentation.theme,
+        presentation.preset,
+        presentation.total,
+        presentation.durations,
         infos,
-        [s.offset for s in layout.sources],
+        [s.offset for s in presentation.sources],
     )
     segments = []
-    for i, (seg, d) in enumerate(zip(project.timeline, layout.durations, strict=True)):
+    for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)
         label = label or getattr(seg, "title", "")
         segments.append(SegmentSummary(i, seg.type, d, str(label)))
     return ProjectSummary(
-        project.name, layout.preset, layout.theme, layout.total, segments, warnings, layout.offsets
+        project.name,
+        presentation.preset,
+        presentation.theme,
+        presentation.total,
+        segments,
+        warnings,
+        layout.offsets,
     )
 
 

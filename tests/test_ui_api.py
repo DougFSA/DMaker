@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,6 +40,38 @@ def test_state_and_schema(client):
     assert "timeline" in client.get("/api/schema").json()["properties"]
 
 
+def test_state_includes_build_id_and_running_jobs(client):
+    assert client.get("/api/state").json()["build_id"] == server.SERVER_BUILD_ID
+    assert client.get("/api/state").json()["running_jobs"] == 0
+
+    gate = threading.Event()
+    job = server.jobs.start("bloqueado", lambda job: gate.wait(5))
+    try:
+        assert client.get("/api/state").json()["running_jobs"] == 1
+    finally:
+        gate.set()
+        server.jobs.wait(job, 5)
+
+
+def test_shutdown_refuses_while_a_job_is_running(client):
+    gate = threading.Event()
+    job = server.jobs.start("bloqueado", lambda job: gate.wait(5))
+    try:
+        resp = client.post("/api/shutdown")
+        assert resp.status_code == 409
+    finally:
+        gate.set()
+        server.jobs.wait(job, 5)
+
+
+def test_clear_finished_jobs_endpoint(client):
+    server.jobs.wait(server.jobs.start("j1", lambda job: None), timeout=5)
+    server.jobs.wait(server.jobs.start("j2", lambda job: None), timeout=5)
+    removed = client.delete("/api/jobs/finished").json()["removed"]
+    assert removed >= 2
+    assert client.delete("/api/jobs/finished").json()["removed"] == 0
+
+
 def test_project_roundtrip_and_validation(client):
     assert client.put(f"/api/projects/{PROJECT}", json=SPEC).json()["ok"]
     got = client.get(f"/api/projects/{PROJECT}").json()
@@ -51,6 +84,22 @@ def test_project_roundtrip_and_validation(client):
     resp = client.put(f"/api/projects/{PROJECT}", json=bad)
     assert resp.status_code == 422 and "end" in json.dumps(resp.json())
     assert client.get("/api/projects/nao-existe").status_code == 404
+
+
+def test_get_project_with_invalid_spec_returns_422_with_raw_spec(client):
+    """Simula um servidor com código antigo lendo uma spec com um campo que ele não conhece: a
+    interface precisa do JSON cru para mostrar na aba JSON em vez de travar ao abrir o projeto."""
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    spec_path = config.PROJECTS_DIR / PROJECT / "spec.json"
+    raw = json.loads(spec_path.read_text(encoding="utf-8"))
+    raw["campo_que_este_schema_nao_conhece"] = True
+    spec_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    resp = client.get(f"/api/projects/{PROJECT}")
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["raw_spec"] == raw
+    assert any("campo_que_este_schema_nao_conhece" in d.get("loc", "") for d in body["detail"])
 
 
 def test_list_templates_endpoint(client):

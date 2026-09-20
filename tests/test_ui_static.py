@@ -19,8 +19,9 @@ OPTIONS = STATIC_DIR / "options.js"
 FILTERS = STATIC_DIR / "filters.js"
 MEDIA = STATIC_DIR / "media.js"
 PROGRESS = STATIC_DIR / "progress.js"
+LAYOUT = STATIC_DIR / "layout.js"
 
-ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS)
+ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS, LAYOUT)
 
 # domínios externos permitidos só dentro de comentários JS; fora deles é proibido
 EXTERNAL_URL_RE = re.compile(r"https?://")
@@ -147,3 +148,78 @@ def test_app_js_supports_hash_routing_and_heartbeat():
     assert "hashchange" in js
     assert "/api/clients/ping" in js
     assert "DMakerProgress" in js
+
+
+def test_jobs_panel_has_clear_finished_button():
+    html = INDEX.read_text(encoding="utf-8")
+    assert 'id="btn-clear-jobs"' in html
+    js = JS.read_text(encoding="utf-8")
+    assert "btn-clear-jobs" in js
+    assert "/api/jobs/finished" in js
+
+
+def test_layout_file_exists_and_is_referenced():
+    assert LAYOUT.is_file(), "layout.js não encontrado"
+    html = INDEX.read_text(encoding="utf-8")
+    assert "/static/layout.js" in html, "index.html não referencia layout.js"
+    js = LAYOUT.read_text(encoding="utf-8")
+    assert "window.DMakerLayout" in js
+    for fn in ("normalizeLayout", "swapPanels", "builtinLayouts", "applyLayout"):
+        assert f"function {fn}" in js, f"{fn} não encontrada em layout.js"
+
+
+def test_builtin_layouts_cover_shotcut_inspired_names():
+    js = LAYOUT.read_text(encoding="utf-8")
+    for name in ("Edição", "Áudio", "Player"):
+        assert f'"{name}"' in js or f"{name}:" in js, f"layout embutido {name!r} não encontrado"
+
+
+def test_index_has_layout_selector_and_draggable_panels():
+    html = INDEX.read_text(encoding="utf-8")
+    assert 'id="layout-select"' in html
+    for panel in ("player", "filters", "media", "timeline"):
+        assert f'data-panel="{panel}"' in html, f'data-panel="{panel}" não encontrado em index.html'
+    assert 'data-slot="top-left"' in html and 'data-slot="bottom"' in html
+    assert html.count('class="panel-title"') >= 4 or html.count("panel-title") >= 4
+
+
+def test_app_js_and_editor_js_hook_into_layout():
+    app_js = JS.read_text(encoding="utf-8")
+    editor_js = EDITOR.read_text(encoding="utf-8")
+    assert "DMakerLayout.init" in app_js
+    assert "DMakerLayout.refresh" in app_js
+    assert "dmaker:layout-applied" in editor_js
+
+
+def test_timeline_has_track_mute_hide_lock_buttons():
+    js = TIMELINE.read_text(encoding="utf-8")
+    for token in (
+        "track-mute",
+        "track-hide",
+        "track-lock",
+        "data-track-action",
+        "onTrackToggle",
+        "onLockedAttempt",
+    ):
+        assert token in js, f"{token!r} não encontrado em timeline.js"
+
+
+def test_keymap_has_track_mute_hide_lock_shortcuts():
+    js = KEYMAP.read_text(encoding="utf-8")
+    for key in ("Ctrl+m", "Ctrl+h", "Ctrl+l"):
+        assert f'"{key}"' in js, f"atalho {key!r} não encontrado em keymap.js"
+    for action_id in ("track_mute", "track_hide", "track_lock"):
+        assert f'"{action_id}"' in js, f"ação {action_id!r} não encontrada em keymap.js"
+
+
+def test_editor_js_wires_track_shortcuts_to_set_field():
+    js = EDITOR.read_text(encoding="utf-8")
+    assert "track_mute" in js and "track_hide" in js and "track_lock" in js
+    assert "tracks.${trackId}" in js
+
+
+def test_player_and_media_js_prefer_resolved_path():
+    player_js = PLAYER.read_text(encoding="utf-8")
+    media_js = MEDIA.read_text(encoding="utf-8")
+    assert "item.path" in player_js
+    assert "buildResolvedPathMap" in media_js and "item.path" in media_js

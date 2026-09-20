@@ -10,6 +10,7 @@ import time
 import pytest
 import uvicorn
 
+from dmaker.pipeline.build import build_id
 from dmaker.pipeline.jobs import JobManager
 from dmaker.pipeline.remote import RenderDispatcher, UIClient
 from dmaker.ui import server as ui_server
@@ -95,6 +96,22 @@ def test_clients_active_reflects_ping(live_server):
     assert client.clients_active() is False
 
 
+def test_state_includes_build_id_and_running_jobs(live_server):
+    state = UIClient(live_server).state()
+    assert state["build_id"] == ui_server.SERVER_BUILD_ID
+    assert state["running_jobs"] == 0
+
+
+def test_shutdown_returns_false_when_a_job_is_running(live_server):
+    gate = threading.Event()
+    job = ui_server.jobs.start("bloqueado", lambda job: gate.wait(5))
+    try:
+        assert UIClient(live_server).shutdown() is False
+    finally:
+        gate.set()
+        ui_server.jobs.wait(job, 5)
+
+
 # ---------- RenderDispatcher com cliente e dependências falsas ----------
 
 
@@ -108,6 +125,11 @@ class FakeClient:
         self.render_calls: list[tuple[str, dict]] = []
         self.export_calls: list[tuple[str, list[str]]] = []
         self._next_job_id = 1
+        # por padrão, "com o mesmo código do disco" (build_id local): ensure_ui() não vê nada de
+        # estranho e não tenta reiniciar, a menos que o teste troque state_response.
+        self.state_response = {"build_id": build_id(), "running_jobs": 0}
+        self.shutdown_calls = 0
+        self.shutdown_result = True
 
     def is_alive(self) -> bool:
         return self._alive
@@ -115,6 +137,15 @@ class FakeClient:
     def launch(self) -> None:
         if self._alive_after_launch:
             self._alive = True
+
+    def state(self) -> dict:
+        return dict(self.state_response)
+
+    def shutdown(self) -> bool:
+        self.shutdown_calls += 1
+        if self.shutdown_result:
+            self._alive = False  # simula o processo antigo saindo
+        return self.shutdown_result
 
     def render(self, name, options):
         self.render_calls.append((name, dict(options)))
@@ -182,6 +213,52 @@ def test_ensure_ui_raises_when_launch_does_not_bring_it_up():
     dispatcher, _logs = _dispatcher(client)
     with pytest.raises(RuntimeError):
         dispatcher.ensure_ui()
+
+
+def test_ensure_ui_does_nothing_when_build_id_matches():
+    client = FakeClient()
+    client._alive = True  # já está de pé, com o mesmo código do disco (state_response padrão)
+    dispatcher, logs = _dispatcher(client)
+
+    assert dispatcher.ensure_ui() is True
+    assert client.shutdown_calls == 0
+    assert not any("reinici" in line.lower() for line in logs)
+
+
+def test_ensure_ui_restarts_when_stale_and_no_job_is_running():
+    client = FakeClient()
+    client._alive = True
+    client.state_response = {"build_id": "codigo-antigo", "running_jobs": 0}
+    dispatcher, logs = _dispatcher(client)
+
+    assert dispatcher.ensure_ui() is True
+    assert client.shutdown_calls == 1
+    assert client._alive is True  # o launcher (client.launch) religou depois do shutdown
+    assert any("reiniciada" in line.lower() for line in logs)
+
+
+def test_ensure_ui_does_not_restart_when_stale_but_jobs_are_running():
+    client = FakeClient()
+    client._alive = True
+    client.state_response = {"build_id": "codigo-antigo", "running_jobs": 2}
+    dispatcher, logs = _dispatcher(client)
+
+    assert dispatcher.ensure_ui() is True
+    assert client.shutdown_calls == 0
+    assert client._alive is True  # não derrubou a interface com job rodando
+    assert any("não vou reiniciar" in line.lower() for line in logs)
+
+
+def test_ensure_ui_keeps_using_stale_ui_when_shutdown_is_refused():
+    client = FakeClient()
+    client._alive = True
+    client.state_response = {"build_id": "codigo-antigo", "running_jobs": 0}
+    client.shutdown_result = False  # um job pode ter começado entre a checagem e o pedido
+    dispatcher, _logs = _dispatcher(client)
+
+    assert dispatcher.ensure_ui() is True
+    assert client.shutdown_calls == 1
+    assert client._alive is True  # shutdown recusado: segue usando a interface como está
 
 
 def test_open_browser_only_when_just_launched_or_no_clients():

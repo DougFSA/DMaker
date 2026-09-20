@@ -114,3 +114,21 @@ def measure(text: str, ref: FontRef, ass_size: float, spacing: float = 0) -> tup
 
 def fontsdir() -> Path:
     return FONTS_DIR
+
+
+def resolve_file(theme_font_files: dict[str, Path], role: str) -> Path:
+    """Arquivo .ttf de um papel de fonte de layout de cartão da marca (script, date, serif...).
+
+    `theme_font_files` é `theme.fonts["files"]`: papel -> caminho candidato dentro da pasta da marca
+    (`assets/brands/<marca>/fonts/<arquivo>`). Quando o arquivo não está na marca (ex.: uma fonte do
+    sistema como Georgia), cai para a mesma fonte em `C:\\Windows\\Fonts` pelo nome do arquivo.
+    """
+    candidate = theme_font_files.get(role)
+    if candidate is None:
+        raise FileNotFoundError(f"Papel de fonte desconhecido na marca: {role!r}")
+    if candidate.exists():
+        return candidate
+    fallback = WINDOWS_FONTS_DIR / candidate.name
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(f"Fonte não encontrada para o papel {role!r}: nem {candidate} nem {fallback}")

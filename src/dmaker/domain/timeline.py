@@ -51,6 +51,28 @@ def timeline_total(durations: list[float], transitions: list[Transition | None])
     return spans[-1][1] if spans else 0.0
 
 
+def stack_lanes(intervals: list[tuple[float, float]]) -> list[int]:
+    """Número de faixa (0, 1, 2...) de cada intervalo (início, fim): greedy por ordem de início,
+    reaproveitando a primeira faixa já livre; dois intervalos que se sobrepõem no tempo nunca
+    dividem a mesma faixa. Base de `pipeline.timeline_view.stack_lanes` (que agrupa objetos
+    `TrackItem` da vista) e de `domain.tracks.video_overlay_lanes` (que decide a V2/V3... de cada
+    picture-in-picture ao aplicar mudo/oculto por trilha no render)."""
+    order = sorted(range(len(intervals)), key=lambda i: intervals[i][0])
+    lane_ends: list[float] = []
+    lane_of = [0] * len(intervals)
+    for i in order:
+        start, end = intervals[i]
+        for lane, lane_end in enumerate(lane_ends):
+            if lane_end <= start:
+                lane_ends[lane] = end
+                lane_of[i] = lane
+                break
+        else:
+            lane_of[i] = len(lane_ends)
+            lane_ends.append(end)
+    return lane_of
+
+
 def tone_for(
     start: float, end: float, spans: list[tuple[float, float]], tones: list[str | None]
 ) -> str | None:

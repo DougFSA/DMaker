@@ -10,6 +10,7 @@ from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
+from ..domain.tracks import apply_track_state
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
@@ -18,7 +19,7 @@ from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_f
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .lint import lint
 from .segments import MezzanineBuilder
-from .sources import resolve_session, resolve_sources
+from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
 
@@ -53,7 +54,9 @@ class RenderPipeline:
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
         self.log = log or (lambda message: None)
-        self.sync = SyncResolver(offset_finder or ffmpeg_offset_finder(self.runner), self.log)
+        self.sync = SyncResolver(
+            offset_finder or ffmpeg_offset_finder(self.runner), self.log, prober=self.prober
+        )
         self.cache_dir = cache_dir
         self.jobs_dir = jobs_dir
         self.output_dir = output_dir
@@ -96,15 +99,23 @@ class RenderPipeline:
     # ---------- execução ----------
 
     def run(self) -> RenderResult:
+        if self.project.multicam is not None:
+            raise ValueError(
+                f"bloco multicam em timeline[{self.project.multicam.at}] ainda não planejado: rode plan_multicam"
+            )
         ctx = self._context()
         p, o = ctx.project, ctx.options
 
         ctx.log(
             f"render {p.name}: {ctx.preset.id} {ctx.width}x{ctx.height}" + (" (preview)" if o.preview else "")
         )
-        p = ctx.project = self._sliced(p, o, ctx)
-        offsets = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
-        ctx.session = resolve_session(p, ctx.prober, offsets)
+        p = apply_track_state(p)  # mudo/oculto por trilha da interface, paridade com o Shotcut
+        p = self._sliced(p, o, ctx)
+        resolution = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
+        ctx.warnings.extend(resolution.warnings)
+        ctx.session = resolve_session(p, ctx.prober, resolution.offsets, resolution.parts)
+        p, _origin = expand_parts(p, ctx.session, resolution.parts, ctx.log)
+        ctx.project = p
         sources = resolve_sources(p, ctx.prober, ctx.session)
         infos = [s.info for s in sources]
         transitions = transitions_of(p.timeline)

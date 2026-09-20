@@ -221,6 +221,8 @@ def set_field(project: Project, path: str, value: Any) -> Project:
         target: Any = data
         for part in parts[:-1]:
             key: Any = int(part) if isinstance(target, list) else part
+            if isinstance(target, dict) and key not in target:
+                target[key] = {}  # cria o dicionário no caminho (ex.: "tracks.V2" ainda não existia)
             try:
                 target = target[key]
             except (KeyError, IndexError, TypeError) as exc:
