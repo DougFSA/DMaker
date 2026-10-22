@@ -28,6 +28,7 @@ from .context import Prober
 from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
+from .voiceover import known_voices
 
 
 def project_path(name_or_path: str | Path) -> Path:
@@ -104,6 +105,7 @@ def summarize(
         presentation.durations,
         infos,
         [s.offset for s in presentation.sources],
+        known_voices=known_voices(project),
     )
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):

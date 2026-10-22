@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from .common import Inputs
+
+
+class NarrationInput(Protocol):
+    """O que a mixagem precisa saber de uma narração já sintetizada (satisfeito por `PreparedVoiceover`)."""
+
+    path: Path
+    start: float
+    volume: float
 
 
 def resolve_span(
@@ -41,9 +51,12 @@ def audio_graph(
     include_norm: bool = True,
     extra_voices: list[str] | None = None,
     music_duration: float | None = None,
+    narrations: Sequence[NarrationInput] = (),
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
+    `narrations` entram no barramento de voz depois do ganho e do mudo dos clipes (narrar sobre clipes
+    mudos é o caso comum) e antes do ducking: a música abaixa sob elas e o loudnorm as conta.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -59,10 +72,18 @@ def audio_graph(
         lines.append(f"{a}volume={audio.voice_gain:.3f}[a_gain]")
         a = "[a_gain]"
 
+    spoken = narration_streams(lines, inputs, narrations)
+    if spoken:
+        lines.append(
+            f"{a}{''.join(spoken)}amix=inputs={1 + len(spoken)}:duration=first"
+            ":dropout_transition=0:normalize=0[a_narrated]"
+        )
+        a = "[a_narrated]"
+
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
         mus = music_stream(lines, inputs, music, music_path, total, music_duration)
-        if music.ducking and not audio.mute_clips:
+        if music.ducking and (spoken or not audio.mute_clips):
             lines.append(f"{a}asplit=2[voice][sc]")
             lines.append(
                 f"{mus}[sc]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
@@ -90,6 +111,26 @@ def audio_graph(
 
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
     return f"{cur_a}loudnorm=I={target_lufs:g}:TP=-1.5:LRA=11:print_format=json{out}"
+
+
+def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[NarrationInput]) -> list[str]:
+    """Uma entrada por narração, em 48 kHz estéreo (como o resto da mixagem), com ganho e atrasada até o
+    instante em que começa. Narração sem volume não gera entrada."""
+    labels = []
+    for index, narration in enumerate(narrations):
+        if narration.volume <= 0:
+            continue
+        chain = [
+            f"[{inputs.add(narration.path)}:a]aresample=48000",
+            "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            f"volume={narration.volume:.3f}",
+        ]
+        if narration.start > 0:
+            chain.append(f"adelay={int(round(narration.start * 1000))}:all=1")
+        label = f"[nar{index}]"
+        lines.append(",".join(chain) + label)
+        labels.append(label)
+    return labels
 
 
 def music_stream(

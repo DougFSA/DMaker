@@ -26,10 +26,15 @@ FFMPEG_DIR = BIN_DIR / "ffmpeg"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 BRANDS_DIR = ASSETS_DIR / "brands"
+VOICES_DIR = ASSETS_DIR / "voices"
 CACHE_DIR = ROOT / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
 WAVEFORM_DIR = CACHE_DIR / "waveform"
+VOICE_CACHE_DIR = CACHE_DIR / "voice"
+# Voz usada quando a narração não escolhe uma. Vazio (padrão) é a voz automática do OmniVoice; defina
+# DMAKER_DEFAULT_VOICE=dora para um rascunho rápido com o Kokoro, por exemplo.
+DEFAULT_VOICE_ID = os.environ.get("DMAKER_DEFAULT_VOICE") or None
 JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = ROOT / "output"

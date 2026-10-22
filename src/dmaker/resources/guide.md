@@ -214,6 +214,83 @@ precisar inspecionar de verdade. `fix_captions(name, {"errado": "certo"})` corri
 cues (o próximo render usa o corrigido); o cache de transcrição é reaproveitado enquanto as fontes não
 mudarem, `force=true` refaz tudo.
 
+## Voz e narração
+
+Duas engines locais, sem custo, escolhidas pela voz (extra `voice`: `pip install torch torchaudio
+--index-url https://download.pytorch.org/whl/cpu` e depois `pip install -e .[voice]`):
+
+| Motor | Vozes | Quando usar | Velocidade na CPU (i5 de 4 núcleos, medido) |
+|---|---|---|---|
+| OmniVoice (padrão) | voz automática, clones (`clone_voice`) e vozes por descrição (`design_voice`) | narração final, realista | cerca de 50 s de processamento por segundo de áudio com 16 passos; ~25 s no rascunho (8 passos) |
+| Kokoro-82M (opcional) | prontas: `dora` (feminina), `alex` e `santa` (masculinas), pt-BR | rascunho rápido para conferir roteiro e ritmo | cerca de 3 s por segundo de áudio |
+
+Sem `voice` a narração usa o OmniVoice com voz automática (ou desenhada, se houver `instruct`); escolha
+`dora`, `alex` ou `santa` para o Kokoro, ou defina `DMAKER_DEFAULT_VOICE=dora` para que ele seja o padrão.
+Os modelos baixam sozinhos na primeira vez, com conferência de hash: OmniVoice (~3,2 GB) em
+`cache/models/omnivoice`, Kokoro (~350 MB) em `cache/models/kokoro`. O Kokoro depende do espeak-ng (GPL-3,
+instalado pelo `kokoro-onnx` como biblioteca à parte).
+
+- Biblioteca: as vozes prontas vêm embutidas (não se removem); as suas ficam em `assets/voices/<id>/`
+  (`voice.json` e, nos clones, `reference.wav`). `list_voices(brand)` lista prontas, da marca e sem marca,
+  com `engine` e `kind` (`preset`, `clone` ou `design`).
+- `clone_voice(name, reference_audio, reference_text?)`: gravação de fala limpa (3 a 15 s é o ideal e o
+  mais rápido). Até 20 s a gravação vale inteira (sem silêncio nas pontas); acima disso o DMaker transcreve
+  janelas de 15 s e guarda a que tem mais fala, com o texto dela (o `reference_text` passado é descartado,
+  porque não alinha com um trecho). Sem `reference_text`, o Whisper transcreve.
+- `design_voice(name, gender, age, pitch, accent, whisper)` ou `instruct` completo. Termos aceitos:
+  gênero `male|female`; idade `child, teenager, young adult, middle-aged, elderly`; tom `very low pitch,
+  low pitch, moderate pitch, high pitch, very high pitch`; sotaque `american, british, australian,
+  chinese, canadian, indian, korean, portuguese, russian, japanese` + ` accent`; `whisper`. Apelidos em
+  português (feminino, grave, idoso, britânico) são traduzidos.
+- `synthesize_speech(text, out, voice, language, speed, instruct, seed, steps, srt, draft)`: job em segundo
+  plano que devolve `job_id`; o resultado traz `output`, `duration_s` e `cues` (início, fim e texto de cada
+  fala). Linha em branco é pausa de parágrafo, `[pausa 1.2]` fixa uma pausa em segundos, R$, % e números
+  são lidos por extenso. Saída `.wav`, `.mp3` ou `.m4a` (48 kHz, mono). `speed` vai de 0.5 a 2 no Kokoro.
+- Qualidade, seguindo o VoiceStudio: `steps` 16 (padrão, o "balanced" dele), `draft=true` ou `steps` 8 para
+  rascunho (o "fast" dele, mais áspero), `steps` 32 para o máximo. O DMaker fixa também `guidance_scale` 2.0,
+  `denoise` e `postprocess_output` ligados, e `preprocess_prompt` ligado nas referências. O texto passa por
+  limpeza de segurança (caracteres invisíveis, entidades HTML, pontuação repetida), frases com menos de 20
+  caracteres juntam-se à seguinte e trechos vão até 800 caracteres antes de serem cortados. Cada fala sai
+  com o silêncio das pontas aparado (-40 dBFS, 40 ms de margem) e a narração recebe o acabamento broadcast
+  dele (highpass, compressor, EQ e limiter; `--raw` na CLI desliga). Não foram reproduzidos o refinamento
+  por LLM e o ajuste de ritmo por slot: servem a ditado e dublagem, não a narração.
+- Custo no OmniVoice: além do tempo por segundo de áudio, conte ~30 s para carregar o modelo e, em voz sem
+  gravação, o preparo único da âncora. A referência é reprocessada a cada fala, então referências curtas
+  (5 a 10 s) deixam tudo mais rápido. A quantização int8 do modelo acelera só ~20% e estraga a
+  inteligibilidade, por isso não é usada. Cada fala fica em `cache/voice` (por motor, voz e parâmetros):
+  refazer um roteiro com poucas mudanças só sintetiza o que mudou. Vozes por descrição ganham uma frase de
+  âncora gerada uma vez, para o timbre não mudar entre as falas.
+- CLI equivalente: `dmaker voice say "texto" --voice ID --out narracao.wav [--draft] [--steps 32]`.
+
+### Narração no projeto
+
+`audio.narration` põe a fala sintetizada como voz do vídeo, direto na spec, sem gerar o áudio antes. Cada
+item tem `text` (ou `script`, um arquivo `.txt` relativo à pasta do projeto, nunca os dois), `voice` (id de
+`assets/voices`; sem ele, voz automática), `instruct`, `start` (instante do vídeo, em segundos), `volume`
+(0 a 4), `speed` (0.5 a 2), `language` (`pt`) e `seed` (fixa a síntese). A narração entra no barramento de
+voz antes do ducking e da normalização: a música abaixa sob ela e o loudness final a conta. Em vídeo só de
+cartões e imagens, ela é a voz (com `mute_clips` a música também abaixa sob a narração).
+
+```json
+{
+  "timeline": [{"type": "card", "title": "Bem-vindo", "duration": 6}],
+  "audio": {
+    "music": {"src": "trilha.mp3"},
+    "narration": [{"text": "Olá, este é o DMaker.", "voice": "ana", "start": 0.5, "seed": 1}]
+  },
+  "captions": {"source": "narration"}
+}
+```
+
+- `captions.source: "narration"` usa o texto falado como legenda, com os tempos da própria síntese
+  (sem Whisper, sem transcrever). Combina com `style.mode: "karaoke"`.
+- Cada fala fica em `cache/voice`: só a primeira vez sintetiza (na CPU, dezenas de segundos por segundo de
+  áudio); render de prévia e final reaproveitam. Mudar texto, voz, `speed` ou `seed` gera de novo só o que mudou.
+- A vista da linha do tempo ganha a trilha `NAR` (um item por narração, duração estimada em ~14 caracteres
+  por segundo até a síntese). O `validate_project` avisa se a voz não existe na biblioteca ou se a
+  narração estimada passa do fim do vídeo; `render_project` avisa se a real passou.
+- Com `dry_run` nada é sintetizado (usa a estimativa). Render parcial (`segments`) ignora a narração.
+
 ## Cartões por layout (brand.json)
 
 Marcas com identidade visual própria (placa floral, fontes cursivas) podem definir cartões fixos no

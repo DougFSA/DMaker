@@ -291,3 +291,117 @@ def test_music_tail_span_uses_probed_duration_for_start_at(tmp_path):
     # start_at efetivo = duração da música (8.0, do prober falso) - 2.0 - 0.5 (folga) = 5.5
     assert "atrim=start=5.500:duration=2.000" in graph
     assert "adelay=2000:all=1" in graph
+
+
+# ---------- narração por texto ----------
+
+
+class FakeSynthesizer:
+    """Seno de 0,05 s por caractere, contando as sínteses (a real leva minutos na CPU)."""
+
+    engine_id = "fake-pipeline"
+
+    def __init__(self):
+        self.texts: list[str] = []
+
+    def synthesize(self, request):
+        import numpy as np
+
+        from dmaker.voice.synth import Speech
+
+        self.texts.append(request.text)
+        t = np.arange(int(len(request.text) * 0.05 * 24000)) / 24000
+        return Speech((0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32), 24000)
+
+
+def _narrated_pipeline(directory: Path, synthesizer: FakeSynthesizer, runner: RecordingRunner, **audio):
+    from dmaker.pipeline.narration import NarrationService
+    from dmaker.voice.library import VoiceLibrary
+
+    (directory / "trilha.mp3").write_bytes(b"x")
+    project = Project.model_validate(
+        {
+            "name": "narrado",
+            "timeline": [{"type": "card", "title": "Abertura", "duration": 6.0, "motion": "none"}],
+            "captions": {"source": "narration"},
+            "audio": {
+                "narration": [{"text": "Olá, este é o DMaker.", "start": 0.5}],
+                "music": {"src": "trilha.mp3"},
+                **audio,
+            },
+        }
+    )
+    project.base_dir = directory
+    return RenderPipeline(
+        project,
+        RenderOptions(preview=True, quiet=True, out=directory / "out.mp4"),
+        runner=runner,
+        prober=fake_prober,
+        transcriber_factory=lambda captions: pytest.fail("legenda de narração não usa o Whisper"),
+        cache_dir=directory / "mez",
+        jobs_dir=directory / "jobs",
+        output_dir=directory / "output",
+        narrator=NarrationService(synthesizer, runner, directory / "voice-cache"),
+        voice_library=VoiceLibrary(directory / "voices"),
+    )
+
+
+def test_render_mixes_narration_before_ducking_and_captions_it(tmp_path):
+    synthesizer = FakeSynthesizer()
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _narrated_pipeline(tmp_path, synthesizer, runner).run()
+
+    assert synthesizer.texts == ["Olá, este é o DMaker."]
+    narration_wav = result.job_dir / "narration_1.wav"
+    final, measurement = runner.commands[-2], next(c for c in runner.commands if "-f" in c and "null" in c)
+    assert str(narration_wav) in final  # entra como entrada do comando final
+    assert str(narration_wav) in measurement  # e do da medição, para o loudness final contá-la
+
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "adelay=500:all=1[nar0]" in graph
+    assert (
+        graph.index("amix=inputs=2:duration=first")
+        < graph.index("sidechaincompress")
+        < graph.index("loudnorm")
+    )
+    assert "[a_narrated]asplit=2[voice][sc]" in graph
+
+    assert result.captions_file == result.job_dir / "captions.narration.srt"
+    ass = (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+    assert "OLÁ," in ass.upper() and "DMAKER" in ass.upper()  # legendas saem em caixa alta
+    assert result.warnings == []
+
+
+def test_render_reuses_the_cached_narration(tmp_path):
+    synthesizer = FakeSynthesizer()
+    first = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    _narrated_pipeline(tmp_path, synthesizer, first).run()
+    second = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    _narrated_pipeline(tmp_path, synthesizer, second).run()
+    assert len(synthesizer.texts) == 1  # a fala veio do cache no segundo render
+
+
+def test_narration_replaces_the_voice_of_a_video_without_speech(tmp_path):
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _narrated_pipeline(tmp_path, FakeSynthesizer(), runner, mute_clips=True).run()
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "volume=0[a_mute]" in graph and "[a_mute][nar0]amix=inputs=2" in graph
+    assert "sidechaincompress" in graph  # a música abaixa sob a narração mesmo com os clipes mudos
+
+
+def test_render_warns_when_the_real_narration_passes_the_end(tmp_path):
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    pipeline = _narrated_pipeline(tmp_path, FakeSynthesizer(), runner)
+    pipeline.project.audio.narration[0] = pipeline.project.audio.narration[0].model_copy(
+        update={"start": 5.5}
+    )
+    result = pipeline.run()
+    assert any("audio.narration[0]" in w and "cortado" in w for w in result.warnings)
+
+
+def test_dry_run_does_not_synthesize(tmp_path):
+    synthesizer = FakeSynthesizer()
+    pipeline = _narrated_pipeline(tmp_path, synthesizer, RecordingRunner())
+    pipeline.options.dry_run = True
+    result = pipeline.run()
+    assert synthesizer.texts == [] and result.captions_file is None

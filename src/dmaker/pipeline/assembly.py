@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_enc
 from .context import RenderContext
 from .segments import PreparedSegment
 from .textlayer import TextLayer
+from .voiceover import PreparedVoiceover
 
 SILENCE_LUFS = -60.0
 
@@ -69,6 +71,7 @@ class LoudnessMeter:
         transitions: list[Transition | None],
         music_path: Path | None,
         total: float,
+        voiceovers: Sequence[PreparedVoiceover] = (),
     ) -> LoudnessMeasure:
         inputs = Inputs()
         for item in prepared:
@@ -86,6 +89,7 @@ class LoudnessMeter:
             total,
             include_norm=False,
             music_duration=_music_duration(ctx, music_path),
+            narrations=voiceovers,
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[ameas]", "-f", "null", "-"]
@@ -114,6 +118,7 @@ def build_assembly(
     measured: dict | None,
     normalize: bool,
     out_path: Path,
+    voiceovers: Sequence[PreparedVoiceover] = (),
 ) -> Assembly:
     """Comando final. O grafo vai em arquivo (graph.txt) e o ASS é referenciado por caminho relativo
     ao diretório do job, o que evita a escapada de `C:` nos filtros."""
@@ -167,6 +172,7 @@ def build_assembly(
         include_norm=normalize,
         extra_voices=pip_audio,
         music_duration=_music_duration(ctx, music_path),
+        narrations=voiceovers,
     )
 
     quality = "draft" if o.preview else p.output.quality

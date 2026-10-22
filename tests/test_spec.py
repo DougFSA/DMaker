@@ -228,3 +228,50 @@ def test_track_state_rejects_unknown_field():
     spec = dict(MINIMAL, tracks={"A2": {"invalid": True}})
     with pytest.raises(ValidationError):
         Project.model_validate(spec)
+
+
+# ---------- narração por texto ----------
+
+
+def test_narration_defaults_and_roundtrip():
+    from dmaker.domain.spec import Narration
+
+    narration = Narration(text="Olá, este é o DMaker.")
+    assert narration.start == 0 and narration.volume == 1.0 and narration.speed == 1.0
+    assert narration.language == "pt" and narration.voice is None and narration.seed is None
+    project = Project.model_validate(
+        {**MINIMAL, "audio": {"narration": [{"script": "roteiro.txt", "voice": "ana", "start": 0.5}]}}
+    )
+    assert project.audio.narration[0].script == "roteiro.txt"
+    assert Project.model_validate_json(project.model_dump_json()).audio.narration == project.audio.narration
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{}, {"text": "  "}, {"text": "a", "script": "b.txt"}],
+    ids=["nenhum", "texto em branco", "os dois"],
+)
+def test_narration_needs_exactly_one_of_text_or_script(fields):
+    with pytest.raises(ValidationError, match="`text`.*`script`"):
+        Project.model_validate({**MINIMAL, "audio": {"narration": [fields]}})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"start": -1}, {"volume": 5}, {"speed": 0.2}, {"speed": 3}, {"voz": "x"}],
+    ids=["start", "volume", "lento", "rápido", "campo desconhecido"],
+)
+def test_narration_rejects_out_of_range_values(fields):
+    with pytest.raises(ValidationError):
+        Project.model_validate({**MINIMAL, "audio": {"narration": [{"text": "oi", **fields}]}})
+
+
+def test_narration_captions_source_text_is_checked_like_on_screen_text():
+    spec = {
+        **MINIMAL,
+        "audio": {"narration": [{"text": "Antes — depois"}]},
+        "captions": {"source": "narration"},
+    }
+    assert ("audio.narration[0].text", "Antes — depois") in Project.model_validate(spec).texts()
+    spec["captions"] = {"source": "auto"}
+    assert Project.model_validate(spec).texts() == []

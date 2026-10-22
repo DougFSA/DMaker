@@ -4,7 +4,7 @@ from dmaker.domain.brand import load_theme
 from dmaker.domain.presets import get_preset
 from dmaker.domain.spec import CaptionStyle, ProgressBar, TextOverlay
 from dmaker.media import fonts
-from dmaker.text.ass import AssDoc
+from dmaker.text.ass import AssDoc, ass_color
 from dmaker.text.captions import Cue, Word
 from dmaker.text.overlays import (
     Canvas,
@@ -96,6 +96,26 @@ def test_captions_classic_and_boxed(canvas):
     add_captions(doc, canvas, [Cue(0, 1, "linha simples")], CaptionStyle(mode="boxed", uppercase=False))
     st = doc.styles["Cap"]
     assert st.border_style == 3 and len(doc.events) == 1 and "linha simples" in doc.events[0].text
+
+
+def test_caption_box_color_accepts_theme_key(canvas):
+    """A caixa da legenda segue o tema como os outros campos de cor, sem hex na spec."""
+    doc = AssDoc(canvas.width, canvas.height)
+    style = CaptionStyle(mode="boxed", box_color="primary", box_alpha=1.0)
+    add_captions(doc, canvas, [Cue(0, 1, "linha")], style)
+    assert doc.styles["Cap"].outline == ass_color(canvas.theme.colors["primary"])
+
+
+def test_boxed_text_drops_the_outline(canvas):
+    """Contorno sobre caixa engrossa a letra e borra o texto; quem pedir `outline` manda nele."""
+    from dmaker.text.overlays import effective_style
+
+    boxed = TextOverlay(text="x", role="subtitle", style={"box": True})
+    assert effective_style(boxed, canvas.theme, None)["outline"] == 0
+
+    asked = TextOverlay(text="x", role="subtitle", style={"box": True, "outline": 2})
+    assert effective_style(asked, canvas.theme, None)["outline"] == 2
+    assert effective_style(TextOverlay(text="x", role="subtitle"), canvas.theme, None)["outline"] > 0
 
 
 def test_progress_bar_and_guides(canvas):

@@ -14,14 +14,17 @@ from ..domain.tracks import apply_track_state
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
+from ..voice.library import VoiceLibrary
 from .assembly import LoudnessMeter, build_assembly
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .lint import lint
+from .narration import NarrationService
 from .segments import MezzanineBuilder
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
+from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings
 
 
 class RenderPipeline:
@@ -42,6 +45,8 @@ class RenderPipeline:
         log: Callable[[str], None] | None = None,
         offset_finder: OffsetFinder | None = None,
         matter: Matter | None = None,
+        narrator: NarrationService | None = None,
+        voice_library: VoiceLibrary | None = None,
     ):
         self.project = project
         self.options = options or RenderOptions()
@@ -51,6 +56,8 @@ class RenderPipeline:
         self.prober = prober
         self.matter = matter or RvmMatter()
         self.mezzanines = mezzanines or MezzanineBuilder()
+        self.narrator = narrator
+        self.voiceover = VoiceoverPreparer(voice_library)
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
         self.log = log or (lambda message: None)
@@ -84,6 +91,7 @@ class RenderPipeline:
             runner=self.runner,
             prober=self.prober,
             matter=self.matter,
+            narrator=self.narrator,
             log=self.log,
         )
 
@@ -124,7 +132,16 @@ class RenderPipeline:
         ]
         total = timeline_total(durations, transitions)
         ctx.warnings.extend(
-            lint(p, ctx.theme, ctx.preset, total, durations, infos, [s.offset for s in sources])
+            lint(
+                p,
+                ctx.theme,
+                ctx.preset,
+                total,
+                durations,
+                infos,
+                [s.offset for s in sources],
+                known_voices=known_voices(p, self.voiceover.library),
+            )
         )
 
         prepared = self.mezzanines.prepare(ctx, sources)
@@ -135,23 +152,25 @@ class RenderPipeline:
         total = timeline_total(durations, transitions)
         spans = timeline_spans(durations, transitions)
         tones = [item.tone for item in prepared]
+        voiceovers = self.voiceover.prepare(ctx)
+        ctx.warnings.extend(overrun_warnings(voiceovers, total))
 
         if p.captions and p.captions.enabled and not o.no_captions:
             ctx.log(
                 "legendas: "
                 + ("transcrição automática" if p.captions.source == "auto" else p.captions.source)
             )
-        captions = self.captions.produce(ctx, sources, prepared, transitions)
+        captions = self.captions.produce(ctx, sources, prepared, transitions, voiceovers)
         guides = o.guides if o.guides is not None else p.output.guides
         layer = build_text_layer(ctx, total, spans, tones, captions.cues if captions else None, guides)
         layer.doc.write(ctx.job_dir / "overlay.ass")
 
         music_path = self._music_path()
-        measured, normalize = self._loudness(ctx, prepared, transitions, music_path, total)
+        measured, normalize = self._loudness(ctx, prepared, transitions, music_path, total, voiceovers)
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assembly = build_assembly(
-            ctx, prepared, transitions, total, layer, music_path, measured, normalize, out_path
+            ctx, prepared, transitions, total, layer, music_path, measured, normalize, out_path, voiceovers
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -185,9 +204,16 @@ class RenderPipeline:
             raise ValueError(
                 f"segmentos {first}-{last} fora da linha do tempo (0 a {len(project.timeline) - 1})"
             )
-        ctx.log(f"render parcial: trechos {first} a {last} (sem sobreposições e legendas)")
+        ctx.log(f"render parcial: trechos {first} a {last} (sem sobreposições, legendas e narração)")
         sliced = project.model_copy(
-            update={"timeline": project.timeline[first : last + 1], "overlays": [], "captions": None}
+            update={
+                "timeline": project.timeline[first : last + 1],
+                "overlays": [],
+                "captions": None,
+                "audio": project.audio.model_copy(
+                    update={"narration": []}
+                ),  # tempos absolutos não valem no recorte
+            }
         )
         sliced.base_dir = project.base_dir
         sliced.timeline[0] = sliced.timeline[0].model_copy(update={"transition": None})
@@ -202,13 +228,15 @@ class RenderPipeline:
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
         return path
 
-    def _loudness(self, ctx, prepared, transitions, music_path, total) -> tuple[dict | None, bool]:
+    def _loudness(
+        self, ctx, prepared, transitions, music_path, total, voiceovers
+    ) -> tuple[dict | None, bool]:
         """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição
         alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só."""
         mode = ctx.project.audio.normalize
         if mode == "off" or ctx.options.dry_run:
             return None, mode != "off"
-        measure = self.loudness.measure(ctx, prepared, transitions, music_path, total)
+        measure = self.loudness.measure(ctx, prepared, transitions, music_path, total, voiceovers)
         if measure.silent:
             ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")
             return None, False

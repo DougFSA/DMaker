@@ -43,6 +43,20 @@ def _blob_points(
     return pts
 
 
+# Faixa central do título/subtítulo e área do logo embaixo, em fração do quadro (x0, y0, x1, y1).
+SPARKLE_KEEP_OUT = ((0.08, 0.28, 0.92, 0.66), (0.28, 0.66, 0.72, 0.92))
+
+
+def sparkle_spot(rng: random.Random, w: float, h: float, tries: int = 40) -> tuple[float, float]:
+    """Sorteia a posição de um brilho fora do texto e do logo, para a decoração não cortar letras."""
+    x, y = w / 2, h / 2
+    for _ in range(tries):
+        x, y = rng.uniform(0.05 * w, 0.95 * w), rng.uniform(0.05 * h, 0.95 * h)
+        if not any(x0 * w <= x <= x1 * w and y0 * h <= y <= y1 * h for x0, y0, x1, y1 in SPARKLE_KEEP_OUT):
+            return x, y
+    return rng.uniform(0.05 * w, 0.95 * w), rng.uniform(0.05 * h, 0.2 * h)
+
+
 def _draw_background(img: Image.Image, theme: Theme, dark: bool, rng: random.Random) -> None:
     w, h = img.size
     base = min(w, h)
@@ -91,7 +105,7 @@ def _draw_background(img: Image.Image, theme: Theme, dark: bool, rng: random.Ran
     # brilhos em losango (estrela de 4 pontas)
     sp = ImageDraw.Draw(img)
     for _ in range(5):
-        x, y = rng.uniform(0.05 * w, 0.95 * w), rng.uniform(0.05 * h, 0.95 * h)
+        x, y = sparkle_spot(rng, w, h)
         size = rng.uniform(0.012, 0.03) * base
         inner = size * 0.22
         pts = [

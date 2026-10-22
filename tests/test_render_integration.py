@@ -325,3 +325,23 @@ def test_matte_render_with_real_model(synthetic_media, tmp_path):
     assert out.exists() and abs(result.duration - 1.0) < 0.01
     info = probe(out)
     assert info.has_audio and abs(info.duration - 1.0) < 0.15
+
+
+@pytest.mark.parametrize("extension", ["wav", "mp3", "m4a"])
+def test_narration_concat_joins_parts_with_pauses(tmp_path, extension):
+    import numpy as np
+
+    from dmaker.filtergraph.voice import narration_concat_command
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.media.wavio import write_wav
+
+    tone = np.sin(2 * np.pi * 440 * np.arange(24000) / 24000).astype(np.float32) * 0.3  # 1 s a 24 kHz
+    first = write_wav(tmp_path / "a.wav", tone, 24000)
+    second = write_wav(tmp_path / "b.wav", tone[:12000], 24000)  # 0,5 s
+    out = tmp_path / f"narracao.{extension}"
+
+    SubprocessRunner(quiet=True).run(narration_concat_command([(first, 0.5), (second, 0.0)], out))
+
+    info = probe(out)
+    assert info.has_audio and info.sample_rate == 48000 and info.channels == 1
+    assert abs(info.duration - 2.0) < 0.08  # 1,0 + 0,5 de pausa + 0,5 (mp3/m4a acrescentam um pouco)

@@ -131,3 +131,11 @@ def test_known_track_ids_covers_fixed_and_dynamic_ids():
 def test_known_track_ids_minimal_project_has_no_dynamic_ids():
     ids = known_track_ids(make_project())
     assert ids == {"V1", "A1", "TX", "GR", "CC", "MUS"}
+
+
+def test_nar_track_exists_only_with_narration_and_muting_it_removes_the_narrations():
+    assert "NAR" not in known_track_ids(make_project())
+    project = make_project(audio={"narration": [{"text": "Olá"}]}, tracks={"NAR": {"muted": True}})
+    assert "NAR" in known_track_ids(project)
+    new = apply_track_state(project)
+    assert new.audio.narration == [] and len(project.audio.narration) == 1  # original intocado

@@ -57,6 +57,10 @@ def test_lists_tools_and_prompt():
         "fix_captions",
         "edit_project",
         "timeline_view",
+        "list_voices",
+        "clone_voice",
+        "design_voice",
+        "synthesize_speech",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -331,3 +335,89 @@ def test_qa_report_via_mcp():
     spec_path = config.PROJECTS_DIR / "mcp-qa-teste" / "spec.json"
     spec_path.unlink()
     spec_path.parent.rmdir()
+
+
+class _FakeSynthesizer:
+    engine_id = "fake-mcp"
+
+    def __init__(self):
+        self.texts: list[str] = []
+
+    def synthesize(self, request):
+        import numpy as np
+
+        from dmaker.voice.synth import Speech
+
+        self.texts.append(request.text)
+        return Speech(np.zeros(int(0.5 * 24000), dtype=np.float32), 24000)
+
+
+def test_voice_tools_with_temporary_library(monkeypatch, tmp_path):
+    import dmaker.mcp_server as mcp_server
+    from dmaker.voice.library import VoiceLibrary
+
+    library = VoiceLibrary(tmp_path / "voices")
+    monkeypatch.setattr(mcp_server, "_voice_library", lambda: library)
+
+    presets = mcp_server.list_voices()
+    assert [(v["id"], v["engine"], v["kind"]) for v in presets] == [
+        ("dora", "kokoro", "preset"),
+        ("alex", "kokoro", "preset"),
+        ("santa", "kokoro", "preset"),
+    ]
+    created = mcp_server.design_voice("Locutora", gender="feminino", pitch="grave", brand="medlycare")
+    assert created["id"] == "locutora" and created["instruct"] == "female, low pitch"
+    assert mcp_server.design_voice("Locutor", instruct="male, elderly")["instruct"] == "male, elderly"
+
+    stored = [v["id"] for v in mcp_server.list_voices() if v["kind"] != "preset"]
+    assert stored == ["locutor", "locutora"]
+    assert created["engine"] == "omnivoice"
+    by_brand = [v["id"] for v in mcp_server.list_voices(brand="outra") if v["kind"] != "preset"]
+    assert by_brand == ["locutor"]
+
+
+def test_synthesize_speech_runs_as_a_job(monkeypatch, tmp_path):
+    import dmaker.mcp_server as mcp_server
+    from dmaker.media.ffmpeg import RecordingRunner
+    from dmaker.voice.library import VoiceLibrary
+
+    library = VoiceLibrary(tmp_path / "voices")
+    library.save_design("Locutora", "female")
+    fake = _FakeSynthesizer()
+    out = tmp_path / "narracao.wav"
+    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    monkeypatch.setattr(mcp_server, "_voice_library", lambda: library)
+    monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
+    monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
+    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+
+    started = mcp_server.synthesize_speech(
+        "Esta é a primeira frase longa. Esta é a segunda frase longa.",
+        out=str(out),
+        voice="locutora",
+        srt=True,
+    )
+    assert started["job_id"]
+    job = mcp_server.jobs.get(started["job_id"])
+    mcp_server.jobs.wait(job, 30)
+
+    status = mcp_server.job_status(started["job_id"])
+    assert status["status"] == "done", status.get("error")
+    assert status["result"]["output"] == str(out)
+    assert [c["text"] for c in status["result"]["cues"]] == [
+        "Esta é a primeira frase longa.",
+        "Esta é a segunda frase longa.",
+    ]
+    assert status["progress"]["label"] == "fala 2 de 2"
+    assert fake.texts == ["Esta é a primeira frase longa.", "Esta é a segunda frase longa."]
+
+
+def test_synthesize_speech_rejects_unknown_voice_immediately(monkeypatch, tmp_path):
+    import pytest
+
+    import dmaker.mcp_server as mcp_server
+    from dmaker.voice.library import VoiceLibrary, VoiceNotFoundError
+
+    monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path))
+    with pytest.raises(VoiceNotFoundError, match="fantasma"):
+        mcp_server.synthesize_speech("Oi.", voice="fantasma")

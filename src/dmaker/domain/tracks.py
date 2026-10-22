@@ -31,6 +31,8 @@ def known_track_ids(project: Project) -> set[str]:
     mostraria): usado pelo lint para avisar de um id desconhecido em `project.tracks`."""
     ids = {"V1", "A1", "TX", "GR", "CC", "MUS"}
     ids.update(f"A{2 + i}" for i in range(len(project.audio.tracks)))
+    if project.audio.narration:
+        ids.add("NAR")
     lanes = video_overlay_lanes(project)
     ids.update(f"V{2 + lane}" for lane in set(lanes.values()))
     return ids
@@ -43,6 +45,7 @@ def apply_track_state(project: Project) -> Project:
     - A1 muda -> `audio.mute_clips = True` (mudo do áudio de cada clipe da V1).
     - A<n> muda, n>=2 -> remove `audio.tracks[n-2]` (a faixa externa some da mixagem).
     - MUS muda -> `audio.music = None`.
+    - NAR muda -> `audio.narration = []` (as narrações somem da mixagem e das legendas).
     - CC oculta -> `captions.enabled = False`.
     - TX oculta -> remove as sobreposições de texto.
     - GR oculta -> remove as sobreposições de imagem e a barra de progresso.
@@ -67,6 +70,9 @@ def apply_track_state(project: Project) -> Project:
 
     if _muted(tracks, "MUS") and audio.music is not None:
         audio = audio.model_copy(update={"music": None})
+
+    if _muted(tracks, "NAR") and audio.narration:
+        audio = audio.model_copy(update={"narration": []})
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:

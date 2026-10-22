@@ -7,6 +7,7 @@
  *   open(name, spec)   chamado por app.js.openProject ao abrir um projeto
  *   refreshView()      chamado por app.js após qualquer mudança na spec (formulário/JSON/undo)
  *   markSaved()        chamado por app.js após um Salvar bem sucedido (limpa o indicador)
+ *   getPlayheadTime()  posição atual do player, em segundos (voice.js insere a narração nesse ponto)
  *
  * Todas as edições passam por applyOp(op), que chama POST /api/projects/{nome}/edit, atualiza
  * a spec e a vista compartilhadas com app.js e empilha um snapshot para desfazer/refazer.
@@ -744,4 +745,10 @@ async function open(name, spec) {
   ensureProxies();
 }
 
-window.DMakerEditor = { open, refreshView, markSaved, applyOp };
+/** Posição atual do player em segundos (0 se a linha do tempo ainda não foi aberta); usada pelo estúdio
+ * de voz para encaixar a narração inserida no ponto onde a pessoa está olhando. */
+function getPlayheadTime() {
+  return edState.player ? edState.player.getTime() : 0;
+}
+
+window.DMakerEditor = { open, refreshView, markSaved, applyOp, getPlayheadTime };

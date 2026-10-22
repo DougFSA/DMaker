@@ -1651,6 +1651,7 @@ function switchTab(tab) {
   if (tab === "editor" && state.spec) renderEditorForm();
   if (tab === "captions") loadCaptionsTab();
   if (tab === "timeline" && state.spec && window.DMakerEditor) DMakerEditor.refreshView();
+  if (tab === "voice" && window.DMakerVoice) DMakerVoice.onShow();
   if (window.DMakerLayout) DMakerLayout.refresh();
 }
 
@@ -1984,6 +1985,7 @@ async function init() {
   try {
     state.stateInfo = await api.get("/api/state");
   } catch (err) { handleError(err); }
+  if (window.DMakerVoice) DMakerVoice.init({ brands: (state.stateInfo && state.stateInfo.brands) || [] });
   try {
     await refreshProjectList();
   } catch (err) { handleError(err); }

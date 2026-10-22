@@ -1,0 +1,70 @@
+{
+  "name": "Casamento floral azul",
+  "colors": {
+    "primary": "#1a1a1a",
+    "text": "#1a1a1a",
+    "bg": "#ffffff",
+    "bg_dark": "#1a1a1a"
+  },
+  "fonts": {
+    "family": "Poppins",
+    "title": "bold",
+    "body": "regular",
+    "highlight": "medium",
+    "light": "light",
+    "files": {
+      "script": "GreatVibes-Regular.ttf",
+      "date": "PlayfairDisplay-Italic.ttf",
+      "serif": "georgia.ttf"
+    }
+  },
+  "logos": {},
+  "rules": {
+    "no_dash": true
+  },
+  "style": {
+    "card_variant": "light"
+  },
+  "card_layouts": {
+    "abertura": {
+      "background": "cards/placa.png",
+      "elements": [
+        { "kind": "text", "text": "{{data}}", "font": "date", "size": 125, "y": 126, "color": "#1a1a1a", "shadow": true },
+        { "kind": "text", "text": "{{nomes}}", "font": "script", "size": 205, "y": 440, "color": "#1a1a1a", "shadow": true },
+        { "kind": "text", "text": "{{igreja}}", "font": "serif", "size": 56, "y": 789, "color": "#1a1a1a", "shadow": true },
+        { "kind": "text", "text": "{{igreja2}}", "font": "serif", "size": 56, "y": 849, "color": "#1a1a1a", "shadow": true },
+        { "kind": "text", "text": "{{cidade}}", "font": "serif", "size": 56, "y": 910, "color": "#1a1a1a", "shadow": true }
+      ]
+    },
+    "creditos": {
+      "background": "cards/placa.png",
+      "elements": [
+        {
+          "kind": "blocks",
+          "title_font": "serif",
+          "text_font": "serif",
+          "title_size": 72,
+          "text_size": 56,
+          "title_gap": 84,
+          "line_gap": 58,
+          "block_gap": 52,
+          "center_y": true,
+          "color": "#1a1a1a",
+          "shadow": true,
+          "items": [
+            { "title": "Presidente da Celebração", "text": "{{celebrante}}" },
+            { "title": "Cerimonial", "text": "{{cerimonial}}" },
+            { "title": "Fotos", "text": "{{fotos}}" },
+            { "title": "Filmagem", "text": "{{filmagem}}" },
+            { "title": "Fotos e Filmagem", "text": "{{fotos_filmagem}}" },
+            { "title": "Música", "text": "{{musica}}" }
+          ]
+        }
+      ]
+    },
+    "encerramento": {
+      "background": "cards/encerramento.png",
+      "elements": []
+    }
+  }
+}

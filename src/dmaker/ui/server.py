@@ -27,13 +27,16 @@ from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
+from .voice_routes import build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
 # painéis conhecidos pelo seletor de layouts da interface (espelha KNOWN_PANELS em layout.js).
-LAYOUT_PANELS = {"player", "filters", "media", "timeline", "progress", "properties", "sidebar"}
+LAYOUT_PANELS = {"player", "filters", "media", "timeline", "progress", "properties", "sidebar", "voice"}
+# abas que um layout pode pedir para abrir ao ser aplicado (a "Voz" é o estúdio de voz)
+LAYOUT_TABS = {"timeline", "voice"}
 
 # calculado uma vez, na importação: representa o código que este processo carregou. O RenderDispatcher
 # (pipeline/remote.py) compara com o build_id() do disco para saber se este servidor está desatualizado.
@@ -45,6 +48,7 @@ SHUTDOWN_DELAY_S = 0.3
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
+app.include_router(build_voice_router(jobs))
 
 
 # ---------- modelos de entrada ----------
@@ -119,6 +123,7 @@ class LayoutModel(BaseModel):
     areas: dict[str, str] = Field(default_factory=dict)
     sizes: dict[str, float] = Field(default_factory=dict)
     hidden: list[str] = Field(default_factory=list)
+    tab: str | None = None  # aba aberta ao aplicar o layout (ex.: "voice"); sem valor, a aba atual fica
 
 
 # ---------- utilidades ----------
@@ -857,6 +862,8 @@ def _validate_layout_panels(layout: LayoutModel) -> None:
     unknown = (set(layout.areas.values()) | set(layout.hidden)) - LAYOUT_PANELS
     if unknown:
         raise _error(400, f"painel desconhecido: {', '.join(sorted(unknown))}")
+    if layout.tab is not None and layout.tab not in LAYOUT_TABS:
+        raise _error(400, f"aba desconhecida: {layout.tab}")
 
 
 @app.get("/api/layouts")
@@ -867,7 +874,7 @@ def list_layouts() -> dict:
 @app.put("/api/layouts/{name}")
 def save_layout(name: str, layout: LayoutModel) -> dict:
     _validate_layout_panels(layout)
-    layout_store.save(name, layout.model_dump())
+    layout_store.save(name, layout.model_dump(exclude_none=True))
     return {"ok": True}
 
 

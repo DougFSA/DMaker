@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "src" / "dmaker" / "ui" / "static"
 
@@ -20,8 +25,11 @@ FILTERS = STATIC_DIR / "filters.js"
 MEDIA = STATIC_DIR / "media.js"
 PROGRESS = STATIC_DIR / "progress.js"
 LAYOUT = STATIC_DIR / "layout.js"
+VOICE = STATIC_DIR / "voice.js"
 
-ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS, LAYOUT)
+ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS, LAYOUT, VOICE)
+
+requires_node = pytest.mark.skipif(shutil.which("node") is None, reason="node não instalado")
 
 # domínios externos permitidos só dentro de comentários JS; fora deles é proibido
 EXTERNAL_URL_RE = re.compile(r"https?://")
@@ -223,3 +231,126 @@ def test_player_and_media_js_prefer_resolved_path():
     media_js = MEDIA.read_text(encoding="utf-8")
     assert "item.path" in player_js
     assert "buildResolvedPathMap" in media_js and "item.path" in media_js
+
+
+def test_voice_file_exists_and_is_referenced_before_app_js():
+    assert VOICE.is_file(), "voice.js não encontrado"
+    html = INDEX.read_text(encoding="utf-8")
+    assert "/static/voice.js" in html, "index.html não referencia voice.js"
+    assert html.index("/static/voice.js") < html.index("/static/app.js")
+    assert "window.DMakerVoice" in VOICE.read_text(encoding="utf-8")
+
+
+def test_index_has_voice_tab_and_studio_ids():
+    html = INDEX.read_text(encoding="utf-8")
+    assert 'data-tab="voice"' in html and 'id="panel-voice"' in html and 'data-panel="voice"' in html
+    for element_id in (
+        "voice-list",
+        "voice-clone-file",
+        "voice-rec-toggle",
+        "voice-rec-clock",
+        "voice-clone-consent",
+        "voice-design-gender",
+        "voice-design-instruct",
+        "voice-script",
+        "voice-script-stats",
+        "voice-speed",
+        "voice-generate",
+        "voice-progress-fill",
+        "voice-result-audio",
+        "voice-result-download",
+        "voice-result-insert",
+        "voice-history",
+    ):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+    assert "permissão do dono" in html and "5 a 8 segundos" in html
+    assert "[pausa 1.2]" in html
+
+
+def test_voice_js_uses_voice_api_with_jobs_sse_and_recorder():
+    js = VOICE.read_text(encoding="utf-8")
+    for token in (
+        "/api/voices",
+        "/api/voices/design-options",
+        "/api/voices/clone",
+        "/api/voices/design",
+        "/api/voices/speak",
+        "/preview",
+        "/api/jobs/",
+        "EventSource",
+        "MediaRecorder",
+        "getUserMedia",
+        "audio.narration",
+        "saveProject",
+        "getPlayheadTime",
+    ):
+        assert token in js, f"{token!r} não encontrado em voice.js"
+
+
+def test_app_js_and_layout_js_hook_into_voice_studio():
+    app_js = JS.read_text(encoding="utf-8")
+    assert "DMakerVoice.init" in app_js and "DMakerVoice.onShow" in app_js
+    assert "getPlayheadTime" in EDITOR.read_text(encoding="utf-8")
+    layout_js = LAYOUT.read_text(encoding="utf-8")
+    assert '"voice"' in layout_js and "tab-btn-voice" in layout_js
+    assert "Voz:" in layout_js, "layout embutido Voz não encontrado"
+
+
+@requires_node
+@pytest.mark.parametrize("path", sorted(STATIC_DIR.glob("*.js")), ids=lambda p: p.name)
+def test_every_static_script_has_valid_syntax(path):
+    result = subprocess.run(["node", "--check", str(path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def _run_voice_pure(expression: str):
+    """Avalia `expression` com as funções puras de voice.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(VOICE))});"
+        "const pure = window.DMakerVoice.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_voice_script_estimate_uses_14_chars_per_second_speed_and_pauses():
+    assert _run_voice_pure('pure.estimateSeconds("a".repeat(140), 1)') == 10
+    assert _run_voice_pure('pure.estimateSeconds("a".repeat(140), 2)') == 5
+    assert _run_voice_pure('pure.estimateSeconds("a".repeat(14) + " [pausa 1,5] ", 1)') == 2.5
+    assert _run_voice_pure('pure.estimateSeconds("", 1)') == 0
+
+
+@requires_node
+def test_voice_recording_advice_and_formatting():
+    levels = _run_voice_pure("[1, 4, 6, 12, 20].map((s) => pure.recordingAdvice(s).level)")
+    assert levels == ["bad", "ok", "good", "ok", "bad"]
+    assert _run_voice_pure("[pure.formatClock(5400), pure.formatDuration(42), pure.formatDuration(65)]") == [
+        "0:05",
+        "42 s",
+        "1 min 05 s",
+    ]
+    assert _run_voice_pure(
+        '["audio/webm;codecs=opus", "audio/mp4", "audio/ogg"].map(pure.extensionForMime)'
+    ) == [
+        "webm",
+        "m4a",
+        "ogg",
+    ]
+
+
+@requires_node
+def test_voice_narration_item_for_the_project_spec():
+    item = _run_voice_pure(
+        'pure.buildNarrationItem({text: "Oi", voiceId: "ana", speed: 1.1, language: null, seed: 0}, 3.456)'
+    )
+    assert item == {"text": "Oi", "start": 3.46, "speed": 1.1, "voice": "ana", "seed": 0}
+    bare = _run_voice_pure(
+        'pure.buildNarrationItem({text: "Oi", voiceId: null, speed: 1, language: "en", seed: null}, -1)'
+    )
+    assert bare == {"text": "Oi", "start": 0, "speed": 1, "language": "en"}
+    error = json.dumps("ValueError: voz sumiu\nTraceback (most recent call last)")
+    assert _run_voice_pure(f"pure.jobErrorMessage({error})") == "voz sumiu"

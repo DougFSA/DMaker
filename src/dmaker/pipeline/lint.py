@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from ..domain.brand import Theme
 from ..domain.presets import Preset
 from ..domain.spec import ClipSegment, Project
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
+from .voiceover import estimate_narration_duration
 
 DASHES = ("—", "–")
 
@@ -19,9 +22,11 @@ def lint(
     durations: list[float],
     infos: list[MediaInfo | None],
     offsets: list[float] | None = None,
+    known_voices: Collection[str] | None = None,
 ) -> list[str]:
     """Devolve avisos; levanta ValueError só para o que não tem como renderizar. `offsets` é onde cada
-    fonte começa no relógio da sessão (0 para arquivos avulsos)."""
+    fonte começa no relógio da sessão (0 para arquivos avulsos). `known_voices` são os ids da biblioteca
+    de vozes; sem ele, a existência da voz de cada narração não é conferida."""
     warnings: list[str] = []
     segments = project.timeline
     if preset.max_duration and total > preset.max_duration + 0.01:
@@ -70,6 +75,7 @@ def lint(
     captions = project.captions
     if captions and captions.enabled and captions.source == "auto" and project.audio.mute_clips:
         warnings.append("Legendas automáticas com audio.mute_clips: não há voz para transcrever.")
+    warnings += _narration_warnings(project, total, known_voices)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:
@@ -78,4 +84,32 @@ def lint(
         v1_state = project.tracks.get("V1")
         if v1_state and v1_state.hidden:
             warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
+    return warnings
+
+
+def _narration_warnings(project: Project, total: float, known_voices: Collection[str] | None) -> list[str]:
+    """Voz inexistente, narração fora do vídeo (pela duração estimada) e legenda de narração sem narração."""
+    warnings: list[str] = []
+    for i, narration in enumerate(project.audio.narration):
+        where = f"audio.narration[{i}]"
+        if narration.voice and known_voices is not None and narration.voice not in known_voices:
+            available = ", ".join(sorted(known_voices)) or "nenhuma voz cadastrada"
+            warnings.append(f"{where}: a voz {narration.voice!r} não existe na biblioteca ({available}).")
+        if narration.script and not project.resolve(narration.script).exists():
+            warnings.append(f"{where}: roteiro {narration.script!r} não encontrado.")
+            continue
+        if narration.start >= total:
+            warnings.append(
+                f"{where}: começa em {narration.start:g}s, depois do fim do vídeo ({total:.1f}s)."
+            )
+            continue
+        end = narration.start + estimate_narration_duration(project, narration)
+        if end > total + 0.5:
+            warnings.append(
+                f"{where}: deve terminar por volta de {end:.1f}s (estimativa), depois do fim do vídeo "
+                f"({total:.1f}s); o final da fala seria cortado."
+            )
+    captions = project.captions
+    if captions and captions.enabled and captions.source == "narration" and not project.audio.narration:
+        warnings.append('captions.source "narration" sem audio.narration: não há fala para legendar.')
     return warnings

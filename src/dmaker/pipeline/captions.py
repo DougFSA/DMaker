@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +17,7 @@ from ..text.transcribe import Transcriber, WhisperTranscriber
 from .context import RenderContext
 from .segments import PreparedSegment, cache_key
 from .sources import Source
+from .voiceover import PreparedVoiceover, narration_cues
 
 TranscriberFactory = Callable[[Captions], Transcriber]
 
@@ -35,9 +36,31 @@ class CaptionResult:
     file: Path | None
 
 
+@dataclass
+class CaptionInputs:
+    """O que uma fonte de legendas pode precisar do render em curso."""
+
+    ctx: RenderContext
+    sources: list[Source]
+    prepared: list[PreparedSegment]
+    transitions: list[Transition | None]
+    voiceovers: Sequence[PreparedVoiceover]
+    vocabulary: list[str]
+
+
+CueProducer = Callable[[CaptionInputs], tuple[list[Cue] | None, Path | None]]
+
+
 class CaptionPipeline:
+    """Cada valor de `captions.source` é um produtor de cues; qualquer outro valor é um arquivo de legendas.
+    Uma fonte nova entra em `producers`, sem mexer em `produce`."""
+
     def __init__(self, transcriber_factory: TranscriberFactory = default_transcriber_factory):
         self.transcriber_factory = transcriber_factory
+        self.producers: dict[str, CueProducer] = {
+            "auto": self._from_transcription,
+            "narration": self._from_narration,
+        }
 
     def produce(
         self,
@@ -45,6 +68,7 @@ class CaptionPipeline:
         sources: list[Source],
         prepared: list[PreparedSegment],
         transitions: list[Transition | None],
+        voiceovers: Sequence[PreparedVoiceover] = (),
     ) -> CaptionResult | None:
         project, options = ctx.project, ctx.options
         captions = project.captions
@@ -53,17 +77,16 @@ class CaptionPipeline:
         vocabulary = list(ctx.theme.captions.get("vocabulary", [])) + list(captions.vocabulary)
         replacements = {**ctx.theme.captions.get("replacements", {}), **captions.replacements}
 
-        if captions.source == "auto":
-            if project.audio.mute_clips:
-                return None
-            cues, store = self._auto(ctx, sources, prepared, transitions, vocabulary)
-            if cues is None:
-                return None
-        else:
+        producer = self.producers.get(captions.source)
+        if producer is None:
             store = project.resolve(captions.source)
             if not store.exists():
                 raise FileNotFoundError(f"captions.source não encontrado: {captions.source}")
             cues = load_captions(store)
+        else:
+            cues, store = producer(CaptionInputs(ctx, sources, prepared, transitions, voiceovers, vocabulary))
+            if cues is None:
+                return None
 
         cues = apply_replacements(cues, replacements)
         if captions.offset:
@@ -73,7 +96,24 @@ class CaptionPipeline:
             cues = regroup(cues, style.max_words, style.max_chars)
         return CaptionResult(cues, store)
 
+    # ---------- texto das narrações ----------
+
+    @staticmethod
+    def _from_narration(inputs: CaptionInputs) -> tuple[list[Cue] | None, Path | None]:
+        """As legendas são o próprio texto falado, com os tempos da síntese: sem Whisper."""
+        if not inputs.voiceovers:
+            return None, None
+        cues = narration_cues(inputs.voiceovers)
+        store = inputs.ctx.job_dir / "captions.narration.srt"
+        store.write_text(to_srt(cues), encoding="utf-8")
+        return cues, store
+
     # ---------- transcrição automática com cache ----------
+
+    def _from_transcription(self, inputs: CaptionInputs) -> tuple[list[Cue] | None, Path | None]:
+        if inputs.ctx.project.audio.mute_clips:
+            return None, None
+        return self._auto(inputs.ctx, inputs.sources, inputs.prepared, inputs.transitions, inputs.vocabulary)
 
     def _audio_key(self, ctx: RenderContext, sources: list[Source], vocabulary: list[str]) -> str:
         captions = ctx.project.captions

@@ -52,6 +52,14 @@ sempre `medlycare.com.br`; oferta atual: teste grátis de 3 meses sem cartão. V
 da marca (para a transcrição acertar) já vêm no tema; `captions.vocabulary`/`replacements` somam com os
 dele. Tom e regras completas de comunicação: skill `medlycare-marketing`.
 
+## Voz e narração
+
+Voz local, sem custo. Padrão: OmniVoice (realista; clones `clone_voice`, vozes por descrição
+`design_voice`), lento na CPU: ~50 s por segundo de áudio (`draft=true` faz o rascunho em metade). Para
+conferir roteiro e ritmo rápido use as vozes prontas do Kokoro (`dora`, `alex`, `santa`; ~3 s por segundo).
+MCP: `list_voices`, `synthesize_speech` (job: `job_status`). CLI: `dmaker voice say|clone|design|list|
+remove|preview`. Detalhes no guia.
+
 ## Quando ler `dmaker://guide`
 
 O manual completo (recurso MCP `dmaker://guide`, ou ferramenta `dmaker_guide`) tem a referência inteira da

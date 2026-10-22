@@ -796,6 +796,165 @@ def clean_cache() -> dict:
     return {"removed": n}
 
 
+# ---------- voz e narração ----------
+
+
+@server.tool(
+    description=(
+        "Vozes da biblioteca: as prontas (dora, alex, santa; motor kokoro, rápido) e as suas (clones e "
+        "projetadas; motor omnivoice, lento). Com brand, as dessa marca mais as sem marca. Cada voz tem id, "
+        "engine, kind (preset | clone | design), idioma e, nas projetadas, o instruct."
+    )
+)
+def list_voices(brand: str | None = None) -> list[dict]:
+    from .pipeline.voices import profile_dict
+
+    return [profile_dict(p) for p in _voice_library().list(brand=brand)]
+
+
+@server.tool(
+    description=(
+        "Clona uma voz a partir de uma gravação de 3 a 15 s de fala limpa (usa só o começo, sem silêncio). "
+        "Sem reference_text, o Whisper transcreve a gravação. Devolve a voz cadastrada (use o id em "
+        "synthesize_speech)."
+    )
+)
+def clone_voice(
+    name: str,
+    reference_audio: str,
+    reference_text: str | None = None,
+    brand: str | None = None,
+    language: str = "pt",
+) -> dict:
+    from .pipeline.voices import clone_voice as _clone
+    from .pipeline.voices import profile_dict
+
+    profile = _clone(
+        name,
+        Path(reference_audio),
+        reference_text=reference_text,
+        brand=brand,
+        language=language,
+        library=_voice_library(),
+    )
+    return profile_dict(profile)
+
+
+@server.tool(
+    description=(
+        "Cria uma voz descrevendo como ela soa, sem gravação. Atributos aceitos: gender (male | female), "
+        "age (child, teenager, young adult, middle-aged, elderly), pitch (very low pitch, low pitch, "
+        "moderate pitch, high pitch, very high pitch), accent (por exemplo british accent, portuguese "
+        "accent), whisper. Aceita apelidos em português (feminino, grave, idoso...) ou um instruct "
+        "completo, como 'female, low pitch'."
+    )
+)
+def design_voice(
+    name: str,
+    gender: str | None = None,
+    age: str | None = None,
+    pitch: str | None = None,
+    accent: str | None = None,
+    whisper: bool = False,
+    instruct: str | None = None,
+    brand: str | None = None,
+    language: str = "pt",
+) -> dict:
+    from .pipeline.voices import design_voice as _design
+    from .pipeline.voices import profile_dict
+
+    profile = _design(
+        name, gender, age, pitch, accent, whisper, instruct, brand, language, library=_voice_library()
+    )
+    return profile_dict(profile)
+
+
+def _narration_work(job: Job, text: str, out: str | None, options: dict) -> dict:
+    """Narração ligada ao job: cada fala vira progresso e evento."""
+    from .pipeline.voices import speak
+
+    def on_progress(done: int, total: int) -> None:
+        job.progress = {
+            "label": f"fala {done} de {total}",
+            "done": done,
+            "total": total,
+            "percent": int(100 * (done - 1) / total),
+        }
+
+    result = speak(
+        text,
+        Path(out) if out else None,
+        on_progress=on_progress,
+        log=job.log,
+        library=_voice_library(),
+        synthesizer=_voice_synthesizer(),
+        **options,
+    )
+    return {
+        "output": str(result.path),
+        "duration_s": round(result.duration, 2),
+        "srt": str(result.srt_path) if result.srt_path else None,
+        "cues": [{"start": round(s, 2), "end": round(e, 2), "text": t} for s, e, t in result.cues],
+    }
+
+
+@server.tool(
+    description=(
+        "Narra um texto com uma voz da biblioteca (voice = id; sem voice, o OmniVoice com voz automática, ou "
+        "desenhada se houver instruct) e grava o áudio (.wav, .mp3 ou .m4a). Qualidade: OmniVoice com 16 "
+        "passos; draft=true usa 8 (rascunho). Roda em segundo plano porque na CPU demora (OmniVoice: ~50 s "
+        "por segundo de áudio, ~25 s no rascunho; vozes prontas dora/alex/santa do Kokoro: ~3 s por "
+        "segundo; falas repetidas vêm do cache): devolve job_id, consulte com job_status. Pausas: linha em "
+        "branco = pausa de parágrafo; [pausa 1.2] fixa uma pausa. "
+        "Números, R$ e % são lidos por extenso."
+    )
+)
+def synthesize_speech(
+    text: str,
+    out: str | None = None,
+    voice: str | None = None,
+    language: str | None = None,
+    speed: float = 1.0,
+    instruct: str | None = None,
+    seed: int | None = None,
+    steps: int | None = None,
+    srt: bool = False,
+    draft: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .voice.synth import DRAFT_STEPS
+
+    if voice:
+        _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
+    options = {
+        "voice_id": voice,
+        "language": language,
+        "speed": speed,
+        "instruct": instruct,
+        "seed": seed,
+        "steps": DRAFT_STEPS if draft and steps is None else steps,
+        "write_srt": srt,
+    }
+    job = jobs.start(
+        f"narração ({voice or 'voz automática'}, {len(text)} caracteres)",
+        lambda job: _narration_work(job, text, out, options),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+def _voice_library():
+    from .voice.library import VoiceLibrary
+
+    return VoiceLibrary()
+
+
+def _voice_synthesizer():
+    from .pipeline.voices import shared_synthesizer
+
+    return shared_synthesizer()
+
+
 # ---------- recursos e prompt ----------
 
 

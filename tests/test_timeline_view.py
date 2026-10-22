@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dmaker.domain.spec import Project
+from dmaker.domain.spec import Project, TrackState
 from dmaker.media.probe import MediaInfo
 from dmaker.pipeline.layout import project_layout
 from dmaker.pipeline.timeline_view import TrackItem, build_timeline_view, stack_lanes
@@ -314,3 +314,67 @@ def test_music_span_tail_without_music_duration_keeps_raw_gap(tmp_path):
     view = build_timeline_view(project, project_layout(project, prober=fake_prober))
     mus = next(t for t in view.tracks if t.id == "MUS")
     assert mus.items[0].in_point == 0.5
+
+
+def _narrated_project(tmp_path: Path, **audio) -> Project:
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    (tmp_path / "roteiro.txt").write_text("x" * 140, encoding="utf-8")
+    spec = {
+        "name": "narrado",
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 20}],
+        "audio": {
+            "narration": [
+                {"text": "x" * 70, "start": 1.0, "voice": "ana"},
+                {"script": "roteiro.txt", "start": 8.0, "speed": 2.0},
+            ],
+            **audio,
+        },
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    return project
+
+
+def test_narration_track_has_one_estimated_item_per_narration(tmp_path):
+    project = _narrated_project(tmp_path)
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    ids = [t.id for t in view.tracks]
+    assert ids.index("A1") < ids.index("NAR")
+    track = next(t for t in view.tracks if t.id == "NAR")
+    first, second = track.items
+    # ~14 caracteres por segundo: 70 caracteres = 5 s; 140 caracteres a 2x = 5 s
+    assert (first.start, first.end) == (1.0, pytest.approx(6.0))
+    assert (second.start, second.end) == (8.0, pytest.approx(13.0))
+    assert first.extra == {"voice": "ana", "estimated": True}
+    assert second.path == str((tmp_path / "roteiro.txt").resolve()) and first.path is None
+    assert first.kind == "narration" and first.id == "NAR-0"
+
+
+def test_narration_track_uses_real_durations_when_known(tmp_path):
+    project = _narrated_project(tmp_path)
+    layout = project_layout(project, prober=fake_prober)
+    view = build_timeline_view(project, layout, narration_durations=[7.25, None])
+    first, second = next(t for t in view.tracks if t.id == "NAR").items
+    assert first.end == pytest.approx(8.25) and first.extra["estimated"] is False
+    assert second.extra["estimated"] is True
+
+
+def test_narration_track_respects_the_saved_track_state(tmp_path):
+    project = _narrated_project(tmp_path)
+    project = project.model_copy(update={"tracks": {"NAR": TrackState(muted=True, locked=True)}})
+    track = next(
+        t
+        for t in build_timeline_view(project, project_layout(project, prober=fake_prober)).tracks
+        if t.id == "NAR"
+    )
+    assert track.muted and track.locked and all(item.muted for item in track.items)
+
+
+def test_no_narration_means_no_nar_track(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    project = Project.model_validate(
+        {"name": "sem", "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 2}]}
+    )
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    assert "NAR" not in [t.id for t in view.tracks]

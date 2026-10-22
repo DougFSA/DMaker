@@ -13,8 +13,11 @@
  *
  * Painéis: "player", "filters", "media", "timeline" (movidos entre os quatro slots), "progress"
  * (recolhe/expande, reaproveitando o toggle existente do painel de Andamento), "sidebar" (só
- * redimensiona) e "properties" (reservado para o formulário da aba Propriedades virar encaixável;
- * ainda não tem um lugar na grade, mas já é um nome de painel válido).
+ * redimensiona), "voice" (o estúdio de voz, que vive na própria aba "Voz": ocultá-lo esconde a aba) e
+ * "properties" (reservado para o formulário da aba Propriedades virar encaixável; ainda não tem um
+ * lugar na grade, mas já é um nome de painel válido).
+ *
+ * Um layout também pode trazer `tab` ("timeline" ou "voice"): ao escolhê-lo no seletor, essa aba abre.
  *
  * window.DMakerLayout:
  *   normalizeLayout(obj), swapPanels(layout, a, b), builtinLayouts()   funções puras, testáveis
@@ -26,7 +29,8 @@
 const DMAKER_LAYOUT_STORAGE_KEY = "dmaker.layout.current";
 const DMAKER_LAYOUT_DRAG_MIME = "application/x-dmaker-panel";
 
-const KNOWN_PANELS = ["player", "filters", "media", "timeline", "progress", "properties", "sidebar"];
+const KNOWN_PANELS = ["player", "filters", "media", "timeline", "progress", "properties", "sidebar", "voice"];
+const KNOWN_TABS = ["timeline", "voice"]; // abas que um layout pode abrir ao ser escolhido no seletor
 const KNOWN_SLOTS = ["top-left", "top-center", "top-right", "bottom", "dock-bottom", "sidebar"];
 const MOVABLE_PANELS = ["player", "filters", "media", "timeline"];
 
@@ -63,7 +67,9 @@ function normalizeLayout(raw) {
     const value = typeof rawSizes[key] === "number" && Number.isFinite(rawSizes[key]) ? rawSizes[key] : SIZE_DEFAULTS[key];
     sizes[key] = lyClamp(value, min, max);
   }
-  return { version: 1, areas, sizes, hidden };
+  const layout = { version: 1, areas, sizes, hidden };
+  if (KNOWN_TABS.includes(obj.tab)) layout.tab = obj.tab;
+  return layout;
 }
 
 /** Layout novo com os painéis `a` e `b` trocados de slot. Se só um dos dois estiver na grade,
@@ -92,11 +98,12 @@ const EDITING_AREAS = { "top-center": "player", "top-left": "filters", bottom: "
  * fica oculto, sem precisar mover painel nenhum de slot. */
 function builtinLayouts() {
   return {
-    Edição: normalizeLayout({ areas: EDITING_AREAS, sizes: {}, hidden: ["progress"] }),
-    Efeitos: normalizeLayout({ areas: EDITING_AREAS, sizes: { "col-left": 420 }, hidden: ["progress", "media"] }),
-    Áudio: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.16 }, hidden: ["progress"] }),
-    Player: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.72 }, hidden: ["progress"] }),
-    Revisão: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.22 }, hidden: [] }),
+    Edição: normalizeLayout({ areas: EDITING_AREAS, sizes: {}, hidden: ["progress"], tab: "timeline" }),
+    Efeitos: normalizeLayout({ areas: EDITING_AREAS, sizes: { "col-left": 420 }, hidden: ["progress", "media"], tab: "timeline" }),
+    Áudio: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.16 }, hidden: ["progress"], tab: "timeline" }),
+    Player: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.72 }, hidden: ["progress"], tab: "timeline" }),
+    Revisão: normalizeLayout({ areas: EDITING_AREAS, sizes: { "row-top": 0.22 }, hidden: [], tab: "timeline" }),
+    Voz: normalizeLayout({ areas: EDITING_AREAS, sizes: {}, hidden: ["progress"], tab: "voice" }),
   };
 }
 
@@ -164,6 +171,8 @@ function applyLayout(layout) {
     if (panelName === "progress") {
       const progressEl = document.getElementById("progress-panel");
       if (progressEl) progressEl.classList.toggle("collapsed", isHidden);
+    } else if (panelName === "voice") {
+      setVoiceTabVisible(!isHidden);
     } else {
       const panelEl = panelElement(panelName);
       if (panelEl) panelEl.hidden = isHidden;
@@ -175,9 +184,25 @@ function applyLayout(layout) {
   document.dispatchEvent(new CustomEvent("dmaker:layout-applied"));
 }
 
+/** O estúdio de voz ocupa uma aba inteira: "ocultar" o painel esconde o botão da aba (e sai dela). */
+function setVoiceTabVisible(visible) {
+  const tabButton = document.getElementById("tab-btn-voice");
+  if (tabButton) tabButton.hidden = !visible;
+  if (!visible && typeof state !== "undefined" && state.activeTab === "voice" && typeof switchTab === "function") {
+    switchTab("timeline");
+  }
+}
+
+/** Abre a aba que o layout pede, só quando a pessoa o escolhe (arrastar e ocultar painéis não troca de aba). */
+function openLayoutTab(layout) {
+  if (!layout.tab || typeof switchTab !== "function" || typeof state === "undefined") return;
+  if (state.activeTab !== layout.tab) switchTab(layout.tab);
+}
+
 function setCurrentLayout(name, layout) {
   currentLayoutName = name;
   applyLayout(layout);
+  openLayoutTab(currentLayout);
   persistCurrent();
   renderSelectorOptions();
 }

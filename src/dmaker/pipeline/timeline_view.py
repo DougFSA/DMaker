@@ -4,10 +4,12 @@ Puro: só olha para o projeto e o layout, não toca disco nem executa nada.
 Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-picture) em V2, V3... (uma
 faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem + barra de
 progresso), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
-clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`), "MUS" (música) e "CC" (legendas)."""
+clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`), "NAR" (narrações por texto), "MUS" (música)
+e "CC" (legendas)."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
@@ -24,6 +26,7 @@ from ..domain.spec import (
 from ..domain.timeline import stack_lanes as _lane_of
 from ..filtergraph.audio import resolve_span
 from .layout import ProjectLayout, to_presentation
+from .voiceover import estimate_narration_duration, narration_label
 
 
 @dataclass
@@ -332,6 +335,39 @@ def _audio_track_tracks(project: Project, layout: ProjectLayout) -> list[Track]:
     return tracks
 
 
+def _narration_track(
+    project: Project, layout: ProjectLayout, durations: Sequence[float | None] = ()
+) -> Track | None:
+    """Uma narração por item. `durations` traz a duração real das já sintetizadas (None ou ausente = a
+    estimativa por texto, marcada em `extra["estimated"]`)."""
+    if not project.audio.narration:
+        return None
+    muted, hidden, locked = _track_state(project, "NAR")
+    items = []
+    for i, narration in enumerate(project.audio.narration):
+        known = durations[i] if i < len(durations) else None
+        duration = known if known is not None else estimate_narration_duration(project, narration)
+        items.append(
+            TrackItem(
+                id=_item_id("NAR", i),
+                kind="narration",
+                index=i,
+                label=narration_label(narration),
+                start=narration.start,
+                end=narration.start + duration,
+                in_point=0.0,
+                out_point=None,
+                src=narration.script,
+                source=None,
+                transition=None,
+                muted=narration.volume <= 0 or muted,
+                extra={"voice": narration.voice, "estimated": known is None},
+                path=str(project.resolve(narration.script)) if narration.script else None,
+            )
+        )
+    return Track(id="NAR", kind="audio", label="NAR", items=items, muted=muted, hidden=hidden, locked=locked)
+
+
 def _music_track(
     project: Project, layout: ProjectLayout, music_duration: float | None = None
 ) -> Track | None:
@@ -389,12 +425,17 @@ def _captions_track(project: Project, layout: ProjectLayout) -> Track | None:
 
 
 def build_timeline_view(
-    project: Project, layout: ProjectLayout, music_duration: float | None = None
+    project: Project,
+    layout: ProjectLayout,
+    music_duration: float | None = None,
+    narration_durations: Sequence[float | None] = (),
 ) -> TimelineView:
     """Monta a vista multitrilha: uma faixa por PiP que se sobrepõe, texto, gráficos, a linha do
     tempo principal, o áudio de cada clipe, cada faixa de áudio externa, a música e as legendas.
     Trechos de uma fonte com `parts` aparecem como um item só (agregado pelo trecho original).
-    `music_duration` refina spans de música com `tail`; sem ela, a folga bruta é mostrada. Cada item
+    `music_duration` refina spans de música com `tail`; sem ela, a folga bruta é mostrada.
+    `narration_durations` (uma por narração, ver `VoiceoverPreparer.cached_durations`) troca a
+    estimativa pela duração real das narrações já sintetizadas. Cada item
     ganha `path` (caminho absoluto já resolvido pela spec) e cada trilha carrega o mudo/oculto/
     bloqueio salvo em `project.tracks` (`domain.tracks.apply_track_state` aplica o mesmo estado no
     render, para a prévia e o vídeo final nunca discordarem)."""
@@ -473,6 +514,10 @@ def build_timeline_view(
         )
     )
     tracks.extend(_audio_track_tracks(project, layout))
+
+    narration_track = _narration_track(project, layout, narration_durations)
+    if narration_track is not None:
+        tracks.append(narration_track)
 
     music_track = _music_track(project, layout, music_duration)
     if music_track is not None:

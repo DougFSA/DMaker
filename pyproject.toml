@@ -17,11 +17,15 @@ dependencies = [
     "mcp>=2.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",  # upload de referência de voz na interface (FastAPI Form/UploadFile)
     "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 captions = ["faster-whisper>=1.0"]
+# torch vem à parte, versão CPU: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# kokoro-onnx: motor rápido (vozes prontas); omnivoice: clones e vozes projetadas (lento na CPU)
+voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]

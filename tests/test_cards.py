@@ -3,7 +3,13 @@ import pytest
 from dmaker.domain.brand import load_theme
 from dmaker.domain.presets import get_preset
 from dmaker.media import fonts
-from dmaker.visuals.cards import render_backdrop, render_card, render_framed_image
+from dmaker.visuals.cards import (
+    SPARKLE_KEEP_OUT,
+    render_backdrop,
+    render_card,
+    render_framed_image,
+    sparkle_spot,
+)
 from dmaker.visuals.geometry import fit_rect
 
 pytestmark = pytest.mark.skipif(
@@ -46,3 +52,15 @@ def test_default_theme_card_without_logo():
     theme = load_theme("default")
     img = render_card(theme, 480, 480, "Título do vídeo", "subtítulo", None, True, None, None, seed=5)
     assert img.size == (480, 480)
+
+
+@pytest.mark.parametrize("size", [(1920, 1080), (1080, 1920), (1080, 1080)])
+def test_sparkles_stay_out_of_text_and_logo(size):
+    import random
+
+    w, h = size
+    rng = random.Random(7)
+    for _ in range(500):
+        x, y = sparkle_spot(rng, w, h)
+        for x0, y0, x1, y1 in SPARKLE_KEEP_OUT:
+            assert not (x0 * w <= x <= x1 * w and y0 * h <= y <= y1 * h)

@@ -151,6 +151,9 @@ def effective_style(ov: TextOverlay, theme: Theme, tone: str | None = None) -> d
         st["position"] = ov.position
     if ov.animation:
         st["animation"] = ov.animation
+    if st.get("box") and "outline" not in ov.style.model_fields_set:
+        # a caixa já separa o texto do fundo; manter contorno aqui engrossa a letra e fecha os vãos
+        st.update(outline=0, shadow=0)
     st.setdefault("font", None)
     st.setdefault("spacing", 0)
     # cores: chave do tema ou hex
@@ -389,7 +392,7 @@ def add_captions(
         if name in doc.styles:
             return doc.styles[name].primary, doc.styles[name].secondary
         boxed = cs.mode == "boxed"
-        color, box_color, box_alpha = base_color, cs.box_color, cs.box_alpha
+        color, box_color, box_alpha = base_color, theme.color(cs.box_color, "#000000"), cs.box_alpha
         outline_w, shadow = cs.outline * s, cs.shadow * s
         if tone == "light" and not boxed:
             boxed, color, box_color, box_alpha = True, theme.colors["white"], theme.colors["primary"], 1.0

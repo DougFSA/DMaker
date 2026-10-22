@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -339,3 +340,71 @@ def test_music_stream_raises_clear_error_when_tail_has_no_music_duration():
     music = Music(src="m.m4a", spans=[MusicSpan(start=10, tail=True)])
     with pytest.raises(ValueError, match="tail"):
         music_stream([], inputs, music, Path("m.m4a"), total=60.0)
+
+
+# ---------- narração no barramento de voz ----------
+
+
+@dataclass(frozen=True)
+class _Narration:
+    path: Path
+    start: float = 0.0
+    volume: float = 1.0
+
+
+def test_audio_graph_mixes_narration_into_the_voice_before_ducking():
+    inputs = Inputs()
+    inputs.add("a.mov")
+    lines: list[str] = []
+    audio = AudioSettings(music=Music(src="m.mp3", volume=0.2, ducking=True))
+    narrations = [_Narration(Path("n1.wav"), start=0.5, volume=1.5), _Narration(Path("n2.wav"), start=4.0)]
+    audio_graph(lines, inputs, "[ta0]", audio, Path("m.mp3"), 12.0, narrations=narrations)
+    text = ";".join(lines)
+    assert inputs.args[2:] == ["-i", "n1.wav", "-i", "n2.wav", "-stream_loop", "-1", "-i", "m.mp3"]
+    assert (
+        "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1.500,adelay=500:all=1[nar0]"
+        in text
+    )
+    assert "volume=1.000,adelay=4000:all=1[nar1]" in text
+    assert "[ta0][nar0][nar1]amix=inputs=3:duration=first" in text
+    # a música abaixa sob o barramento que já inclui a narração, e o loudnorm vem depois de tudo
+    assert text.index("[a_narrated]asplit=2[voice][sc]") < text.index("sidechaincompress")
+    assert text.index("sidechaincompress") < text.index("loudnorm")
+
+
+def test_audio_graph_narration_without_delay_or_volume():
+    inputs = Inputs()
+    lines: list[str] = []
+    audio_graph(
+        lines,
+        inputs,
+        "[ta0]",
+        AudioSettings(normalize="off"),
+        None,
+        5.0,
+        narrations=[_Narration(Path("n.wav")), _Narration(Path("mudo.wav"), volume=0.0)],
+    )
+    text = ";".join(lines)
+    assert "adelay" not in text and "mudo.wav" not in " ".join(inputs.args)
+    assert "[ta0][nar0]amix=inputs=2" in text
+
+
+def test_audio_graph_narration_replaces_the_voice_when_clips_are_muted():
+    """Vídeo só de cartões e imagens (clipes mudos): a narração é a voz e a música ainda abaixa sob ela."""
+    inputs = Inputs()
+    lines: list[str] = []
+    audio = AudioSettings(mute_clips=True, music=Music(src="m.mp3"))
+    audio_graph(lines, inputs, "[ta0]", audio, Path("m.mp3"), 6.0, narrations=[_Narration(Path("n.wav"))])
+    text = ";".join(lines)
+    assert "[ta0]volume=0[a_mute]" in text and "[a_mute][nar0]amix=inputs=2" in text
+    assert "sidechaincompress" in text
+
+    lines_without: list[str] = []
+    audio_graph(lines_without, Inputs(), "[ta0]", audio, Path("m.mp3"), 6.0)
+    assert "sidechaincompress" not in ";".join(lines_without)  # sem narração, mudo continua sem ducking
+
+
+def test_audio_graph_without_narration_is_unchanged():
+    lines: list[str] = []
+    audio_graph(lines, Inputs(), "[ta0]", AudioSettings(normalize="off"), None, 5.0)
+    assert "narrated" not in ";".join(lines) and "[nar" not in ";".join(lines)

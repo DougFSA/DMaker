@@ -349,12 +349,14 @@ class CaptionStyle(Strict):
     max_chars: int = Field(22, ge=4, le=80)
     y: float | None = Field(None, ge=0, le=1)  # fração da altura (âncora no centro); None = automático
     pop: bool = False  # aumentar a palavra ativa desloca a linha; fica desligado por padrão
-    box_color: str = "#000000"
+    box_color: str = "#000000"  # hex ou chave do tema (primary, accent...)
     box_alpha: float = Field(0.6, ge=0, le=1)
 
 
 class Captions(Strict):
-    source: str = "auto"  # "auto" (transcrição) ou caminho .srt/.vtt/.json
+    # "auto" (transcrição), "narration" (o texto das narrações de `audio.narration`, sem Whisper)
+    # ou caminho .srt/.vtt/.json
+    source: str = "auto"
     language: str = "pt"
     model: str = "small"  # tiny | base | small | medium | large-v3
     device: Literal["cpu", "cuda"] = "cpu"
@@ -424,9 +426,34 @@ class AudioTrack(Strict):
     volume: float = Field(1.0, ge=0, le=4)
 
 
+class Narration(Strict):
+    """Fala sintetizada por texto, misturada como voz do vídeo (a música abaixa sob ela). O texto vem de
+    `text` ou de `script` (arquivo .txt relativo ao projeto, como os outros caminhos), nunca dos dois.
+    `voice` é o id de uma voz de `assets/voices`; sem ela, a voz automática do motor."""
+
+    text: str | None = None
+    script: str | None = None
+    voice: str | None = None
+    instruct: str | None = None  # descrição do jeito de falar (ver o guia, "Voz e narração")
+    start: float = Field(0.0, ge=0)  # instante do vídeo final em que a fala começa
+    volume: float = Field(1.0, ge=0, le=4)
+    speed: float = Field(1.0, ge=0.5, le=2)
+    language: str = "pt"
+    seed: int | None = None  # fixa a síntese: o mesmo texto soa igual a cada render
+
+    @model_validator(mode="after")
+    def _one_source(self) -> Narration:
+        if bool(self.text and self.text.strip()) == bool(self.script):
+            raise ValueError(
+                "narração precisa de `text` (o texto) ou `script` (um arquivo .txt), um dos dois"
+            )
+        return self
+
+
 class AudioSettings(Strict):
     music: Music | None = None
     tracks: list[AudioTrack] = []
+    narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
     voice_gain: float = Field(1.0, ge=0, le=4)
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
@@ -613,6 +640,10 @@ class Project(Strict):
                 for field_name, value in seg.fields.items():
                     if isinstance(value, str):
                         out.append((f"timeline[{i}].fields.{field_name}", value))
+        if self.captions and self.captions.source == "narration":  # o texto falado aparece como legenda
+            out += [
+                (f"audio.narration[{i}].text", n.text) for i, n in enumerate(self.audio.narration) if n.text
+            ]
         for i, ov in enumerate(self.overlays):
             if isinstance(ov, TextOverlay):
                 out.append((f"overlays[{i}].text", ov.text))

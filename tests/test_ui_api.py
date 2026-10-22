@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from dmaker import config
+from dmaker.media.ffmpeg import RecordingRunner
+from dmaker.text.captions import Cue
+from dmaker.text.transcribe import Transcript
 from dmaker.ui import server
+from dmaker.ui.layouts import LayoutStore
+from dmaker.ui.voice_routes import VoiceServices, get_voice_services
+from dmaker.voice.library import VoiceLibrary
+from dmaker.voice.synth import Speech, VoiceRequest
 
 from .conftest import requires_ffmpeg
 
@@ -322,3 +331,270 @@ def test_qa_endpoint(client):
     assert "Checagens feitas" in result["text"]
     assert result["project"] == PROJECT
     assert client.post("/api/projects/nao-existe/qa").status_code == 404
+
+
+# ---------- estúdio de voz ----------
+
+
+class FakeTranscriber:
+    """Devolve sempre o mesmo texto e guarda as chamadas, no lugar do Whisper."""
+
+    def __init__(self, text: str = "texto transcrito da gravação"):
+        self.text = text
+        self.calls: list[Path] = []
+
+    def transcribe(self, wav: Path, language: str, initial_prompt: str | None = None) -> Transcript:
+        self.calls.append(wav)
+        return Transcript([Cue(0.0, 2.0, self.text)])
+
+
+class FakeSynthesizer:
+    """Seno com 0,05 s por caractere, no lugar do OmniVoice (que leva minutos para carregar)."""
+
+    engine_id = "fake-ui"
+
+    def __init__(self):
+        self.requests: list[VoiceRequest] = []
+
+    def synthesize(self, request: VoiceRequest) -> Speech:
+        self.requests.append(request)
+        count = int(len(request.text) * 0.05 * 24000)
+        samples = (0.3 * np.sin(2 * np.pi * 440 * np.arange(count) / 24000)).astype(np.float32)
+        return Speech(samples, 24000)
+
+
+def _write_last_argument(command) -> None:
+    """Simula o ffmpeg criando o arquivo de saída, que é sempre o último argumento."""
+    Path(command.args[-1]).write_bytes(b"audio")
+
+
+@pytest.fixture
+def studio(tmp_path, monkeypatch):
+    """Biblioteca, saída e cache de voz em tmp_path, com transcritor, sintetizador e ffmpeg falsos."""
+    output_dir = tmp_path / "output"
+    cache_dir = tmp_path / "voice-cache"
+    monkeypatch.setattr(config, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", cache_dir)
+    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", cache_dir)
+    services = VoiceServices(
+        library=VoiceLibrary(tmp_path / "voices"),
+        runner=RecordingRunner(on_run=_write_last_argument),
+        transcriber=FakeTranscriber(),
+        synthesizer=FakeSynthesizer(),
+    )
+    server.app.dependency_overrides[get_voice_services] = lambda: services
+    yield services
+    server.app.dependency_overrides.pop(get_voice_services, None)
+
+
+@pytest.fixture
+def voice_client(studio):
+    with TestClient(server.app) as c:
+        yield c
+
+
+def _wait_for_job(job_id: str):
+    job = server.jobs.get(job_id)
+    server.jobs.wait(job, 10)
+    return job
+
+
+def _stored_voices(client, **params):
+    """Vozes gravadas em disco: a lista da API também traz as vozes prontas embutidas (kind preset)."""
+    return [v for v in client.get("/api/voices", params=params).json() if v["kind"] != "preset"]
+
+
+def test_list_voices_filters_by_brand(voice_client, studio):
+    assert _stored_voices(voice_client) == []
+    studio.library.save_design("Da marca", "female", brand="medlycare")
+    studio.library.save_design("De outra", "male", brand="outra")
+    studio.library.save_design("Livre", "elderly")
+
+    everything = _stored_voices(voice_client)
+    assert {v["id"] for v in everything} == {"da-marca", "de-outra", "livre"}
+    assert everything[0]["kind"] == "design" and "instruct" in everything[0]
+
+    brand_only = _stored_voices(voice_client, brand="medlycare")
+    assert {v["id"] for v in brand_only} == {"da-marca", "livre"}  # as sem marca servem para qualquer uma
+
+
+def test_design_options_expose_vocabulary_for_the_selects(voice_client):
+    options = voice_client.get("/api/voices/design-options").json()
+    assert {"value": "female", "label": "feminino"} in options["gender"]
+    assert {"value": "child", "label": "criança"} in options["age"]
+    assert {"value": "very low pitch", "label": "muito grave"} in options["pitch"]
+    assert {"value": "british accent", "label": "britânico"} in options["accent"]
+    assert {"value": "pt", "label": "Português"} in options["languages"]
+
+
+def test_clone_with_upload_converts_reference_and_uses_given_text(voice_client, studio):
+    resp = voice_client.post(
+        "/api/voices/clone",
+        data={"name": "Ana Júlia", "reference_text": "texto dado", "brand": "medlycare", "language": "pt"},
+        files={"audio": ("gravacao.webm", b"bytes-do-webm", "audio/webm")},
+    )
+    assert resp.status_code == 200, resp.text
+    voice = resp.json()
+    assert voice["id"] == "ana-julia" and voice["kind"] == "clone" and voice["brand"] == "medlycare"
+    assert voice["reference_text"] == "texto dado"
+    assert studio.transcriber.calls == []  # com o texto informado, o Whisper não é chamado
+
+    command = studio.runner.commands[0]
+    assert any(
+        arg.endswith("referencia.webm") for arg in command
+    )  # o ffmpeg lê o formato gravado no navegador
+    assert (studio.library.root / "ana-julia" / "reference.wav").exists()
+    assert [v["id"] for v in _stored_voices(voice_client)] == ["ana-julia"]
+
+
+def test_clone_without_text_transcribes_the_reference(voice_client, studio):
+    resp = voice_client.post(
+        "/api/voices/clone",
+        data={"name": "Sem Texto"},
+        files={"audio": ("voz.mp3", b"mp3", "audio/mpeg")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reference_text"] == "texto transcrito da gravação"
+    assert len(studio.transcriber.calls) == 1
+
+
+def test_clone_rejects_empty_upload_and_duplicate_name(voice_client, studio):
+    empty = voice_client.post(
+        "/api/voices/clone", data={"name": "Vazia"}, files={"audio": ("v.wav", b"", "audio/wav")}
+    )
+    assert empty.status_code == 400 and "vazio" in empty.json()["detail"]
+
+    form = {"name": "Repetida", "reference_text": "a"}
+    first = voice_client.post("/api/voices/clone", data=form, files={"audio": ("v.wav", b"x", "audio/wav")})
+    assert first.status_code == 200
+    again = voice_client.post("/api/voices/clone", data=form, files={"audio": ("v.wav", b"x", "audio/wav")})
+    assert again.status_code == 400 and "Já existe" in again.json()["detail"]
+
+
+def test_design_voice_from_attributes_and_validation_errors(voice_client):
+    resp = voice_client.post(
+        "/api/voices/design",
+        json={"name": "Locutora", "gender": "feminino", "pitch": "grave", "language": "pt"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["instruct"] == "female, low pitch" and resp.json()["kind"] == "design"
+
+    free = voice_client.post("/api/voices/design", json={"name": "Livre", "instruct": "male, elderly"})
+    assert free.json()["instruct"] == "male, elderly"
+
+    invalid = voice_client.post("/api/voices/design", json={"name": "Estranha", "gender": "robô"})
+    assert invalid.status_code == 400 and "Gênero inválido" in invalid.json()["detail"]
+    empty = voice_client.post("/api/voices/design", json={"name": "Vazia"})
+    assert empty.status_code == 400 and "pelo menos um atributo" in empty.json()["detail"]
+
+
+def test_remove_voice_and_unknown_or_malicious_ids(voice_client, studio):
+    studio.library.save_design("Sai logo", "female")
+    assert voice_client.delete("/api/voices/sai-logo").json() == {"ok": True}
+    assert _stored_voices(voice_client) == []
+
+    assert voice_client.delete("/api/voices/fantasma").status_code == 404
+    assert voice_client.delete("/api/voices/..").status_code == 404
+    assert voice_client.delete("/api/voices/%2E%2E").status_code == 404
+
+
+def test_speak_returns_job_with_sse_progress_and_result_path(voice_client, studio):
+    studio.library.save_design("Locutora", "female")
+    resp = voice_client.post(
+        "/api/voices/speak",
+        json={"text": "Primeira fala.\n\nSegunda fala.", "voice": "locutora", "speed": 1.1, "seed": 7},
+    )
+    assert resp.status_code == 200, resp.text
+    job = _wait_for_job(resp.json()["job_id"])
+    assert job.status == "done", job.error
+
+    result = job.result
+    assert Path(result["output"]).exists() and Path(result["output"]).parent == config.OUTPUT_DIR
+    assert result["audio_url"].startswith("/api/voices/audio?path=")
+    assert len(result["cues"]) == 2 and result["duration_s"] > 0
+    request = studio.synthesizer.requests[0]
+    assert request.speed == 1.1 and request.seed == 7 and request.voice.id == "locutora"
+
+    labels = []
+    with voice_client.stream("GET", f"/api/jobs/{job.id}/events") as events:
+        for line in events.iter_lines():
+            if line.startswith("data: "):
+                event = json.loads(line[6:])
+                if event["kind"] == "progress":
+                    labels.append(event["label"])
+    assert labels == ["fala 1 de 2", "fala 2 de 2"]
+
+    audio = voice_client.get(result["audio_url"])
+    assert audio.status_code == 200 and audio.content == b"audio"
+    download = voice_client.get(result["audio_url"] + "&download=true")
+    assert "attachment" in download.headers["content-disposition"]
+
+
+def test_speak_validates_text_voice_and_speed_before_starting_a_job(voice_client, studio):
+    before = len(server.jobs.list())
+    assert voice_client.post("/api/voices/speak", json={"text": "   "}).status_code == 400
+    unknown = voice_client.post("/api/voices/speak", json={"text": "Oi", "voice": "fantasma"})
+    assert unknown.status_code == 404
+    assert voice_client.post("/api/voices/speak", json={"text": "Oi", "speed": 9}).status_code == 422
+    assert len(server.jobs.list()) == before
+
+
+def test_different_voices_do_not_overwrite_each_others_narration_file(voice_client, studio):
+    studio.library.save_design("Uma", "female")
+    studio.library.save_design("Outra", "male")
+    outputs = set()
+    for voice in ("uma", "outra"):
+        body = {"text": "Mesmo texto.", "voice": voice}
+        job_id = voice_client.post("/api/voices/speak", json=body).json()["job_id"]
+        outputs.add(_wait_for_job(job_id).result["output"])
+    assert len(outputs) == 2
+
+
+def test_voice_preview_is_a_job_that_speaks_the_sample_text(voice_client, studio):
+    studio.library.save_design("Locutora", "female")
+    resp = voice_client.post("/api/voices/locutora/preview")
+    job = _wait_for_job(resp.json()["job_id"])
+    assert job.status == "done", job.error
+    assert Path(job.result["output"]).name == "voz-locutora-amostra.wav"
+    assert studio.synthesizer.requests[0].text.startswith("Olá, esta é a minha voz")
+    assert voice_client.post("/api/voices/fantasma/preview").status_code == 404
+
+
+def test_speech_job_failure_reports_the_error(voice_client, studio):
+    def broken(request):
+        raise RuntimeError("modelo indisponível")
+
+    studio.synthesizer.synthesize = broken
+    job = _wait_for_job(voice_client.post("/api/voices/speak", json={"text": "Oi."}).json()["job_id"])
+    assert job.status == "error" and "modelo indisponível" in job.error
+
+
+def test_audio_endpoint_refuses_paths_outside_output_and_voice_cache(voice_client, studio, tmp_path):
+    inside = config.OUTPUT_DIR / "ok.wav"
+    inside.parent.mkdir(parents=True)
+    inside.write_bytes(b"ok")
+    cached = config.VOICE_CACHE_DIR / "fala.wav"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"cache")
+    outside = tmp_path / "fora.wav"
+    outside.write_bytes(b"secreto")
+    not_audio = config.OUTPUT_DIR / "notas.txt"
+    not_audio.write_text("x")
+
+    assert voice_client.get("/api/voices/audio", params={"path": str(inside)}).content == b"ok"
+    assert voice_client.get("/api/voices/audio", params={"path": str(cached)}).content == b"cache"
+    assert voice_client.get("/api/voices/audio", params={"path": str(outside)}).status_code == 404
+    assert voice_client.get("/api/voices/audio", params={"path": str(not_audio)}).status_code == 404
+    traversal = config.OUTPUT_DIR / ".." / "fora.wav"
+    assert voice_client.get("/api/voices/audio", params={"path": str(traversal)}).status_code == 404
+    missing = config.OUTPUT_DIR / "nao-existe.wav"
+    assert voice_client.get("/api/voices/audio", params={"path": str(missing)}).status_code == 404
+
+
+def test_layout_accepts_voice_panel_and_known_tab_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "layout_store", LayoutStore(tmp_path / "layouts.json"))
+    with TestClient(server.app) as c:
+        layout = {"version": 1, "areas": {}, "sizes": {}, "hidden": ["voice"], "tab": "voice"}
+        assert c.put("/api/layouts/Voz", json=layout).status_code == 200
+        assert c.get("/api/layouts").json()["layouts"]["Voz"]["tab"] == "voice"
+        assert c.put("/api/layouts/Ruim", json={**layout, "tab": "sofa"}).status_code == 400

@@ -891,5 +891,186 @@ def agent(
             console.print(answer, markup=False)
 
 
+# ---------- voz e narração ----------
+
+voice_app = typer.Typer(
+    help="Voz: narração por texto, clonagem de voz e voz projetada por descrição (modelo local OmniVoice).",
+    no_args_is_help=True,
+)
+app.add_typer(voice_app, name="voice")
+
+VOICE_ERRORS: tuple[type[Exception], ...] = (*RENDER_ERRORS, ValidationError, OSError)
+
+
+def _voice_fail(exc: Exception) -> None:
+    from .media.ffmpeg import FFmpegError
+
+    _fail(str(exc) if not isinstance(exc, FFmpegError) else f"FFmpeg falhou: {exc.args[0]}")
+
+
+def _print_narration(result) -> None:
+    console.print(f"[green]Pronto:[/green] {result.path}  ({result.duration:.1f}s de áudio)")
+    if result.srt_path:
+        console.print(f"  legendas: {result.srt_path}")
+
+
+@voice_app.command("say")
+def voice_say(
+    text: Annotated[str | None, typer.Argument(help="Texto a narrar (ou use --file).")] = None,
+    out: Annotated[Path | None, typer.Option(help="Arquivo de saída: .wav, .mp3 ou .m4a.")] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="Id de uma voz (dmaker voice list): dora, alex, santa ou uma sua.")
+    ] = None,
+    file: Annotated[Path | None, typer.Option(help="Arquivo .txt com o roteiro.")] = None,
+    language: Annotated[
+        str | None, typer.Option(help="Idioma (pt, en, es...). Padrão: o da voz, ou pt.")
+    ] = None,
+    instruct: Annotated[str | None, typer.Option(help="Descrição da voz, ex.: 'female, low pitch'.")] = None,
+    speed: Annotated[float, typer.Option(help="Velocidade da fala (1.0 normal, 1.2 mais rápida).")] = 1.0,
+    seed: Annotated[int | None, typer.Option(help="Semente: mesma semente, mesma fala.")] = None,
+    steps: Annotated[
+        int | None,
+        typer.Option(
+            help="Passos de síntese do OmniVoice (padrão 16, como no VoiceStudio; 32 para máxima qualidade)."
+        ),
+    ] = None,
+    srt: Annotated[bool, typer.Option(help="Grava um .srt com o tempo de cada fala.")] = False,
+    draft: Annotated[
+        bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo, mais áspero).")
+    ] = False,
+    raw: Annotated[bool, typer.Option(help="Voz crua do modelo, sem o acabamento broadcast.")] = False,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
+    (lento na CPU). O resultado de cada fala fica em cache."""
+    import time
+
+    from .pipeline.voices import build_synthesizer, speak
+    from .voice.synth import DRAFT_STEPS
+
+    script = file.read_text(encoding="utf-8") if file else text
+    if not script or not script.strip():
+        _fail("Informe o texto ou --file.")
+    synthesizer = build_synthesizer(device)
+    started = time.perf_counter()
+    try:
+        result = speak(
+            script,
+            out,
+            voice_id=voice,
+            language=language,
+            speed=speed,
+            instruct=instruct,
+            seed=seed,
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+            write_srt=srt,
+            master=not raw,
+            log=_console_log,
+            synthesizer=synthesizer,
+        )
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_narration(result)
+    console.print(f"  tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+@voice_app.command("clone")
+def voice_clone(
+    name: Annotated[str, typer.Argument(help="Nome da voz.")],
+    reference: Annotated[Path, typer.Argument(help="Gravação da voz (3 a 15 s de fala limpa).")],
+    text: Annotated[
+        str | None, typer.Option(help="O que é dito na gravação (sem isso, o Whisper transcreve).")
+    ] = None,
+    brand: Annotated[str | None, typer.Option(help="Marca dona da voz.")] = None,
+    language: Annotated[str, typer.Option()] = "pt",
+) -> None:
+    """Cria uma voz clonada a partir de uma gravação."""
+    from .pipeline.voices import clone_voice
+
+    try:
+        profile = clone_voice(name, reference, reference_text=text, brand=brand, language=language)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Voz criada:[/green] {profile.id}")
+    console.print(f"  texto da referência: {profile.reference_text}", markup=False, highlight=False)
+
+
+@voice_app.command("design")
+def voice_design(
+    name: Annotated[str, typer.Argument(help="Nome da voz.")],
+    gender: Annotated[str | None, typer.Option(help="male | female (masculino | feminino)")] = None,
+    age: Annotated[
+        str | None, typer.Option(help="child, teenager, young adult, middle-aged, elderly")
+    ] = None,
+    pitch: Annotated[
+        str | None, typer.Option(help="very low pitch ... very high pitch (grave ... agudo)")
+    ] = None,
+    accent: Annotated[str | None, typer.Option(help="ex.: british accent, portuguese accent")] = None,
+    whisper: Annotated[bool, typer.Option(help="Voz sussurrada.")] = False,
+    instruct: Annotated[
+        str | None, typer.Option(help="Descrição completa, ex.: 'female, low pitch'.")
+    ] = None,
+    brand: Annotated[str | None, typer.Option(help="Marca dona da voz.")] = None,
+    language: Annotated[str, typer.Option()] = "pt",
+) -> None:
+    """Cria uma voz descrevendo como ela soa (sem gravação)."""
+    from .pipeline.voices import design_voice
+
+    try:
+        profile = design_voice(name, gender, age, pitch, accent, whisper, instruct, brand, language)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Voz criada:[/green] {profile.id}  ({profile.instruct})", highlight=False)
+
+
+@voice_app.command("list")
+def voice_list(
+    brand: Annotated[str | None, typer.Option(help="Só as vozes dessa marca e as sem marca.")] = None,
+) -> None:
+    """Lista as vozes da biblioteca."""
+    from .voice.library import VoiceLibrary
+
+    profiles = VoiceLibrary().list(brand=brand)
+    if not profiles:
+        console.print("Nenhuma voz cadastrada. Use `dmaker voice clone` ou `dmaker voice design`.")
+        return
+    table = Table("id", "motor", "tipo", "idioma", "marca", "descrição")
+    for p in profiles:
+        table.add_row(
+            p.id, p.engine, p.kind, p.language, p.brand or "-", p.instruct or p.reference_text or p.name
+        )
+    console.print(table)
+
+
+@voice_app.command("remove")
+def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) -> None:
+    """Apaga uma voz da biblioteca."""
+    from .voice.library import VoiceLibrary
+
+    try:
+        VoiceLibrary().remove(voice_id)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Voz removida:[/green] {voice_id}")
+
+
+@voice_app.command("preview")
+def voice_preview(
+    voice_id: Annotated[str, typer.Argument(help="Id da voz.")],
+    text: Annotated[
+        str | None, typer.Option(help="Frase de teste (padrão: uma frase curta no idioma da voz).")
+    ] = None,
+    out: Annotated[Path | None, typer.Option()] = None,
+) -> None:
+    """Gera uma amostra curta da voz para ouvir antes de usar."""
+    from .pipeline.voices import preview_voice
+
+    try:
+        result = preview_voice(voice_id, text, out, log=_console_log)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_narration(result)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

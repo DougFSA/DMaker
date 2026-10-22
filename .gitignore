@@ -28,3 +28,6 @@ desktop.ini
 
 # layouts salvos da interface (dado da pessoa usando, não do repositório)
 layouts.json
+
+# vozes clonadas (referências são dados pessoais)
+assets/voices/

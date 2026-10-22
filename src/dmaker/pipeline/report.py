@@ -30,6 +30,7 @@ from .context import Prober
 from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
+from .voiceover import known_voices
 
 WORDS_PER_SECOND_LIMIT = 3.5
 CARD_TITLE_CHAR_LIMIT = 60
@@ -193,7 +194,16 @@ def check_lint(project: Project, layout: ProjectLayout) -> list[Finding]:
     infos = [s.info for s in layout.sources]
     offsets = [s.offset for s in layout.sources]
     try:
-        warnings = lint(project, layout.theme, layout.preset, layout.total, layout.durations, infos, offsets)
+        warnings = lint(
+            project,
+            layout.theme,
+            layout.preset,
+            layout.total,
+            layout.durations,
+            infos,
+            offsets,
+            known_voices=known_voices(project),
+        )
     except ValueError as exc:
         return [Finding("erro", "lint", str(exc))]
     return [Finding("aviso", "lint", w) for w in warnings]

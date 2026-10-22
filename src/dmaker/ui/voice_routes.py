@@ -1,0 +1,329 @@
+"""Rotas do estúdio de voz da interface: biblioteca de vozes, clonagem, design e narração em job.
+
+Adaptador fino sobre `pipeline.voices`. As dependências pesadas (biblioteca, ffmpeg, Whisper, sintetizador)
+chegam por `VoiceServices`, que os testes trocam por dublês com `app.dependency_overrides`.
+A síntese na CPU é lenta, então falar e ouvir a prévia são sempre jobs com progresso por SSE.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import tempfile
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated, Any
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from .. import config
+from ..media.ffmpeg import FFmpegError, FFmpegRunner
+from ..pipeline.jobs import Job, JobManager
+from ..text.transcribe import Transcriber
+from ..voice import design as voice_design
+from ..voice.library import VoiceLibrary, VoiceNotFoundError
+from ..voice.synth import SpeechSynthesizer
+
+SERVABLE_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 5 a 8 s de fala cabem em poucos MB; isto só barra arquivo errado
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_SCRIPT_CHARS = 20000  # ~24 minutos de fala: muito além de um vídeo curto, e protege a fila da CPU
+VOICE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")  # o que `slugify` produz; barra "..", "/" e afins
+
+# idiomas oferecidos nos selects; o modelo fala centenas, estes são os que o editor usa no dia a dia
+LANGUAGES = [
+    {"value": "pt", "label": "Português"},
+    {"value": "en", "label": "Inglês"},
+    {"value": "es", "label": "Espanhol"},
+    {"value": "fr", "label": "Francês"},
+    {"value": "de", "label": "Alemão"},
+    {"value": "it", "label": "Italiano"},
+]
+
+# o vocabulário do VoiceDesign guarda apelidos sem acento (para casar o que se digita); na tela vai com acento
+DISPLAY_LABELS = {
+    "crianca": "criança",
+    "medio": "médio",
+    "britanico": "britânico",
+    "chines": "chinês",
+    "portugues": "português",
+    "japones": "japonês",
+}
+
+# uma síntese por vez: o modelo ocupa a CPU toda, e duas ao mesmo tempo só deixariam as duas mais lentas
+_synthesis_lock = threading.Lock()
+
+
+@dataclass
+class VoiceServices:
+    """Dependências do estúdio de voz; `None` em runner, transcritor e sintetizador usa os reais do pipeline."""
+
+    library: VoiceLibrary
+    runner: FFmpegRunner | None = None
+    transcriber: Transcriber | None = None
+    synthesizer: SpeechSynthesizer | None = None
+
+
+def get_voice_services() -> VoiceServices:
+    return VoiceServices(library=VoiceLibrary())
+
+
+Services = Annotated[VoiceServices, Depends(get_voice_services)]
+
+
+class DesignRequest(BaseModel):
+    name: str
+    gender: str | None = None
+    age: str | None = None
+    pitch: str | None = None
+    accent: str | None = None
+    whisper: bool = False
+    instruct: str | None = None
+    brand: str | None = None
+    language: str = "pt"
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(max_length=MAX_SCRIPT_CHARS)
+    voice: str | None = None
+    language: str | None = None
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    seed: int | None = None
+    instruct: str | None = None
+
+
+def design_options() -> dict[str, Any]:
+    """Vocabulário do VoiceDesign no formato dos selects da página: valor canônico e rótulo em português."""
+
+    def entries(table: dict[str, tuple[str, ...]]) -> list[dict[str, str]]:
+        return [
+            {"value": canonical, "label": DISPLAY_LABELS.get(aliases[0], aliases[0])}
+            for canonical, aliases in table.items()
+        ]
+
+    return {
+        "gender": entries(voice_design.GENDERS),
+        "age": entries(voice_design.AGES),
+        "pitch": entries(voice_design.PITCHES),
+        "accent": entries(voice_design.ACCENTS),
+        "languages": LANGUAGES,
+    }
+
+
+def audio_url(path: Path) -> str:
+    return "/api/voices/audio?" + urlencode({"path": path.resolve().as_posix()})
+
+
+def narration_output_path(text: str, **options: Any) -> Path:
+    """Arquivo da narração: o nome muda com texto e opções, para vozes diferentes não se sobrescreverem."""
+    digest = hashlib.sha1(json.dumps([text, options], sort_keys=True).encode()).hexdigest()[:10]
+    return config.OUTPUT_DIR / f"narracao-{digest}.wav"
+
+
+def is_servable_audio(path: Path) -> bool:
+    """Só áudio dentro de output/ ou cache/voice: a página nunca lê arquivo arbitrário do disco por aqui."""
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if resolved.suffix.lower() not in SERVABLE_AUDIO_EXTS or not resolved.is_file():
+        return False
+    return any(
+        resolved.is_relative_to(root.resolve()) for root in (config.OUTPUT_DIR, config.VOICE_CACHE_DIR)
+    )
+
+
+def _bad_request(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+def _existing_voice(library: VoiceLibrary, voice_id: str) -> None:
+    if not VOICE_ID_PATTERN.match(voice_id):
+        raise HTTPException(status_code=404, detail=f"Voz {voice_id!r} não encontrada.")
+    try:
+        library.get(voice_id)
+    except VoiceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _save_upload(upload: UploadFile, folder: Path) -> Path:
+    """Grava o arquivo enviado em disco (o ffmpeg lê por caminho), recusando o que passa do limite."""
+    suffix = re.sub(r"[^a-z0-9.]", "", Path(upload.filename or "").suffix.lower())[:6] or ".bin"
+    destination = folder / f"referencia{suffix}"
+    written = 0
+    with destination.open("wb") as handle:
+        while chunk := upload.file.read(UPLOAD_CHUNK_BYTES):
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413, detail="Arquivo grande demais para uma gravação de referência."
+                )
+            handle.write(chunk)
+    if not written:
+        raise HTTPException(status_code=400, detail="O arquivo de áudio enviado está vazio.")
+    return destination
+
+
+def _progress_reporter(job: Job):
+    """Cada fala vira evento SSE de progresso ("fala i de n"), além do campo lido pela listagem de jobs."""
+
+    def report(done: int, total: int) -> None:
+        job.progress = {
+            "label": f"fala {done} de {total}",
+            "done": done,
+            "total": total,
+            "percent": int(100 * (done - 1) / total),
+        }
+        job.emit("progress", **job.progress)
+
+    return report
+
+
+def _run_speech(job: Job, services: VoiceServices, text: str, out: Path, options: dict[str, Any]) -> dict:
+    from ..pipeline.voices import speak
+
+    if not _synthesis_lock.acquire(blocking=False):
+        job.log("Aguardando outra síntese terminar")
+        _synthesis_lock.acquire()
+    try:
+        result = speak(
+            text,
+            out,
+            on_progress=_progress_reporter(job),
+            log=job.log,
+            library=services.library,
+            runner=services.runner,
+            synthesizer=services.synthesizer,
+            **options,
+        )
+    finally:
+        _synthesis_lock.release()
+    return {
+        "output": str(result.path),
+        "audio_url": audio_url(result.path),
+        "duration_s": round(result.duration, 2),
+        "cues": [{"start": round(s, 2), "end": round(e, 2), "text": t} for s, e, t in result.cues],
+    }
+
+
+def build_voice_router(jobs: JobManager) -> APIRouter:
+    router = APIRouter(prefix="/api/voices", tags=["voz"])
+
+    @router.get("")
+    def list_voices(services: Services, brand: str | None = None) -> list[dict]:
+        from ..pipeline.voices import profile_dict
+
+        return [profile_dict(p) for p in services.library.list(brand=brand)]
+
+    @router.get("/design-options")
+    def get_design_options() -> dict:
+        return design_options()
+
+    @router.get("/audio")
+    def get_audio(path: str, download: bool = False) -> FileResponse:
+        target = Path(path)
+        if not is_servable_audio(target):
+            raise HTTPException(status_code=404, detail="Áudio não encontrado ou fora das pastas permitidas.")
+        return FileResponse(target, filename=target.name if download else None)
+
+    @router.post("/clone")
+    def clone(
+        services: Services,
+        name: Annotated[str, Form()],
+        audio: Annotated[UploadFile, File()],
+        reference_text: Annotated[str | None, Form()] = None,
+        brand: Annotated[str | None, Form()] = None,
+        language: Annotated[str, Form()] = "pt",
+    ) -> dict:
+        from ..pipeline.voices import clone_voice, profile_dict
+
+        with tempfile.TemporaryDirectory(prefix="dmaker-voz-") as folder:
+            reference = _save_upload(audio, Path(folder))
+            try:
+                profile = clone_voice(
+                    name,
+                    reference,
+                    reference_text=reference_text or None,
+                    brand=brand or None,
+                    language=language,
+                    library=services.library,
+                    runner=services.runner,
+                    transcriber=services.transcriber,
+                )
+            except FFmpegError as exc:
+                raise HTTPException(status_code=400, detail="Não foi possível ler o áudio enviado.") from exc
+            except (ValueError, FileNotFoundError) as exc:
+                raise _bad_request(exc) from exc
+        return profile_dict(profile)
+
+    @router.post("/design")
+    def design(req: DesignRequest, services: Services) -> dict:
+        from ..pipeline.voices import design_voice, profile_dict
+
+        try:
+            profile = design_voice(
+                req.name,
+                req.gender,
+                req.age,
+                req.pitch,
+                req.accent,
+                req.whisper,
+                req.instruct or None,
+                req.brand or None,
+                req.language,
+                library=services.library,
+            )
+        except ValueError as exc:
+            raise _bad_request(exc) from exc
+        return profile_dict(profile)
+
+    @router.delete("/{voice_id}")
+    def remove(voice_id: str, services: Services) -> dict:
+        _existing_voice(services.library, voice_id)
+        services.library.remove(voice_id)
+        return {"ok": True}
+
+    @router.post("/speak")
+    def speak_text(req: SpeakRequest, services: Services) -> dict:
+        text = req.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Escreva o texto da narração.")
+        if req.voice:
+            _existing_voice(services.library, req.voice)
+        options = {
+            "voice_id": req.voice or None,
+            "language": req.language or None,
+            "speed": req.speed,
+            "instruct": req.instruct or None,
+            "seed": req.seed,
+        }
+        out = narration_output_path(text, **options)
+        job = jobs.start(
+            f"narração ({req.voice or 'voz automática'}, {len(text)} caracteres)",
+            lambda job: _run_speech(job, services, text, out, options),
+            meta={"kind": "voice"},
+        )
+        return {"job_id": job.id}
+
+    @router.post("/{voice_id}/preview")
+    def preview(voice_id: str, services: Services) -> dict:
+        from ..pipeline.voices import PREVIEW_TEXTS
+
+        _existing_voice(services.library, voice_id)
+        voice = services.library.get(voice_id)
+        text = PREVIEW_TEXTS.get(voice.language, PREVIEW_TEXTS["pt"])
+        options = {"voice_id": voice.id, "language": voice.language, "speed": 1.0, "seed": 1}
+        out = config.OUTPUT_DIR / f"voz-{voice.id}-amostra.wav"
+        job = jobs.start(
+            f"prévia da voz {voice.name}",
+            lambda job: _run_speech(job, services, text, out, options),
+            meta={"kind": "voice"},
+        )
+        return {"job_id": job.id}
+
+    return router
