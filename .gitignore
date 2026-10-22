@@ -31,3 +31,6 @@ layouts.json
 
 # vozes clonadas (referências são dados pessoais)
 assets/voices/
+
+# projetos de vídeo (mídia pesada e dados de clientes ficam só na máquina)
+projects/
