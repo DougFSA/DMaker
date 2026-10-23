@@ -328,18 +328,26 @@ com a revisão no meio, e o roteiro vive num projeto editável `<nome>.<idioma>.
 
 1. **Preparar** (`dub_prepare`, ou `dmaker dub prepare ARQUIVO --to en [--from pt]`): separa voz e fundo
    (Demucs, em cache), transcreve a voz com tempo por palavra (Whisper), parte em frases de 1 a 12 s
-   (pontuação, pausas de fôlego e tamanho) e traduz com o Ollama local (modelo em `DMAKER_TRANSLATE_MODEL`,
+   (pontuação, pausas de fôlego e tamanho), separa quem fala (diarização local, no modo `per_speaker`) e
+   traduz com o Ollama local (modelo em `DMAKER_TRANSLATE_MODEL`,
    padrão `gpt-oss:20b`; sem o Ollama aberto o erro diz como abrir). A tradução recebe o roteiro inteiro em
    JSON para ter contexto, pede fala natural de tamanho parecido com o original e mantém intactos os termos
-   do dicionário de pronúncia (marcas) e `glossary` (termos extras). Opções: `speaker_mode` (`per_segment`,
-   padrão: cada frase clona a voz de quem fala ali, serve a vários falantes; `single`: um clone para o
-   arquivo), `voice` (voz da biblioteca no lugar do clone), `keep_original_db` (ex.: -18: voz original por
-   baixo, estilo voice-over; sem ele só a dublada), `brand` (dicionário de pronúncia).
-2. **Revisar**: `dub_get(project)` lista as falas (`id`, tempo, `original`, `text`); `dub_update_segment(project,
-   segment_id, text, locked)` corrige a tradução (aceita `[[termo|pronúncia]]`); `locked=true` protege a fala de
-   `dub_retranslate` (traduz de novo só as destravadas). O JSON também pode ser editado à mão.
-3. **Gerar** (`dub_render`, ou `dmaker dub render PROJETO.dub.json [--out] [--draft]`): para cada fala clona a voz
-   (a janela de fala em volta dela, ou a vizinha se ela for curta; usa o cache de clones da correção de fala),
+   do dicionário de pronúncia (marcas) e `glossary` (termos extras). Opções: `speaker_mode` (`per_speaker`,
+   o padrão: separa quem fala e usa uma voz clonada por pessoa, montada do melhor trecho de 3 a 15 s só com a
+   fala dela; com uma pessoa só vale como `single`. `per_segment`: cada frase clona a voz em volta dela, uma
+   aproximação para vários falantes. `single`: um clone para o arquivo), `num_speakers` (força quantas pessoas
+   falam; `--speakers N` na CLI; só no `per_speaker`), `voice` (voz da biblioteca no lugar do clone),
+   `keep_original_db` (ex.: -18: voz original por baixo, estilo voice-over; sem ele só a dublada), `brand`
+   (dicionário de pronúncia). A diarização roda na CPU, sem conta nem token (sherpa-onnx; os modelos baixam
+   para `cache/models/diarization` na primeira vez), em cerca de 0,3x a duração do áudio; `DMAKER_DIARIZATION=off`
+   a desliga (o padrão volta a ser `per_segment`).
+2. **Revisar**: `dub_get(project)` lista as falas (`id`, tempo, `speaker`, `original`, `text`) e os `speakers`;
+   `dub_update_segment(project, segment_id, text, locked, speaker)` corrige a tradução (aceita
+   `[[termo|pronúncia]]`) e/ou troca quem fala ("Falante 2"): só aquela fala é sintetizada de novo; `locked=true`
+   protege a fala de `dub_retranslate` (traduz de novo só as destravadas). O JSON também pode ser editado à mão.
+3. **Gerar** (`dub_render`, ou `dmaker dub render PROJETO.dub.json [--out] [--draft]`): para cada fala usa a voz
+   do falante dela (`per_speaker`), ou clona a janela de fala em volta dela, ou a vizinha se ela for curta
+   (`per_segment`; usa o cache de clones da correção de fala),
    sintetiza a tradução no idioma alvo com a duração que cabe e monta fundo inteiro + falas dubladas nas
    posições originais (+ voz original atenuada) sobre o vídeo, copiado sem recodificar. Grava o vídeo
    (`output/dublagem/<nome>.<idioma>.<ext>`) e a legenda `.srt` no idioma alvo. `dmaker dub ARQUIVO --to en` faz
@@ -356,9 +364,8 @@ Cache por fala: o áudio de cada fala sai do cache quando texto, voz, idioma, du
 então corrigir uma tradução e gerar de novo sintetiza só ela (`regenerated` no resultado). Custo na CPU: ~20 s
 por segundo de fala sintetizada, mais a separação (3x a 6x a duração, uma vez) e a tradução (minutos com o
 `gpt-oss:20b`). `draft=true` usa 8 passos. Na interface, aba Voz, seção "Dublar": escolher o arquivo, idiomas,
-preparar, editar a tabela de falas (tempo, original, tradução, travar), gerar com progresso "fala i de n",
-comparar original e dublado, baixar vídeo e legenda e "Usar no projeto". Fora do escopo: separação de
-falantes por diarização (o campo `speaker` do projeto está reservado) e sincronia labial.
+preparar, editar a tabela de falas (tempo, falante, original, tradução, travar), gerar com progresso "fala i de
+n", comparar original e dublado, baixar vídeo e legenda e "Usar no projeto". Fora do escopo: sincronia labial.
 
 ### Narração no projeto
 

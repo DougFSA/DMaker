@@ -11,6 +11,8 @@ from dmaker.media import ffmpeg
 # cache e saída dos testes ficam fora dos diretórios de trabalho normais
 _TEST_CACHE = config.ROOT / "cache" / "_tests"
 os.environ.setdefault("DMAKER_TEST", "1")
+# a dublagem de produção diariza com o sherpa-onnx; os testes injetam um diarizador falso (ou nenhum)
+os.environ.setdefault("DMAKER_DIARIZATION", "off")
 
 
 def ffmpeg_available() -> bool:

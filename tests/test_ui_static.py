@@ -667,3 +667,49 @@ def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
         _run_voice_pure('pure.pronunciationPreviewText("DMaker", "pt")') == "Eu falo DMaker. Repito: DMaker."
     )
     assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."
+
+
+@requires_node
+def test_dub_table_shows_a_speaker_select_only_when_the_project_has_two_or_more():
+    segments = "[{id:'s1',start:1,end:3,original:'a',text:'b',locked:false,speaker:'Falante 2'},{id:'s2',start:4,end:6,original:'o',text:'t',locked:false,speaker:null}]"
+    alone = _run_dub_pure(f"pure.segmentRowsHtml({segments}, ['Falante 1'])")
+    assert "dub-speaker-pick" not in alone
+    shared = _run_dub_pure(f"pure.segmentRowsHtml({segments}, ['Falante 1', 'Falante <2>'])")
+    assert shared.count("dub-speaker-pick") == 2 and "Falante &lt;2&gt;" in shared
+    first, second = shared.split('data-id="s2"')
+    assert '<option value="Falante 1">' in first and '<option value="Falante 1" selected>' not in first
+    assert "Sem falante" not in first and "Sem falante" in second  # fala sem falante ainda deixa escolher
+
+
+@requires_node
+def test_dub_edits_carry_the_speaker_only_when_one_is_chosen_and_the_count_is_a_small_integer():
+    edits = _run_dub_pure(
+        "pure.segmentEdits([{id:'s1',text:'a',locked:false,speaker:'Falante 2'},{id:'s2',text:'b',locked:false,speaker:null}])"
+    )
+    assert edits == [
+        {"id": "s1", "text": "a", "locked": False, "speaker": "Falante 2"},
+        {"id": "s2", "text": "b", "locked": False},
+    ]
+    assert _run_dub_pure("['', ' 3 ', '2', '0', '13', '1,5', 'dois', '-1'].map(pure.parseSpeakerCount)") == [
+        None,
+        3,
+        2,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
+def test_the_dub_form_offers_the_per_speaker_mode_first_and_a_speaker_count():
+    html = INDEX.read_text(encoding="utf-8")
+    select = html[html.index('id="dub-speaker"') : html.index("</select>", html.index('id="dub-speaker"'))]
+    assert (
+        select.index('value="per_speaker"')
+        < select.index('value="per_segment"')
+        < select.index('value="single"')
+    )
+    assert 'id="dub-speaker-count"' in html and 'id="dub-speaker-count-field"' in html
+    css = CSS.read_text(encoding="utf-8")
+    assert ".dub-with-speakers .dub-row" in css and ".dub-speaker-pick" in css and ".dub-who" in css

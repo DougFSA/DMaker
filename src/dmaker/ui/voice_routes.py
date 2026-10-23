@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import config
+from ..media.diarization import SpeakerDiarizer
 from ..media.ffmpeg import FFmpegError, FFmpegRunner
 from ..media.probe import MediaInfo
 from ..pipeline.isolation import IsolationService
@@ -87,6 +88,9 @@ class VoiceServices:
     isolation: IsolationService | None = None  # separador de voz e fundo; None usa o Demucs
     prober: Callable[[Path], MediaInfo] | None = None  # leitor de mídia; None usa o ffprobe
     translator: Translator | None = None  # tradutor da dublagem; None usa o Ollama local
+    diarizer: SpeakerDiarizer | None = (
+        None  # separação de falantes da dublagem; None usa o sherpa-onnx, se instalado
+    )
 
 
 def get_voice_services() -> VoiceServices:
