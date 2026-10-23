@@ -12,7 +12,7 @@ import dmaker.mcp_server as mcp_server
 from dmaker import config
 from dmaker.cli import app
 from dmaker.domain.dub import load_dub_project, save_dub_project
-from tests.test_dubbing import DubHarness
+from tests.test_dubbing import DubHarness, text_taking
 
 cli = CliRunner()
 
@@ -245,3 +245,77 @@ def test_dub_job_failure_carries_the_translation_message(wired: DubHarness):
 def test_dub_tools_are_listed():
     names = {tool.name for tool in asyncio.run(mcp_server.server.list_tools())}
     assert {"dub_prepare", "dub_render", "dub_get", "dub_update_segment", "dub_retranslate"} <= names
+
+
+# ---------- esticar o vídeo (--fit / fit_mode) ----------
+
+
+def test_cli_prepare_saves_the_fit_mode_in_the_project(wired: DubHarness, tmp_path: Path):
+    result = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--fit", "video"])
+    assert result.exit_code == 0, result.output
+    assert load_dub_project(default_project(tmp_path)).fit_mode == "video"
+    default = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en"])
+    assert default.exit_code == 0 and load_dub_project(default_project(tmp_path)).fit_mode == "voz"
+
+
+def test_cli_render_fit_overrides_the_project_for_that_render_only(wired: DubHarness):
+    project = wired.prepare().edited("s1", text=text_taking(5.5))
+    save_dub_project(project, wired.project_path)
+    result = cli.invoke(
+        app, ["dub", "render", str(wired.project_path), "--out", str(wired.out), "--fit", "video"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "vídeo esticado em 1 trecho(s)" in result.output and "vídeo esticado" in result.output
+    args = wired.mix_commands()[-1].args
+    assert args[args.index("-c:v") + 1] == "libx264"
+    assert load_dub_project(wired.project_path).fit_mode == "voz"  # o arquivo do projeto não mudou
+
+
+def test_cli_render_without_fit_follows_the_project(wired: DubHarness):
+    project = wired.prepare(fit_mode="video").edited("s1", text=text_taking(5.5))
+    save_dub_project(project, wired.project_path)
+    result = cli.invoke(app, ["dub", "render", str(wired.project_path), "--out", str(wired.out)])
+    assert result.exit_code == 0, result.output
+    assert wired.mix_commands()[-1].args[wired.mix_commands()[-1].args.index("-c:v") + 1] == "libx264"
+
+
+def test_cli_dub_run_accepts_fit_and_rejects_an_unknown_mode(wired: DubHarness, tmp_path: Path):
+    ok = cli.invoke(
+        app, ["dub", "run", str(wired.src), "--to", "en", "--fit", "misto", "--out", str(tmp_path / "m.mp4")]
+    )
+    assert ok.exit_code == 0, ok.output
+    assert load_dub_project(default_project(tmp_path)).fit_mode == "misto"
+    for command in (
+        ["dub", "prepare", str(wired.src), "--to", "en", "--fit", "esticar"],
+        ["dub", "render", str(default_project(tmp_path)), "--fit", "esticar"],
+    ):
+        bad = cli.invoke(app, command)
+        assert bad.exit_code == 1 and "voz, video, misto" in bad.output
+
+
+def test_dub_prepare_tool_saves_the_fit_mode(wired: DubHarness, tmp_path: Path):
+    status = finished(mcp_server.dub_prepare(str(wired.src), "en", fit_mode="misto"))
+    assert status["status"] == "done", status.get("error")
+    assert status["result"]["fit_mode"] == "misto"
+    assert load_dub_project(default_project(tmp_path)).fit_mode == "misto"
+
+
+def test_dub_render_tool_reports_the_stretch_and_the_override_does_not_touch_the_file(wired: DubHarness):
+    save_dub_project(wired.prepare().edited("s1", text=text_taking(5.5)), wired.project_path)
+    status = finished(mcp_server.dub_render(str(wired.project_path), out=str(wired.out), fit_mode="video"))
+    assert status["status"] == "done", status.get("error")
+    result = status["result"]
+    assert result["fit_mode"] == "video" and result["output_seconds"] > 40.0
+    assert [item["id"] for item in result["stretched"]] == ["s1"]
+    assert result["segments"][0]["status"] == "stretched" and result["segments"][0]["video_stretch"] > 1.0
+    assert load_dub_project(wired.project_path).fit_mode == "voz"
+
+
+def test_dub_render_tool_rejects_an_unknown_fit_mode(wired: DubHarness):
+    wired.prepare()
+    with pytest.raises(Exception, match="fit_mode"):
+        asyncio.run(
+            mcp_server.server.call_tool(
+                "dub_render", {"project": str(wired.project_path), "fit_mode": "esticar"}
+            )
+        )

@@ -5,7 +5,9 @@ Dois passos, com um projeto editável entre eles:
             o `.dub.json` (o usuário revisa e corrige as traduções);
   gerar:    para cada fala clona a voz de quem fala ali, sintetiza a tradução na duração que cabe (com cache por
             fala: editar uma tradução refaz só aquela) -> monta fundo + falas dubladas (+ voz original atenuada)
-            no vídeo original e grava a legenda no idioma alvo.
+            no vídeo original e grava a legenda no idioma alvo. Conforme o `fit_mode` do projeto, a fala que não
+            cabe é comprimida na voz (padrão) ou estica o vídeo na janela dela, e o resto da linha do tempo
+            (falas seguintes, fundo, legenda) acompanha.
 Cada dependência pesada (Whisper, Demucs, Ollama, OmniVoice, ffmpeg) entra por parâmetro.
 """
 
@@ -14,11 +16,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .. import config
-from ..domain.dub import PROJECT_SUFFIX, DubProject, DubSegment, SpeakerMode, save_dub_project
+from ..domain.dub import PROJECT_SUFFIX, DubProject, DubSegment, FitMode, SpeakerMode, save_dub_project
 from ..filtergraph.dub import DubClip, dub_mix_command
 from ..filtergraph.speech_edit import corrected_suffix
 from ..media.ffmpeg import FFmpegRunner
@@ -31,12 +33,14 @@ from ..text.translate import Line, OllamaTranslator, Translator
 from ..voice.dub_plan import (
     Slot,
     natural_seconds,
-    place_speech,
     plan_fit,
+    plan_video_fit,
+    plan_voice_fit,
     segment_words,
     slot_plan,
     subtitle_cues,
 )
+from ..voice.dub_retime import IDENTITY, RetimePlan, StretchWindow, plan_retime, retimed_span
 from ..voice.levels import active_rms, gain_to_match_db
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
@@ -64,14 +68,23 @@ class SegmentReport:
     speech_seconds: float  # duração da fala sintetizada
     played_seconds: float  # quanto dela toca no vídeo (depois do atempo e do corte)
     tempo: float
-    status: str  # fits | advances | squeezed | overflow | empty
+    status: str  # fits | advances | squeezed | stretched | overflow | empty
     message: str
     cached: bool
     voice: str
+    stretch: float = 1.0  # fator do vídeo na janela da fala; 1.0 = imagem intacta
+    retimed_start: float | None = (
+        None  # onde a fala começa no arquivo final (muda se algo antes foi esticado)
+    )
 
     @property
     def warns(self) -> bool:
         return self.status == "overflow"
+
+    @property
+    def added_seconds(self) -> float:
+        """Quanto o vídeo cresceu nesta fala por causa do esticamento."""
+        return (self.end - self.start) * (self.stretch - 1.0)
 
 
 @dataclass(frozen=True)
@@ -80,10 +93,17 @@ class DubResult:
     srt_path: Path
     report: list[SegmentReport]
     timings: dict[str, float] = field(default_factory=dict)  # segundos de cada etapa
+    fit_mode: FitMode = "voz"  # o modo que valeu de fato (áudio sem imagem não estica)
+    output_seconds: float = 0.0  # duração do arquivo final; passa da original quando o vídeo foi esticado
 
     @property
     def warnings(self) -> list[str]:
         return [f"Fala {r.id} ({r.start:.1f} s): {r.message}" for r in self.report if r.warns]
+
+    @property
+    def stretched(self) -> list[SegmentReport]:
+        """As falas cuja imagem foi esticada, na ordem do arquivo."""
+        return [r for r in self.report if r.stretch > 1.0]
 
     @property
     def regenerated(self) -> int:
@@ -119,6 +139,7 @@ def project_summary(project: DubProject, path: Path) -> dict:
         "speaker_mode": project.speaker_mode,
         "voice": project.voice,
         "keep_original_db": project.keep_original_db,
+        "fit_mode": project.fit_mode,
         "glossary": project.glossary,
         "translator_model": project.translator_model,
         "segments": [
@@ -145,9 +166,31 @@ def report_dict(report: SegmentReport) -> dict:
         "speech_seconds": round(report.speech_seconds, 2),
         "played_seconds": round(report.played_seconds, 2),
         "tempo": round(report.tempo, 3),
+        "video_stretch": round(report.stretch, 3),
+        "retimed_start": None if report.retimed_start is None else round(report.retimed_start, 3),
         "status": report.status,
         "message": report.message,
         "cached": report.cached,
+    }
+
+
+def result_dict(result: DubResult) -> dict:
+    """O resultado da geração como dicionário (MCP e interface), sem a lista de falas: cada adaptador a nomeia."""
+    return {
+        "fit_mode": result.fit_mode,
+        "output_seconds": round(result.output_seconds, 3),
+        "stretched": [
+            {
+                "id": r.id,
+                "start": round(r.start, 2),
+                "factor": round(r.stretch, 3),
+                "added_seconds": round(r.added_seconds, 2),
+            }
+            for r in result.stretched
+        ],
+        "warnings": result.warnings,
+        "regenerated": result.regenerated,
+        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
     }
 
 
@@ -207,6 +250,7 @@ class DubbingService:
         brand: str | None = None,
         project_path: Path | None = None,
         on_progress: ProgressReport | None = None,
+        fit_mode: FitMode = "voz",
     ) -> DubProject:
         """Transcreve, parte em frases e traduz `src`; grava o projeto editável e o devolve."""
         report = on_progress or (lambda _label, _fraction: None)
@@ -248,6 +292,7 @@ class DubbingService:
             translator_model=self.translator.model,
             glossary=list(glossary),
             brand=brand,
+            fit_mode=fit_mode,
         )
         with self._stage(timings, "Tradução"):
             project = self._translated(project, 0.6, 0.98, report)
@@ -334,8 +379,9 @@ class DubbingService:
             )
         fixed_voice = self._fixed_voice(project, words, stems.vocals, vocals)
 
+        fit_mode = self._effective_fit_mode(project, info)
         slots = slot_plan(project.segments, info.duration)
-        clips: list[DubClip] = []
+        spoken: list[tuple[DubSegment, DubClip]] = []
         reports: list[SegmentReport] = []
         total = len(project.segments)
         with self._stage(timings, "Síntese das falas"):
@@ -343,25 +389,54 @@ class DubbingService:
                 label = f"Sintetizando a fala {number} de {total}"
                 self.log(label)
                 report(label, 0.1 + 0.85 * (number - 1) / total)
-                entry = self._synthesize_segment(
-                    project, segment, slot, fixed_voice, words, stems.vocals, vocals, steps
+                entry, clip = self._synthesize_segment(
+                    project, segment, slot, fit_mode, fixed_voice, words, stems.vocals, vocals, steps
                 )
-                reports.append(entry[0])
-                if entry[1] is not None:
-                    clips.append(entry[1])
+                reports.append(entry)
+                if clip is not None:
+                    spoken.append((segment, clip))
+
+        # só depois de sintetizar se sabe quanto cada fala dura, e portanto o que precisa esticar
+        retime = self._retime_plan(project, reports, info)
+        reports = [
+            replace(entry, retimed_start=retime.retime(segment.start))
+            for segment, entry in zip(project.segments, reports, strict=True)
+        ]
+        clips = [replace(clip, start=retime.retime(segment.start)) for segment, clip in spoken]
+        for entry in (r for r in reports if r.stretch > 1.0):
+            self.log(f"Fala {entry.id}: {entry.message}")
 
         report("Montando a dublagem", 0.95)
         with self._stage(timings, "Montagem"):
-            self._mix(project, src, info, stems, clips, out)
-        srt_path = self._write_srt(out, project, reports)
+            self._mix(project, src, info, stems, clips, out, retime)
+        srt_path = self._write_srt(out, project, reports, retime)
         report("Dublagem pronta", 1.0)
-        return DubResult(out, srt_path, reports, timings)
+        output_seconds = info.duration if retime.is_identity else retime.total_seconds
+        return DubResult(out, srt_path, reports, timings, fit_mode, output_seconds)
+
+    def _effective_fit_mode(self, project: DubProject, info: MediaInfo) -> FitMode:
+        """O modo que vale: sem imagem (ou sem taxa de quadros) não há o que esticar, e a voz se ajusta como antes."""
+        if project.fit_mode != "voz" and not (info.has_video and info.fps > 0):
+            self.log("Sem vídeo para esticar: a voz se ajusta ao tempo (modo voz).")
+            return "voz"
+        return project.fit_mode
+
+    @staticmethod
+    def _retime_plan(project: DubProject, reports: list[SegmentReport], info: MediaInfo) -> RetimePlan:
+        """Os trechos esticados do vídeo: a janela original de cada fala que não coube (as que couberam ficam)."""
+        windows = [
+            StretchWindow(segment.start, segment.end, entry.stretch)
+            for segment, entry in zip(project.segments, reports, strict=True)
+            if entry.stretch > 1.0
+        ]
+        return plan_retime(windows, info.duration, info.fps) if windows else IDENTITY
 
     def _synthesize_segment(
         self,
         project: DubProject,
         segment: DubSegment,
         slot: Slot,
+        fit_mode: FitMode,
         fixed_voice: VoiceProfile | None,
         words: list[Word],
         stems_vocals: Path,
@@ -381,49 +456,42 @@ class DubbingService:
             project.target_language,
         )
         fit = plan_fit(natural, slot)
+        # No modo `voz` o modelo já recebe a fala comprimida; nos outros a fala é pedida na duração natural, e
+        # é a imagem que se ajusta a ela (ou a voz, só até o `atempo`, no misto).
+        requested = fit.request_seconds if fit_mode == "voz" else natural
         lexicon = self.narrator.lexicons(project.brand or voice.brand, project.target_language)
         request = VoiceRequest(
             text=normalize_for_speech(spoken_text(segment.text, lexicon), project.target_language),
             language=project.target_language,
             voice=voice,
             steps=steps,
-            duration=round(fit.request_seconds, 3),
+            duration=round(requested, 3),
         )
         cached = self.narrator.is_cached(request)
         path, speech_seconds = self.narrator.speak(request)
         samples, rate = read_wav(path)
         gain = gain_to_match_db(active_rms(samples, rate), vocals.level_within(segment.start, segment.end))
-        placement = place_speech(speech_seconds, fit.capacity)
-        status, message = fit.status, fit.message
-        if placement.truncated:
-            status = "overflow"
-            message = (
-                f"cortada: a fala dura {speech_seconds / placement.tempo:.1f} s e só cabem {fit.capacity:.1f} s; "
-                "encurte a tradução"
-            )
-        elif placement.tempo > 1.0 and status in ("fits", "advances"):
-            status, message = "squeezed", f"acelerada {placement.tempo:.2f}x para caber"
-        clip = DubClip(
-            path,
-            segment.start,
-            gain,
-            placement.tempo,
-            fit.capacity if placement.truncated else None,
+        outcome = (
+            plan_voice_fit(speech_seconds, fit)
+            if fit_mode == "voz"
+            else plan_video_fit(speech_seconds, slot, fit_mode)
         )
+        clip = DubClip(path, segment.start, gain, outcome.tempo, outcome.max_seconds)
         entry = SegmentReport(
             id=segment.id,
             start=segment.start,
             end=segment.end,
             text=segment.text,
             natural_seconds=natural,
-            requested_seconds=fit.request_seconds,
+            requested_seconds=requested,
             speech_seconds=speech_seconds,
-            played_seconds=placement.played_seconds,
-            tempo=placement.tempo,
-            status=status,
-            message=message,
+            played_seconds=outcome.played_seconds,
+            tempo=outcome.tempo,
+            status=outcome.status,
+            message=outcome.message,
             cached=cached,
             voice=voice.id,
+            stretch=outcome.stretch,
         )
         return entry, clip
 
@@ -446,7 +514,14 @@ class DubbingService:
         )
 
     def _mix(
-        self, project: DubProject, src: Path, info: MediaInfo, stems: Stems, clips: list[DubClip], out: Path
+        self,
+        project: DubProject,
+        src: Path,
+        info: MediaInfo,
+        stems: Stems,
+        clips: list[DubClip],
+        out: Path,
+        retime: RetimePlan,
     ) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         graph_file = self.cache_dir / "dub" / f"{out.stem}.graph.txt"
@@ -460,23 +535,24 @@ class DubbingService:
             info.has_video,
             original_voice=stems.vocals if project.keep_original_db is not None else None,
             original_voice_db=project.keep_original_db if project.keep_original_db is not None else -18.0,
+            retime=retime,
+            fps=info.fps,
         )
         graph_file.parent.mkdir(parents=True, exist_ok=True)
         graph_file.write_text(mix.graph, encoding="utf-8")
         self.runner.run(mix.command)
 
     @staticmethod
-    def _write_srt(out: Path, project: DubProject, reports: list[SegmentReport]) -> Path:
-        """Legenda no idioma alvo: cada fala aparece enquanto a voz dublada toca."""
+    def _write_srt(
+        out: Path, project: DubProject, reports: list[SegmentReport], retime: RetimePlan = IDENTITY
+    ) -> Path:
+        """Legenda no idioma alvo: cada fala aparece enquanto a voz dublada toca, na linha do tempo do arquivo final."""
         cues: list[Cue] = []
         for segment, entry in zip(project.segments, reports, strict=True):
             if entry.status == "empty":
                 continue
-            end = segment.start + max(entry.played_seconds, 0.5)
-            cues += [
-                Cue(a, b, text)
-                for a, b, text in subtitle_cues(written_text(segment.text), segment.start, end)
-            ]
+            begin, end = retimed_span(retime, segment.start, max(entry.played_seconds, 0.5))
+            cues += [Cue(a, b, text) for a, b, text in subtitle_cues(written_text(segment.text), begin, end)]
         srt_path = out.with_suffix(".srt")
         srt_path.write_text(to_srt(cues), encoding="utf-8")
         return srt_path

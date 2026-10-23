@@ -659,6 +659,29 @@ def test_dub_edits_and_result_summary():
 
 
 @requires_node
+def test_dub_result_summary_tells_how_much_video_was_stretched():
+    stretched = "[{id:'s1',added_seconds:0.8},{id:'s4',added_seconds:0.5}]"
+    summary = _run_dub_pure(
+        f"pure.describeResult({{report:[1,2],regenerated:2,timings:{{a:3}},stretched:{stretched},output_seconds:41.3}})"
+    )
+    assert summary.endswith(" Vídeo esticado em 2 trecho(s), 1.3 s a mais. O vídeo final tem 41.3 s.")
+    assert _run_dub_pure("pure.describeStretch([], 40)") == ""
+    assert _run_dub_pure("pure.describeStretch(undefined, 40)") == ""
+    assert _run_dub_pure("pure.statusLabel('stretched')") == "vídeo esticado"
+
+
+def test_dub_fit_selector_offers_the_three_modes_and_travels_with_prepare_and_save():
+    html, js = INDEX.read_text(encoding="utf-8"), DUB.read_text(encoding="utf-8")
+    assert 'for="dub-fit">Quando a fala não cabe<' in html
+    select = html[html.index('id="dub-fit"') : html.index("</select>", html.index('id="dub-fit"'))]
+    assert 'value="voz">Acelerar a voz' in select and 'value="video">Esticar o vídeo' in select
+    assert 'value="misto">Misto' in select
+    assert js.count('fit_mode: el("dub-fit").value') == 2  # no preparar e no salvar/gerar
+    assert 'el("dub-fit").value = project.fit_mode' in js
+    assert "—" not in select
+
+
+@requires_node
 def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
     assert (
         _run_voice_pure('pure.pronunciationPreviewText("DMaker", "en-US")') == "I say DMaker. Again: DMaker."

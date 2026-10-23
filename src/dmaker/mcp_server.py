@@ -1240,7 +1240,10 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
         "corrija com dub_update_segment antes de dub_render. speaker_mode: per_segment (clona a voz de quem fala "
         "em cada frase; serve a vários falantes) ou single (um clone para o arquivo). voice usa uma voz da "
         "biblioteca no lugar do clone. keep_original_db (ex.: -18) mantém a voz original por baixo. glossary: "
-        "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). Lento na CPU (separação de "
+        "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). fit_mode decide o que fazer "
+        "quando a fala traduzida não cabe no tempo da original: voz (padrão: avança na pausa e acelera a voz até "
+        "~1,44x), video (a voz fica natural e o vídeo estica até 1,3x naquele trecho) ou misto (a voz acelera "
+        "até 1,15x e o vídeo estica no resto). Lento na CPU (separação de "
         "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
     )
 )
@@ -1254,6 +1257,7 @@ def dub_prepare(
     glossary: list[str] | None = None,
     brand: str | None = None,
     project: str | None = None,
+    fit_mode: Literal["voz", "video", "misto"] = "voz",
     wait_seconds: float = 0,
 ) -> dict:
     from .pipeline.dubbing import default_project_path
@@ -1272,6 +1276,7 @@ def dub_prepare(
         "keep_original_db": keep_original_db,
         "glossary": glossary or [],
         "brand": brand,
+        "fit_mode": fit_mode,
     }
     job = jobs.start(
         f"dublagem: preparar ({Path(path).name})",
@@ -1281,19 +1286,20 @@ def dub_prepare(
     return {**job.snapshot(), "result": job.result}
 
 
-def _dub_render_work(job: Job, project_path: str, out: str | None, steps: int | None) -> dict:
+def _dub_render_work(
+    job: Job, project_path: str, out: str | None, steps: int | None, fit_mode: str | None = None
+) -> dict:
     from .domain.dub import load_dub_project
-    from .pipeline.dubbing import report_dict
+    from .pipeline.dubbing import report_dict, result_dict
 
-    result = _dubbing_service(job).render(
-        load_dub_project(Path(project_path)), Path(out) if out else None, _stage_progress(job), steps
-    )
+    project = load_dub_project(Path(project_path))
+    if fit_mode:  # vale só para esta geração; o arquivo do projeto não muda
+        project = project.model_copy(update={"fit_mode": fit_mode})
+    result = _dubbing_service(job).render(project, Path(out) if out else None, _stage_progress(job), steps)
     return {
         "output": str(result.path),
         "srt": str(result.srt_path),
-        "warnings": result.warnings,
-        "regenerated": result.regenerated,
-        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
+        **result_dict(result),
         "segments": [report_dict(r) for r in result.report],
     }
 
@@ -1306,7 +1312,9 @@ def _dub_render_work(job: Job, project_path: str, out: str | None, steps: int | 
         "sintetizada fica em cache: depois de editar uma tradução, rode de novo e só ela é refeita. O resultado "
         "traz warnings (falas que não couberam: encurte a tradução) e o relatório de cada fala. draft usa 8 "
         "passos (metade do tempo). Lento na CPU (~20 s por segundo de fala): devolve job_id, consulte com "
-        "job_status."
+        "job_status. fit_mode (voz, video ou misto) troca, só nesta geração, o que fazer com a fala que não "
+        "cabe: video e misto esticam o vídeo (até 1,3x) naquele trecho em vez de acelerar a voz, e o resultado "
+        "traz output_seconds e a lista stretched (fala, fator e segundos a mais)."
     )
 )
 def dub_render(
@@ -1314,6 +1322,7 @@ def dub_render(
     out: str | None = None,
     draft: bool = False,
     steps: int | None = None,
+    fit_mode: Literal["voz", "video", "misto"] | None = None,
     wait_seconds: float = 0,
 ) -> dict:
     from .domain.dub import load_dub_project
@@ -1322,7 +1331,9 @@ def dub_render(
     load_dub_project(Path(project))  # falha já na chamada se o projeto não existe ou está inválido
     job = jobs.start(
         f"dublagem: gerar ({Path(project).name})",
-        lambda job: _dub_render_work(job, project, out, DRAFT_STEPS if draft and steps is None else steps),
+        lambda job: _dub_render_work(
+            job, project, out, DRAFT_STEPS if draft and steps is None else steps, fit_mode
+        ),
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}

@@ -350,7 +350,16 @@ letras de cada idioma. Se cabe, a fala dura isso; se passa, avança na pausa seg
 de silêncio); se ainda passa, o modelo é pedido para falar mais rápido (até 1,25x) e o áudio pronto é acelerado
 sem mudar o tom (`atempo`, até 1,15x); acima disso o fim da fala é cortado com fade e o resultado traz
 `warnings` pedindo uma tradução mais curta. Cada fala tem `status` (`fits`, `advances`, `squeezed`,
-`overflow`, `empty`) no relatório.
+`stretched`, `overflow`, `empty`) no relatório.
+
+`fit_mode` (no projeto; `--fit` na CLI; `fit_mode` no `dub_prepare`, e no `dub_render` só para aquela geração)
+troca o que fazer quando a tradução não cabe: `voz` (padrão, o encaixe acima), `video` (a voz fica na velocidade
+natural e o vídeo estica, sem interpolar quadros, só na janela daquela fala, até 1,3x) e `misto` (a voz acelera
+até 1,15x e o vídeo estica no que faltar). Só a fala que não coube estica; o fundo e a voz original atenuada
+acompanham o vídeo (mesmo tom), as falas seguintes e a legenda `.srt` caem nos tempos novos, e o arquivo final
+fica mais longo (`output_seconds`; `stretched` lista fala, fator e segundos a mais). Com trecho esticado a imagem
+é recodificada (x264, CRF 18); sem ele continua copiada. Passou de 1,3x: o fim da fala é cortado e o resultado traz
+`warnings`. Em áudio sem imagem o modo vale como `voz`.
 
 Cache por fala: o áudio de cada fala sai do cache quando texto, voz, idioma, duração e passos são os mesmos,
 então corrigir uma tradução e gerar de novo sintetiza só ela (`regenerated` no resultado). Custo na CPU: ~20 s

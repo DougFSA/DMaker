@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config
-from ..domain.dub import PROJECT_SUFFIX, DubProject, load_dub_project, save_dub_project
+from ..domain.dub import PROJECT_SUFFIX, DubProject, FitMode, load_dub_project, save_dub_project
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
 from ..pipeline.dubbing import (
@@ -26,6 +26,7 @@ from ..pipeline.dubbing import (
     default_project_path,
     project_summary,
     report_dict,
+    result_dict,
 )
 from ..pipeline.jobs import Job, JobManager
 from ..voice.synth import DRAFT_STEPS
@@ -44,6 +45,7 @@ class PrepareRequest(BaseModel):
     voice: str | None = None
     keep_original_db: float | None = Field(default=None, le=0)
     glossary: list[str] = Field(default_factory=list, max_length=100)
+    fit_mode: FitMode = "voz"
 
 
 class SegmentEdit(BaseModel):
@@ -58,6 +60,7 @@ class ProjectUpdate(BaseModel):
     keep_original_db: float | None = Field(default=None, le=0)
     speaker_mode: Literal["per_segment", "single"] = "per_segment"
     voice: str | None = None
+    fit_mode: FitMode | None = None  # None mantém o do projeto (clientes antigos não o enviam)
 
 
 class RenderRequest(BaseModel):
@@ -136,6 +139,7 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
             glossary=req.glossary,
             project_path=path,
             on_progress=stage_reporter(job),
+            fit_mode=req.fit_mode,
         )
     return _summary(project, path)
 
@@ -162,9 +166,7 @@ def _run_render(job: Job, services: VoiceServices, path: Path, draft: bool) -> d
         "original": project.source,
         "original_url": file_url(Path(project.source)),
         "report": [report_dict(r) for r in result.report],
-        "warnings": result.warnings,
-        "regenerated": result.regenerated,
-        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
+        **result_dict(result),
     }
 
 
@@ -175,13 +177,14 @@ def _apply_update(project: DubProject, update: ProjectUpdate) -> DubProject:
             edited = edited.edited(item.id, item.text, item.locked)
         except KeyError as exc:
             raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
-    return edited.model_copy(
-        update={
-            "keep_original_db": update.keep_original_db,
-            "speaker_mode": update.speaker_mode,
-            "voice": update.voice or None,
-        }
-    )
+    changes = {
+        "keep_original_db": update.keep_original_db,
+        "speaker_mode": update.speaker_mode,
+        "voice": update.voice or None,
+    }
+    if update.fit_mode is not None:
+        changes["fit_mode"] = update.fit_mode
+    return edited.model_copy(update=changes)
 
 
 def build_dub_router(jobs: JobManager) -> APIRouter:

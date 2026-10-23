@@ -3,7 +3,9 @@
 Funções puras, sem áudio nem disco. A segmentação segue a do VoiceStudio (frases por pontuação e pausas, de
 cerca de 1 a 12 s); o encaixe é próprio: uma fala dublada pode durar mais que a original, e o que passa do
 espaço sai primeiro por avançar na pausa seguinte, depois por pedir ao modelo uma fala mais rápida, depois por
-acelerar o áudio pronto (`atempo`), e só então por avisar que a tradução precisa ser mais curta.
+acelerar o áudio pronto (`atempo`), e só então por avisar que a tradução precisa ser mais curta. Nos modos
+`video` e `misto` o que não cabe estica a imagem da fala em vez de acelerar a voz (`plan_video_fit`); a conta da
+linha do tempo esticada fica em `dub_retime`.
 """
 
 from __future__ import annotations
@@ -286,6 +288,86 @@ def place_speech(speech_seconds: float, capacity: float) -> Placement:
     after_tempo = speech_seconds / tempo
     truncated = after_tempo > capacity + TRUNCATION_TOLERANCE_SECONDS
     return Placement(tempo, min(after_tempo, capacity) if truncated else after_tempo, truncated)
+
+
+# ---------- desfecho de cada fala: o que muda no áudio e no vídeo ----------
+
+
+@dataclass(frozen=True)
+class FitOutcome:
+    """O que se faz com uma fala sintetizada: aceleração, esticamento do vídeo, corte e o veredito."""
+
+    tempo: float  # aceleração da voz (`atempo`); 1.0 = velocidade natural
+    stretch: float  # fator do vídeo na janela da fala; 1.0 = imagem intacta
+    played_seconds: float  # quanto a voz toca na linha do tempo final
+    max_seconds: float | None  # corta (com fade) a voz neste ponto: ela não coube; None = inteira
+    status: str  # fits | advances | squeezed | stretched | overflow
+    message: str
+
+    @property
+    def warns(self) -> bool:
+        return self.status == "overflow"
+
+
+def plan_voice_fit(speech_seconds: float, fit: FitPlan) -> FitOutcome:
+    """Modo `voz`: só o áudio se ajusta (atempo até `MAX_TEMPO`, o que passar é cortado); o vídeo não muda."""
+    placement = place_speech(speech_seconds, fit.capacity)
+    status, message = fit.status, fit.message
+    if placement.truncated:
+        status = "overflow"
+        message = (
+            f"cortada: a fala dura {speech_seconds / placement.tempo:.1f} s e só cabem {fit.capacity:.1f} s; "
+            "encurte a tradução"
+        )
+    elif placement.tempo > 1.0 and status in ("fits", "advances"):
+        status, message = "squeezed", f"acelerada {placement.tempo:.2f}x para caber"
+    return FitOutcome(
+        placement.tempo,
+        1.0,
+        placement.played_seconds,
+        fit.capacity if placement.truncated else None,
+        status,
+        message,
+    )
+
+
+# O `setpts` só alonga a duração de cada quadro, sem interpolar: a 1,3x cada quadro dura 30% mais e o
+# movimento fica visivelmente mais lento, mas ainda natural para uma pessoa falando ou um plano de apoio. Acima
+# disso vira câmera lenta evidente, com tranco de quadro repetido. 1,3x também cobre a expansão típica de
+# uma tradução do inglês para o português (a fala cresce de 15% a 30%).
+MAX_VIDEO_STRETCH = 1.3
+
+
+def plan_video_fit(speech_seconds: float, slot: Slot, mode: str) -> FitOutcome:
+    """Modos `video` e `misto`: a fala que não cabe estica a imagem da sua janela, em vez de ser comprimida.
+
+    `video` mantém a voz na velocidade natural. `misto` primeiro acelera a voz até `MAX_TEMPO` e estica o vídeo
+    só no que ainda faltar. A fala pode avançar na pausa seguinte (`slot.room`) como sempre, então a imagem
+    estica apenas o que a pausa não absorve. Passou de `MAX_VIDEO_STRETCH`: a imagem fica no limite e o fim
+    da voz é cortado, com aviso, porque nenhuma das duas velocidades pode ceder mais.
+    """
+    capacity = slot.capacity
+    tempo = fit_tempo(speech_seconds, capacity) if mode == "misto" else 1.0
+    heard = speech_seconds / tempo
+    if heard <= capacity + TRUNCATION_TOLERANCE_SECONDS:
+        if tempo > 1.0:
+            return FitOutcome(tempo, 1.0, heard, None, "squeezed", f"acelerada {tempo:.2f}x para caber")
+        if heard <= slot.duration:
+            return FitOutcome(1.0, 1.0, heard, None, "fits", "cabe no tempo original")
+        advance = f"avança {heard - slot.duration:.1f} s na pausa seguinte"
+        return FitOutcome(1.0, 1.0, heard, None, "advances", advance)
+    stretch = (heard - slot.room) / slot.duration
+    where = f"acelerada {tempo:.2f}x e " if tempo > 1.0 else ""
+    if stretch <= MAX_VIDEO_STRETCH:
+        added = slot.duration * (stretch - 1.0)
+        message = f"{where}vídeo esticado {stretch:.2f}x (+{added:.1f} s) para a fala caber"
+        return FitOutcome(tempo, stretch, heard, None, "stretched", message)
+    limited = slot.duration * MAX_VIDEO_STRETCH + slot.room
+    message = (
+        f"cortada: {where}vídeo no limite de {MAX_VIDEO_STRETCH:.2f}x e a fala ainda dura {heard:.1f} s "
+        f"para {limited:.1f} s; encurte a tradução"
+    )
+    return FitOutcome(tempo, MAX_VIDEO_STRETCH, limited, limited, "overflow", message)
 
 
 # ---------- legenda no idioma alvo ----------
