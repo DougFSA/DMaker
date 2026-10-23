@@ -76,7 +76,36 @@ function tlIsDraggable(trackId, item) {
   if (trackId.startsWith("V") && trackId !== "V1") return true;
   if (trackId === "TX") return true;
   if (trackId === "GR" && item.kind === "image") return true;
+  if (trackId === "NAR") return true; // só desloca: a duração vem da síntese, não se apara
   return false;
+}
+
+/** Alças de aparar (início/fim) só existem onde aparar faz sentido: a fala da narração tem a
+ * duração que a voz levou, então a NAR só se arrasta inteira. Função pura. */
+function tlHasTrimHandles(trackId, item) {
+  return tlIsDraggable(trackId, item) && trackId !== "NAR";
+}
+
+/** Segundos com precisão de milissegundo, para o arrasto não gravar 0.30000000000000004 na spec. */
+function tlRoundSeconds(seconds) {
+  return Math.round(seconds * 1000) / 1000;
+}
+
+/** Operação de edição do arrasto de uma fala da NAR: o novo `start` de `audio.narration[i]`, pelo
+ * mesmo `set_field` que as outras edições de campo usam (a spec continua sendo a única fonte de
+ * verdade). Nunca antes de zero. Função pura. */
+function tlNarrationMoveOp(item, start) {
+  return { type: "set_field", path: `audio.narration.${item.index}.start`, value: tlRoundSeconds(Math.max(0, start)) };
+}
+
+/** Texto do balão de uma fala da NAR: a fala inteira e se a duração é a real (já sintetizada) ou
+ * uma estimativa por texto. Os outros itens só mostram o rótulo. Função pura. */
+function tlItemTitle(item) {
+  const label = item.label || item.kind;
+  if (item.kind !== "narration") return label;
+  const seconds = tlRoundSeconds(item.end - item.start).toFixed(1).replace(".", ",");
+  const estimated = item.extra && item.extra.estimated;
+  return `${label} (${estimated ? "duração estimada" : "duração real"}: ${seconds} s)`;
 }
 
 function tlSpansWhole(trackId) {
@@ -270,14 +299,15 @@ function createTimeline(container, callbacks) {
       `tl-item-${tlKindClass(item.kind)}`,
       selectedIds.has(item.id) ? "selected" : "",
       item.muted ? "tl-item-muted" : "",
+      item.extra && item.extra.estimated ? "tl-item-estimated" : "",
     ].filter(Boolean).join(" ");
-    const handles = draggable
+    const handles = tlHasTrimHandles(track.id, item)
       ? '<div class="tl-item-handle tl-item-handle-in" data-handle="in"></div><div class="tl-item-handle tl-item-handle-out" data-handle="out"></div>'
       : "";
     const waveform = tlWaveformEligible(track, item) ? '<canvas class="tl-waveform"></canvas>' : "";
     return `<div class="${classes}" data-item-id="${tlEsc(item.id)}" data-track-id="${tlEsc(track.id)}"
         data-draggable="${draggable ? "1" : "0"}" style="left:${left}px;width:${width}px"
-        title="${tlEsc(item.label || item.kind)}">
+        title="${tlEsc(tlItemTitle(item))}">
         ${waveform}${handles}<span class="tl-item-label">${tlEsc(tlDisplayLabel(item.label) || item.kind)}</span>
       </div>`;
   }
@@ -468,6 +498,14 @@ function createTimeline(container, callbacks) {
     document.addEventListener("mouseup", onUp);
   }
 
+  /** Encaixa o início da fala, ou o fim dela quando é o fim que está perto de um ponto de encaixe. */
+  function snapNarrationStart(item, start) {
+    const duration = item.end - item.start;
+    const snappedStart = snapTime(start, item.id);
+    if (snappedStart !== start) return snappedStart;
+    return snapTime(start + duration, item.id) - duration;
+  }
+
   function finishItemDrag() {
     if (!drag || !drag.result) return;
     const { mode, track, item, handle, original } = drag;
@@ -482,6 +520,10 @@ function createTimeline(container, callbacks) {
     }
     const deltaSeconds = drag.result.deltaSeconds || 0;
     if (Math.abs(deltaSeconds) < 0.001) return;
+    if (track.id === "NAR") {
+      cb.onOp(tlNarrationMoveOp(item, snapNarrationStart(item, original.start + deltaSeconds)));
+      return;
+    }
     if (mode === "trim") {
       cb.onOp({ type: "trim", index: item.index, side: handle, delta: deltaSeconds });
       return;
@@ -653,4 +695,12 @@ function createTimeline(container, callbacks) {
   };
 }
 
-window.DMakerTimeline = { create: createTimeline, formatTimecode: tlFormatTimecode, tickStep: tlTickStep };
+window.DMakerTimeline = {
+  create: createTimeline,
+  formatTimecode: tlFormatTimecode,
+  tickStep: tlTickStep,
+  isDraggable: tlIsDraggable,
+  hasTrimHandles: tlHasTrimHandles,
+  narrationMoveOp: tlNarrationMoveOp,
+  itemTitle: tlItemTitle,
+};

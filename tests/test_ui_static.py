@@ -667,3 +667,50 @@ def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
         _run_voice_pure('pure.pronunciationPreviewText("DMaker", "pt")') == "Eu falo DMaker. Repito: DMaker."
     )
     assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."
+
+
+def _run_timeline_pure(expression: str):
+    """Avalia `expression` com as funções puras da linha do tempo carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(TIMELINE))});"
+        "const tl = window.DMakerTimeline;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_timeline_narration_blocks_drag_whole_but_have_no_trim_handles():
+    item = '{kind: "narration", index: 1}'
+    assert _run_timeline_pure(f'tl.isDraggable("NAR", {item})') is True
+    assert _run_timeline_pure(f'tl.hasTrimHandles("NAR", {item})') is False
+    assert _run_timeline_pure('tl.hasTrimHandles("V1", {kind: "clip"})') is True
+    assert _run_timeline_pure('tl.isDraggable("A1", {kind: "clip-audio"})') is False
+
+
+@requires_node
+def test_timeline_narration_drag_becomes_a_set_field_on_its_own_start():
+    assert _run_timeline_pure("tl.narrationMoveOp({index: 2}, 3.14159)") == {
+        "type": "set_field",
+        "path": "audio.narration.2.start",
+        "value": 3.142,
+    }
+    assert _run_timeline_pure("tl.narrationMoveOp({index: 0}, -0.4)")["value"] == 0
+
+
+@requires_node
+def test_timeline_narration_title_tells_real_from_estimated_duration():
+    real = '{kind: "narration", label: "Olá", start: 1, end: 3.25, extra: {estimated: false}}'
+    guess = '{kind: "narration", label: "Olá", start: 1, end: 6, extra: {estimated: true}}'
+    assert _run_timeline_pure(f"tl.itemTitle({real})") == "Olá (duração real: 2,3 s)"
+    assert _run_timeline_pure(f"tl.itemTitle({guess})") == "Olá (duração estimada: 5,0 s)"
+    assert _run_timeline_pure('tl.itemTitle({kind: "clip", label: "a.mp4"})') == "a.mp4"
+
+
+def test_timeline_styles_dashed_border_for_estimated_narration():
+    css = CSS.read_text(encoding="utf-8")
+    assert ".tl-item-narration" in css and ".tl-item-narration.tl-item-estimated" in css
+    assert "tl-item-estimated" in TIMELINE.read_text(encoding="utf-8")

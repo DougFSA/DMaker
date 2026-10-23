@@ -34,6 +34,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
+
 ### Fixed
 
 - **DMK-8**: testes de voz e áudio isolados em pasta temporária (diretórios de dados fixados na
