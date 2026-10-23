@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import MODELS_DIR
+from .. import config
 from .library import VoiceProfile
 from .synth import Speech, VoiceRequest
 
@@ -118,7 +118,7 @@ class KokoroSynthesizer:
     def __init__(
         self,
         variant: str = "fp32",
-        models_dir: Path = MODELS_DIR / "kokoro",
+        models_dir: Path | None = None,
         downloader: Downloader = download_file,
         model_loader: Callable[[], Any] | None = None,
     ) -> None:
@@ -126,7 +126,7 @@ class KokoroSynthesizer:
             raise ValueError(f"Variante {variant!r} desconhecida; use {' ou '.join(MODEL_FILES)}.")
         self.variant = variant
         self.engine_id = f"kokoro:v1.0-{variant}"
-        self.models_dir = models_dir
+        self.models_dir = models_dir or config.MODELS_DIR / "kokoro"
         self.downloader = downloader
         self._model_loader = model_loader or self._load_model
         self._model: Any = None

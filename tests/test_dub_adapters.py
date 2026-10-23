@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,6 @@ def wired(monkeypatch, dub: DubHarness, tmp_path: Path) -> DubHarness:
         "dmaker.pipeline.dubbing.default_dubbing_service", lambda *args, **kwargs: dub.service
     )
     monkeypatch.setattr(mcp_server, "_dubbing_service", lambda job: dub.service)
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", tmp_path / "voices")
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: dub.base.library)
     return dub
 
@@ -145,7 +145,7 @@ def test_cli_errors_are_portuguese_with_exit_code_1(wired: DubHarness, tmp_path:
     same = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "pt"])
     assert same.exit_code == 1 and "diferente do idioma de origem" in same.output
     mode = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--speaker", "coro"])
-    assert mode.exit_code == 1 and "per_segment ou single" in mode.output
+    assert mode.exit_code == 1 and "per_speaker ou per_segment ou single" in mode.output
     missing = cli.invoke(app, ["dub", "render", str(tmp_path / "nada.dub.json")])
     assert missing.exit_code == 1 and "não encontrado" in missing.output
     no_file = cli.invoke(app, ["dub", "prepare", str(tmp_path / "nada.mp4"), "--to", "en"])
@@ -178,7 +178,13 @@ def test_dub_get_and_update_segment_edit_the_translation_and_the_lock(wired: Dub
     shown = mcp_server.dub_get(str(wired.project_path))
     assert shown["segments"][1]["id"] == "s2" and shown["translator_model"] == "tradutor-falso"
     updated = mcp_server.dub_update_segment(str(wired.project_path), "s2", text="Corrigida.", locked=True)
-    assert updated == {"project": str(wired.project_path), "id": "s2", "text": "Corrigida.", "locked": True}
+    assert updated == {
+        "project": str(wired.project_path),
+        "id": "s2",
+        "text": "Corrigida.",
+        "locked": True,
+        "speaker": None,
+    }
     saved = load_dub_project(wired.project_path)
     assert saved.segment("s2").text == "Corrigida." and saved.segment("s2").locked
     with pytest.raises(KeyError, match="s9"):
@@ -245,3 +251,67 @@ def test_dub_job_failure_carries_the_translation_message(wired: DubHarness):
 def test_dub_tools_are_listed():
     names = {tool.name for tool in asyncio.run(mcp_server.server.list_tools())}
     assert {"dub_prepare", "dub_render", "dub_get", "dub_update_segment", "dub_retranslate"} <= names
+
+
+# ---------- falantes (diarização) ----------
+
+
+def two_people(wired: DubHarness) -> DubHarness:
+    from tests.test_dubbing_speakers import TWO_PEOPLE, FakeDiarizer
+
+    wired.diarizer = FakeDiarizer(TWO_PEOPLE)
+    wired.service.diarizer = wired.diarizer
+    return wired
+
+
+def test_cli_prepare_separates_the_speakers_by_default_and_can_force_the_count(
+    wired: DubHarness, tmp_path: Path
+):
+    two_people(wired)
+    result = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--speakers", "2"])
+    assert result.exit_code == 0, result.output
+    assert "falante" in result.output and "Falante 2" in result.output
+    project = load_dub_project(default_project(tmp_path))
+    assert project.speaker_mode == "per_speaker" and project.speaker_names == ["Falante 1", "Falante 2"]
+    assert wired.diarizer.calls[0][1] == 2
+
+
+def test_cli_speakers_needs_the_per_speaker_mode_and_a_positive_count(wired: DubHarness):
+    two_people(wired)
+    other = cli.invoke(
+        app, ["dub", "prepare", str(wired.src), "--to", "en", "--speaker", "single", "--speakers", "2"]
+    )
+    assert other.exit_code == 1 and "só vale no modo per_speaker" in other.output
+    assert cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--speakers", "0"]).exit_code == 2
+
+
+def test_mcp_dub_update_segment_swaps_the_speaker_and_refuses_an_unknown_one(wired: DubHarness):
+    two_people(wired).prepare()
+    updated = mcp_server.dub_update_segment(str(wired.project_path), "s3", speaker="Falante 2")
+    assert (
+        updated["speaker"] == "Falante 2" and updated["text"] == "EN Depois é só exportar o vídeo e publicar."
+    )
+    assert load_dub_project(wired.project_path).segment("s3").speaker == "Falante 2"
+    with pytest.raises(ValueError, match="Falante 7"):
+        mcp_server.dub_update_segment(str(wired.project_path), "s3", speaker="Falante 7")
+    shown = mcp_server.dub_get(str(wired.project_path))
+    assert shown["speakers"] == ["Falante 1", "Falante 2"] and shown["segments"][2]["speaker"] == "Falante 2"
+
+
+def test_mcp_dub_prepare_passes_the_mode_and_the_count(wired: DubHarness):
+    two_people(wired)
+    status = finished(mcp_server.dub_prepare(str(wired.src), "en", num_speakers=2))
+    assert status["status"] == "done", status
+    assert status["result"]["speaker_mode"] == "per_speaker" and status["result"]["speakers"] == [
+        "Falante 1",
+        "Falante 2",
+    ]
+    assert wired.diarizer.calls[-1][1] == 2
+
+
+def test_the_mcp_tool_documents_the_speaker_parameters():
+    tools = asyncio.run(mcp_server.server.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+    assert "speaker" in by_name["dub_update_segment"].input_schema["properties"]
+    prepare = by_name["dub_prepare"].input_schema["properties"]
+    assert "num_speakers" in prepare and "per_speaker" in json.dumps(prepare["speaker_mode"])

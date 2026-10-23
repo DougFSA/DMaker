@@ -25,7 +25,7 @@ cli = CliRunner()
 def harness(tmp_path: Path, monkeypatch) -> ServiceHarness:
     monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", tmp_path / "media" / "voices")
+    monkeypatch.setattr("dmaker.config.VOICES_DIR", tmp_path / "media" / "voices")
     return ServiceHarness(tmp_path / "media")
 
 

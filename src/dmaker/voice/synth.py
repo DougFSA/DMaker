@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from ..config import MODELS_DIR, VOICE_CACHE_DIR
+from .. import config
 from ..media.wavio import read_wav
 from .library import VoiceProfile
 from .pronunciation import language_code
@@ -118,15 +118,15 @@ class OmniVoiceSynthesizer:
         self,
         model_id: str = DEFAULT_MODEL_ID,
         device: str = "auto",
-        models_dir: Path = MODELS_DIR / "omnivoice",
-        prompt_dir: Path = VOICE_CACHE_DIR / "prompts",
+        models_dir: Path | None = None,
+        prompt_dir: Path | None = None,
         model_loader: Callable[[], Any] | None = None,
     ) -> None:
         self.model_id = model_id
         self.engine_id = f"omnivoice:{model_id}"
         self.device = device
-        self.models_dir = models_dir
-        self.prompt_dir = prompt_dir
+        self.models_dir = models_dir or config.MODELS_DIR / "omnivoice"
+        self.prompt_dir = prompt_dir or config.VOICE_CACHE_DIR / "prompts"
         self._model_loader = model_loader or self._load_model
         self._model: Any = None
         self._device: str | None = None

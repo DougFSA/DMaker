@@ -405,6 +405,7 @@ def test_project_summary_lists_the_segments(dub: DubHarness):
         "original": S1,
         "text": f"EN {S1}",
         "locked": False,
+        "speaker": None,
     }
 
 

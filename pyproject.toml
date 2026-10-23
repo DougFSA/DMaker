@@ -28,7 +28,8 @@ captions = ["faster-whisper>=1.0"]
 # demucs: isolamento vocal (voz x música e ruído; usa só get_model e apply_model, sem o I/O do pacote)
 # conversão de voz (OpenVoice V2): o código de inferência vem copiado em voice/third_party/openvoice, porque o
 # pacote original fixa numpy, librosa e gradio antigos; ele só precisa do torch e do torchaudio já instalados
-voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5", "demucs>=4.1"]
+# sherpa-onnx: diarização (quem fala quando) na dublagem; audioseal: marca d'água inaudível (Meta, MIT) em toda fala sintetizada e a verificação (dmaker voice verify)
+voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5", "demucs>=4.1", "sherpa-onnx>=1.13.8", "audioseal>=0.2"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]

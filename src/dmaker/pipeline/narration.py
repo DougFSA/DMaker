@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import VOICE_CACHE_DIR
+from .. import config
 from ..filtergraph.voice import narration_concat_command
 from ..media.ffmpeg import FFmpegRunner
 from ..media.wavio import wav_duration, write_wav
@@ -17,11 +17,25 @@ from ..voice.postprocess import POSTPROCESS_VERSION, finish_speech
 from ..voice.pronunciation import Lexicon, spoken_text, written_text
 from ..voice.script import Utterance, normalize_for_speech, parse_script
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
+from ..voice.watermark import Watermarker, default_watermarker
 
 DEFAULT_STEPS: int | None = None  # passos de síntese: None deixa cada motor escolher o seu padrão
 
 # léxico de pronúncia de uma marca (None = só o global) num idioma; idioma None junta todos (só para listar termos)
 LexiconProvider = Callable[[str | None, str | None], Lexicon]
+
+
+# aviso de cada fala pronta, na ordem do roteiro: (índice a partir de 1, total, arquivo no cache, duração, pausa depois)
+UtteranceListener = Callable[[int, int, Path, float, float], None]
+
+
+class NarrationCancelled(Exception):
+    """A narração parou entre duas falas a pedido; as `ready` falas já prontas ficam no cache."""
+
+    def __init__(self, ready: int, total: int) -> None:
+        super().__init__(f"Narração interrompida depois da fala {ready} de {total}.")
+        self.ready = ready
+        self.total = total
 
 
 def no_pronunciation(_brand: str | None, _language: str | None) -> Lexicon:
@@ -34,6 +48,12 @@ class NarrationResult:
     duration: float
     cues: list[tuple[float, float, str]] = field(default_factory=list)  # (início, fim, texto) de cada fala
     srt_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class PlannedUtterance:
+    chars: int  # tamanho do texto falado, que é o que a síntese custa
+    cached: bool  # já está em disco: a próxima narração não sintetiza esta fala
 
 
 def cue_timeline(spans: list[tuple[float, Utterance]]) -> tuple[list[tuple[float, float, str]], float]:
@@ -58,11 +78,15 @@ class NarrationService:
         cache_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
         lexicons: LexiconProvider = no_pronunciation,
+        watermarker: Watermarker | None = None,
     ) -> None:
+        """`watermarker` marca cada fala sintetizada; sem ele vale o padrão (AudioSeal, ligada, a menos que
+        `DMAKER_WATERMARK=0` ou a biblioteca falte)."""
+        self.watermarker = watermarker if watermarker is not None else default_watermarker()
         self.lexicons = lexicons
         self.synthesizer = synthesizer
         self.runner = runner
-        self.cache_dir = cache_dir or VOICE_CACHE_DIR
+        self.cache_dir = cache_dir or config.VOICE_CACHE_DIR
         self.log = log or (lambda _message: None)
 
     def cache_key(self, request: VoiceRequest) -> str:
@@ -82,6 +106,10 @@ class NarrationService:
         ]
         if request.duration is not None:  # a mesma frase forçada a durar 3 s ou 5 s são falas diferentes
             parts.append(f"{request.duration:.3f}")
+        if (
+            self.watermarker.identity
+        ):  # falas com e sem marca não se misturam; sem marca a chave é a de sempre
+            parts.append(self.watermarker.identity)
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def _cache_path(self, request: VoiceRequest) -> Path:
@@ -96,7 +124,9 @@ class NarrationService:
         path = self._cache_path(request)
         if not path.exists():
             speech = self.synthesizer.synthesize(request)
-            write_wav(path, finish_speech(speech.samples, speech.sample_rate), speech.sample_rate)
+            samples = finish_speech(speech.samples, speech.sample_rate)
+            # a marca é o último passo antes de gravar: nada depois dela altera as amostras que a carregam
+            write_wav(path, self.watermarker.embed(samples, speech.sample_rate), speech.sample_rate)
         return path, wav_duration(path)
 
     @staticmethod
@@ -146,6 +176,28 @@ class NarrationService:
             spans.append((wav_duration(path), utterance))
         return cue_timeline(spans)[1] if spans else None
 
+    def plan(
+        self,
+        text: str,
+        voice: VoiceProfile | None,
+        language: str = "pt",
+        speed: float = 1.0,
+        instruct: str | None = None,
+        seed: int | None = None,
+        steps: int | None = DEFAULT_STEPS,
+        brand: str | None = None,
+    ) -> list[PlannedUtterance]:
+        """Cada fala do roteiro com o tamanho que o sintetizador vai receber e se já está no cache.
+
+        Serve para estimar o que falta de uma narração longa sem pagar uma síntese.
+        """
+        lexicon = self.lexicons(brand, language)
+        planned: list[PlannedUtterance] = []
+        for utterance in parse_script(text):
+            request = self._request(utterance, lexicon, voice, language, speed, instruct, seed, steps)
+            planned.append(PlannedUtterance(len(request.text), self._cache_path(request).exists()))
+        return planned
+
     def render(
         self,
         text: str,
@@ -160,10 +212,15 @@ class NarrationService:
         steps: int | None = DEFAULT_STEPS,
         master: bool = True,
         brand: str | None = None,
+        on_utterance: UtteranceListener | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> NarrationResult:
         """Narra `text`; `brand` escolhe o dicionário de pronúncia (o global vale sempre).
 
         A pronúncia só muda o que vai ao sintetizador: legendas e SRT mantêm o texto escrito.
+        `on_utterance` avisa cada fala assim que ela fica pronta (as que já estavam no cache também), para
+        quem quiser ouvir antes do fim. `should_stop` é consultado antes de cada fala: se devolver True a
+        narração para com `NarrationCancelled`, sem montar o arquivo final, e o que já saiu fica no cache.
         """
         utterances = parse_script(text)
         if not utterances:
@@ -172,11 +229,15 @@ class NarrationService:
         parts: list[tuple[Path, float]] = []
         spans: list[tuple[float, Utterance]] = []
         for index, utterance in enumerate(utterances, 1):
+            if should_stop and should_stop():
+                raise NarrationCancelled(index - 1, len(utterances))
             self.log(f"Fala {index} de {len(utterances)}")
             if on_progress:
                 on_progress(index, len(utterances))
             request = self._request(utterance, lexicon, voice, language, speed, instruct, seed, steps)
             path, duration = self.speak(request)
+            if on_utterance:
+                on_utterance(index, len(utterances), path, duration, utterance.pause_after)
             parts.append((path, utterance.pause_after))
             spans.append((duration, Utterance(written_text(utterance.text), utterance.pause_after)))
 
