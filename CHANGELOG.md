@@ -34,6 +34,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-17**: gerenciador de modelos (ver tamanho, licença e uso de cada modelo, baixar, apagar e limpar sobras) na CLI, no MCP e na interface
+
 ---
 
 ## Linha de base — 2026-10-22

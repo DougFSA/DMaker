@@ -1654,6 +1654,7 @@ function switchTab(tab) {
   if (tab === "voice" && window.DMakerVoice) DMakerVoice.onShow();
   if (tab === "voice" && window.DMakerSpeech) DMakerSpeech.onShow();
   if (tab === "voice" && window.DMakerDub) DMakerDub.onShow();
+  if (tab === "models" && window.DMakerModels) DMakerModels.onShow();
   if (window.DMakerLayout) DMakerLayout.refresh();
 }
 
@@ -1990,6 +1991,7 @@ async function init() {
   if (window.DMakerVoice) DMakerVoice.init({ brands: (state.stateInfo && state.stateInfo.brands) || [] });
   if (window.DMakerSpeech) DMakerSpeech.init();
   if (window.DMakerDub) DMakerDub.init();
+  if (window.DMakerModels) DMakerModels.init();
   try {
     await refreshProjectList();
   } catch (err) { handleError(err); }

@@ -796,6 +796,57 @@ def clean_cache() -> dict:
     return {"removed": n}
 
 
+# ---------- modelos de IA ----------
+
+
+def _model_download_work(job: Job, model_id: str) -> dict:
+    from .pipeline.models_service import job_progress_reporter, shared_service
+
+    service = shared_service()
+    report = job_progress_reporter(job, service.spec(model_id).name)
+    return service.download(model_id, report).to_dict()
+
+
+@server.tool(
+    description=(
+        "Gerencia os modelos de IA em cache/models (OmniVoice, Kokoro, Demucs, Whisper, recorte de pessoa). "
+        "action=list: estado de cada modelo (baixado, parcial ou ausente), tamanho real em disco, licença, "
+        "para que serve e quais funções dependem dele, mais as sobras (arquivos que nenhum modelo usa), o total "
+        "ocupado e o espaço livre. action=download com model_id: baixa em segundo plano e confere o arquivo "
+        "(devolve job_id, consulte com job_status; os de ~3 GB levam minutos). action=remove com model_id e "
+        "action=prune (apaga as sobras) EXIGEM confirm=true: sem ele nada é apagado e o erro traz o aviso de "
+        "quais funções deixam de funcionar. O disco costuma estar cheio: confira o espaço livre antes de baixar."
+    )
+)
+def models(
+    action: Literal["list", "download", "remove", "prune"] = "list",
+    model_id: str | None = None,
+    confirm: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.models_service import ConfirmationRequired, shared_service
+
+    service = shared_service()
+    if action == "list":
+        return service.inventory().to_dict()
+    if action == "prune":
+        try:
+            return {"removed": service.prune(confirm=confirm).to_dict()}
+        except ConfirmationRequired as exc:
+            raise ValueError(f"{exc} Repita a chamada com confirm=true.") from exc
+    if not model_id:
+        raise ValueError(f"A ação {action} precisa de model_id (use action=list para ver os ids).")
+    if action == "remove":
+        try:
+            return {"removed": service.remove(model_id, confirm=confirm).to_dict()}
+        except ConfirmationRequired as exc:
+            raise ValueError(f"{exc} Repita a chamada com confirm=true.") from exc
+    spec = service.spec(model_id)
+    job = jobs.start(f"baixar modelo ({spec.name})", lambda job: _model_download_work(job, model_id))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
 # ---------- voz e narração ----------
 
 

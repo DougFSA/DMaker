@@ -62,6 +62,7 @@ def test_lists_tools_and_prompt():
         "design_voice",
         "synthesize_speech",
         "pronunciation",
+        "models",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
