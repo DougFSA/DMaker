@@ -2220,3 +2220,59 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- fila de narrações (aba Voz, queue.js) ---------- */
+
+.queue-item .progress-bar-track {
+  margin: 6px 0 2px;
+}
+
+.queue-progress {
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-badge.queue-state-running {
+  background: var(--green);
+  color: var(--bg);
+}
+
+.voice-badge.queue-state-failed {
+  background: var(--danger);
+  color: var(--text);
+}
+
+.voice-badge.queue-state-paused,
+.voice-badge.queue-state-cancelled {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.queue-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-file-name {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.queue-file a.btn {
+  text-decoration: none;
+}
+
+.queue-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queue-files summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}

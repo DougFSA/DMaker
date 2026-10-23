@@ -28,6 +28,8 @@ from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
 from .dub_routes import build_dub_router
+from .queue_routes import build_queue_router
+from .queue_routes import runtime as voice_queue_runtime
 from .speech_routes import build_speech_router
 from .voice_routes import build_voice_router
 
@@ -51,6 +53,7 @@ app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
 app.include_router(build_voice_router(jobs))
+app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
 
@@ -907,6 +910,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) 
     import uvicorn
 
     config.ensure_dirs()
+    voice_queue_runtime.start_worker()  # a fila de narrações roda sozinha enquanto a interface estiver aberta
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

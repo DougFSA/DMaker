@@ -61,6 +61,8 @@ def test_lists_tools_and_prompt():
         "clone_voice",
         "design_voice",
         "synthesize_speech",
+        "voice_queue_add",
+        "voice_queue_list",
         "pronunciation",
     } <= tools
     assert "editar-video" in prompts
@@ -538,3 +540,39 @@ def test_synthesize_speech_in_english_does_not_use_the_portuguese_pronunciation(
 
     assert mcp_server.job_status(started["job_id"])["status"] == "done"
     assert fake.texts == ["Meet the DMaker app today."]
+
+
+def test_voice_queue_tools_enqueue_and_list_without_running_anything(monkeypatch, tmp_path):
+    import pytest
+
+    import dmaker.mcp_server as mcp_server
+    from dmaker.pipeline.voice_queue import VoiceQueue
+    from dmaker.pipeline.voice_queue_service import VoiceQueueService
+    from dmaker.voice.library import VoiceLibrary
+
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
+    service = VoiceQueueService(
+        VoiceQueue(tmp_path / "cache" / "voice_queue.json"), VoiceLibrary(tmp_path / "v")
+    )
+    monkeypatch.setattr(mcp_server, "_voice_queue_service", lambda: service)
+    script = tmp_path / "curso.md"
+    script.write_text("# Um\nPrimeiro texto.\n\n# Dois\nSegundo texto.", encoding="utf-8")
+
+    from_text = mcp_server.voice_queue_add(
+        text="Uma frase para narrar.", voice="dora", title="Aviso", draft=True
+    )
+    from_file = mcp_server.voice_queue_add(file_path=str(script), format="mp3")
+
+    assert from_text["state"] == "Pendente" and from_text["chapters"] == 1
+    assert from_text["output_dir"].endswith("aviso") and "dmaker voice queue run" in from_text["runs_with"]
+    assert from_file["chapters"] == 2 and from_file["title"] == "curso"
+
+    listing = mcp_server.voice_queue_list()
+    assert [i["title"] for i in listing["items"]] == ["Aviso", "curso"]
+    assert listing["items"][0]["options"]["draft"] is True and listing["eta_label"]
+    assert listing["items"][0]["files"] == []  # sem nada executado: a ferramenta só enfileira
+
+    with pytest.raises(ValueError, match="text ou file_path"):
+        mcp_server.voice_queue_add()
+    with pytest.raises(ValueError, match="text ou file_path"):
+        mcp_server.voice_queue_add(text="a", file_path=str(script))

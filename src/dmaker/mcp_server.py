@@ -948,6 +948,69 @@ def synthesize_speech(
     return {**job.snapshot(), "result": job.result}
 
 
+def _voice_queue_service():
+    from .pipeline.voice_queue_service import VoiceQueueService
+
+    return VoiceQueueService(library=_voice_library())
+
+
+@server.tool(
+    description=(
+        "Põe uma narração longa (audiobook, manual narrado, vários roteiros) na fila de narrações, que roda "
+        "um item por vez e retoma de onde parou se o processo cair. Informe text (capítulos marcados com "
+        "'# Título' ou 'Capítulo N' viram arquivos separados) ou file_path (.txt, .md ou .docx; títulos viram "
+        "capítulos). Cada item gera output/narracoes/<título>/NN-<capítulo>.wav, o <título>-completo.wav "
+        "com 1,5 s entre capítulos e o .srt do completo. voice = id da voz; draft=true usa 8 passos no "
+        "OmniVoice (rascunho); format = wav | mp3. A ferramenta só enfileira: quem executa é o `dmaker ui` "
+        "aberto ou o comando `dmaker voice queue run`. Acompanhe com voice_queue_list."
+    )
+)
+def voice_queue_add(
+    text: str | None = None,
+    file_path: str | None = None,
+    voice: str | None = None,
+    title: str | None = None,
+    draft: bool = False,
+    format: Literal["wav", "mp3"] = "wav",
+    language: str | None = None,
+    speed: float = 1.0,
+    brand: str | None = None,
+) -> dict:
+    from .pipeline.voice_queue import STATE_LABELS, QueueOptions
+
+    if bool(text) == bool(file_path):
+        raise ValueError("Informe text ou file_path, um dos dois.")
+    options = QueueOptions(
+        voice=voice, language=language, speed=speed, brand=brand, draft=draft, audio_format=format
+    )
+    service = _voice_queue_service()
+    item = (
+        service.add_text(text, options, title) if text else service.add_path(Path(file_path), options, title)
+    )
+    return {
+        "id": item.id,
+        "title": item.title,
+        "chapters": item.chapters_total,
+        "output_dir": item.output_dir,
+        "state": STATE_LABELS[item.state],
+        "runs_with": "dmaker ui aberto ou dmaker voice queue run",
+    }
+
+
+@server.tool(
+    description=(
+        "Lista a fila de narrações: estado de cada item (Pendente, Rodando, Pausado, Cancelado, Concluído, "
+        "Falhou), capítulo e fala em andamento, porcentagem, tempo estimado restante (medido nesta máquina) "
+        "e os arquivos prontos. eta_label no topo é o tempo para esvaziar a fila."
+    )
+)
+def voice_queue_list() -> dict:
+    view = _voice_queue_service().view()
+    for item in view["items"]:
+        item["files"] = [f["name"] for f in item["files"]]
+    return view
+
+
 @server.tool(
     description=(
         "Dicionário de pronúncia da narração: como a voz fala cada termo (ex.: DMaker -> Di-mêiker). "

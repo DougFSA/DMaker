@@ -36,6 +36,12 @@ class NarrationResult:
     srt_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class PlannedUtterance:
+    chars: int  # tamanho do texto falado, que é o que a síntese custa
+    cached: bool  # já está em disco: a próxima narração não sintetiza esta fala
+
+
 def cue_timeline(spans: list[tuple[float, Utterance]]) -> tuple[list[tuple[float, float, str]], float]:
     """Início e fim de cada fala na narração montada (fala + pausa depois) e a duração total.
 
@@ -145,6 +151,28 @@ class NarrationService:
                 return None
             spans.append((wav_duration(path), utterance))
         return cue_timeline(spans)[1] if spans else None
+
+    def plan(
+        self,
+        text: str,
+        voice: VoiceProfile | None,
+        language: str = "pt",
+        speed: float = 1.0,
+        instruct: str | None = None,
+        seed: int | None = None,
+        steps: int | None = DEFAULT_STEPS,
+        brand: str | None = None,
+    ) -> list[PlannedUtterance]:
+        """Cada fala do roteiro com o tamanho que o sintetizador vai receber e se já está no cache.
+
+        Serve para estimar o que falta de uma narração longa sem pagar uma síntese.
+        """
+        lexicon = self.lexicons(brand, language)
+        planned: list[PlannedUtterance] = []
+        for utterance in parse_script(text):
+            request = self._request(utterance, lexicon, voice, language, speed, instruct, seed, steps)
+            planned.append(PlannedUtterance(len(request.text), self._cache_path(request).exists()))
+        return planned
 
     def render(
         self,
