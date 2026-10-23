@@ -11,7 +11,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
-from ..config import OUTPUT_DIR
+from .. import config
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from ..voice.design import VoiceDesign, parse_instruct
@@ -20,7 +20,7 @@ from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
 from ..voice.router import RoutingSynthesizer
 from ..voice.synth import OmniVoiceSynthesizer, SpeechSynthesizer
-from .narration import DEFAULT_STEPS, NarrationResult, NarrationService
+from .narration import DEFAULT_STEPS, NarrationResult, NarrationService, UtteranceListener
 
 PREVIEW_TEXTS = {
     "pt": "Olá, esta é a minha voz. Assim eu soo ao narrar o seu vídeo, com calma e clareza.",
@@ -103,7 +103,7 @@ def design_voice(
 
 def default_narration_path(text: str) -> Path:
     digest = hashlib.sha1(text.encode()).hexdigest()[:8]
-    return OUTPUT_DIR / f"narracao-{digest}.wav"
+    return config.OUTPUT_DIR / f"narracao-{digest}.wav"
 
 
 def speak(
@@ -124,11 +124,14 @@ def speak(
     synthesizer: SpeechSynthesizer | None = None,
     brand: str | None = None,
     lexicons: LexiconStore | None = None,
+    on_utterance: UtteranceListener | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> NarrationResult:
     """Narra `text` com a voz `voice_id` (ou uma voz automática/descrita por `instruct`) e grava o áudio.
 
     Sem `language`, vale o idioma da voz escolhida (ou português quando não há voz). A pronúncia vem do
-    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz)."""
+    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz). `on_utterance` e
+    `should_stop` repassam à narração o aviso de cada fala pronta e o pedido de parada entre falas."""
     voice = (library or VoiceLibrary()).get(voice_id) if voice_id else None
     service = NarrationService(
         synthesizer or shared_synthesizer(),
@@ -149,6 +152,8 @@ def speak(
         steps=steps,
         master=master,
         brand=brand or (voice.brand if voice else None),
+        on_utterance=on_utterance,
+        should_stop=should_stop,
     )
 
 
@@ -165,7 +170,7 @@ def preview_voice(
     library = library or VoiceLibrary()
     voice = library.get(voice_id)
     sample = text or PREVIEW_TEXTS.get(voice.language, PREVIEW_TEXTS["pt"])
-    destination = out or OUTPUT_DIR / f"voz-{voice.id}-amostra.wav"
+    destination = out or config.OUTPUT_DIR / f"voz-{voice.id}-amostra.wav"
     return speak(
         sample,
         destination,

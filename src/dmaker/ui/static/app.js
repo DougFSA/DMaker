@@ -363,7 +363,7 @@ function renderProjectList() {
 }
 
 function statusLabel(status) {
-  return { running: "Em andamento", done: "Concluído", error: "Erro" }[status] || status;
+  return { running: "Em andamento", done: "Concluído", error: "Erro", cancelled: "Parado" }[status] || status;
 }
 
 let jobsPollTimer = null;

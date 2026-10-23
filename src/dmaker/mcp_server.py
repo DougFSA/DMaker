@@ -244,6 +244,7 @@ def edit_project(name: str, op: dict) -> dict:
     description=(
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
+        "NAR narrações (duração real quando já sintetizadas, senão estimada), "
         "MUS música, CC legendas), com o intervalo de cada item já calculado."
     )
 )
@@ -251,10 +252,12 @@ def timeline_view(name: str) -> dict:
     from .pipeline.layout import project_layout
     from .pipeline.projects import load_project
     from .pipeline.timeline_view import build_timeline_view
+    from .pipeline.voiceover import view_narration_durations
 
     project = load_project(name)
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = view_narration_durations(project)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @server.tool(
@@ -472,7 +475,7 @@ def export_project(
 
 
 @server.tool(
-    description="Situação de um render em segundo plano (running | done | error) e o resultado quando pronto."
+    description="Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto."
 )
 def job_status(job_id: str) -> dict:
     job = jobs.get(job_id)

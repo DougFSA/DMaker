@@ -1,42 +1,44 @@
 ---
 name: dmaker-mapa-de-testes
-description: Monta e publica como Artifact o mapa de teste manual de uma versão do DMaker no Jira (projeto DMK): onde sentar para testar cada chamado (qual branch fazer checkout), agrupado por pilha de branch e não por PR, com o que olhar ou ouvir em cada um e uma lista de marcar que fica salva no navegador. Use sempre que o Douglas pedir "o mapa de testes", "me diz qual chamado testo em qual branch", "onde eu testo cada coisa", "gera o mapa de novo", "atualiza o mapa" ou qualquer variação de "por onde eu começo a testar o DMaker". Também serve depois de uma leva de entregas, quando ele vai começar o teste manual da versão.
+description: Monta e publica como Artifact o mapa de teste manual do DMaker a partir do Jira (projeto DMK): a lista do que testar agora na develop, ou seja, os chamados em Teste Manual, agrupados por área, com o que olhar ou ouvir em cada um e uma lista de marcar que fica salva no navegador. Tudo se testa na develop, então não há branch para fazer checkout. Use sempre que o Douglas pedir "o mapa de testes", "o que eu testo agora", "o que tem pra testar no DMaker", "gera o mapa de novo", "atualiza o mapa" ou qualquer variação de "por onde eu começo a testar o DMaker". Também serve depois de uma leva de entregas, quando ele vai começar o teste manual da versão.
 ---
 
 # Mapa de testes: DMaker
 
-Responde uma pergunta só: **onde ele senta para testar o que ainda falta.**
+Responde uma pergunta só: **o que ele tem para testar agora, e o que olhar em cada
+coisa.**
 
 Leia junto:
 
 - `.claude/skills/_comum/jira.md`: colunas, transições, consultas
-- `.claude/skills/_comum/git.md`: convenções de branch e PR empilhada
+- `.claude/skills/_comum/git.md`: o fluxo de entrega (tudo entra na `develop` na entrega)
 
 ## O que o mapa é, e o que ele não é
 
-Ele **não** é uma lista de PRs. É uma lista de **postos de teste**.
+Desde 23/10/2026 o executor mergeia o PR na `develop` ao entregar o card, e o
+Douglas testa **sempre pela `develop`**. Não há mais "qual branch fazer checkout",
+pilha de branches nem PR aberto esperando aval. O mapa deixou de ser um mapa de
+lugares e virou uma **lista do que testar na `develop` agora**.
 
-Uma pilha de sete branches é um checkout só: o topo contém as seis anteriores, e
-ele testa as sete de lá sem trocar de branch. Uma lista PR a PR faria ele
-levantar sete vezes, e é justamente o trabalho que o mapa existe para poupar. No
-DMaker a regra é cada card sair da `develop`, então quase todo posto será avulso;
-pilha aparece só quando um card depende de outro de verdade.
+Ele **não** é uma lista de PRs nem um relatório de entrega. É o roteiro de teste,
+agrupado por **área**, para ele testar de uma vez tudo que mexe na mesma parte do
+editor (uma passada pela interface de voz serve a todos os cards de voz).
 
-Quatro tipos de posto, nesta ordem:
+Os postos agora são áreas, e só têm cards em `Teste Manual`:
 
-1. **Pilhas ainda em teste**: um posto por pilha, o topo dela como lugar de sentar.
-2. **Avulsos**: chamados em `Teste Manual` que saíram direto da `develop` e não se
-   empilham. Um checkout cada, e a ordem entre eles não importa. Diga isso.
-3. **Na develop**: chamados em `Teste Manual` cujo código **já está mergeado** na
-   `develop` (voltaram do `dmaker-redesenvolvimento-develop`). Um único posto: a
-   própria `develop`. Ele não troca de branch, só atualiza.
-4. **Já aprovado**: o que ele mesmo já moveu para `Concluído` e cujo PR ainda está
-   aberto (esperando o `dmaker-merge-develop`). Entra no mapa **sem nada a
-   testar**, só para ele não procurar; some quando mergear. Card em `Concluído`
-   sem PR aberto fica de fora: já está na `develop` ou na `main`.
+1. **Uma área por posto**, pelo rótulo do card (`voz`, `dublagem`, `interface`,
+   `audio`, `render`, `testes`, `desempenho`; o prefixo do título, `Voz:`,
+   `Dublagem:`, serve de reserva). Card com dois rótulos entra na área do
+   comportamento que mais pesa e o `olhar` cita a outra.
+2. **Dentro da área**, ponha primeiro o que foi **corrigido num redesenvolvimento**
+   (ele já viu o defeito e quer confirmar o conserto), depois o resto por chave.
+3. Área sem card em `Teste Manual` não entra no mapa. Se nada está em
+   `Teste Manual`, o mapa é uma frase: "não há nada para testar", e o relatório
+   diz o que está em desenvolvimento ou em redesenvolvimento.
 
-Um posto vazio não entra. Se a versão inteira já está aprovada, o mapa é curto e
-o relatório diz isso.
+Cards em `Concluído` não aparecem (já foram testados e aprovados). Cards em
+`Redesenvolvimento`, `Em desenvolvimento`, `Backlog` ou `Aguardando Atendimento`
+não são testáveis: vão numa nota do fecho, com o status.
 
 ## 1. Pergunte a versão
 
@@ -44,57 +46,30 @@ Sempre, mesmo que uma pareça óbvia. Uma pergunta curta basta.
 
 ## 2. Levante os fatos
 
-Três fontes, e nenhuma substitui a outra.
-
 **Jira**, para saber o que ainda se testa:
 
 ```
 project = DMK AND fixVersion = "<versão>" ORDER BY key ASC
 ```
 
-Guarde chave, título e **status**. É o status que separa os postos: `Teste
-Manual` vai para os postos de teste (pilha, avulso ou develop, conforme o PR);
-`Concluído` com PR aberto vai para o posto de aprovados; `Concluído` sem PR aberto
-fica de fora, com uma exceção, abaixo. Card em `Redesenvolvimento`,
-`Em desenvolvimento`, `Backlog` ou `Aguardando Atendimento` não é testável: não
-entra num posto, vai numa nota do fecho dizendo o status.
+Guarde chave, título, rótulos e **status**. `Teste Manual` (id 10075) é o que vai
+para os postos.
 
-**GitHub**, para as PRs e as bases:
-
-```bash
-gh pr list --state open --limit 60 --json number,title,headRefName,baseRefName
-```
-
-Para cada card em `Teste Manual`, descubra se o PR está aberto ou se o código já
-está na `develop` (`git log --oneline origin/develop | grep -i DMK-XXX`): isso
-decide entre os postos "pilha/avulso" e "na develop".
-
-**O git**, para a ancestralidade, e este é o passo que não se pula.
-
-### Confirme a pilha por ancestralidade, nunca pela base da PR
-
-A base de uma PR diz o que alguém *pretendia*. `git merge-base` diz o que a
-branch **contém**. Os dois divergem toda vez que uma PR do meio da pilha é
-mergeada e o GitHub re-aponta as bases, e o mapa que confia na base manda ele
-testar de um lugar que não tem o código.
+**O git**, para confirmar que o que o Jira diz está de fato na `develop`:
 
 ```bash
 git fetch -q origin
-git merge-base --is-ancestor origin/<branch-de-baixo> origin/<branch-do-topo> \
-  && echo contido || echo FALTA
+git log --oneline origin/develop | grep -i DMK-XXX
 ```
 
-Rode para **cada** branch da pilha contra o topo candidato. Um "FALTA" quebra a
-premissa do posto: ou o topo é outro, ou aquele chamado vira avulso. Nunca
-publique um posto de pilha sem ter rodado isto.
+(case-insensitive: há commits com a chave em minúsculas). Card em `Teste Manual`
+**sem** commit na `develop` é anomalia, não é testável: não entra num posto; diga
+no relatório (a entrega não mergeou, ou o merge se perdeu).
 
-Confirme também se duas pilhas se cruzam. Quando não se cruzam, diga no mapa que
-são independentes: é o que autoriza ele a testar as duas em qualquer ordem.
-
-**A prova de que o PR está pronto**, por último. Não há CI, então
-`gh pr checks` vem vazio e não prova nada. O que vale é o comentário de entrega do
-card trazer a validação técnica (`ruff` e `pytest` com contagem). Entrega sem isso
-não entra como testável: diga no relatório e mande consertar antes.
+**A prova de que o card está pronto para testar.** Não há CI, então o que vale é o
+comentário de entrega do card trazer a validação técnica (`ruff` e `pytest` com
+contagem) e o commit de merge. Entrega sem isso não entra como testável: diga no
+relatório.
 
 ## 3. Escreva o "o que olhar"
 
@@ -109,26 +84,25 @@ couber, **como testar**: o comando (`dmaker ui`, `dmaker render <projeto>
 --preview`, `dmaker voice ...`) e o arquivo de exemplo em `output/`, se o
 comentário de entrega apontar um.
 
-O posto de sentar ganha também a receita de preparo, no `nota` do posto:
+O mapa tem **um** preparo, que vale para todos os postos, e vai no `lede`:
 
 ```
-git checkout <branch>      # o topo da pilha, ou o branch do avulso, ou develop
-git pull                   # se for a develop
-pip install -e .           # só se o card mudou dependência (pyproject.toml)
+git checkout develop && git pull
+pip install -e .           # só se algum card mudou dependência (pyproject.toml)
 dmaker ui                  # ou a CLI do card
 ```
 
 Lembre: `projects/`, `output/`, `cache/` e `assets/voices/` não são versionados,
-então sobrevivem à troca de branch. Se o card mexeu na receita do mezanino, o
-cache se renova sozinho (`MEZZ_VERSION`), mas o primeiro render é mais lento.
+então sobrevivem à atualização da `develop`. Se algum card mexeu na receita do
+mezanino, o cache se renova sozinho (`MEZZ_VERSION`), mas o primeiro render é mais
+lento.
 
 Marque com `selo` o que merece atenção fora do normal:
 
-- chamado corrigido depois que ele já tinha visto;
+- chamado corrigido depois que ele já tinha visto (`corrigido`);
 - chamado que exige instalação (extra do pip, modelo que baixa na primeira vez);
-- card `Concluído` cujo conteúdo foi reescrito depois por outro card: este é o
-  caso que justifica trazer um concluído de volta para o mapa, com o selo
-  dizendo por quê.
+- chamado cuja área foi mexida por **outro** card da mesma leva: é onde os
+  defeitos de integração aparecem, e o selo diz qual era o outro.
 
 ## 4. Preencha o template
 
@@ -139,36 +113,36 @@ próprio arquivo. Mapa da v1 e mapa da v3 têm que parecer a mesma página.
 ```js
 const DADOS = {
   versao: '1',
-  titulo: 'Onde sentar para testar o que falta',
-  lede: 'Duas ou três linhas dizendo como a versão está dividida.',
+  titulo: 'O que testar na develop',
+  lede: 'Tudo está na `develop`: rode `git checkout develop && git pull` e teste por área.',
   placar: [
     { valor: '8', rotulo: 'a testar', tom: 'teal', id: 'restam' },
-    { valor: '3', rotulo: 'já em Concluído', tom: 'done' },
-    { valor: '9', rotulo: 'PRs abertas' },
+    { valor: '3', rotulo: 'áreas' },
   ],
   postos: [
     {
-      titulo: 'Pilha da dublagem',
-      modo: 'Um checkout, três chamados',
-      estilo: 'pilha',            // 'pilha' | 'avulso' | 'pronto'
-      nota: 'Confirmei por ancestralidade: o branch abaixo contém os dois anteriores.',
-      onde: { rotulo: 'Sente em', branch: 'feat/dmk-14-dublagem-...', pr: 12 },
+      titulo: 'Dublagem',
+      modo: '3 chamados',
+      estilo: 'pilha',            // 'pilha' (destaque) | 'avulso' | 'pronto'
+      nota: 'Uma passada pela tela de dublagem serve aos três.',
+      // `onde` é opcional: omita (a `develop` já está no lede). Use só se um
+      // chamado exigir um lugar diferente.
       itens: [
         {
           chave: 'DMK-12',
           titulo: 'Dublagem: troca a voz mantendo o ritmo',
           olhar: 'Gere a dublagem e compare a duração de cada trecho com o original.',
-          selo: null,             // ou 'corrigido hoje', 'baixa um modelo'...
-          pr: null,               // só nos avulsos; na pilha o PR está em `onde`
-          contaComoTeste: true,   // false no posto de aprovados
+          selo: null,             // ou 'corrigido', 'baixa um modelo'...
+          pr: 12,                 // PR já mergeado (link de registro)
+          contaComoTeste: true,
         },
       ],
     },
   ],
-  tituloFecho: 'Na hora de mergear',
-  avisos: ['**O CHANGELOG vai conflitar.** ...'],
+  tituloFecho: 'Para lembrar',
+  avisos: ['**Atualize a `develop` antes de cada sessão**: ela recebe entregas o tempo todo.'],
   notas: ['**DMK-20** ainda não foi desenvolvido.'],
-  assinatura: 'Pilhas conferidas por ancestralidade de commit, não por leitura das PRs.',
+  assinatura: 'Cada chamado conferido no log da `develop`; o que não estava lá ficou de fora.',
 };
 ```
 
@@ -198,18 +172,20 @@ não estiver nesta conversa, ache com `action: "list"` antes de publicar.
 
 No chat, não repita o mapa. Diga só:
 
-- o que mudou desde o último mapa (o que ele já aprovou é a mudança mais comum);
-- em quantos lugares ele precisa sentar, e quais;
+- o que mudou desde o último mapa (o que ele já aprovou e o que chegou novo são as
+  mudanças mais comuns);
+- quantas áreas e quantos chamados ele tem para testar;
 - os um ou dois itens que merecem ser os primeiros, com o motivo;
-- o que ficou de fora da versão e continua pendente.
+- o que ficou de fora da versão e continua pendente, e qualquer anomalia (card em
+  `Teste Manual` sem commit na `develop`).
 
 ## Delegação
 
-Levantar Jira, PRs e estado de merge é trabalho de `dmaker-apurador`, e ler o
+Levantar Jira e conferir o log da `develop` é trabalho de `dmaker-apurador`, e ler o
 comentário de entrega de cada card para escrever o "o que olhar" é o que mais pesa
 quando a versão tem mais de oito chamados. Peça a ele, por card: chave, título,
-status, PR (e se está aberto), e **duas linhas do comentário de entrega, com o que
-testar** e o comando ou arquivo de exemplo.
+rótulos, status, o commit na `develop` (ou a ausência), e **duas linhas do
+comentário de entrega, com o que testar** e o comando ou arquivo de exemplo.
 
-A ancestralidade, a montagem dos postos e o texto do mapa ficam com você: é onde
-o mapa acerta ou erra.
+O agrupamento por área, a ordem e o texto do mapa ficam com você: é onde o mapa
+acerta ou erra.

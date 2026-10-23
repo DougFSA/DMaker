@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import CACHE_DIR
+from .. import config
 from ..domain.spec import Project
 from ..media.audiosync import SyncResult, sync_offset, sync_offset_near
 from ..media.ffmpeg import FFmpegRunner
@@ -43,7 +43,7 @@ class _FfmpegLinks:
 
 
 def ffmpeg_offset_finder(runner: FFmpegRunner) -> OffsetFinder:
-    return _FfmpegLinks(runner, CACHE_DIR / "audio" / "sync")
+    return _FfmpegLinks(runner, config.CACHE_DIR / "audio" / "sync")
 
 
 @dataclass(frozen=True)

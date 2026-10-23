@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from dmaker.media.ffmpeg import RecordingRunner
-from dmaker.pipeline.narration import NarrationService, cue_timeline
+from dmaker.pipeline.narration import NarrationCancelled, NarrationService, cue_timeline
 from dmaker.voice.library import VoiceLibrary
 from dmaker.voice.pronunciation import Lexicon
 from dmaker.voice.script import Utterance
@@ -300,3 +300,68 @@ def test_plan_reports_each_utterance_size_and_whether_it_is_already_cached(tmp_p
     assert not any(p.cached for p in service.plan(TEXT, voice=None, speed=1.2))
     assert not any(p.cached for p in service.plan(TEXT, voice=None, steps=8))
     assert len(synthesizer.requests) == 3  # e o plano continua sem sintetizar
+
+
+def test_on_utterance_reports_each_ready_utterance_in_order_with_its_pause(tmp_path):
+    ready: list[tuple[int, int, Path, float, float]] = []
+    service, synthesizer, _ = _service(tmp_path)
+    result = service.render(
+        TEXT, tmp_path / "a.wav", voice=None, on_utterance=lambda *args: ready.append(args)
+    )
+
+    assert [(i, n) for i, n, *_ in ready] == [(1, 3), (2, 3), (3, 3)]
+    assert [pause for *_, pause in ready] == [0.35, 0.7, 0.0]
+    assert all(path.parent == tmp_path / "cache" and path.exists() for _, _, path, _, _ in ready)
+    assert [round(duration, 2) for *_, duration, _ in ready] == [round(e - s, 2) for s, e, _ in result.cues]
+
+
+def test_on_utterance_also_reports_utterances_that_were_already_cached(tmp_path):
+    service, synthesizer, _ = _service(tmp_path)
+    service.render(TEXT, tmp_path / "a.wav", voice=None)
+    ready: list[int] = []
+    service.render(TEXT, tmp_path / "b.wav", voice=None, on_utterance=lambda i, *_: ready.append(i))
+    assert ready == [1, 2, 3] and len(synthesizer.requests) == 3
+
+
+def test_utterance_is_reported_before_the_next_one_is_synthesized(tmp_path):
+    """É isso que deixa tocar a fala 1 enquanto a 2 ainda está sendo gerada."""
+    synthesizer = FakeSynthesizer()
+    calls_when_reported: list[int] = []
+    service, _, _ = _service(tmp_path, synthesizer)
+    service.render(
+        TEXT,
+        tmp_path / "a.wav",
+        voice=None,
+        on_utterance=lambda *_: calls_when_reported.append(len(synthesizer.requests)),
+    )
+    assert calls_when_reported == [1, 2, 3]
+
+
+def test_should_stop_cancels_between_utterances_keeping_the_ready_ones_in_the_cache(tmp_path):
+    service, synthesizer, runner = _service(tmp_path)
+    ready: list[int] = []
+
+    def on_utterance(index, *_):
+        ready.append(index)
+
+    with pytest.raises(NarrationCancelled) as stop:
+        service.render(
+            TEXT,
+            tmp_path / "a.wav",
+            voice=None,
+            on_utterance=on_utterance,
+            should_stop=lambda: len(ready) >= 2,
+        )
+    assert (stop.value.ready, stop.value.total) == (2, 3)
+    assert len(synthesizer.requests) == 2 and runner.commands == []  # nem o arquivo final foi montado
+    assert not (tmp_path / "a.wav").exists()
+
+    service.render(TEXT, tmp_path / "b.wav", voice=None)  # gerar de novo só sintetiza o que faltava
+    assert len(synthesizer.requests) == 3
+
+
+def test_should_stop_before_the_first_utterance_synthesizes_nothing(tmp_path):
+    service, synthesizer, _ = _service(tmp_path)
+    with pytest.raises(NarrationCancelled) as stop:
+        service.render(TEXT, tmp_path / "a.wav", voice=None, should_stop=lambda: True)
+    assert stop.value.ready == 0 and synthesizer.requests == []

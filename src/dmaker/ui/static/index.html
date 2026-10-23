@@ -439,6 +439,14 @@
                     <div class="progress-bar-track"><div class="progress-bar-fill" id="voice-progress-fill"></div></div>
                     <div class="progress-bar-label" id="voice-progress-label"></div>
                     <div class="hint-text">Na CPU a síntese é lenta: cada segundo de áudio leva dezenas de segundos. Falas repetidas saem do cache.</div>
+                    <div class="add-row">
+                      <button type="button" class="btn btn-small btn-danger" id="voice-stop" title="Para depois da fala que está sendo gerada; o que já ficou pronto continua guardado">Parar</button>
+                    </div>
+                  </div>
+                  <div class="voice-live" id="voice-live" hidden>
+                    <div class="voice-live-status" id="voice-live-status" role="status" aria-live="polite"></div>
+                    <div class="hint-text">Prévia ao vivo: cada fala toca assim que fica pronta e é a fala crua, sem o acabamento final. O arquivo final, com acabamento broadcast, aparece abaixo quando o roteiro terminar.</div>
+                    <button type="button" class="btn btn-small" id="voice-live-mute" title="Silencia a prévia ao vivo; não interrompe a geração">Silenciar prévia</button>
                   </div>
                   <div class="voice-result" id="voice-result" hidden>
                     <audio id="voice-result-audio" class="voice-audio" controls></audio>

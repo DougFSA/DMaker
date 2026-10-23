@@ -18,7 +18,7 @@ runner = CliRunner()
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", tmp_path / "voices")
+    monkeypatch.setattr("dmaker.config.VOICES_DIR", tmp_path / "voices")
 
 
 def invoke(*args: str):

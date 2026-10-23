@@ -362,6 +362,7 @@ h2 {
 .job-status-running { background: #2A4A50; color: var(--mint); }
 .job-status-done { background: var(--success-bg); color: var(--success); }
 .job-status-error { background: var(--danger-bg); color: var(--danger); }
+.job-status-cancelled { background: var(--panel-alt); color: var(--text-muted); }
 
 .mini-bar-track {
   height: 5px;
@@ -1635,6 +1636,12 @@ h2 {
 .tl-item-clip-audio { background: #244A55; }
 .tl-item-track { background: #24555A; }
 .tl-item-music { background: #245A4E; }
+.tl-item-narration { background: #6B3F73; }
+/* duração só estimada (a fala ainda não foi sintetizada): borda tracejada; a real fica com a borda cheia */
+.tl-item-narration.tl-item-estimated {
+  border: 1px dashed var(--mint);
+  background: rgba(107, 63, 115, 0.55);
+}
 .tl-item-captions { background: #555; }
 .tl-item-progress-bar { background: #3A3A3A; }
 .tl-item-other { background: var(--teal); }
@@ -2065,6 +2072,18 @@ h2 {
 
 .voice-progress .progress-bar-label {
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-live {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  background: var(--panel-alt);
+  border-radius: 4px;
+}
+
+.voice-live-status {
   font-variant-numeric: tabular-nums;
 }
 

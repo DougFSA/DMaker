@@ -7,7 +7,7 @@ import json
 import sys
 
 from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.stdio import StdioServerParameters, get_default_environment, stdio_client
 
 from dmaker import config
 
@@ -15,8 +15,12 @@ from .conftest import requires_ffmpeg
 
 
 async def _session(fn):
+    # o servidor é outro processo: sem a pasta de dados do teste ele gravaria em projects/ e cache/ reais
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "dmaker.mcp_server"], cwd=str(config.ROOT)
+        command=sys.executable,
+        args=["-m", "dmaker.mcp_server"],
+        cwd=str(config.ROOT),
+        env={**get_default_environment(), "DMAKER_DATA_DIR": str(config.DATA_DIR)},
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -392,7 +396,7 @@ def test_synthesize_speech_runs_as_a_job(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: library)
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
     monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "cache")
 
     started = mcp_server.synthesize_speech(
         "Esta é a primeira frase longa. Esta é a segunda frase longa.",
@@ -482,7 +486,7 @@ def test_synthesize_speech_uses_the_pronunciation_of_the_brand(monkeypatch, tmp_
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
     monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "cache")
 
     started = mcp_server.synthesize_speech(
         "O DMaker é da MedlyCare. Veja [[Samanta|Samanta]] aqui.", out=str(out), brand="medlycare"
@@ -533,7 +537,7 @@ def test_synthesize_speech_in_english_does_not_use_the_portuguese_pronunciation(
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
     monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "cache")
 
     started = mcp_server.synthesize_speech("Meet the DMaker app today.", out=str(out), language="en")
     mcp_server.jobs.wait(mcp_server.jobs.get(started["job_id"]), 30)
