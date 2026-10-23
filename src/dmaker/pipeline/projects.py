@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import PROJECTS_DIR
+from .. import config
 from ..domain.brand import Theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import (
@@ -36,7 +36,7 @@ def project_path(name_or_path: str | Path) -> Path:
     p = Path(name_or_path)
     if p.suffix == ".json":
         return p
-    return PROJECTS_DIR / str(name_or_path) / "spec.json"
+    return config.PROJECTS_DIR / str(name_or_path) / "spec.json"
 
 
 def parse_segments(value: str | None) -> tuple[int, int] | None:
@@ -55,7 +55,7 @@ def load_project(name_or_path: str | Path) -> Project:
 
 
 def save_project(project: Project, folder: Path | None = None) -> Path:
-    folder = folder or PROJECTS_DIR / project.name
+    folder = folder or config.PROJECTS_DIR / project.name
     path = project.save(folder / "spec.json")
     project.base_dir = folder.resolve()
     return path

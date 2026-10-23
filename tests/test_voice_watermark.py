@@ -239,7 +239,7 @@ def test_speak_turns_the_watermark_off_with_the_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr(voices, "default_watermarker", fake_default)
     runner = RecordingRunner(on_run=lambda command: Path(command.args[-1]).write_bytes(b"audio"))
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
 
     for flag in (True, False):
         voices.speak(

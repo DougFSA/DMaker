@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from ..config import MODELS_DIR
+from .. import config
 from ..media.cpu import compute_threads
 
 logger = logging.getLogger("dmaker.voice.watermark")
@@ -184,7 +184,7 @@ class AudioSealWatermarker:
         from audioseal import AudioSeal
 
         torch.set_num_threads(self.threads or compute_threads())
-        with _model_cache((self.models_dir or MODELS_DIR).resolve()):
+        with _model_cache((self.models_dir or config.MODELS_DIR).resolve()):
             model = getattr(AudioSeal, loader_name)(card)
         return model.eval()
 
