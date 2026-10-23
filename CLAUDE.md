@@ -9,6 +9,8 @@ Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 e
 - Fluxo de trabalho pelo Jira (projeto DMK): cada chamado sai da `develop` num branch `feat/dmk-XXX-slug` ou `fix/dmk-XXX-slug` e entra por PR; nunca commit direto na `develop` nem na `main`. Skills em `.claude/skills/`: `dmaker-rodada` (chamados novos), `dmaker-redesenvolvimento` (reprovados com PR aberto), `dmaker-redesenvolvimento-develop` (reprovados já mergeados), `dmaker-merge-develop` (aprovados), `dmaker-producao` (release e tag), `dmaker-mapa-de-testes` e `dmaker-catalogo-funcionalidades`. Regras comuns em `.claude/skills/_comum/`; agentes `dmaker-apurador` e `dmaker-executor` em `.claude/agents/`.
 - Sem CI: ruff e pytest locais são o último portão antes do PR. O `CHANGELOG.md` registra o que entra (bloco `[Não lançado]`, uma linha `DMK-xxx` por chamado novo).
 
+- Interface nova (Vue 3 + Vite + TypeScript, pasta `frontend/`, só consome a API de `ui/server.py`): em `frontend/`, `npm run lint`, `npm run typecheck`, `npm run test` e `npm run build` (gera `src/dmaker/ui/dist/`, fora do git; o release roda o build). Com o `dist`, `dmaker ui` serve a nova em `/` e a clássica (HTML/JS puro em `ui/static/`) em `/classica`.
+
 ## Arquitetura (pacotes por responsabilidade)
 
 ```

@@ -14,10 +14,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, config
 from ..domain.brand import available_brands, load_theme
@@ -32,6 +34,9 @@ from .speech_routes import build_speech_router
 from .voice_routes import build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
+CLASSIC_INDEX = STATIC_DIR / "index.html"
+# saída do `npm run build` em frontend/ (artefato de build: fora do git, dentro do pacote no release)
+DIST_DIR = Path(__file__).parent / "dist"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
@@ -890,15 +895,65 @@ def delete_layout(name: str) -> dict:
 
 
 # ---------- frontend ----------
+# A interface nova (Vue, pasta frontend/) é compilada para DIST_DIR e atende em "/" quando existir. A
+# anterior (HTML/JS puro em static/) continua inteira em "/classica" e volta a atender "/" se o build
+# não foi feito, para nunca haver um dia sem interface. O DIST_DIR é conferido a cada pedido, não na
+# importação: gerar o build com o servidor no ar já vale sem reiniciar.
+
+
+def _dist_index() -> Path | None:
+    index_file = DIST_DIR / "index.html"
+    return index_file if index_file.is_file() else None
+
+
+def _dist_file(relative: str) -> Path | None:
+    """Arquivo do build pedido pela URL, ou None se não existe ou tenta sair do DIST_DIR (../)."""
+    candidate = (DIST_DIR / relative).resolve()
+    try:
+        candidate.relative_to(DIST_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(_dist_index() or CLASSIC_INDEX)
+
+
+@app.get("/classica")
+def classic_index() -> FileResponse:
+    return FileResponse(CLASSIC_INDEX)
 
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _frontend_response(url_path: str) -> FileResponse | None:
+    """Arquivo do build (/assets/..., favicon) ou, para rota sem extensão, o index.html da interface nova
+    (o Vue Router resolve /projetos, /saidas etc. no navegador). None quando não é assunto do front."""
+    index_file = _dist_index()
+    path = url_path.lstrip("/")
+    if index_file is None or path.startswith(("api/", "static/")):
+        return None
+    built = _dist_file(path)
+    if built is not None:
+        return FileResponse(built)
+    if Path(path).suffix:  # arquivo inexistente (ex.: um .js antigo): 404 de verdade, não a página
+        return None
+    return FileResponse(index_file)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def frontend_fallback(request: Request, exc: StarletteHTTPException) -> Response:
+    """Só um GET sem rota vira a interface nova. Tratar o 404 aqui, em vez de registrar uma rota
+    "/{path}" que pega tudo, deixa o roteamento da API intacto (405 continua 405, 404 continua 404)."""
+    if exc.status_code == 404 and request.method in ("GET", "HEAD"):
+        response = _frontend_response(request.url.path)
+        if response is not None:
+            return response
+    return await http_exception_handler(request, exc)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:

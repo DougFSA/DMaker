@@ -29,6 +29,25 @@ O `pytest` leva **cerca de 5 minutos**: a integração renderiza com ffmpeg de
 verdade e o servidor MCP sobe por stdio. Isso não é lentidão a contornar, é o que
 faz o teste valer.
 
+### Portões do front (pasta `frontend/`, interface Vue)
+
+Mexeu em `frontend/`? Rode também estes quatro, de dentro da pasta (`cd frontend`),
+e todos precisam passar, **além** dos três do Python acima:
+
+```powershell
+npm run lint        # eslint, sem avisos
+npm run typecheck   # vue-tsc em modo strict
+npm run test        # vitest: cliente da API, stores e componentes
+npm run build       # gera src/dmaker/ui/dist/ (artefato, fora do git)
+```
+
+A primeira vez, `npm ci` instala as dependências (versões fixas no
+`package-lock.json`). O `dist` não é commitado: quem lança a versão roda o build
+(`dmaker-producao`, seção "Depois do release"). Com o `dist` presente, `dmaker ui`
+serve a interface nova em `/` e a clássica em `/classica`; sem ele, a clássica
+continua em `/`. Para ver a tela ao vivo, `npm run dev` (porta 5174, com proxy de
+`/api` para o `dmaker ui`; troque o destino com `DMAKER_API`).
+
 ### Rode os portões em PRIMEIRO PLANO
 
 Nunca dispare o `pytest` (nem `ruff`, nem `gh pr checks`) em segundo plano e

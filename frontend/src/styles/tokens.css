@@ -1,0 +1,131 @@
+/* Tokens do visual do DMaker (referência: ZeBeyond, Phenomenon Studio).
+   Paleta do shot: fundo #010704, verde escuro #39594D, menta #E8F1ED, cinza esverdeado #A1B8B2,
+   ardósia #68708B, acentos #08DF9C, #18D770 e #59B99B. Os componentes só usam os papéis semânticos
+   (--color-bg, --color-text...), nunca a cor crua, para o tema claro ser só outra tabela de valores. */
+
+:root {
+  /* paleta crua: ponto de partida dos dois temas */
+  --palette-ink: #010704;
+  --palette-forest: #39594d;
+  --palette-mint: #e8f1ed;
+  --palette-sage: #a1b8b2;
+  --palette-slate: #68708b;
+  --palette-neon: #08df9c;
+  --palette-green: #18d770;
+  --palette-jade: #59b99b;
+
+  /* espaçamento (escala de 4 px) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* raios */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  /* tipografia */
+  --font-sans: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  /* medidas do layout */
+  --sidebar-width: 15.5rem;
+  --sidebar-width-collapsed: 4.75rem;
+  --topbar-height: 4rem;
+
+  --transition: 160ms ease;
+}
+
+/* tema escuro: padrão */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-bg: var(--palette-ink);
+  --color-bg-soft: #04100b;
+  --color-surface: #08130d;
+  --color-surface-raised: #0d1c15;
+  --color-surface-hover: #12261c;
+  --color-border: rgb(57 89 77 / 0.5);
+  --color-border-strong: var(--palette-forest);
+
+  --color-text: var(--palette-mint);
+  --color-text-soft: var(--palette-sage);
+  --color-text-muted: #8a93ad; /* ardósia clareada: #68708b sozinha não passa de 4,5:1 sobre o fundo escuro */
+
+  --color-accent: var(--palette-neon);
+  --color-accent-strong: var(--palette-green);
+  --color-accent-soft: var(--palette-jade);
+  --color-accent-text: var(--palette-neon); /* acento usado como cor de texto/ícone */
+  --color-on-accent: var(--palette-ink); /* texto sobre fundo de acento */
+  --color-accent-bg: rgb(8 223 156 / 0.12);
+
+  --color-success: var(--palette-green);
+  --color-success-bg: rgb(24 215 112 / 0.14);
+  --color-warning: #f2c14e;
+  --color-warning-bg: rgb(242 193 78 / 0.14);
+  --color-error: #ff7a7a;
+  --color-error-bg: rgb(255 122 122 / 0.14);
+  --color-info: #8fa3ff;
+  --color-info-bg: rgb(143 163 255 / 0.14);
+
+  --color-overlay: rgb(1 7 4 / 0.72);
+  --color-focus: var(--palette-neon);
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.6);
+  --glow-accent: 0 0 0 1px rgb(8 223 156 / 0.35), 0 8px 32px rgb(8 223 156 / 0.12);
+}
+
+/* tema claro: derivado dos mesmos tokens (menta como fundo, tinta como texto) */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-bg: #f1f6f3;
+  --color-bg-soft: #e8f1ed;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-hover: #e8f1ed;
+  --color-border: #cddcd5;
+  --color-border-strong: var(--palette-jade);
+
+  --color-text: #06170f;
+  --color-text-soft: var(--palette-forest);
+  --color-text-muted: #5b6380;
+
+  --color-accent: var(--palette-neon);
+  --color-accent-strong: #0bbf7c;
+  --color-accent-soft: var(--palette-jade);
+  --color-accent-text: #0a7a56; /* o neon não tem contraste como texto sobre branco */
+  --color-on-accent: var(--palette-ink);
+  --color-accent-bg: rgb(8 223 156 / 0.16);
+
+  --color-success: #0a7a45;
+  --color-success-bg: rgb(24 215 112 / 0.16);
+  --color-warning: #8a5a00;
+  --color-warning-bg: rgb(242 193 78 / 0.28);
+  --color-error: #b3261e;
+  --color-error-bg: rgb(255 122 122 / 0.2);
+  --color-info: #3d4fb3;
+  --color-info-bg: rgb(143 163 255 / 0.22);
+
+  --color-overlay: rgb(6 23 15 / 0.45);
+  --color-focus: #0a7a56;
+
+  --shadow-sm: 0 1px 2px rgb(6 23 15 / 0.08);
+  --shadow-md: 0 8px 24px rgb(6 23 15 / 0.1);
+  --shadow-lg: 0 24px 64px rgb(6 23 15 / 0.18);
+  --glow-accent: 0 0 0 1px rgb(10 122 86 / 0.3), 0 8px 24px rgb(8 223 156 / 0.18);
+}
