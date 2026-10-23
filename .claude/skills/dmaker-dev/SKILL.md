@@ -7,6 +7,12 @@ description: Desenvolvimento no DMaker com economia de tokens: o Opus (sessão p
 
 Objetivo: entregar features/bugs do DMaker (`D:\DMaker`) gastando poucos tokens na sessão principal. O Opus entende o pedido, planeja com precisão e revisa; agentes **Sonnet** escrevem o código e os testes. Os padrões de `D:\DMaker\CLAUDE.md` valem para todos (SOLID, injeção de dependência, testes junto de cada mudança, código limpo em português/inglês, ruff + pytest verdes).
 
+## Relação com o fluxo do Jira
+
+Trabalho que é de um chamado do projeto DMK entra pelas skills de fluxo: `dmaker-rodada` (chamados novos) e `dmaker-redesenvolvimento` / `dmaker-redesenvolvimento-develop` (reprovados no teste manual). Elas usam os agentes `dmaker-executor` e `dmaker-apurador` e as regras de `.claude/skills/_comum/` (git, Jira, qualidade).
+
+`dmaker-dev` serve para **pedidos avulsos**, sem chamado, e para o **planejamento de cada card**: o formato de plano abaixo é o esqueleto do briefing que a rodada manda ao executor. O princípio é o mesmo (Opus planeja e revisa, Sonnet implementa).
+
 ## Regras de economia
 
 - A sessão principal **não lê arquivos grandes inteiros** para planejar: usa `Grep`/`Glob` e lê só os trechos necessários. A exploração ampla é do agente.
@@ -21,7 +27,7 @@ Objetivo: entregar features/bugs do DMaker (`D:\DMaker`) gastando poucos tokens 
 2. **Planejar** (Opus): localizar os pontos de mudança com Grep/Glob; escrever o plano no formato abaixo. Para bug: primeiro o teste que reproduz.
 3. **Implementar** (Sonnet): `Agent` com `model: "sonnet"`, `subagent_type: "general-purpose"`, prompt = template abaixo preenchido. Para várias tarefas independentes, vários agentes em paralelo.
 4. **Verificar** (Opus): rodar `.venv\Scripts\ruff check src tests`, `.venv\Scripts\ruff format --check src tests` e `.venv\Scripts\python -m pytest -q` (o agente já rodou; a sessão confirma). Ler `git diff --stat` e os trechos críticos (novas interfaces, mudanças em `pipeline/`, `filtergraph/`, `spec.py`). Se algo estiver errado: mandar o ajuste ao **mesmo agente** por `SendMessage` (mantém o contexto), não abrir outro.
-5. **Entregar** (Opus): resumo de 5 a 10 linhas: o que mudou, arquivos, testes novos, o que ficou de fora. Commit só se o usuário pedir (mensagem em português com o `Co-Authored-By` da sessão).
+5. **Entregar** (Opus): resumo de 5 a 10 linhas: o que mudou, arquivos, testes novos, o que ficou de fora. Commit só se o usuário pedir (mensagem em português com o `Co-Authored-By` da sessão). Mesmo avulso, **nada vai direto na `main` nem na `develop`**: o trabalho sai num branch da `develop` (`feat/...` ou `fix/...`, sem chave de card se não houver) e entra por PR, a menos que o Douglas peça outra coisa. Convenções em `.claude/skills/_comum/git.md`.
 
 ## Formato do plano
 
