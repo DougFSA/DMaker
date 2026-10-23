@@ -20,7 +20,7 @@ from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
 from ..voice.router import RoutingSynthesizer
 from ..voice.synth import OmniVoiceSynthesizer, SpeechSynthesizer
-from .narration import DEFAULT_STEPS, NarrationResult, NarrationService
+from .narration import DEFAULT_STEPS, NarrationResult, NarrationService, UtteranceListener
 
 PREVIEW_TEXTS = {
     "pt": "Olá, esta é a minha voz. Assim eu soo ao narrar o seu vídeo, com calma e clareza.",
@@ -124,11 +124,14 @@ def speak(
     synthesizer: SpeechSynthesizer | None = None,
     brand: str | None = None,
     lexicons: LexiconStore | None = None,
+    on_utterance: UtteranceListener | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> NarrationResult:
     """Narra `text` com a voz `voice_id` (ou uma voz automática/descrita por `instruct`) e grava o áudio.
 
     Sem `language`, vale o idioma da voz escolhida (ou português quando não há voz). A pronúncia vem do
-    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz)."""
+    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz). `on_utterance` e
+    `should_stop` repassam à narração o aviso de cada fala pronta e o pedido de parada entre falas."""
     voice = (library or VoiceLibrary()).get(voice_id) if voice_id else None
     service = NarrationService(
         synthesizer or shared_synthesizer(),
@@ -149,6 +152,8 @@ def speak(
         steps=steps,
         master=master,
         brand=brand or (voice.brand if voice else None),
+        on_utterance=on_utterance,
+        should_stop=should_stop,
     )
 
 

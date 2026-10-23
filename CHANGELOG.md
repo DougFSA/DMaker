@@ -34,6 +34,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
+
 ---
 
 ## Linha de base — 2026-10-22
