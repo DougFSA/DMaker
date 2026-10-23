@@ -1494,17 +1494,26 @@ dub_app = typer.Typer(
 )
 app.add_typer(dub_app, name="dub")
 
-SPEAKER_MODES = ("per_segment", "single")
+SPEAKER_MODES = ("per_speaker", "per_segment", "single")
+SPEAKER_HELP = (
+    "per_speaker (padrão: separa quem fala e usa uma voz clonada por pessoa), per_segment (clona a voz de "
+    "cada fala) ou single (um clone para o arquivo)."
+)
+SPEAKERS_HELP = (
+    "Quantas pessoas falam (força a separação de falantes; sem isso o áudio decide). Só no modo per_speaker."
+)
 
 
 def _print_segments(project) -> None:
     from rich.markup import escape
 
-    table = Table("fala", "tempo", "original", "tradução", "trava")
+    with_speakers = len(project.speakers) > 1
+    table = Table("fala", "tempo", *(["falante"] if with_speakers else []), "original", "tradução", "trava")
     for s in project.segments:
         table.add_row(
             s.id,
             f"{s.start:.1f} a {s.end:.1f}",
+            *([escape(s.speaker or "")] if with_speakers else []),
             escape(s.source_text),
             escape(s.text),
             "sim" if s.locked else "",
@@ -1542,16 +1551,17 @@ def _prepare_dub(
     file: Path,
     target: str,
     source: str,
-    speaker: str,
+    speaker: str | None,
     voice: str | None,
     keep_original: float | None,
     glossary: list[str] | None,
     brand: str | None,
     project_path: Path | None,
+    num_speakers: int | None = None,
 ) -> tuple:
     from .pipeline.dubbing import default_project_path
 
-    if speaker not in SPEAKER_MODES:
+    if speaker is not None and speaker not in SPEAKER_MODES:
         _fail(f"Modo de falante {speaker!r} inválido; use {' ou '.join(SPEAKER_MODES)}.")
     path = project_path or default_project_path(file, target)
     project = service.prepare(
@@ -1564,6 +1574,7 @@ def _prepare_dub(
         glossary=glossary or [],
         brand=brand,
         project_path=path,
+        num_speakers=num_speakers,
     )
     return project, path
 
@@ -1573,9 +1584,8 @@ def dub_prepare(
     file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
     target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
     source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
-    speaker: Annotated[
-        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
-    ] = "per_segment",
+    speaker: Annotated[str | None, typer.Option(help=SPEAKER_HELP)] = None,
+    speakers: Annotated[int | None, typer.Option("--speakers", min=1, help=SPEAKERS_HELP)] = None,
     voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
     keep_original: Annotated[
         float | None,
@@ -1604,7 +1614,7 @@ def dub_prepare(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+            service, file, target, source, speaker, voice, keep_original, glossary, brand, project, speakers
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
@@ -1664,9 +1674,8 @@ def dub_run(
     file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
     target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
     source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
-    speaker: Annotated[
-        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
-    ] = "per_segment",
+    speaker: Annotated[str | None, typer.Option(help=SPEAKER_HELP)] = None,
+    speakers: Annotated[int | None, typer.Option("--speakers", min=1, help=SPEAKERS_HELP)] = None,
     voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
     keep_original: Annotated[
         float | None, typer.Option(help="Mantém a voz original por baixo, em dB (ex.: -18).")
@@ -1691,7 +1700,7 @@ def dub_run(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+            service, file, target, source, speaker, voice, keep_original, glossary, brand, project, speakers
         )
         _print_segments(dub)
         result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)

@@ -36,6 +36,13 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Added
 
+- **DMK-4**: dublagem com uma voz clonada por pessoa, separando quem fala (diarização local).
+  O novo modo `per_speaker` (padrão da dublagem) descobre quem fala em cada trecho, monta um
+  clone por falante a partir do melhor trecho de 3 a 15 s só com a fala dele e dubla cada fala
+  com a voz do falante certo; com uma pessoa só vale como `single`. O falante de cada fala
+  aparece no `.dub.json`, na tabela da seção Dublar (coluna editável) e em `dub_get`; trocar
+  o falante (`dub_update_segment`, `speaker`) refaz só aquela fala. CLI: `dmaker dub prepare
+  --speakers N` força o número de pessoas. `per_segment` e `single` seguem como estavam.
 - **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
 - **DMK-6**: fila de narrações que roda em segundo plano e retoma de onde parou, com importação de roteiro em txt, md ou docx por capítulos
 - **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
@@ -50,6 +57,12 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Pré-requisitos na máquina
 
+- **DMK-4**: `.venv\Scripts\pip install -e .[voice]` instala o `sherpa-onnx` (diarização na
+  CPU, sem token nem conta). Na primeira dublagem no modo `per_speaker`, os modelos baixam para
+  `cache/models/diarization` (cerca de 34 MB, versão e SHA-256 fixados): segmentação
+  pyannote-segmentation-3.0 em ONNX (licença MIT) e embeddings CAM++ do 3D-Speaker (Apache-2.0),
+  das releases oficiais do k2-fsa. Sem o `sherpa-onnx`, ou com `DMAKER_DIARIZATION=off`, o padrão
+  volta a ser `per_segment`.
 - **DMK-7**: pacote `audioseal` no extra `voice` (`.venv\Scripts\pip install -e .[voice]`); os pesos (~90 MB) são baixados na primeira marca ou verificação, para `cache/models/audioseal`.
 
 ---

@@ -2166,8 +2166,23 @@ h2 {
   border-bottom: 1px solid var(--border);
 }
 
+.dub-with-speakers .dub-row {
+  grid-template-columns: 124px minmax(0, 1fr) minmax(0, 1.2fr) 92px 64px;
+}
+
+.dub-who {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .dub-row:last-child {
   border-bottom: 0;
+}
+
+.dub-speaker-pick {
+  width: 100%;
+  font-size: 12px;
 }
 
 .dub-time {
@@ -2231,7 +2246,8 @@ h2 {
 }
 
 @media (max-width: 760px) {
-  .dub-row {
+  .dub-row,
+  .dub-with-speakers .dub-row {
     grid-template-columns: 1fr;
   }
 

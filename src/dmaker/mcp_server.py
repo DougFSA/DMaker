@@ -1324,8 +1324,10 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
         "Dublagem, passo 1: transcreve a fala de um vídeo ou áudio, parte em frases e traduz para "
         "target_language com o Ollama local (modelo em DMAKER_TRANSLATE_MODEL), e grava o projeto editável "
         "`.dub.json` (padrão output/dublagem/<nome>.<idioma>.dub.json). Revise as traduções com dub_get e "
-        "corrija com dub_update_segment antes de dub_render. speaker_mode: per_segment (clona a voz de quem fala "
-        "em cada frase; serve a vários falantes) ou single (um clone para o arquivo). voice usa uma voz da "
+        "corrija com dub_update_segment antes de dub_render. speaker_mode: per_speaker (o padrão: separa quem "
+        "fala e usa um clone por pessoa, a partir dos melhores trechos dela; com um falante só vale como single), "
+        "per_segment (clona a voz em volta de cada frase) ou single (um clone para o arquivo). num_speakers "
+        "força a quantidade de pessoas na diarização (só no modo per_speaker). voice usa uma voz da "
         "biblioteca no lugar do clone. keep_original_db (ex.: -18) mantém a voz original por baixo. glossary: "
         "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). Lento na CPU (separação de "
         "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
@@ -1335,13 +1337,14 @@ def dub_prepare(
     path: str,
     target_language: str,
     source_language: str = "pt",
-    speaker_mode: Literal["per_segment", "single"] = "per_segment",
+    speaker_mode: Literal["per_speaker", "per_segment", "single"] | None = None,
     voice: str | None = None,
     keep_original_db: float | None = None,
     glossary: list[str] | None = None,
     brand: str | None = None,
     project: str | None = None,
     wait_seconds: float = 0,
+    num_speakers: int | None = None,
 ) -> dict:
     from .pipeline.dubbing import default_project_path
 
@@ -1355,6 +1358,7 @@ def dub_prepare(
     options = {
         "source": source_language,
         "speaker_mode": speaker_mode,
+        "num_speakers": num_speakers,
         "voice": voice,
         "keep_original_db": keep_original_db,
         "glossary": glossary or [],
@@ -1427,20 +1431,31 @@ def dub_get(project: str) -> dict:
 @server.tool(
     description=(
         "Corrige uma fala de um projeto de dublagem: text troca a tradução (a pronúncia pode usar "
-        "[[termo|pronúncia]]); locked=true impede que dub_retranslate a sobrescreva. Grava o .dub.json. "
-        "Depois rode dub_render: só a fala editada é sintetizada de novo."
+        "[[termo|pronúncia]]); locked=true impede que dub_retranslate a sobrescreva; speaker troca quem fala "
+        '(um dos falantes do projeto, ex.: "Falante 2"; veja dub_get) e a fala passa a usar a voz dele. Grava o '
+        ".dub.json. Depois rode dub_render: só a fala editada é sintetizada de novo."
     )
 )
 def dub_update_segment(
-    project: str, segment_id: str, text: str | None = None, locked: bool | None = None
+    project: str,
+    segment_id: str,
+    text: str | None = None,
+    locked: bool | None = None,
+    speaker: str | None = None,
 ) -> dict:
     from .domain.dub import load_dub_project, save_dub_project
 
     path = Path(project)
-    updated = load_dub_project(path).edited(segment_id, text, locked)
+    updated = load_dub_project(path).edited(segment_id, text, locked, speaker)
     save_dub_project(updated, path)
     segment = updated.segment(segment_id)
-    return {"project": str(path), "id": segment.id, "text": segment.text, "locked": segment.locked}
+    return {
+        "project": str(path),
+        "id": segment.id,
+        "text": segment.text,
+        "locked": segment.locked,
+        "speaker": segment.speaker,
+    }
 
 
 def _dub_retranslate_work(job: Job, project_path: str) -> dict:

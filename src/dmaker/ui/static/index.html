@@ -614,9 +614,14 @@
                     <div class="field">
                       <label for="dub-speaker">Voz</label>
                       <select id="dub-speaker">
-                        <option value="per_segment">Clonar a voz de cada fala (vários falantes)</option>
+                        <option value="per_speaker">Uma voz clonada por pessoa (separa quem fala)</option>
+                        <option value="per_segment">Clonar a voz em volta de cada fala</option>
                         <option value="single">Um só clone para o arquivo todo</option>
                       </select>
+                    </div>
+                    <div class="field" id="dub-speaker-count-field">
+                      <label for="dub-speaker-count">Quantas pessoas falam (opcional)</label>
+                      <input type="number" id="dub-speaker-count" min="1" max="12" step="1" placeholder="Vazio: o áudio decide">
                     </div>
                     <div class="field">
                       <label for="dub-voice">Voz da biblioteca (opcional)</label>
