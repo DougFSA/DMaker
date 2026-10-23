@@ -32,9 +32,13 @@ MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
+STEMS_DIR = CACHE_DIR / "stems"  # voz e fundo separados (isolamento vocal), por trecho de arquivo
 # Voz usada quando a narração não escolhe uma. Vazio (padrão) é a voz automática do OmniVoice; defina
 # DMAKER_DEFAULT_VOICE=dora para um rascunho rápido com o Kokoro, por exemplo.
 DEFAULT_VOICE_ID = os.environ.get("DMAKER_DEFAULT_VOICE") or None
+# Modelo do Ollama que traduz as falas da dublagem. gpt-oss:20b traduz bem e cabe nos 32 GB de RAM; em CPU é
+# lento (minutos por lote), então quem tiver outro modelo melhor ajusta por DMAKER_TRANSLATE_MODEL.
+TRANSLATE_MODEL = os.environ.get("DMAKER_TRANSLATE_MODEL") or "gpt-oss:20b"
 JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = ROOT / "output"

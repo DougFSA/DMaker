@@ -17,6 +17,7 @@ from dmaker.text.transcribe import Transcript
 from dmaker.ui import server
 from dmaker.ui.layouts import LayoutStore
 from dmaker.ui.voice_routes import VoiceServices, get_voice_services
+from dmaker.voice.lexicon_store import LexiconStore
 from dmaker.voice.library import VoiceLibrary
 from dmaker.voice.synth import Speech, VoiceRequest
 
@@ -376,11 +377,13 @@ def studio(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "OUTPUT_DIR", output_dir)
     monkeypatch.setattr(config, "VOICE_CACHE_DIR", cache_dir)
     monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", cache_dir)
+    (tmp_path / "assets" / "brands" / "medlycare").mkdir(parents=True)
     services = VoiceServices(
         library=VoiceLibrary(tmp_path / "voices"),
         runner=RecordingRunner(on_run=_write_last_argument),
         transcriber=FakeTranscriber(),
         synthesizer=FakeSynthesizer(),
+        lexicons=LexiconStore(tmp_path / "assets"),
     )
     server.app.dependency_overrides[get_voice_services] = lambda: services
     yield services
@@ -598,3 +601,168 @@ def test_layout_accepts_voice_panel_and_known_tab_only(tmp_path, monkeypatch):
         assert c.put("/api/layouts/Voz", json=layout).status_code == 200
         assert c.get("/api/layouts").json()["layouts"]["Voz"]["tab"] == "voice"
         assert c.put("/api/layouts/Ruim", json={**layout, "tab": "sofa"}).status_code == 400
+
+
+def test_pronunciation_crud_with_brand_scope(voice_client):
+    assert voice_client.get("/api/voices/pronunciation").json() == {"brand": None, "entries": []}
+
+    first = voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Meiker"})
+    assert first.status_code == 200, first.text
+    assert first.json()["entries"] == [
+        {"term": "DMaker", "spoken": "Di Meiker", "scope": "global", "language": "pt"}
+    ]
+
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "dmaker", "spoken": "Dimêiker", "brand": "medlycare"}
+    )
+    voice_client.post("/api/voices/pronunciation", json={"term": "API", "spoken": "êi-pi-ai"})
+
+    global_only = voice_client.get("/api/voices/pronunciation").json()["entries"]
+    assert [(e["term"], e["scope"]) for e in global_only] == [("API", "global"), ("DMaker", "global")]
+    branded = voice_client.get("/api/voices/pronunciation", params={"brand": "medlycare"}).json()["entries"]
+    assert branded == [
+        {"term": "API", "spoken": "êi-pi-ai", "scope": "global", "language": "pt"},  # herdado
+        {"term": "dmaker", "spoken": "Dimêiker", "scope": "medlycare", "language": "pt"},  # esconde o global
+    ]
+
+    removed = voice_client.delete(
+        "/api/voices/pronunciation", params={"term": "dmaker", "brand": "medlycare"}
+    )
+    assert removed.status_code == 200
+    assert [e["scope"] for e in removed.json()["entries"]] == ["global", "global"]
+    assert voice_client.delete("/api/voices/pronunciation", params={"term": "API"}).json()["entries"] == [
+        {"term": "DMaker", "spoken": "Di Meiker", "scope": "global", "language": "pt"}
+    ]
+
+
+def test_pronunciation_validation_errors_are_400(voice_client):
+    empty = voice_client.post("/api/voices/pronunciation", json={"term": "  ", "spoken": "x"})
+    assert empty.status_code == 400 and "termo" in empty.json()["detail"]
+    brand = voice_client.post(
+        "/api/voices/pronunciation", json={"term": "A", "spoken": "b", "brand": "nenhuma"}
+    )
+    assert brand.status_code == 400 and "não encontrada" in brand.json()["detail"]
+    unknown = voice_client.delete("/api/voices/pronunciation", params={"term": "fantasma"})
+    assert unknown.status_code == 400 and "não está no dicionário" in unknown.json()["detail"]
+    assert voice_client.get("/api/voices/pronunciation", params={"brand": "../x"}).status_code == 400
+    assert voice_client.post("/api/voices/pronunciation", json={"term": "A"}).status_code == 422
+
+
+def test_pronunciation_route_does_not_clash_with_voice_removal(voice_client, studio):
+    studio.library.save_design("Sai logo", "female")
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Meiker"})
+    assert voice_client.delete("/api/voices/sai-logo").json() == {"ok": True}
+    assert len(voice_client.get("/api/voices/pronunciation").json()["entries"]) == 1
+
+
+def test_speak_uses_the_lexicon_and_cues_keep_the_written_text(voice_client, studio):
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Meiker"})
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "MedlyCare", "spoken": "Médli Quér", "brand": "medlycare"}
+    )
+    body = {"text": "O DMaker é da MedlyCare.", "brand": "medlycare"}
+
+    job = _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"])
+
+    assert job.status == "done", job.error
+    assert studio.synthesizer.requests[-1].text == "O Di Meiker é da Médli Quér."
+    assert job.result["cues"][0]["text"] == "O DMaker é da MedlyCare."
+
+
+def test_speak_without_brand_only_uses_the_global_lexicon(voice_client, studio):
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Meiker"})
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "MedlyCare", "spoken": "Médli Quér", "brand": "medlycare"}
+    )
+
+    body = {"text": "O DMaker é da MedlyCare."}
+    _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"])
+
+    assert studio.synthesizer.requests[-1].text == "O Di Meiker é da MedlyCare."
+
+
+def test_changing_the_lexicon_gives_the_narration_a_new_output_file(voice_client, studio):
+    body = {"text": "O DMaker edita vídeos."}
+    first = _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"]).result["output"]
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Meiker"})
+    second = _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"]).result[
+        "output"
+    ]
+
+    assert first != second  # o navegador não pode reaproveitar o áudio antigo
+
+
+def test_speak_rejects_an_invalid_brand_before_starting_a_job(voice_client):
+    before = len(server.jobs.list())
+    resp = voice_client.post("/api/voices/speak", json={"text": "Oi", "brand": "../x"})
+    assert resp.status_code == 400 and len(server.jobs.list()) == before
+
+
+def test_speak_falls_back_to_the_brand_of_the_voice(voice_client, studio):
+    studio.library.save_design("Da marca", "female", brand="medlycare")
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "MedlyCare", "spoken": "Médli Quér", "brand": "medlycare"}
+    )
+
+    body = {"text": "Conheça a MedlyCare.", "voice": "da-marca"}
+    _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"])
+
+    assert studio.synthesizer.requests[-1].text == "Conheça a Médli Quér."
+
+
+def test_pronunciation_entries_carry_their_language_and_can_be_filtered(voice_client):
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Mêiker"})
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "MedlyCare", "spoken": "Medly Care", "language": "en-US"}
+    )
+
+    everything = voice_client.get("/api/voices/pronunciation").json()["entries"]
+    assert [(e["language"], e["term"]) for e in everything] == [("en", "MedlyCare"), ("pt", "DMaker")]
+    only_english = voice_client.get("/api/voices/pronunciation", params={"language": "en_GB"}).json()[
+        "entries"
+    ]
+    assert [e["term"] for e in only_english] == ["MedlyCare"]
+
+    wrong_language = voice_client.delete("/api/voices/pronunciation", params={"term": "MedlyCare"})
+    assert wrong_language.status_code == 400 and "idioma pt" in wrong_language.json()["detail"]
+    removed = voice_client.delete("/api/voices/pronunciation", params={"term": "MedlyCare", "language": "en"})
+    assert [e["term"] for e in removed.json()["entries"]] == ["DMaker"]
+
+
+def test_speak_in_english_does_not_apply_the_portuguese_entry(voice_client, studio):
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Mêiker"})
+
+    _wait_for_job(
+        voice_client.post(
+            "/api/voices/speak", json={"text": "Meet the DMaker app.", "language": "en"}
+        ).json()["job_id"]
+    )
+    _wait_for_job(
+        voice_client.post(
+            "/api/voices/speak", json={"text": "Conheça o DMaker hoje.", "language": "pt"}
+        ).json()["job_id"]
+    )
+
+    assert [r.text for r in studio.synthesizer.requests[-2:]] == [
+        "Meet the DMaker app.",
+        "Conheça o Di Mêiker hoje.",
+    ]
+
+
+def test_speak_output_file_follows_the_pronunciation_of_the_spoken_language(voice_client, studio):
+    english = {"text": "Meet the DMaker app.", "language": "en"}
+    first = _wait_for_job(voice_client.post("/api/voices/speak", json=english).json()["job_id"]).result[
+        "output"
+    ]
+    voice_client.post("/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Di Mêiker"})  # só em pt
+    same = _wait_for_job(voice_client.post("/api/voices/speak", json=english).json()["job_id"]).result[
+        "output"
+    ]
+    voice_client.post(
+        "/api/voices/pronunciation", json={"term": "DMaker", "spoken": "Dee Maker", "language": "en"}
+    )
+    changed = _wait_for_job(voice_client.post("/api/voices/speak", json=english).json()["job_id"]).result[
+        "output"
+    ]
+
+    assert first == same and first != changed

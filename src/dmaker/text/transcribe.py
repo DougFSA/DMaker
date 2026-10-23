@@ -26,10 +26,17 @@ class Transcriber(Protocol):
     def transcribe(self, wav: Path, language: str, initial_prompt: str | None = None) -> Transcript: ...
 
 
-def extract_audio_wav(runner: FFmpegRunner, src: Path, dst: Path) -> Path:
-    """Áudio mono 16 kHz, o formato que os modelos de fala esperam."""
+def extract_audio_wav(
+    runner: FFmpegRunner, src: Path, dst: Path, start: float | None = None, end: float | None = None
+) -> Path:
+    """Áudio mono 16 kHz, o formato que os modelos de fala esperam; `start`/`end` recortam um trecho."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    args = ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)]
+    args: list[str] = []
+    if start:
+        args += ["-ss", f"{start:.3f}"]  # antes do -i: o ffmpeg pula direto, sem decodificar o começo
+    if end is not None:
+        args += ["-t", f"{end - (start or 0.0):.3f}"]
+    args += ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)]
     runner.run(FFmpegCommand(args, label="áudio para transcrição"))
     return dst
 

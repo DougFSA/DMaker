@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import threading
 import warnings
 from collections.abc import Callable, Iterator
@@ -18,6 +17,7 @@ import numpy as np
 from ..config import MODELS_DIR, VOICE_CACHE_DIR
 from ..media.wavio import read_wav
 from .library import VoiceProfile
+from .pronunciation import language_code
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,7 @@ class VoiceRequest:
     speed: float = 1.0
     steps: int | None = None  # None: o motor escolhe o padrão dele (OmniVoice: 16)
     seed: int | None = None
+    duration: float | None = None  # segundos que a fala deve durar (OmniVoice); o Kokoro não força duração
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,6 @@ MIN_GPU_MEMORY_BYTES = (
 # Frase de ancoragem de uma voz sem gravação. Curta de propósito (~4 s): o custo de cada fala na CPU
 # cresce com o tamanho da referência, e uma âncora longa encarece todas as falas seguintes.
 ANCHOR_TEXTS = {"pt": "Olá, tudo bem? Eu sou a voz que vai narrar o seu vídeo."}
-
-
-def _base_language(language: str) -> str:
-    """`pt-BR` e `pt_br` viram `pt`: o modelo conhece idiomas, não variantes regionais."""
-    return re.split(r"[-_]", language.strip().lower())[0]
 
 
 def _compute_threads() -> int:
@@ -247,14 +243,16 @@ class OmniVoiceSynthesizer:
     def _generate(self, model: Any, request: VoiceRequest, **conditioning: Any) -> Speech:
         arguments: dict[str, Any] = {
             "text": request.text,
-            "language": _base_language(request.language),
+            "language": language_code(request.language),
             "num_step": self.effective_steps(request),
             "guidance_scale": GUIDANCE_SCALE,
             "denoise": True,  # token <|denoise|> à frente da geração: menos ruído de fundo
             "postprocess_output": True,  # tira silêncio nas pontas, aplica fade e margem
             **conditioning,
         }
-        if request.speed != 1.0:
+        if request.duration is not None:
+            arguments["duration"] = request.duration  # o modelo manda a duração e ignora a velocidade
+        elif request.speed != 1.0:
             arguments["speed"] = request.speed
         if request.seed is not None:
             self._seed(
@@ -289,7 +287,7 @@ class OmniVoiceSynthesizer:
 
     def _anchor(self, model: Any, request: VoiceRequest, instruct: str | None) -> Any | None:
         """Prompt de uma voz sem gravação: gera a frase de ancoragem uma vez e a usa como referência."""
-        language = _base_language(request.language)
+        language = language_code(request.language)
         key = hashlib.sha256(f"anchor|{instruct or ''}|{language}".encode()).hexdigest()[:16]
         anchor_text = ANCHOR_TEXTS.get(language, request.text)
 

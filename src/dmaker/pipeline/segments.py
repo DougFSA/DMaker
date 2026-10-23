@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -27,15 +27,17 @@ from ..filtergraph.reframe import resolve_reframe_mode
 from ..media.ffmpeg import FFmpegCommand
 from ..media.matting import MATTE_VERSION, MatteRequest, hex_to_rgb, tone_of
 from ..media.probe import MediaInfo
+from ..media.separation import Stems
 from ..visuals.card_layouts import render_layout_card
 from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
 from .context import RenderContext
+from .isolation import default_isolation_service, progress_logger
 from .sources import Source
 
-MEZZ_VERSION = "m4"  # muda quando a receita do mezanino muda (invalida o cache)
+MEZZ_VERSION = "m5"  # muda quando a receita do mezanino muda (invalida o cache)
 
 
 def cache_key(*parts: object) -> str:
@@ -160,9 +162,46 @@ def matte_source(
     return MattedSource(out, matted_info, tone_of(background), command if _needs_render(out, ctx) else None)
 
 
+@dataclass(frozen=True)
+class CameraAudio:
+    """Áudio da câmera já isolado (voz ou fundo) para o intervalo que o trecho usa, e como pedir a
+    separação, que só roda se o mezanino precisar ser gerado."""
+
+    path: Path
+    isolate: Callable[[], Stems]
+
+    @property
+    def key(self) -> str:
+        """Pasta do cache de stems: carrega a chave do arquivo, do trecho e do modelo."""
+        return self.path.parent.name
+
+
+def isolate_camera_audio(
+    index: int, segment: ClipSegment, source: Source, in_point: float, duration: float, ctx: RenderContext
+) -> CameraAudio | None:
+    """Voz ou fundo do áudio da câmera, conforme `audio_mode`; None quando o trecho usa o áudio como
+    gravado ou não tem áudio da câmera para separar."""
+    assert source.path is not None and source.info is not None
+    if segment.audio_mode == "original" or not source.info.has_audio or segment.mute or segment.volume <= 0:
+        return None
+    if ctx.isolator is None:
+        ctx.isolator = default_isolation_service(ctx.runner, ctx.log)
+    isolator, path, stream = ctx.isolator, source.path, source.audio_stream
+    start = max(in_point, 0.0)
+    end = start + max(duration * segment.speed, 0.01)
+    stems = isolator.stems_for(path, start, end, stream)
+
+    def isolate() -> Stems:
+        report = progress_logger(ctx.log, f"isolando a voz do {_label(index, ctx)}")
+        return isolator.isolate(path, start, end, stream, report)
+
+    return CameraAudio(stems.vocals if segment.audio_mode == "voice" else stems.background, isolate)
+
+
 class ClipPreparer:
     """Vídeo: corte, velocidade, enquadramento e cor ficam no FFmpeg. Com `matte`, a fonte passa
-    antes pelo recorte de pessoa e o mezanino parte do arquivo já com o fundo trocado."""
+    antes pelo recorte de pessoa e o mezanino parte do arquivo já com o fundo trocado. Com `audio_mode`
+    diferente de `original`, o áudio da câmera vem do isolamento vocal."""
 
     def prepare(self, index: int, segment: Segment, source: Source, ctx: RenderContext) -> PreparedSegment:
         assert isinstance(segment, ClipSegment) and source.path is not None and source.info is not None
@@ -178,9 +217,10 @@ class ClipPreparer:
             if segment.matte is not None
             else None
         )
+        camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
         key = cache_key(
             MEZZ_VERSION,
-            segment.model_dump(mode="json"),
+            segment.model_dump(mode="json"),  # inclui o audio_mode
             str(source.path),
             source.stat_key(),
             W,
@@ -191,8 +231,11 @@ class ClipPreparer:
             in_point,
             [(str(t.path), t.in_point, t.volume, t.audio_stream) for t in tracks],
             matted.path.name if matted else None,  # o nome carrega a chave do recorte
+            camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
         )
         out = ctx.cache_dir / f"{key}.mov"
+        if camera_audio is not None and _needs_render(out, ctx) and not ctx.options.dry_run:
+            camera_audio.isolate()
         prerequisites: tuple[FFmpegCommand, ...] = ()
         if matted is not None:
             # o mezanino parte do recorte, que já começa no ponto de entrada e tem o áudio na faixa 0
@@ -219,6 +262,7 @@ class ClipPreparer:
             in_point=in_point,
             tracks=tracks,
             audio_stream=source.audio_stream,
+            camera_audio=camera_audio.path if camera_audio else None,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
             label=_label(index, ctx),

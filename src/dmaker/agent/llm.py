@@ -82,6 +82,13 @@ class OllamaChat:
     num_ctx: int = 16384
     timeout: float = 1800.0  # um modelo de 20b em CPU leva minutos só para ler o prompt de sistema
     keep_alive: str = "60m"  # segura o modelo carregado enquanto uma ferramenta longa (sync, render) roda
+    temperature: float | None = (
+        None  # None: o padrão do modelo; tarefas que pedem fidelidade (tradução) usam baixa
+    )
+    think: bool | str | None = (
+        None  # modelos de raciocínio: "low" encurta o pensamento (gpt-oss ignora booleano)
+    )
+    response_format: str | None = None  # "json" obriga a resposta a ser um JSON válido
     opener: Callable[..., Any] = urllib.request.urlopen
 
     def _request(self, method: str, path: str, body: dict | None, timeout: float) -> dict:
@@ -103,6 +110,12 @@ class OllamaChat:
             "keep_alive": self.keep_alive,
             "options": {"num_ctx": self.num_ctx},
         }
+        if self.temperature is not None:
+            body["options"]["temperature"] = self.temperature
+        if self.think is not None:
+            body["think"] = self.think
+        if self.response_format is not None:
+            body["format"] = self.response_format
         data = self._request("POST", "/api/chat", body, self.timeout)
         message = data.get("message") or {}
         return Reply(

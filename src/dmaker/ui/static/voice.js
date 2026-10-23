@@ -14,11 +14,13 @@
  * window.DMakerVoice:
  *   init({ brands })   chamado por app.js ao terminar de carregar o estado
  *   onShow()           chamado por app.js quando a aba Voz aparece (atualiza a lista de vozes)
+ *   followJob(id, cb)  acompanha um job por SSE (usado por speech.js, que cuida de isolar voz e corrigir fala)
  *   pure               estimateSeconds, formatDuration, formatClock, recordingAdvice, buildNarrationItem...
  */
 (function () {
   const CHARS_PER_SECOND = 14; // ritmo médio da fala em português, para estimar a duração do roteiro
   const PAUSE_MARKER = /\[pausa\s+(\d+(?:[.,]\d+)?)\]/gi;
+  const INLINE_OVERRIDE = /\[\[([^\]]{0,256})\]\]/g; // [[termo|pronúncia]] ou [[pronúncia]]
   const RECOMMENDED_MIN_S = 5;
   const RECOMMENDED_MAX_S = 8;
   const MAX_USED_S = 15; // o servidor só usa os primeiros 15 s da referência
@@ -33,13 +35,26 @@
    * pausas fixas dos marcadores [pausa 1.2]. */
   function estimateSeconds(text, speed) {
     let pauses = 0;
-    const spoken = String(text || "").replace(PAUSE_MARKER, (_, value) => {
+    const spoken = spokenForm(text).replace(PAUSE_MARKER, (_, value) => {
       pauses += parseFloat(value.replace(",", "."));
       return " ";
     });
     const characters = spoken.replace(/\s+/g, " ").trim().length;
     const rate = speed > 0 ? speed : 1;
     return characters / CHARS_PER_SECOND / rate + pauses;
+  }
+
+  /** O texto como a voz o lê: [[termo|pronúncia]] vira a pronúncia (o servidor faz o mesmo). */
+  function spokenForm(text) {
+    return String(text || "").replace(INLINE_OVERRIDE, (_, inner) => inner.split("|").slice(-1)[0]);
+  }
+
+  /** Frase curta para ouvir um termo do dicionário, no idioma dele (o termo duas vezes: a primeira pode soar solta). */
+  function pronunciationPreviewText(term, language) {
+    const word = String(term || "").trim();
+    const code = String(language || "pt").toLowerCase().split(/[-_]/)[0];
+    if (code === "en") return `I say ${word}. Again: ${word}.`;
+    return `Eu falo ${word}. Repito: ${word}.`;
   }
 
   /** "42 s" abaixo de um minuto, "1 min 05 s" acima. */
@@ -110,6 +125,8 @@
     current: null,
     busy: false,
     previewing: new Set(),
+    pronunciation: [],
+    listening: new Set(),
     recorder: null,
     recordedBlob: null,
     recordingStartedAt: 0,
@@ -261,6 +278,113 @@
     el("voice-script-voice").value = voiceId;
     rememberVoice(voiceId);
     el("voice-script").focus();
+  }
+
+  /* ==================== pronúncia ==================== */
+
+  function pronunciationQuery() {
+    const brand = el("voice-pron-brand").value;
+    return brand ? `?brand=${encodeURIComponent(brand)}` : "";
+  }
+
+  async function loadPronunciation() {
+    const data = await api.get(`/api/voices/pronunciation${pronunciationQuery()}`);
+    studio.pronunciation = data.entries;
+    renderPronunciation();
+  }
+
+  function renderPronunciation() {
+    const list = el("voice-pron-rows");
+    if (!studio.pronunciation.length) {
+      list.innerHTML = '<li class="empty-hint">Nenhum termo ainda. Adicione abaixo.</li>';
+      return;
+    }
+    const brandName = (key) => {
+      const found = studio.brands.find((b) => b.key === key);
+      return found ? found.name || found.key : key;
+    };
+    list.innerHTML = studio.pronunciation.map((entry) => {
+      const listening = studio.listening.has(pronunciationKey(entry.term, entry.language));
+      const scope = entry.scope === "global" ? "Todas as marcas" : brandName(entry.scope);
+      return `
+      <li class="voice-item" data-pron-term="${esc(entry.term)}" data-pron-scope="${esc(entry.scope)}" data-pron-language="${esc(entry.language)}">
+        <div class="voice-item-main">
+          <div class="voice-item-name">${esc(entry.term)} &rarr; ${esc(entry.spoken)}</div>
+          <div class="voice-item-meta">Idioma: ${esc(languageLabel(entry.language))} · Vale em: ${esc(scope)}</div>
+        </div>
+        <div class="voice-item-actions">
+          <button type="button" class="btn btn-small" data-pron-action="listen" ${listening ? "disabled" : ""} title="Gera uma frase curta com a voz escolhida em Narração">${listening ? "Gerando..." : "Ouvir"}</button>
+          <button type="button" class="btn btn-small btn-danger" data-pron-action="remove">Remover</button>
+        </div>
+      </li>`;
+    }).join("");
+  }
+
+  function pronunciationKey(term, language) {
+    return `${language}:${term}`;
+  }
+
+  function updatePronunciationForm() {
+    el("voice-pron-add").disabled = !(el("voice-pron-term").value.trim() && el("voice-pron-spoken").value.trim());
+  }
+
+  async function addPronunciation() {
+    const body = {
+      term: el("voice-pron-term").value.trim(),
+      spoken: el("voice-pron-spoken").value.trim(),
+      brand: el("voice-pron-brand").value || null,
+      language: el("voice-pron-language").value || "pt",
+    };
+    if (!body.term || !body.spoken) return;
+    try {
+      const data = await api.post("/api/voices/pronunciation", body);
+      studio.pronunciation = data.entries;
+      renderPronunciation();
+      el("voice-pron-term").value = "";
+      el("voice-pron-spoken").value = "";
+      updatePronunciationForm();
+      showAlert(`Pronúncia de "${body.term}" salva.`, "success");
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function removePronunciation(term, scope, language) {
+    if (!window.confirm(`Tirar "${term}" (${languageLabel(language)}) do dicionário?`)) return;
+    const params = new URLSearchParams({ term, language });
+    if (scope !== "global") params.set("brand", scope);
+    try {
+      const data = await api.del(`/api/voices/pronunciation?${params}`);
+      studio.pronunciation = data.entries;
+      renderPronunciation();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  /** Gera uma frase curta com o termo, pela mesma rota de síntese da narração, e toca. */
+  async function listenPronunciation(term, language) {
+    const key = pronunciationKey(term, language);
+    studio.listening.add(key);
+    renderPronunciation();
+    try {
+      const { job_id } = await api.post("/api/voices/speak", {
+        text: pronunciationPreviewText(term, language),
+        voice: el("voice-script-voice").value || null,
+        language,
+        brand: el("voice-pron-brand").value || null,
+        seed: 1,
+      });
+      const result = await followJob(job_id);
+      const audio = el("voice-preview-audio");
+      audio.src = `${result.audio_url}&t=${Date.now()}`;
+      await audio.play().catch(() => showAlert("Prévia pronta: use o player da lista de vozes para ouvir.", "success"));
+    } catch (err) {
+      handleError(err);
+    } finally {
+      studio.listening.delete(key);
+      renderPronunciation();
+    }
   }
 
   /* ==================== nova voz: clonar ==================== */
@@ -448,6 +572,7 @@
       language: el("voice-language").value || null,
       seed: seedRaw === "" ? null : Number(seedRaw),
     };
+    const brand = el("voice-pron-brand").value || null;
     rememberVoice(entry.voiceId);
     studio.busy = true;
     updateScriptStats();
@@ -461,7 +586,7 @@
     startElapsedTicker(draw);
     try {
       const { job_id } = await api.post("/api/voices/speak", {
-        text: entry.text, voice: entry.voiceId, speed: entry.speed, language: entry.language, seed: entry.seed,
+        text: entry.text, voice: entry.voiceId, speed: entry.speed, language: entry.language, seed: entry.seed, brand,
       });
       const result = await followJob(job_id, (evt) => {
         if (evt.label) { label = evt.label; percent = evt.percent || 0; }
@@ -579,8 +704,23 @@
         else if (action === "insert") insertIntoProject(item);
         return;
       }
+      const pronAction = e.target.closest("[data-pron-action]");
+      if (pronAction) {
+        const row = pronAction.closest("[data-pron-term]");
+        const { pronTerm, pronScope, pronLanguage } = row.dataset;
+        if (pronAction.dataset.pronAction === "listen") listenPronunciation(pronTerm, pronLanguage);
+        else removePronunciation(pronTerm, pronScope, pronLanguage);
+        return;
+      }
       const newTab = e.target.closest("[data-voice-newtab]");
       if (newTab) showNewVoiceTab(newTab.dataset.voiceNewtab);
+    });
+
+    el("voice-pron-brand").addEventListener("change", () => loadPronunciation().catch(handleError));
+    el("voice-pron-add").addEventListener("click", addPronunciation);
+    ["voice-pron-term", "voice-pron-spoken"].forEach((id) => {
+      el(id).addEventListener("input", updatePronunciationForm);
+      el(id).addEventListener("keydown", (e) => { if (e.key === "Enter") addPronunciation(); });
     });
 
     el("voice-brand-filter").addEventListener("change", (e) => {
@@ -609,6 +749,8 @@
     el("voice-clone-brand").innerHTML = optionsHtml(brands, "Sem marca (serve para qualquer uma)");
     el("voice-design-brand").innerHTML = optionsHtml(brands, "Sem marca (serve para qualquer uma)");
     el("voice-brand-filter").innerHTML = optionsHtml(brands, "Todas as vozes");
+    el("voice-pron-brand").innerHTML = optionsHtml(brands, "Global (todas as marcas)");
+    el("voice-pron-language").innerHTML = optionsHtml(languages);
     el("voice-design-gender").innerHTML = optionsHtml(studio.options.gender, "Não definir");
     el("voice-design-age").innerHTML = optionsHtml(studio.options.age, "Não definir");
     el("voice-design-pitch").innerHTML = optionsHtml(studio.options.pitch, "Não definir");
@@ -632,17 +774,24 @@
     updateScriptStats();
     updateCloneState();
     loadVoices().catch(handleError);
+    loadPronunciation().catch(handleError);
   }
 
   function onShow() {
-    if (studio.ready) loadVoices().catch(handleError);
+    if (!studio.ready) return;
+    loadVoices().catch(handleError);
+    loadPronunciation().catch(handleError);
   }
 
   window.DMakerVoice = {
     init,
     onShow,
+    followJob, // speech.js acompanha seus próprios jobs com o mesmo SSE
     pure: {
+      esc,
       estimateSeconds,
+      spokenForm,
+      pronunciationPreviewText,
       formatDuration,
       formatClock,
       recordingAdvice,

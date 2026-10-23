@@ -12,6 +12,8 @@ import json
 import re
 import tempfile
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,13 +25,27 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..media.ffmpeg import FFmpegError, FFmpegRunner
+from ..media.probe import MediaInfo
+from ..pipeline.isolation import IsolationService
 from ..pipeline.jobs import Job, JobManager
 from ..text.transcribe import Transcriber
+from ..text.translate import Translator
 from ..voice import design as voice_design
+from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceNotFoundError
+from ..voice.pronunciation import DEFAULT_LANGUAGE, Lexicon, language_code
 from ..voice.synth import SpeechSynthesizer
 
-SERVABLE_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+SERVABLE_AUDIO_EXTS = {
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".ogg",
+    ".flac",
+    ".mp4",
+    ".m4v",
+    ".mov",
+}  # vídeo toca como áudio no <audio>
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 5 a 8 s de fala cabem em poucos MB; isto só barra arquivo errado
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_SCRIPT_CHARS = 20000  # ~24 minutos de fala: muito além de um vídeo curto, e protege a fila da CPU
@@ -67,6 +83,10 @@ class VoiceServices:
     runner: FFmpegRunner | None = None
     transcriber: Transcriber | None = None
     synthesizer: SpeechSynthesizer | None = None
+    lexicons: LexiconStore | None = None  # dicionários de pronúncia; None usa os de assets/
+    isolation: IsolationService | None = None  # separador de voz e fundo; None usa o Demucs
+    prober: Callable[[Path], MediaInfo] | None = None  # leitor de mídia; None usa o ffprobe
+    translator: Translator | None = None  # tradutor da dublagem; None usa o Ollama local
 
 
 def get_voice_services() -> VoiceServices:
@@ -95,6 +115,14 @@ class SpeakRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     seed: int | None = None
     instruct: str | None = None
+    brand: str | None = None  # marca cujo dicionário de pronúncia vale (padrão: a da voz)
+
+
+class PronunciationRequest(BaseModel):
+    term: str
+    spoken: str
+    brand: str | None = None
+    language: str = DEFAULT_LANGUAGE
 
 
 def design_options() -> dict[str, Any]:
@@ -142,13 +170,40 @@ def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-def _existing_voice(library: VoiceLibrary, voice_id: str) -> None:
+def existing_voice(library: VoiceLibrary, voice_id: str) -> None:
     if not VOICE_ID_PATTERN.match(voice_id):
         raise HTTPException(status_code=404, detail=f"Voz {voice_id!r} não encontrada.")
     try:
         library.get(voice_id)
     except VoiceNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def pronunciation_entries(
+    store: LexiconStore, brand: str | None, language: str | None = None
+) -> list[dict[str, str]]:
+    """Termos que valem para a marca, com idioma e escopo de onde vêm (o da marca esconde o global igual).
+
+    Sem `language`, traz todos os idiomas; cada entrada diz o seu.
+    """
+    global_by_language = store.by_language()
+    brand_by_language = store.by_language(brand) if brand else {}
+    codes = sorted({*global_by_language, *brand_by_language})
+    if language:
+        codes = [code for code in codes if code == language_code(language)]
+    entries: list[dict[str, str]] = []
+    for code in codes:
+        own = brand_by_language.get(code, Lexicon())
+        hidden = {term.casefold() for term, _ in own.entries}
+        inherited = [
+            (term, spoken, "global")
+            for term, spoken in global_by_language.get(code, Lexicon()).entries
+            if term.casefold() not in hidden
+        ]
+        owned = [(term, spoken, brand) for term, spoken in own.entries]
+        for term, spoken, scope in sorted(inherited + owned, key=lambda item: item[0].casefold()):
+            entries.append({"term": term, "spoken": spoken, "scope": scope, "language": code})
+    return entries
 
 
 def _save_upload(upload: UploadFile, folder: Path) -> Path:
@@ -184,13 +239,22 @@ def _progress_reporter(job: Job):
     return report
 
 
+@contextmanager
+def exclusive_synthesis(job: Job) -> Iterator[None]:
+    """Só um trabalho pesado de voz por vez (síntese, separação, transcrição); os outros esperam na fila."""
+    if not _synthesis_lock.acquire(blocking=False):
+        job.log("Aguardando outro trabalho de voz terminar")
+        _synthesis_lock.acquire()
+    try:
+        yield
+    finally:
+        _synthesis_lock.release()
+
+
 def _run_speech(job: Job, services: VoiceServices, text: str, out: Path, options: dict[str, Any]) -> dict:
     from ..pipeline.voices import speak
 
-    if not _synthesis_lock.acquire(blocking=False):
-        job.log("Aguardando outra síntese terminar")
-        _synthesis_lock.acquire()
-    try:
+    with exclusive_synthesis(job):
         result = speak(
             text,
             out,
@@ -199,10 +263,9 @@ def _run_speech(job: Job, services: VoiceServices, text: str, out: Path, options
             library=services.library,
             runner=services.runner,
             synthesizer=services.synthesizer,
+            lexicons=services.lexicons,
             **options,
         )
-    finally:
-        _synthesis_lock.release()
     return {
         "output": str(result.path),
         "audio_url": audio_url(result.path),
@@ -282,9 +345,37 @@ def build_voice_router(jobs: JobManager) -> APIRouter:
             raise _bad_request(exc) from exc
         return profile_dict(profile)
 
+    @router.get("/pronunciation")
+    def list_pronunciation(services: Services, brand: str | None = None, language: str | None = None) -> dict:
+        store = services.lexicons or LexiconStore()
+        try:
+            return {"brand": brand, "entries": pronunciation_entries(store, brand or None, language or None)}
+        except ValueError as exc:
+            raise _bad_request(exc) from exc
+
+    @router.post("/pronunciation")
+    def save_pronunciation(req: PronunciationRequest, services: Services) -> dict:
+        store = services.lexicons or LexiconStore()
+        try:
+            store.add(req.term, req.spoken, req.brand or None, req.language)
+            return {"brand": req.brand, "entries": pronunciation_entries(store, req.brand or None)}
+        except ValueError as exc:
+            raise _bad_request(exc) from exc
+
+    @router.delete("/pronunciation")
+    def remove_pronunciation(
+        services: Services, term: str, brand: str | None = None, language: str = DEFAULT_LANGUAGE
+    ) -> dict:
+        store = services.lexicons or LexiconStore()
+        try:
+            store.remove(term, brand or None, language)
+            return {"brand": brand, "entries": pronunciation_entries(store, brand or None)}
+        except ValueError as exc:
+            raise _bad_request(exc) from exc
+
     @router.delete("/{voice_id}")
     def remove(voice_id: str, services: Services) -> dict:
-        _existing_voice(services.library, voice_id)
+        existing_voice(services.library, voice_id)
         services.library.remove(voice_id)
         return {"ok": True}
 
@@ -294,15 +385,25 @@ def build_voice_router(jobs: JobManager) -> APIRouter:
         if not text:
             raise HTTPException(status_code=400, detail="Escreva o texto da narração.")
         if req.voice:
-            _existing_voice(services.library, req.voice)
+            existing_voice(services.library, req.voice)
         options = {
             "voice_id": req.voice or None,
             "language": req.language or None,
             "speed": req.speed,
             "instruct": req.instruct or None,
             "seed": req.seed,
+            "brand": req.brand or None,
         }
-        out = narration_output_path(text, **options)
+        voice = services.library.get(req.voice) if req.voice else None
+        spoken_language = req.language or (voice.language if voice else DEFAULT_LANGUAGE)
+        try:
+            pronunciation = (services.lexicons or LexiconStore()).for_brand(
+                req.brand or (voice.brand if voice else None), spoken_language
+            )
+        except ValueError as exc:
+            raise _bad_request(exc) from exc
+        # a pronúncia entra no nome: trocar o dicionário e narrar de novo não pode devolver o arquivo antigo
+        out = narration_output_path(text, pronunciation=pronunciation.as_dict(), **options)
         job = jobs.start(
             f"narração ({req.voice or 'voz automática'}, {len(text)} caracteres)",
             lambda job: _run_speech(job, services, text, out, options),
@@ -314,7 +415,7 @@ def build_voice_router(jobs: JobManager) -> APIRouter:
     def preview(voice_id: str, services: Services) -> dict:
         from ..pipeline.voices import PREVIEW_TEXTS
 
-        _existing_voice(services.library, voice_id)
+        existing_voice(services.library, voice_id)
         voice = services.library.get(voice_id)
         text = PREVIEW_TEXTS.get(voice.language, PREVIEW_TEXTS["pt"])
         options = {"voice_id": voice.id, "language": voice.language, "speed": 1.0, "seed": 1}

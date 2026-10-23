@@ -275,3 +275,20 @@ def test_narration_captions_source_text_is_checked_like_on_screen_text():
     assert ("audio.narration[0].text", "Antes — depois") in Project.model_validate(spec).texts()
     spec["captions"] = {"source": "auto"}
     assert Project.model_validate(spec).texts() == []
+
+
+def test_clip_audio_mode_defaults_to_original_and_accepts_voice_and_background():
+    def clip(**fields):
+        return Project.model_validate({**MINIMAL, "timeline": [{"type": "clip", "src": "a.mp4", **fields}]})
+
+    assert clip().timeline[0].audio_mode == "original"
+    assert clip(audio_mode="voice").timeline[0].audio_mode == "voice"
+    assert clip(audio_mode="background").timeline[0].audio_mode == "background"
+    with pytest.raises(ValidationError):
+        clip(audio_mode="instrumental")
+
+
+def test_audio_mode_is_in_the_json_schema():
+    schema = Project.model_json_schema()
+    clip = schema["$defs"]["ClipSegment"]["properties"]["audio_mode"]
+    assert clip["enum"] == ["original", "voice", "background"] and clip["default"] == "original"

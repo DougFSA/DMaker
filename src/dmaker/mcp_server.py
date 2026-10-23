@@ -888,6 +888,7 @@ def _narration_work(job: Job, text: str, out: str | None, options: dict) -> dict
         log=job.log,
         library=_voice_library(),
         synthesizer=_voice_synthesizer(),
+        lexicons=_lexicon_store(),
         **options,
     )
     return {
@@ -906,7 +907,9 @@ def _narration_work(job: Job, text: str, out: str | None, options: dict) -> dict
         "por segundo de áudio, ~25 s no rascunho; vozes prontas dora/alex/santa do Kokoro: ~3 s por "
         "segundo; falas repetidas vêm do cache): devolve job_id, consulte com job_status. Pausas: linha em "
         "branco = pausa de parágrafo; [pausa 1.2] fixa uma pausa. "
-        "Números, R$ e % são lidos por extenso."
+        "Números, R$ e % são lidos por extenso. Pronúncia: o dicionário da ferramenta pronunciation vale "
+        "(global mais o da marca brand; sem brand, o da marca da voz); [[termo|pronúncia]] no texto fixa "
+        "uma só ocorrência. Legendas e SRT mantêm o texto escrito."
     )
 )
 def synthesize_speech(
@@ -921,6 +924,7 @@ def synthesize_speech(
     srt: bool = False,
     draft: bool = False,
     wait_seconds: float = 0,
+    brand: str | None = None,
 ) -> dict:
     from .voice.synth import DRAFT_STEPS
 
@@ -934,6 +938,7 @@ def synthesize_speech(
         "seed": seed,
         "steps": DRAFT_STEPS if draft and steps is None else steps,
         "write_srt": srt,
+        "brand": brand,
     }
     job = jobs.start(
         f"narração ({voice or 'voz automática'}, {len(text)} caracteres)",
@@ -941,6 +946,51 @@ def synthesize_speech(
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Dicionário de pronúncia da narração: como a voz fala cada termo (ex.: DMaker -> Di-mêiker). "
+        "action = list | add | remove. Cada entrada vale para um idioma (language, padrão pt; pt-BR e pt "
+        "são o mesmo): a grafia feita para o português não vale na fala em inglês, onde o termo é lido "
+        "como está. Sem brand é o global (todas as marcas); com brand, o da marca, que vale por cima do "
+        "global. list devolve as entradas do escopo no idioma, 'effective' (o que a narração usa nesse "
+        "idioma) e 'languages' (idiomas com entradas no escopo). add pede term e spoken. Só a fala muda, "
+        "legendas mantêm o texto escrito. Para uma única ocorrência, em qualquer idioma, escreva "
+        "[[termo|pronúncia]] direto no texto."
+    )
+)
+def pronunciation(
+    action: Literal["list", "add", "remove"],
+    term: str | None = None,
+    spoken: str | None = None,
+    brand: str | None = None,
+    language: str = "pt",
+) -> dict:
+    from .voice.pronunciation import language_code
+
+    store = _lexicon_store()
+    if action == "add":
+        if not term or not spoken:
+            raise ValueError("add pede term e spoken.")
+        store.add(term, spoken, brand, language)
+    elif action == "remove":
+        if not term:
+            raise ValueError("remove pede term.")
+        store.remove(term, brand, language)
+    return {
+        "scope": brand or "global",
+        "language": language_code(language),
+        "entries": store.list(brand, language).as_dict(),
+        "effective": store.for_brand(brand, language).as_dict(),
+        "languages": list(store.by_language(brand)),
+    }
+
+
+def _lexicon_store():
+    from .voice.lexicon_store import LexiconStore
+
+    return LexiconStore()
 
 
 def _voice_library():
@@ -953,6 +1003,384 @@ def _voice_synthesizer():
     from .pipeline.voices import shared_synthesizer
 
     return shared_synthesizer()
+
+
+# ---------- isolamento vocal ----------
+
+
+def _isolation_work(
+    job: Job, path: str, start: float | None, end: float | None, out_dir: str | None, audio_format: str
+) -> dict:
+    """Isolamento ligado ao job: cada bloco do modelo vira progresso."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.isolation import default_isolation_service
+
+    def on_progress(done: int, total: int) -> None:
+        job.progress = {
+            "label": f"bloco {done} de {total}",
+            "done": done,
+            "total": total,
+            "percent": int(100 * done / max(total, 1)),
+        }
+
+    service = default_isolation_service(SubprocessRunner(sink=job.sink()), job.log)
+    stems = service.export(
+        Path(path),
+        Path(out_dir) if out_dir else config.OUTPUT_DIR / "isolamento",
+        audio_format,  # type: ignore[arg-type]
+        start,
+        end,
+        on_progress=on_progress,
+    )
+    return {"voice": str(stems.vocals), "background": str(stems.background)}
+
+
+@server.tool(
+    description=(
+        "Isola a voz: separa a fala (voice) da música e do ruído de fundo (background) de um vídeo ou áudio, "
+        "ou de um trecho dele (start/end em segundos no arquivo), com o Demucs local. Grava dois arquivos em "
+        "out_dir (padrão output/isolamento; format wav ou mp3). Lento na CPU (~3x a 6x a duração do trecho, "
+        "mais ~30 s para carregar o modelo na primeira vez; o resultado fica em cache): devolve job_id, "
+        "consulte com job_status. Para usar no vídeo sem exportar, ponha audio_mode voice ou background "
+        "no clipe."
+    )
+)
+def isolate_vocals(
+    path: str,
+    start: float | None = None,
+    end: float | None = None,
+    out_dir: str | None = None,
+    format: Literal["wav", "mp3"] = "wav",
+    wait_seconds: float = 0,
+) -> dict:
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    job = jobs.start(
+        f"isolamento vocal ({Path(path).name})",
+        lambda job: _isolation_work(job, path, start, end, out_dir, format),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+# ---------- correção de fala ----------
+
+
+def _speech_fix_service(job: Job):
+    """Serviço de correção de fala ligado ao job (progresso do ffmpeg e do modelo viram eventos)."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.speech_fix import default_speech_fix_service
+
+    return default_speech_fix_service(
+        SubprocessRunner(sink=job.sink()),
+        job.log,
+        library=_voice_library(),
+        synthesizer=_voice_synthesizer(),
+        lexicons=_lexicon_store(),
+    )
+
+
+def _stage_progress(job: Job):
+    """Etapa e fração do serviço viram o progresso do job."""
+
+    def report(label: str, fraction: float) -> None:
+        job.progress = {
+            "label": label,
+            "done": round(fraction * 100),
+            "total": 100,
+            "percent": round(fraction * 100),
+        }
+
+    return report
+
+
+def _speech_words_work(job: Job, path: str, start: float | None, end: float | None, language: str) -> dict:
+    words = _speech_fix_service(job).transcribe_words(Path(path), start, end, language)
+    return {
+        "words": [[round(w.start, 2), round(w.end, 2), w.text] for w in words],
+        "text": " ".join(w.text for w in words),
+    }
+
+
+@server.tool(
+    description=(
+        "Lista as palavras ditas num vídeo ou áudio com o tempo de cada uma (Whisper local), para escolher o "
+        "trecho de fix_speech. start/end (segundos no arquivo) limitam a transcrição; em vídeos longos, "
+        "sempre use. Roda em segundo plano: devolve job_id, consulte com job_status; o resultado traz "
+        "words ([início, fim, palavra]) e text. Fica em cache."
+    )
+)
+def speech_words(
+    path: str,
+    start: float | None = None,
+    end: float | None = None,
+    language: str = "pt",
+    wait_seconds: float = 0,
+) -> dict:
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    job = jobs.start(
+        f"palavras de {Path(path).name}",
+        lambda job: _speech_words_work(job, path, start, end, language),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+def _fix_speech_work(job: Job, request: Any) -> dict:
+    result = _speech_fix_service(job).fix(request, _stage_progress(job))
+    return {
+        "output": str(result.path),
+        "old_text": result.old_text,
+        "new_text": result.new_text,
+        "spoken": result.spoken_context,
+        "region": [round(result.region_start, 2), round(result.region_end, 2)],
+        "duration_rule": result.rule,
+        "squeezed": result.squeezed,
+        "voice": result.voice,
+    }
+
+
+@server.tool(
+    description=(
+        "Corrige uma fala sem gravar de novo: regrava um trecho do vídeo ou áudio com a voz clonada do próprio "
+        "falante (ou de voice, da biblioteca) e emenda no original, que mantém a duração e o resto intacto. "
+        "Aponte o trecho com find (texto errado como foi dito; sem acento nem caixa; occurrence escolhe entre "
+        "repetidas) ou com start e end em segundos; text é o que deve ser dito. Por padrão fala também as "
+        "palavras vizinhas até o próximo fôlego, para a entonação ficar natural (expand=false fala só o "
+        "trecho). Se o texto novo for bem maior ou menor, o trecho estica até as pausas vizinhas; a regra "
+        "usada vem em duration_rule. Em vídeos longos use search_from/search_to para transcrever só uma "
+        "parte. A saída vai para output/correcao/<nome>.corrigido.<ext> (out troca). save_voice guarda a "
+        "voz clonada na biblioteca. Pronúncia: o dicionário vale ([[termo|pronúncia]] em text). Roda em "
+        "segundo plano e é lento na CPU (~20 s por segundo de fala nova, mais a separação de voz, ~3x a 6x a "
+        "janela de 60 s, em cache): devolve job_id, consulte com job_status."
+    )
+)
+def fix_speech(
+    path: str,
+    text: str,
+    find: str | None = None,
+    occurrence: int | None = None,
+    start: float | None = None,
+    end: float | None = None,
+    search_from: float | None = None,
+    search_to: float | None = None,
+    voice: str | None = None,
+    expand: bool = True,
+    save_voice: str | None = None,
+    language: str = "pt",
+    brand: str | None = None,
+    steps: int | None = None,
+    draft: bool = False,
+    seed: int | None = None,
+    out: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.speech_fix import FixRequest
+    from .voice.synth import DRAFT_STEPS
+
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    if voice:
+        _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
+    request = FixRequest(
+        src=Path(path),
+        text=text,
+        find=find,
+        occurrence=occurrence,
+        start=start,
+        end=end,
+        search_from=search_from,
+        search_to=search_to,
+        voice=voice,
+        expand=expand,
+        save_voice=save_voice,
+        language=language,
+        brand=brand,
+        steps=DRAFT_STEPS if draft and steps is None else steps,
+        seed=seed,
+        out=Path(out) if out else None,
+    )
+    job = jobs.start(f"corrigir fala ({Path(path).name})", lambda job: _fix_speech_work(job, request))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+# ---------- dublagem ----------
+
+
+def _dubbing_service(job: Job):
+    """Serviço de dublagem ligado ao job (progresso do ffmpeg e do modelo viram eventos)."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dubbing import default_dubbing_service
+
+    return default_dubbing_service(
+        SubprocessRunner(sink=job.sink()),
+        job.log,
+        library=_voice_library(),
+        synthesizer=_voice_synthesizer(),
+        lexicons=_lexicon_store(),
+    )
+
+
+def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Path, options: dict) -> dict:
+    from .pipeline.dubbing import project_summary
+
+    project = _dubbing_service(job).prepare(
+        Path(source_path), target, project_path=project_path, on_progress=_stage_progress(job), **options
+    )
+    return project_summary(project, project_path)
+
+
+@server.tool(
+    description=(
+        "Dublagem, passo 1: transcreve a fala de um vídeo ou áudio, parte em frases e traduz para "
+        "target_language com o Ollama local (modelo em DMAKER_TRANSLATE_MODEL), e grava o projeto editável "
+        "`.dub.json` (padrão output/dublagem/<nome>.<idioma>.dub.json). Revise as traduções com dub_get e "
+        "corrija com dub_update_segment antes de dub_render. speaker_mode: per_segment (clona a voz de quem fala "
+        "em cada frase; serve a vários falantes) ou single (um clone para o arquivo). voice usa uma voz da "
+        "biblioteca no lugar do clone. keep_original_db (ex.: -18) mantém a voz original por baixo. glossary: "
+        "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). Lento na CPU (separação de "
+        "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
+    )
+)
+def dub_prepare(
+    path: str,
+    target_language: str,
+    source_language: str = "pt",
+    speaker_mode: Literal["per_segment", "single"] = "per_segment",
+    voice: str | None = None,
+    keep_original_db: float | None = None,
+    glossary: list[str] | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.dubbing import default_project_path
+
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    if source_language.split("-")[0] == target_language.split("-")[0]:
+        raise ValueError("O idioma de destino precisa ser diferente do idioma de origem.")
+    if voice:
+        _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
+    project_path = Path(project) if project else default_project_path(Path(path), target_language)
+    options = {
+        "source": source_language,
+        "speaker_mode": speaker_mode,
+        "voice": voice,
+        "keep_original_db": keep_original_db,
+        "glossary": glossary or [],
+        "brand": brand,
+    }
+    job = jobs.start(
+        f"dublagem: preparar ({Path(path).name})",
+        lambda job: _dub_prepare_work(job, path, target_language, project_path, options),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+def _dub_render_work(job: Job, project_path: str, out: str | None, steps: int | None) -> dict:
+    from .domain.dub import load_dub_project
+    from .pipeline.dubbing import report_dict
+
+    result = _dubbing_service(job).render(
+        load_dub_project(Path(project_path)), Path(out) if out else None, _stage_progress(job), steps
+    )
+    return {
+        "output": str(result.path),
+        "srt": str(result.srt_path),
+        "warnings": result.warnings,
+        "regenerated": result.regenerated,
+        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
+        "segments": [report_dict(r) for r in result.report],
+    }
+
+
+@server.tool(
+    description=(
+        "Dublagem, passo 2: gera a dublagem de um projeto `.dub.json` (de dub_prepare): sintetiza cada tradução "
+        "na voz do falante, na duração que cabe, e monta com a música e o ruído de fundo do original; grava o "
+        "vídeo (output/dublagem/<nome>.<idioma>.<ext>, out troca) e a legenda .srt no idioma alvo. Cada fala "
+        "sintetizada fica em cache: depois de editar uma tradução, rode de novo e só ela é refeita. O resultado "
+        "traz warnings (falas que não couberam: encurte a tradução) e o relatório de cada fala. draft usa 8 "
+        "passos (metade do tempo). Lento na CPU (~20 s por segundo de fala): devolve job_id, consulte com "
+        "job_status."
+    )
+)
+def dub_render(
+    project: str,
+    out: str | None = None,
+    draft: bool = False,
+    steps: int | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .domain.dub import load_dub_project
+    from .voice.synth import DRAFT_STEPS
+
+    load_dub_project(Path(project))  # falha já na chamada se o projeto não existe ou está inválido
+    job = jobs.start(
+        f"dublagem: gerar ({Path(project).name})",
+        lambda job: _dub_render_work(job, project, out, DRAFT_STEPS if draft and steps is None else steps),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(description="Lê um projeto de dublagem (.dub.json): as falas com tempo, original e tradução.")
+def dub_get(project: str) -> dict:
+    from .domain.dub import load_dub_project
+    from .pipeline.dubbing import project_summary
+
+    path = Path(project)
+    return project_summary(load_dub_project(path), path)
+
+
+@server.tool(
+    description=(
+        "Corrige uma fala de um projeto de dublagem: text troca a tradução (a pronúncia pode usar "
+        "[[termo|pronúncia]]); locked=true impede que dub_retranslate a sobrescreva. Grava o .dub.json. "
+        "Depois rode dub_render: só a fala editada é sintetizada de novo."
+    )
+)
+def dub_update_segment(
+    project: str, segment_id: str, text: str | None = None, locked: bool | None = None
+) -> dict:
+    from .domain.dub import load_dub_project, save_dub_project
+
+    path = Path(project)
+    updated = load_dub_project(path).edited(segment_id, text, locked)
+    save_dub_project(updated, path)
+    segment = updated.segment(segment_id)
+    return {"project": str(path), "id": segment.id, "text": segment.text, "locked": segment.locked}
+
+
+def _dub_retranslate_work(job: Job, project_path: str) -> dict:
+    from .domain.dub import load_dub_project, save_dub_project
+    from .pipeline.dubbing import project_summary
+
+    path = Path(project_path)
+    project = _dubbing_service(job).retranslate(load_dub_project(path), _stage_progress(job))
+    save_dub_project(project, path)
+    return project_summary(project, path)
+
+
+@server.tool(
+    description=(
+        "Traduz de novo, com o Ollama, as falas de um projeto de dublagem que não estão travadas (locked); as "
+        "travadas, com a sua revisão, ficam como estão. Devolve job_id, consulte com job_status."
+    )
+)
+def dub_retranslate(project: str, wait_seconds: float = 0) -> dict:
+    from .domain.dub import load_dub_project
+
+    load_dub_project(Path(project))
+    job = jobs.start(
+        f"dublagem: traduzir de novo ({Path(project).name})", lambda job: _dub_retranslate_work(job, project)
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
 
 
 # ---------- recursos e prompt ----------

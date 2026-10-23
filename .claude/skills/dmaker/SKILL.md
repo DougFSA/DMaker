@@ -7,12 +7,11 @@ description: Editor de vídeos curtos por comando (Instagram Reels/Stories/Feed,
 
 ## Como rodar
 
-Prefira o servidor MCP `dmaker` (ferramentas `list_templates`, `new_from_template`, `save_project`,
-`validate_project`, `render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP conectado,
-use a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se faltar
+Prefira o servidor MCP `dmaker` (`list_templates`, `new_from_template`, `save_project`, `validate_project`,
+`render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP, use a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se faltar
 ffmpeg). `dmaker ui` abre a interface gráfica; `render_project`/`export_project` já abrem sozinhos para o
-usuário acompanhar (`show_ui=false` só se ele pedir para não abrir). `dmaker agent` opera as tarefas
-mecânicas (template, render, QA, legendas) com um modelo local do Ollama, sem depender desta sessão.
+usuário acompanhar (`show_ui=false` só se ele pedir para não abrir). `dmaker agent` faz as tarefas
+mecânicas (template, render, QA, legendas) com um modelo local do Ollama.
 
 ## Fluxo de trabalho (sempre nessa ordem)
 
@@ -37,12 +36,11 @@ mecânicas (template, render, QA, legendas) com um modelo local do Ollama, sem d
 
 ## O que continua sendo decisão da IA
 
-O software não decide sozinho: escolher os cortes, o ritmo (quando cada trecho troca), qual câmera aparece
-em cada momento (multicâmera) e quais tomadas usar são chamadas de edição, não do DMaker. Peça os
-instantes ao usuário ou avalie com `contact_sheet`/`frames` nas fontes antes de montar a timeline. A
-exceção é o corte automático de cerimônia (bloco `multicam` + `plan_multicam`): ele dá um ritmo
-plausível por fase reconhecida na fala, e o ajuste fino (qual casal está de frente para qual câmera)
-continua sendo feito com `edit_project` a partir dos avisos e da conferência do usuário.
+O software não decide sozinho: os cortes, o ritmo, qual câmera aparece em cada momento (multicâmera) e
+quais tomadas usar são chamadas de edição. Peça os instantes ao usuário ou avalie com
+`contact_sheet`/`frames` nas fontes antes de montar a timeline. A exceção é o corte automático de
+cerimônia (bloco `multicam` + `plan_multicam`): dá um ritmo plausível por fase reconhecida na fala, e o
+ajuste fino (qual casal está de frente para qual câmera) é feito com `edit_project` a partir dos avisos.
 
 ## Regras da marca MedlyCare (`"brand": "medlycare"`)
 
@@ -54,11 +52,16 @@ dele. Tom e regras completas de comunicação: skill `medlycare-marketing`.
 
 ## Voz e narração
 
-Voz local, sem custo. Padrão: OmniVoice (realista; clones `clone_voice`, vozes por descrição
-`design_voice`), lento na CPU: ~50 s por segundo de áudio (`draft=true` faz o rascunho em metade). Para
-conferir roteiro e ritmo rápido use as vozes prontas do Kokoro (`dora`, `alex`, `santa`; ~3 s por segundo).
+Voz local, sem custo. Padrão: OmniVoice (clones `clone_voice`, vozes por descrição `design_voice`),
+lento na CPU: ~50 s por segundo de áudio (`draft=true`: metade). Para
+conferir o roteiro use as vozes prontas do Kokoro (`dora`, `alex`, `santa`; ~3 s por segundo).
 MCP: `list_voices`, `synthesize_speech` (job: `job_status`). CLI: `dmaker voice say|clone|design|list|
-remove|preview`. Detalhes no guia.
+remove|preview`. Pronúncia ("DMaker" sai "DeMaker"): ferramenta `pronunciation` ou `dmaker voice lexicon
+add|list|remove [--brand --language]`; no texto, `[[termo|pronúncia]]`. Veja o guia.
+Separar voz de música/ruído: `isolate_vocals` (job) ou `audio_mode: voice|background` no clipe; lento, em cache.
+Palavra dita errado: `speech_words` e `fix_speech` (jobs) regravam o trecho na voz do falante; veja o guia.
+Dublar para outro idioma (voz clonada, fundo mantido): `dub_prepare`, revisar com `dub_get` e
+`dub_update_segment`, `dub_render` (jobs; só a fala editada é refeita). CLI: `dmaker dub ARQUIVO --to en`.
 
 ## Quando ler `dmaker://guide`
 
@@ -75,5 +78,5 @@ operação de `edit_project` que não lembra o formato.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status`/`list_jobs` acompanham um render em segundo plano, local ou na interface.
 - Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade, uns 2 min).
-- Trilha muda/oculta na interface (botões M/H/cadeado, campo `tracks` da spec) some do render final
-  também, não só da prévia: se uma faixa de áudio ou sobreposição não aparece no vídeo, confira `tracks`.
+- Trilha muda/oculta na interface (campo `tracks` da spec) some também do render final: se áudio ou
+  sobreposição não aparece no vídeo, confira `tracks`.

@@ -27,6 +27,8 @@ from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
+from .dub_routes import build_dub_router
+from .speech_routes import build_speech_router
 from .voice_routes import build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -49,6 +51,8 @@ app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
 app.include_router(build_voice_router(jobs))
+app.include_router(build_speech_router(jobs))
+app.include_router(build_dub_router(jobs))
 
 
 # ---------- modelos de entrada ----------

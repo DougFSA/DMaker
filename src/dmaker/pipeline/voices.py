@@ -16,6 +16,7 @@ from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from ..voice.design import VoiceDesign, parse_instruct
 from ..voice.kokoro import KokoroSynthesizer
+from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
 from ..voice.router import RoutingSynthesizer
 from ..voice.synth import OmniVoiceSynthesizer, SpeechSynthesizer
@@ -121,13 +122,19 @@ def speak(
     library: VoiceLibrary | None = None,
     runner: FFmpegRunner | None = None,
     synthesizer: SpeechSynthesizer | None = None,
+    brand: str | None = None,
+    lexicons: LexiconStore | None = None,
 ) -> NarrationResult:
     """Narra `text` com a voz `voice_id` (ou uma voz automática/descrita por `instruct`) e grava o áudio.
 
-    Sem `language`, vale o idioma da voz escolhida (ou português quando não há voz)."""
+    Sem `language`, vale o idioma da voz escolhida (ou português quando não há voz). A pronúncia vem do
+    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz)."""
     voice = (library or VoiceLibrary()).get(voice_id) if voice_id else None
     service = NarrationService(
-        synthesizer or shared_synthesizer(), runner or SubprocessRunner(quiet=True), log=log
+        synthesizer or shared_synthesizer(),
+        runner or SubprocessRunner(quiet=True),
+        log=log,
+        lexicons=(lexicons or LexiconStore()).for_brand,
     )
     return service.render(
         text,
@@ -141,6 +148,7 @@ def speak(
         write_srt=write_srt,
         steps=steps,
         master=master,
+        brand=brand or (voice.brand if voice else None),
     )
 
 

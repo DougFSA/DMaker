@@ -154,7 +154,12 @@ class SegmentBase(Strict):
 class ClipSegment(SegmentBase):
     """Trecho de vídeo. Com `src`, start/end são tempos no arquivo. Com `source` (nome em
     `project.sources`), start/end são tempos no relógio da sessão (o da fonte principal): é assim
-    que se corta entre câmeras sincronizadas sem calcular pontos de entrada na mão."""
+    que se corta entre câmeras sincronizadas sem calcular pontos de entrada na mão.
+
+    `audio_mode` escolhe qual parte do áudio da própria câmera entra no trecho, por isolamento vocal
+    (Demucs, lento na CPU e guardado em cache): `original` é o áudio como gravado; `voice` é só a voz,
+    limpa de música e ruído; `background` é só o fundo (música e ambiente), útil para dublar ou trocar a
+    fala. Não mexe nas faixas externas (`audio.tracks`)."""
 
     type: Literal["clip"] = "clip"
     src: str | None = None
@@ -165,6 +170,7 @@ class ClipSegment(SegmentBase):
     volume: float = Field(1.0, ge=0, le=4)  # áudio da própria câmera
     mute: bool = False
     matte: Matte | None = None  # fundo substituído por cor lisa (pessoa recortada)
+    audio_mode: Literal["original", "voice", "background"] = "original"
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:

@@ -10,6 +10,7 @@ import pytest
 from dmaker.media.ffmpeg import RecordingRunner
 from dmaker.pipeline.narration import NarrationService, cue_timeline
 from dmaker.voice.library import VoiceLibrary
+from dmaker.voice.pronunciation import Lexicon
 from dmaker.voice.script import Utterance
 from dmaker.voice.synth import Speech, VoiceRequest
 
@@ -159,3 +160,129 @@ def test_empty_text_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="vazio"):
         service.render("   ", tmp_path / "a.wav", voice=None)
     assert synthesizer.requests == [] and runner.commands == []
+
+
+def _lexicon_service(tmp_path, lexicons):
+    def on_run(command):
+        Path(command.args[-1]).write_bytes(b"audio")
+
+    synthesizer = FakeSynthesizer()
+    service = NarrationService(
+        synthesizer, RecordingRunner(on_run=on_run), tmp_path / "cache", lexicons=lexicons
+    )
+    return service, synthesizer
+
+
+def test_pronunciation_changes_what_is_synthesized_but_cues_and_srt_keep_the_written_text(tmp_path):
+    lexicon = Lexicon.of({"DMaker": "Di Meiker"})
+    service, synthesizer = _lexicon_service(tmp_path, lambda _brand, _language: lexicon)
+
+    result = service.render("O DMaker edita vídeos.", tmp_path / "a.wav", voice=None, write_srt=True)
+
+    assert synthesizer.requests[0].text == "O Di Meiker edita vídeos."
+    assert result.cues[0][2] == "O DMaker edita vídeos."
+    assert "O DMaker edita vídeos." in result.srt_path.read_text(encoding="utf-8")
+
+
+def test_inline_override_is_spoken_but_the_cue_shows_the_term(tmp_path):
+    service, synthesizer = _lexicon_service(
+        tmp_path, lambda _brand, _language: Lexicon.of({"DMaker": "Di Meiker"})
+    )
+
+    result = service.render(
+        "Fale [[DMaker|Dimêiker]] agora. Depois [[Samanta]] sorri.", tmp_path / "a.wav", voice=None
+    )
+
+    assert [r.text for r in synthesizer.requests] == ["Fale Dimêiker agora.", "Depois Samanta sorri."]
+    assert [cue[2] for cue in result.cues] == ["Fale DMaker agora.", "Depois Samanta sorri."]
+
+
+def test_brand_selects_the_lexicon_and_changing_it_invalidates_the_cache(tmp_path):
+    asked: list[str | None] = []
+    spellings = {None: "Di Meiker", "medlycare": "Dimêiker"}
+
+    def lexicons(brand, _language):
+        asked.append(brand)
+        return Lexicon.of({"DMaker": spellings[brand]})
+
+    service, synthesizer = _lexicon_service(tmp_path, lexicons)
+    service.render("Uma frase com DMaker.", tmp_path / "a.wav", voice=None)
+    service.render("Uma frase com DMaker.", tmp_path / "b.wav", voice=None)  # mesma pronúncia: vem do cache
+    service.render("Uma frase com DMaker.", tmp_path / "c.wav", voice=None, brand="medlycare")
+
+    assert asked == [None, None, "medlycare"]
+    assert [r.text for r in synthesizer.requests] == ["Uma frase com Di Meiker.", "Uma frase com Dimêiker."]
+
+
+def test_cached_duration_follows_the_same_pronunciation_as_render(tmp_path):
+    service, _ = _lexicon_service(tmp_path, lambda _brand, _language: Lexicon.of({"DMaker": "Di Meiker"}))
+    assert service.cached_duration("Uma frase com DMaker.", None) is None
+
+    rendered = service.render("Uma frase com DMaker.", tmp_path / "a.wav", voice=None)
+
+    assert service.cached_duration("Uma frase com DMaker.", None) == pytest.approx(rendered.duration)
+    other, _ = _lexicon_service(
+        tmp_path, lambda _brand, _language: Lexicon()
+    )  # sem a troca o texto é outro: não está no cache
+    assert other.cached_duration("Uma frase com DMaker.", None) is None
+
+
+def test_without_a_lexicon_provider_the_text_is_spoken_as_written(tmp_path):
+    service, synthesizer, _ = _service(tmp_path)
+    service.render("O DMaker edita.", tmp_path / "a.wav", voice=None, brand="medlycare")
+    assert synthesizer.requests[0].text == "O DMaker edita."
+
+
+def test_forced_duration_is_part_of_the_cache_key_and_is_cached_per_duration(tmp_path):
+    service, synthesizer, _ = _service(tmp_path)
+    short = VoiceRequest(text="Mesma frase.", duration=2.0)
+    long = VoiceRequest(text="Mesma frase.", duration=3.5)
+    assert not service.is_cached(short)
+    service.speak(short)
+    assert service.is_cached(short) and not service.is_cached(long)
+    service.speak(long)
+    service.speak(short)
+    assert len(synthesizer.requests) == 2
+    assert (
+        service.cache_key(short)
+        != service.cache_key(long)
+        != service.cache_key(VoiceRequest(text="Mesma frase."))
+    )
+
+
+def test_the_language_of_the_speech_selects_which_pronunciation_applies(tmp_path):
+    asked: list[tuple[str | None, str | None]] = []
+    portuguese_only = {"pt": Lexicon.of({"DMaker": "Di Mêiker"})}
+
+    def lexicons(brand, language):
+        asked.append((brand, language))
+        return portuguese_only.get(language, Lexicon())
+
+    service, synthesizer = _lexicon_service(tmp_path, lexicons)
+    service.render("Conheça o DMaker hoje.", tmp_path / "a.wav", voice=None, language="pt")
+    service.render("Meet the DMaker today.", tmp_path / "b.wav", voice=None, language="en")
+
+    assert asked == [(None, "pt"), (None, "en")]
+    assert [r.text for r in synthesizer.requests] == ["Conheça o Di Mêiker hoje.", "Meet the DMaker today."]
+
+
+def test_cached_duration_asks_the_lexicon_for_the_language_of_the_speech(tmp_path):
+    asked: list[str | None] = []
+
+    def lexicons(_brand, language):
+        asked.append(language)
+        return Lexicon()
+
+    service, _ = _lexicon_service(tmp_path, lexicons)
+    service.cached_duration("Hello there my friend.", None, language="en")
+
+    assert asked == ["en"]
+
+
+def test_inline_override_wins_in_any_language_even_without_an_entry(tmp_path):
+    service, synthesizer = _lexicon_service(tmp_path, lambda _brand, _language: Lexicon())
+
+    result = service.render("Say [[DMaker|Dee Maker]] now.", tmp_path / "a.wav", voice=None, language="en")
+
+    assert synthesizer.requests[0].text == "Say Dee Maker now."
+    assert result.cues[0][2] == "Say DMaker now."

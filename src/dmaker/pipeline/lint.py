@@ -63,6 +63,11 @@ def lint(
                 warnings.append(
                     f"timeline[{i}]: end={seg.end:g}s passa do fim da fonte ({where}); cortado no fim."
                 )
+        if isinstance(seg, ClipSegment) and info and seg.audio_mode != "original":
+            if reason := _silent_clip_reason(seg, info):
+                warnings.append(
+                    f"timeline[{i}]: audio_mode {seg.audio_mode!r} não faz efeito, o trecho {reason}."
+                )
         if info and info.width and max(info.width, info.height) < preset.short_side:
             warnings.append(
                 f"timeline[{i}]: fonte {info.width}x{info.height} é menor que a saída "
@@ -85,6 +90,13 @@ def lint(
         if v1_state and v1_state.hidden:
             warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
     return warnings
+
+
+def _silent_clip_reason(seg: ClipSegment, info: MediaInfo) -> str | None:
+    """Por que o trecho não tem áudio da câmera (mudo ou fonte sem áudio); None se tem."""
+    if seg.mute or seg.volume <= 0:
+        return "está mudo"
+    return None if info.has_audio else "não tem áudio"
 
 
 def _narration_warnings(project: Project, total: float, known_voices: Collection[str] | None) -> list[str]:

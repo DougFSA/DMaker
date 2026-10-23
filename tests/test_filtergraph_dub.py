@@ -1,0 +1,116 @@
+"""Grafo e comando ffmpeg da dublagem: posições, volume, aceleração, corte, voz original e saída."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from dmaker.filtergraph.dub import DubClip, dub_mix_command, dub_mix_graph
+
+CLIPS = [
+    DubClip(Path("a.wav"), start=1.0, gain_db=2.5),
+    DubClip(Path("b.wav"), start=4.25, gain_db=-1.0, tempo=1.1, max_seconds=2.0),
+]
+
+
+def graph(**options) -> str:
+    defaults = {"first_clip_input": 2, "background_input": 1, "duration": 30.0}
+    return dub_mix_graph(CLIPS, **{**defaults, **options})
+
+
+# ---------- grafo ----------
+
+
+def test_each_clip_is_delayed_to_its_position_in_milliseconds_on_all_channels():
+    text = graph()
+    assert "[2:a]volume=2.50dB" in text and "adelay=delays=1000:all=1[dub0]" in text
+    assert "[3:a]atempo=1.1000,volume=-1.00dB" in text and "adelay=delays=4250:all=1[dub1]" in text
+
+
+def test_a_clip_with_no_speedup_and_room_has_no_atempo_and_no_cut():
+    first_chain = graph().split(";")[1]
+    assert "atempo" not in first_chain and "atrim" not in first_chain and "afade" not in first_chain
+
+
+def test_a_clip_that_did_not_fit_is_cut_with_a_short_fade_out():
+    second_chain = graph().split(";")[2]
+    assert "atrim=duration=2.000,afade=t=out:st=1.920:d=0.08" in second_chain
+    assert second_chain.index("atempo") < second_chain.index("atrim")  # primeiro acelera, depois corta
+
+
+def test_everything_is_stereo_48k_so_amix_accepts_the_inputs():
+    text = graph()
+    assert (
+        text.count("aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo") == 3
+    )  # fundo + 2 falas
+
+
+def test_the_mix_sums_without_normalizing_limits_and_fixes_the_duration():
+    mix = graph().split(";")[-1]
+    assert mix.startswith("[background][dub0][dub1]amix=inputs=3:duration=first:normalize=0,")
+    assert "alimiter=limit=0.891:level=disabled" in mix
+    assert mix.endswith("apad=whole_dur=30.000,atrim=duration=30.000,asetpts=PTS-STARTPTS[out]")
+
+
+def test_the_original_voice_enters_attenuated_before_the_dubbed_clips():
+    text = graph(original_voice_input=3, original_voice_db=-18.0, first_clip_input=4)
+    assert "[3:a]volume=-18.0dB,aresample=48000" in text and "[original]" in text
+    assert "[background][original][dub0][dub1]amix=inputs=4" in text
+    assert "[4:a]" in text and "[5:a]" in text
+
+
+def test_no_clips_is_just_the_background():
+    text = dub_mix_graph([], 2, 1, 10.0)
+    assert "amix=inputs=1" in text and "[dub0]" not in text
+
+
+# ---------- comando ----------
+
+
+def test_video_command_copies_the_picture_and_reads_the_graph_from_a_file(tmp_path: Path):
+    mix = dub_mix_command(
+        Path("video.mp4"), Path("fundo.wav"), CLIPS, tmp_path / "saida.mp4", tmp_path / "g.txt", 30.0, True
+    )
+    args = mix.command.args
+    inputs = [args[i + 1] for i, a in enumerate(args) if a == "-i"]
+    assert inputs == ["video.mp4", "fundo.wav", "a.wav", "b.wav"]
+    assert args[args.index("-/filter_complex") + 1] == str(tmp_path / "g.txt")
+    assert "-filter_complex" not in args  # o grafo vai em arquivo, não na linha de comando
+    assert args[args.index("-c:v") + 1] == "copy" and args[args.index("-c:a") + 1] == "aac"
+    assert args[args.index("-b:a") + 1] == "192k" and "+faststart" in args
+    assert args[args.index("-map") + 1] == "0:v:0" and "[out]" in args
+    assert args[-1] == str(tmp_path / "saida.mp4") and mix.command.total == 30.0
+    assert mix.graph.startswith("[1:a]")  # o fundo é a entrada 1 (a 0 é o vídeo)
+    assert "[2:a]" in mix.graph and "[3:a]" in mix.graph
+
+
+def test_audio_only_command_has_no_video_input_and_encodes_by_extension(tmp_path: Path):
+    mix = dub_mix_command(
+        Path("a.wav"), Path("fundo.wav"), CLIPS, tmp_path / "s.mp3", tmp_path / "g.txt", 12.0, False
+    )
+    args = mix.command.args
+    assert [args[i + 1] for i, a in enumerate(args) if a == "-i"] == ["fundo.wav", "a.wav", "b.wav"]
+    assert "-c:v" not in args and "libmp3lame" in args
+    assert mix.graph.startswith("[0:a]")
+
+
+def test_original_voice_adds_an_input_and_shifts_the_clips(tmp_path: Path):
+    mix = dub_mix_command(
+        Path("v.mp4"),
+        Path("fundo.wav"),
+        CLIPS,
+        tmp_path / "s.mp4",
+        tmp_path / "g.txt",
+        30.0,
+        True,
+        original_voice=Path("voz.wav"),
+        original_voice_db=-20.0,
+    )
+    args = mix.command.args
+    assert [args[i + 1] for i, a in enumerate(args) if a == "-i"] == [
+        "v.mp4",
+        "fundo.wav",
+        "voz.wav",
+        "a.wav",
+        "b.wav",
+    ]
+    assert "[2:a]volume=-20.0dB" in mix.graph and "[3:a]volume=2.50dB" in mix.graph

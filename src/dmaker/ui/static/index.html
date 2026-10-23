@@ -356,6 +356,51 @@
                     </div>
                   </div>
                 </fieldset>
+
+                <fieldset class="form-block" id="speech-isolate-block">
+                  <legend>Isolar voz</legend>
+                  <p class="voice-notice">Separa a fala da música e do ruído de fundo de um vídeo ou áudio. Na CPU leva de 3 a 6 vezes a duração do trecho; o resultado fica guardado.</p>
+                  <div class="field">
+                    <label for="speech-iso-source">Arquivo</label>
+                    <select id="speech-iso-source" data-speech-source="iso"></select>
+                  </div>
+                  <div class="field" id="speech-iso-upload-field" hidden>
+                    <label for="speech-iso-file">Enviar vídeo ou áudio</label>
+                    <input type="file" id="speech-iso-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.mp4,.mov,.mkv">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="speech-iso-start">Início (s, opcional)</label>
+                      <input type="number" id="speech-iso-start" min="0" step="0.1" placeholder="Começo do arquivo">
+                    </div>
+                    <div class="field">
+                      <label for="speech-iso-end">Fim (s, opcional)</label>
+                      <input type="number" id="speech-iso-end" min="0" step="0.1" placeholder="Fim do arquivo">
+                    </div>
+                    <div class="field">
+                      <label for="speech-iso-format">Formato</label>
+                      <select id="speech-iso-format">
+                        <option value="wav">wav (sem perdas)</option>
+                        <option value="mp3">mp3</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="speech-iso-run" disabled>Isolar voz</button>
+                  </div>
+                  <div class="voice-progress" id="speech-iso-progress" hidden>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="speech-iso-fill"></div></div>
+                    <div class="progress-bar-label" id="speech-iso-label"></div>
+                  </div>
+                  <div class="voice-result" id="speech-iso-result" hidden>
+                    <div class="voice-item-meta">Voz</div>
+                    <audio id="speech-iso-voice" class="voice-audio" controls></audio>
+                    <div class="voice-item-actions"><a class="btn btn-small" id="speech-iso-voice-download" href="#">Baixar voz</a></div>
+                    <div class="voice-item-meta">Fundo (música e ambiente)</div>
+                    <audio id="speech-iso-background" class="voice-audio" controls></audio>
+                    <div class="voice-item-actions"><a class="btn btn-small" id="speech-iso-background-download" href="#">Baixar fundo</a></div>
+                  </div>
+                </fieldset>
               </div>
 
               <div class="voice-column">
@@ -385,6 +430,7 @@
                   </div>
                   <div class="hint-text" id="voice-script-stats"></div>
                   <div class="hint-text">Para uma pausa fixa, escreva [pausa 1.2] no ponto desejado. Linha em branco separa parágrafos com uma pausa maior.</div>
+                  <div class="hint-text">Para fixar a pronúncia só de uma ocorrência, escreva [[termo|pronúncia]], por exemplo [[DMaker|Di-mêiker]]. A fala usa a pronúncia e as legendas mostram o termo.</div>
                   <div class="add-row">
                     <button type="button" class="btn btn-accent" id="voice-generate" disabled>Gerar narração</button>
                   </div>
@@ -399,6 +445,200 @@
                     <div class="voice-item-actions">
                       <a class="btn btn-small" id="voice-result-download" href="#">Baixar áudio</a>
                       <button type="button" class="btn btn-small btn-accent" id="voice-result-insert" title="Acrescenta em audio.narration, na posição atual do player, e salva">Inserir no projeto aberto</button>
+                    </div>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-block" id="voice-pron-block">
+                  <legend>Pronúncia</legend>
+                  <p class="voice-notice">Ensine à voz como falar siglas e nomes de marca. Só a fala muda; legendas e SRT mantêm o texto escrito. A narração acima usa o dicionário global mais o da marca escolhida aqui. Cada termo vale só no idioma escolhido: a grafia feita para o português não vale na fala em inglês.</p>
+                  <div class="field">
+                    <label for="voice-pron-brand">Dicionário</label>
+                    <select id="voice-pron-brand"></select>
+                  </div>
+                  <ul class="voice-list voice-pron-list" id="voice-pron-rows"><li class="empty-hint">Carregando...</li></ul>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="voice-pron-term">Termo</label>
+                      <input type="text" id="voice-pron-term" placeholder="Ex.: DMaker">
+                    </div>
+                    <div class="field">
+                      <label for="voice-pron-spoken">Falar como</label>
+                      <input type="text" id="voice-pron-spoken" placeholder="Ex.: Di-mêiker">
+                    </div>
+                    <div class="field">
+                      <label for="voice-pron-language">Idioma da fala</label>
+                      <select id="voice-pron-language"></select>
+                    </div>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="voice-pron-add" disabled>Adicionar</button>
+                  </div>
+                  <div class="hint-text">Ouvir usa a voz escolhida em Narração e leva alguns minutos na CPU.</div>
+                </fieldset>
+
+                <fieldset class="form-block" id="speech-fix-block">
+                  <legend>Corrigir fala</legend>
+                  <p class="voice-notice">Troca uma palavra ou frase dita errado pela fala certa, na voz do próprio falante, sem gravar de novo. O resto do arquivo e a duração ficam como estão. Na CPU leva alguns minutos.</p>
+                  <div class="field">
+                    <label for="speech-fix-source">Arquivo</label>
+                    <select id="speech-fix-source" data-speech-source="fix"></select>
+                  </div>
+                  <div class="field" id="speech-fix-upload-field" hidden>
+                    <label for="speech-fix-file">Enviar vídeo ou áudio</label>
+                    <input type="file" id="speech-fix-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.mp4,.mov,.mkv">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="speech-fix-from">Transcrever de (s, opcional)</label>
+                      <input type="number" id="speech-fix-from" min="0" step="1" placeholder="Começo do arquivo">
+                    </div>
+                    <div class="field">
+                      <label for="speech-fix-to">até (s, opcional)</label>
+                      <input type="number" id="speech-fix-to" min="0" step="1" placeholder="Fim do arquivo">
+                    </div>
+                  </div>
+                  <div class="hint-text">Em vídeos longos, transcreva só o pedaço onde está o erro: é bem mais rápido.</div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="speech-fix-transcribe" disabled>Transcrever</button>
+                  </div>
+                  <div class="voice-progress" id="speech-words-progress" hidden>
+                    <div class="progress-bar-label" id="speech-words-label"></div>
+                  </div>
+                  <div class="speech-words-block" id="speech-words-block" hidden>
+                    <div class="hint-text">Clique na primeira e na última palavra do trecho errado (uma palavra só: clique nela duas vezes).</div>
+                    <div class="speech-words" id="speech-words"></div>
+                    <div class="voice-item-meta" id="speech-selection">Nenhum trecho escolhido.</div>
+                  </div>
+                  <div class="field">
+                    <label for="speech-fix-text">O que deve ser dito no lugar</label>
+                    <input type="text" id="speech-fix-text" placeholder="Ex.: Pedro">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="speech-fix-voice">Voz</label>
+                      <select id="speech-fix-voice"></select>
+                    </div>
+                    <div class="field">
+                      <label for="speech-fix-save">Guardar a voz do falante como (opcional)</label>
+                      <input type="text" id="speech-fix-save" placeholder="Ex.: Entrevistado">
+                    </div>
+                  </div>
+                  <div class="field field-checkbox">
+                    <input type="checkbox" id="speech-fix-expand" checked>
+                    <label for="speech-fix-expand">Falar também as palavras vizinhas (entonação mais natural)</label>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="speech-fix-run" disabled>Corrigir fala</button>
+                  </div>
+                  <div class="voice-progress" id="speech-fix-progress" hidden>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="speech-fix-fill"></div></div>
+                    <div class="progress-bar-label" id="speech-fix-label"></div>
+                  </div>
+                  <div class="voice-result" id="speech-fix-result" hidden>
+                    <div class="voice-item-meta" id="speech-fix-summary"></div>
+                    <div class="voice-item-actions">
+                      <button type="button" class="btn btn-small" id="speech-ab-original">Ouvir o trecho original</button>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-ab-fixed">Ouvir o trecho corrigido</button>
+                    </div>
+                    <audio id="speech-fix-original" class="voice-audio" controls></audio>
+                    <audio id="speech-fix-fixed" class="voice-audio" controls></audio>
+                    <div class="voice-item-actions">
+                      <a class="btn btn-small" id="speech-fix-download" href="#">Baixar corrigido</a>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-fix-use" title="Troca o arquivo original pelo corrigido nos trechos do projeto aberto e salva">Usar no projeto</button>
+                    </div>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-block" id="dub-block">
+                  <legend>Dublar</legend>
+                  <p class="voice-notice">Traduz a fala de um vídeo ou áudio e a refaz no outro idioma com a voz clonada de quem fala, mantendo a música e o ruído de fundo. Primeiro prepare (transcreve e traduz com o Ollama local), depois revise as traduções e gere. Na CPU leva vários minutos; cada fala sintetizada fica em cache, então corrigir uma tradução refaz só aquela fala.</p>
+                  <div class="field">
+                    <label for="dub-source">Arquivo</label>
+                    <select id="dub-source"></select>
+                  </div>
+                  <div class="field" id="dub-upload-field" hidden>
+                    <label for="dub-file">Enviar vídeo ou áudio</label>
+                    <input type="file" id="dub-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.mp4,.mov,.mkv">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="dub-from">Idioma da fala</label>
+                      <select id="dub-from"></select>
+                    </div>
+                    <div class="field">
+                      <label for="dub-to">Dublar para</label>
+                      <select id="dub-to"></select>
+                    </div>
+                    <div class="field">
+                      <label for="dub-speaker">Voz</label>
+                      <select id="dub-speaker">
+                        <option value="per_segment">Clonar a voz de cada fala (vários falantes)</option>
+                        <option value="single">Um só clone para o arquivo todo</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="dub-voice">Voz da biblioteca (opcional)</label>
+                      <select id="dub-voice"></select>
+                    </div>
+                    <div class="field">
+                      <label for="dub-keep">Voz original por baixo (dB, opcional)</label>
+                      <input type="number" id="dub-keep" max="0" step="1" placeholder="Ex.: -18 (vazio: só a dublada)">
+                    </div>
+                    <div class="field">
+                      <label for="dub-glossary">Termos que não se traduzem (opcional)</label>
+                      <input type="text" id="dub-glossary" placeholder="Ex.: DMaker, MedlyCare">
+                    </div>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="dub-prepare" disabled>Preparar (transcrever e traduzir)</button>
+                    <select id="dub-open" title="Abrir um projeto de dublagem já preparado"></select>
+                    <button type="button" class="btn" id="dub-open-run" disabled>Abrir projeto</button>
+                  </div>
+                  <div class="voice-progress" id="dub-prepare-progress" hidden>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="dub-prepare-fill"></div></div>
+                    <div class="progress-bar-label" id="dub-prepare-label"></div>
+                  </div>
+
+                  <div class="dub-project" id="dub-project-block" hidden>
+                    <div class="voice-item-meta" id="dub-project-summary"></div>
+                    <div class="dub-segments" id="dub-segments"></div>
+                    <div class="add-row">
+                      <button type="button" class="btn" id="dub-save" disabled>Salvar traduções</button>
+                      <button type="button" class="btn" id="dub-retranslate" title="Traduz de novo só as falas sem a trava">Traduzir de novo as destravadas</button>
+                    </div>
+                    <div class="field field-checkbox">
+                      <input type="checkbox" id="dub-draft">
+                      <label for="dub-draft">Rascunho (8 passos de síntese, metade do tempo)</label>
+                    </div>
+                    <div class="add-row">
+                      <button type="button" class="btn btn-accent" id="dub-render">Gerar dublagem</button>
+                    </div>
+                    <div class="voice-progress" id="dub-render-progress" hidden>
+                      <div class="progress-bar-track"><div class="progress-bar-fill" id="dub-render-fill"></div></div>
+                      <div class="progress-bar-label" id="dub-render-label"></div>
+                    </div>
+                  </div>
+
+                  <div class="voice-result" id="dub-result" hidden>
+                    <div class="voice-item-meta" id="dub-summary"></div>
+                    <ul class="dub-warnings" id="dub-warnings"></ul>
+                    <div class="dub-ab">
+                      <div>
+                        <div class="voice-item-meta">Original</div>
+                        <video id="dub-original" class="dub-video" controls preload="metadata"></video>
+                      </div>
+                      <div>
+                        <div class="voice-item-meta">Dublado</div>
+                        <video id="dub-dubbed" class="dub-video" controls preload="metadata"></video>
+                      </div>
+                    </div>
+                    <div class="voice-item-actions">
+                      <button type="button" class="btn btn-small" id="dub-play-original">Ouvir o original</button>
+                      <button type="button" class="btn btn-small btn-accent" id="dub-play-dubbed">Ouvir o dublado</button>
+                      <a class="btn btn-small" id="dub-download" href="#">Baixar o vídeo dublado</a>
+                      <a class="btn btn-small" id="dub-download-srt" href="#">Baixar a legenda (.srt)</a>
+                      <button type="button" class="btn btn-small btn-accent" id="dub-use" title="Troca o arquivo original pelo dublado nos trechos do projeto aberto e salva">Usar no projeto</button>
                     </div>
                   </div>
                 </fieldset>
@@ -462,6 +702,8 @@
 <script src="/static/progress.js"></script>
 <script src="/static/layout.js"></script>
 <script src="/static/voice.js"></script>
+<script src="/static/speech.js"></script>
+<script src="/static/dub.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

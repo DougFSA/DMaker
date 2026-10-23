@@ -61,6 +61,7 @@ def test_lists_tools_and_prompt():
         "clone_voice",
         "design_voice",
         "synthesize_speech",
+        "pronunciation",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -421,3 +422,119 @@ def test_synthesize_speech_rejects_unknown_voice_immediately(monkeypatch, tmp_pa
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path))
     with pytest.raises(VoiceNotFoundError, match="fantasma"):
         mcp_server.synthesize_speech("Oi.", voice="fantasma")
+
+
+def test_pronunciation_tool_lists_adds_and_removes_by_scope(monkeypatch, tmp_path):
+    import pytest
+
+    import dmaker.mcp_server as mcp_server
+    from dmaker.voice.lexicon_store import LexiconStore
+
+    (tmp_path / "brands" / "medlycare").mkdir(parents=True)
+    store = LexiconStore(tmp_path)
+    monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
+
+    assert mcp_server.pronunciation("list") == {
+        "scope": "global",
+        "language": "pt",
+        "entries": {},
+        "effective": {},
+        "languages": [],
+    }
+    mcp_server.pronunciation("add", term="DMaker", spoken="Di Meiker")
+    branded = mcp_server.pronunciation("add", term="DMaker", spoken="Dimêiker", brand="medlycare")
+    assert branded == {
+        "scope": "medlycare",
+        "language": "pt",
+        "entries": {"DMaker": "Dimêiker"},
+        "effective": {"DMaker": "Dimêiker"},
+        "languages": ["pt"],
+    }
+    assert mcp_server.pronunciation("list")["entries"] == {"DMaker": "Di Meiker"}
+
+    removed = mcp_server.pronunciation("remove", term="DMaker", brand="medlycare")
+    assert removed["entries"] == {} and removed["effective"] == {"DMaker": "Di Meiker"}
+
+    with pytest.raises(ValueError, match="term e spoken"):
+        mcp_server.pronunciation("add", term="DMaker")
+    with pytest.raises(ValueError, match="term"):
+        mcp_server.pronunciation("remove")
+    with pytest.raises(ValueError, match="não está no dicionário"):
+        mcp_server.pronunciation("remove", term="fantasma")
+
+
+def test_synthesize_speech_uses_the_pronunciation_of_the_brand(monkeypatch, tmp_path):
+    import dmaker.mcp_server as mcp_server
+    from dmaker.media.ffmpeg import RecordingRunner
+    from dmaker.voice.lexicon_store import LexiconStore
+    from dmaker.voice.library import VoiceLibrary
+
+    (tmp_path / "brands" / "medlycare").mkdir(parents=True)
+    store = LexiconStore(tmp_path)
+    store.add("DMaker", "Di Meiker")
+    store.add("MedlyCare", "Médli Quér", brand="medlycare")
+    fake = _FakeSynthesizer()
+    out = tmp_path / "narracao.wav"
+    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
+    monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
+    monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
+    monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
+    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+
+    started = mcp_server.synthesize_speech(
+        "O DMaker é da MedlyCare. Veja [[Samanta|Samanta]] aqui.", out=str(out), brand="medlycare"
+    )
+    job = mcp_server.jobs.get(started["job_id"])
+    mcp_server.jobs.wait(job, 30)
+
+    status = mcp_server.job_status(started["job_id"])
+    assert status["status"] == "done", status.get("error")
+    assert fake.texts == ["O Di Meiker é da Médli Quér.", "Veja Samanta aqui."]
+    assert [c["text"] for c in status["result"]["cues"]] == [
+        "O DMaker é da MedlyCare.",
+        "Veja Samanta aqui.",
+    ]
+
+
+def test_pronunciation_tool_is_scoped_by_language(monkeypatch, tmp_path):
+    import dmaker.mcp_server as mcp_server
+    from dmaker.voice.lexicon_store import LexiconStore
+
+    store = LexiconStore(tmp_path)
+    monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
+
+    mcp_server.pronunciation("add", term="DMaker", spoken="Di Mêiker")  # padrão: pt
+    english = mcp_server.pronunciation("add", term="MedlyCare", spoken="Medly Care", language="en-US")
+
+    assert english["language"] == "en" and english["entries"] == {"MedlyCare": "Medly Care"}
+    assert english["languages"] == ["en", "pt"]
+    assert mcp_server.pronunciation("list")["effective"] == {"DMaker": "Di Mêiker"}
+    assert mcp_server.pronunciation("list", language="es")["effective"] == {}
+
+    mcp_server.pronunciation("remove", term="medlycare", language="en")
+    assert mcp_server.pronunciation("list", language="en")["entries"] == {}
+
+
+def test_synthesize_speech_in_english_does_not_use_the_portuguese_pronunciation(monkeypatch, tmp_path):
+    import dmaker.mcp_server as mcp_server
+    from dmaker.media.ffmpeg import RecordingRunner
+    from dmaker.voice.lexicon_store import LexiconStore
+    from dmaker.voice.library import VoiceLibrary
+
+    store = LexiconStore(tmp_path)
+    store.add("DMaker", "Di Mêiker")
+    fake = _FakeSynthesizer()
+    out = tmp_path / "narracao.wav"
+    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
+    monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
+    monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
+    monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
+    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+
+    started = mcp_server.synthesize_speech("Meet the DMaker app today.", out=str(out), language="en")
+    mcp_server.jobs.wait(mcp_server.jobs.get(started["job_id"]), 30)
+
+    assert mcp_server.job_status(started["job_id"])["status"] == "done"
+    assert fake.texts == ["Meet the DMaker app today."]

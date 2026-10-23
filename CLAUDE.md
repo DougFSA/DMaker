@@ -12,13 +12,14 @@ Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 e
 ```
 agent/       llm.py (OllamaChat), tools.py (McpToolHost), prompt.py, loop.py (AgentLoop): operador local
              por um modelo do Ollama sobre as ferramentas MCP, para tarefas mecânicas (dmaker agent)
-domain/      spec.py (modelo Pydantic do projeto), presets.py, brand.py, timeline.py (contas puras)
-media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio), matting.py (Matter: RvmMatter, recorte de pessoa por ONNX)
-text/        ass.py (ASS), overlays.py (texto/legendas -> eventos), captions.py (cues, SRT, regroup), transcribe.py (Transcriber: WhisperTranscriber)
+domain/      spec.py (modelo Pydantic do projeto), dub.py (projeto de dublagem, `.dub.json`), presets.py, brand.py, timeline.py (contas puras)
+media/       ffmpeg.py (FFmpegCommand, FFmpegRunner: SubprocessRunner | RecordingRunner, ProgressSink), probe.py, fonts.py, audiosync.py (correlação de áudio), matting.py (Matter: RvmMatter, recorte de pessoa por ONNX), separation.py (VocalSeparator: DemucsSeparator, voz x fundo)
+text/        ass.py (ASS), overlays.py (texto/legendas -> eventos), captions.py (cues, SRT, regroup), transcribe.py (Transcriber: WhisperTranscriber), translate.py (Translator: OllamaTranslator, tradução em lotes com contexto)
+voice/       synth.py (SpeechSynthesizer: OmniVoiceSynthesizer), router.py, library.py (VoiceLibrary), reference.py, pronunciation.py, speech_edit.py (achar o trecho e planejar a emenda, puro), levels.py (volume e ponto mais quieto, puro), dub_plan.py (frases, espaço de cada fala e regra de velocidade da dublagem, puro)
 visuals/     cards.py (cartões e fundos), motion.py (Ken Burns sub-pixel), reframe_image.py, geometry.py, pip.py (máscara/moldura do PiP)
-filtergraph/ grafos e comandos ffmpeg como funções puras: reframe, timeline (xfade), overlays, pip (picture-in-picture), audio, encode, mezzanine
-pipeline/    context (RenderContext/Options/Result), sources (avulsas e sessão multicâmera), sync (offsets com cache), segments (preparadores por tipo), captions, textlayer, assembly (+ LoudnessMeter), renderer (orquestra), projects (serviços), jobs, qa, lint
-ui/          server.py (API FastAPI local + SSE de jobs) e static/ (página, vanilla JS)
+filtergraph/ grafos e comandos ffmpeg como funções puras: reframe, timeline (xfade), overlays, pip (picture-in-picture), audio, encode, mezzanine, voice, stems, speech_edit (emenda de fala regravada), dub (mixagem da dublagem)
+pipeline/    context (RenderContext/Options/Result), sources (avulsas e sessão multicâmera), sync (offsets com cache), isolation (stems em cache), narration, voices, speech_fix (regravar fala com a voz do falante), dubbing (dublar: preparar e gerar), segments (preparadores por tipo), captions, textlayer, assembly (+ LoudnessMeter), renderer (orquestra), projects (serviços), jobs, qa, lint
+ui/          server.py (API FastAPI local + SSE de jobs), voice_routes.py, speech_routes.py e dub_routes.py (aba Voz) e static/ (página, vanilla JS)
 cli.py       adaptador Typer, fino    mcp_server.py   adaptador MCP, fino (mesmos serviços)
 ```
 

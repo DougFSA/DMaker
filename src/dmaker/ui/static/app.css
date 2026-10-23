@@ -2007,6 +2007,10 @@ h2 {
   color: var(--text-muted);
 }
 
+.voice-pron-list {
+  margin-bottom: 10px;
+}
+
 .voice-source-choice {
   display: flex;
   flex-wrap: wrap;
@@ -2062,4 +2066,157 @@ h2 {
 .voice-progress .progress-bar-label {
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- isolar voz e corrigir fala (aba Voz, speech.js) ---------- */
+
+.speech-words {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  line-height: 1.9;
+}
+
+.speech-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+
+.speech-time {
+  flex: 0 0 52px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-word {
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13.5px;
+}
+
+.speech-word:hover {
+  background: var(--teal);
+}
+
+.speech-word.anchor {
+  outline: 1px solid var(--green);
+}
+
+.speech-word.selected {
+  background: var(--teal);
+  color: var(--mint);
+}
+
+.speech-words-block {
+  margin: 10px 0;
+}
+
+#speech-selection {
+  margin-top: 6px;
+}
+
+/* ---------- dublagem (aba Voz, dub.js) ---------- */
+
+.dub-project {
+  margin: 12px 0;
+}
+
+.dub-segments {
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt);
+}
+
+.dub-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1.2fr) 92px 64px;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dub-row:last-child {
+  border-bottom: 0;
+}
+
+.dub-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dub-original {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.dub-text {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.dub-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dub-status-warn {
+  color: var(--danger, #e5484d);
+  font-weight: 600;
+}
+
+.dub-lock {
+  font-size: 12px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.dub-warnings {
+  margin: 6px 0;
+  padding-left: 18px;
+  color: var(--danger, #e5484d);
+  font-size: 13px;
+}
+
+.dub-warnings:empty {
+  display: none;
+}
+
+.dub-ab {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.dub-video {
+  width: 100%;
+  max-height: 320px;
+  background: #000;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .dub-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dub-ab {
+    grid-template-columns: 1fr;
+  }
 }

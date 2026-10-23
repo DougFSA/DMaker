@@ -11,6 +11,7 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
+from typer.core import TyperGroup
 
 from . import __version__, config
 from .domain.presets import get_preset, list_presets
@@ -940,6 +941,9 @@ def voice_say(
     ] = False,
     raw: Annotated[bool, typer.Option(help="Voz crua do modelo, sem o acabamento broadcast.")] = False,
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+    brand: Annotated[
+        str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale (padrão: a da voz).")
+    ] = None,
 ) -> None:
     """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
     (lento na CPU). O resultado de cada fala fica em cache."""
@@ -967,6 +971,7 @@ def voice_say(
             master=not raw,
             log=_console_log,
             synthesizer=synthesizer,
+            brand=brand,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
@@ -1070,6 +1075,478 @@ def voice_preview(
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     _print_narration(result)
+
+
+def _print_words(words, detail: bool) -> None:
+    """Palavras com tempo: agrupadas por fôlego (uma linha por frase) ou, com `detail`, uma por linha."""
+    if detail:
+        table = Table("início", "fim", "palavra")
+        for word in words:
+            table.add_row(f"{word.start:.2f}", f"{word.end:.2f}", word.text)
+        console.print(table)
+        return
+    from .voice.speech_edit import MIN_PAUSE_SECONDS
+
+    line: list = []
+    for word in [*words, None]:
+        if line and (word is None or word.start - line[-1].end >= MIN_PAUSE_SECONDS):
+            console.print(
+                f"{line[0].start:8.1f} a {line[-1].end:.1f} s  {' '.join(w.text for w in line)}",
+                markup=False,
+                highlight=False,
+            )
+            line = []
+        if word is not None:
+            line.append(word)
+
+
+@voice_app.command("words")
+def voice_words(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
+    start: Annotated[
+        float | None, typer.Option(help="Início do trecho a transcrever (s no arquivo).")
+    ] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do trecho a transcrever (s no arquivo).")] = None,
+    language: Annotated[str, typer.Option(help="Idioma da fala.")] = "pt",
+    detail: Annotated[bool, typer.Option("--words", help="Uma palavra por linha, com início e fim.")] = False,
+) -> None:
+    """Lista o que foi dito com o tempo de cada trecho, para escolher o que corrigir com `voice fix`."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.speech_fix import default_speech_fix_service
+
+    service = default_speech_fix_service(SubprocessRunner(quiet=True), _console_log)
+    try:
+        words = service.transcribe_words(file, start, end, language)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    if not words:
+        console.print("Nenhuma fala encontrada no trecho.")
+        return
+    _print_words(words, detail)
+
+
+@voice_app.command("fix")
+def voice_fix(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com a fala a corrigir.")],
+    text: Annotated[str, typer.Option(help="O que deve ser dito no lugar (texto certo).")],
+    find: Annotated[
+        str | None, typer.Option(help="Texto errado como foi dito (sem diferenciar acento nem maiúscula).")
+    ] = None,
+    occurrence: Annotated[int | None, typer.Option(help="Qual ocorrência de --find (1, 2...).")] = None,
+    start: Annotated[float | None, typer.Option(help="Início do trecho errado (s no arquivo).")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do trecho errado (s no arquivo).")] = None,
+    search_from: Annotated[
+        float | None,
+        typer.Option(help="Com --find, só transcreve a partir daqui (s); poupa tempo em vídeos longos."),
+    ] = None,
+    search_to: Annotated[float | None, typer.Option(help="Com --find, só transcreve até aqui (s).")] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="Voz da biblioteca. Sem ela, clona a voz do próprio falante.")
+    ] = None,
+    no_expand: Annotated[
+        bool, typer.Option("--no-expand", help="Fala só o trecho trocado, sem as palavras vizinhas.")
+    ] = False,
+    save_voice: Annotated[
+        str | None, typer.Option(help="Guarda a voz clonada do falante na biblioteca com este nome.")
+    ] = None,
+    language: Annotated[str, typer.Option(help="Idioma da fala.")] = "pt",
+    brand: Annotated[str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale.")] = None,
+    steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    seed: Annotated[int | None, typer.Option(help="Semente: mesma semente, mesma fala.")] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Arquivo de saída (padrão: output/correcao/<nome>.corrigido.<ext>).")
+    ] = None,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Regrava um trecho de fala com a voz do próprio falante (corrige uma palavra sem gravar de novo).
+
+    Aponte o trecho com --find "texto errado" ou com --start e --end (veja `dmaker voice words`). O resto do
+    arquivo fica como está e o vídeo mantém a duração. Na CPU leva cerca de 20 s por segundo de fala nova
+    mais a separação da voz (que fica em cache)."""
+    import time
+
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.speech_fix import FixRequest, default_speech_fix_service
+    from .voice.synth import DRAFT_STEPS
+
+    started = time.perf_counter()
+    try:
+        request = FixRequest(
+            src=file,
+            text=text,
+            find=find,
+            occurrence=occurrence,
+            start=start,
+            end=end,
+            search_from=search_from,
+            search_to=search_to,
+            voice=voice,
+            expand=not no_expand,
+            save_voice=save_voice,
+            language=language,
+            brand=brand,
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+            seed=seed,
+            out=out,
+        )
+        service = default_speech_fix_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        result = service.fix(request)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
+    console.print(f'  trocado: "{result.old_text}" -> "{result.new_text}"', markup=False, highlight=False)
+    console.print(
+        f"  região {result.region_start:.2f} a {result.region_end:.2f} s; fala: {result.spoken_context}",
+        markup=False,
+        highlight=False,
+    )
+    console.print(f"  duração: {result.rule}", markup=False, highlight=False)
+    console.print(f"  voz: {result.voice}; tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+lexicon_app = typer.Typer(
+    help="Dicionário de pronúncia: como a voz fala cada termo (global ou por marca).", no_args_is_help=True
+)
+voice_app.add_typer(lexicon_app, name="lexicon")
+
+
+@lexicon_app.command("list")
+def lexicon_list(
+    brand: Annotated[str | None, typer.Option(help="Mostra também os termos dessa marca.")] = None,
+    language: Annotated[str | None, typer.Option(help="Só esse idioma (padrão: todos).")] = None,
+) -> None:
+    """Lista os termos: os globais e, com --brand, os da marca (que valem por cima)."""
+    from .voice.lexicon_store import LexiconStore
+    from .voice.pronunciation import language_code
+
+    store = LexiconStore()
+    try:
+        scopes = [("global", store.by_language())] + ([(brand, store.by_language(brand))] if brand else [])
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    table = Table("escopo", "idioma", "termo", "pronúncia")
+    for scope, languages in scopes:
+        for code, lexicon in languages.items():
+            if language is None or code == language_code(language):
+                for term, spoken in lexicon.entries:
+                    table.add_row(scope, code, term, spoken)
+    if not table.rows:
+        console.print("Nenhum termo cadastrado. Use `dmaker voice lexicon add TERMO PRONÚNCIA`.")
+        return
+    console.print(table)
+
+
+@lexicon_app.command("add")
+def lexicon_add(
+    term: Annotated[str, typer.Argument(help="Como o termo é escrito (ex.: DMaker).")],
+    spoken: Annotated[str, typer.Argument(help="Como deve ser falado (ex.: Di-mêiker).")],
+    brand: Annotated[str | None, typer.Option(help="Vale só para essa marca (padrão: global).")] = None,
+    language: Annotated[str, typer.Option(help="Idioma da fala em que vale (pt, en...).")] = "pt",
+) -> None:
+    """Cadastra ou troca a pronúncia de um termo num idioma. Só a fala muda; legendas mantêm o texto escrito."""
+    from .voice.lexicon_store import LexiconStore
+
+    try:
+        LexiconStore().add(term, spoken, brand, language)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Pronúncia salva ({language}):[/green] {term} -> {spoken}", highlight=False)
+
+
+@lexicon_app.command("remove")
+def lexicon_remove(
+    term: Annotated[str, typer.Argument(help="Termo a tirar do dicionário.")],
+    brand: Annotated[str | None, typer.Option(help="Tira da marca (padrão: do global).")] = None,
+    language: Annotated[str, typer.Option(help="Idioma do termo a tirar.")] = "pt",
+) -> None:
+    """Tira um termo do dicionário, no idioma dado."""
+    from .voice.lexicon_store import LexiconStore
+
+    try:
+        LexiconStore().remove(term, brand, language)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Termo removido:[/green] {term}", highlight=False)
+
+
+# ---------- áudio ----------
+
+audio_app = typer.Typer(
+    help="Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs.",
+    no_args_is_help=True,
+)
+app.add_typer(audio_app, name="audio")
+
+ISOLATION_FORMATS = ("wav", "mp3")
+
+
+@audio_app.command("isolate")
+def audio_isolate(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala e fundo.")],
+    start: Annotated[float | None, typer.Option(help="Início do trecho, em segundos no arquivo.")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do trecho, em segundos no arquivo.")] = None,
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/isolamento).")] = None,
+    audio_format: Annotated[str, typer.Option("--format", help="wav (sem perdas) ou mp3.")] = "wav",
+    stream: Annotated[int, typer.Option(help="Faixa de áudio do arquivo (0 é a primeira).")] = 0,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Separa a voz do fundo e grava `<nome>_voz` e `<nome>_fundo`. Lento na CPU (veja o fator no fim) e
+    guardado em cache: repetir o mesmo trecho é instantâneo."""
+    import time
+
+    from .media.ffmpeg import SubprocessRunner
+    from .media.probe import probe
+    from .media.separation import DemucsSeparator
+    from .pipeline.isolation import IsolationService, progress_logger
+
+    if audio_format not in ISOLATION_FORMATS:
+        _fail(f"Formato {audio_format!r} não suportado; use {' ou '.join(ISOLATION_FORMATS)}.")
+    service = IsolationService(DemucsSeparator(device=device), SubprocessRunner(quiet=True))
+    started = time.perf_counter()
+    try:
+        duration = (end if end is not None else probe(file).duration) - (start or 0.0)
+        stems = service.export(
+            file,
+            out_dir or config.OUTPUT_DIR / "isolamento",
+            audio_format,
+            start,
+            end,
+            stream,
+            progress_logger(_console_log, "separação"),
+        )
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    elapsed = time.perf_counter() - started
+    console.print(f"[green]Voz:[/green]   {stems.vocals}", highlight=False, soft_wrap=True)
+    console.print(f"[green]Fundo:[/green] {stems.background}", highlight=False, soft_wrap=True)
+    console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
+
+
+# ---------- dublagem ----------
+
+
+class _DubGroup(TyperGroup):
+    """`dmaker dub ARQUIVO --to en` (sem subcomando) prepara e gera de uma vez, como `dub run`."""
+
+    def resolve_command(self, ctx, args):
+        if args and args[0] not in self.commands and args[0] not in ctx.help_option_names:
+            return "run", self.commands["run"], args
+        return super().resolve_command(ctx, args)
+
+
+dub_app = typer.Typer(
+    cls=_DubGroup,
+    help="Dublagem: traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma alvo.",
+    no_args_is_help=True,
+)
+app.add_typer(dub_app, name="dub")
+
+SPEAKER_MODES = ("per_segment", "single")
+
+
+def _print_segments(project) -> None:
+    from rich.markup import escape
+
+    table = Table("fala", "tempo", "original", "tradução", "trava")
+    for s in project.segments:
+        table.add_row(
+            s.id,
+            f"{s.start:.1f} a {s.end:.1f}",
+            escape(s.source_text),
+            escape(s.text),
+            "sim" if s.locked else "",
+        )
+    console.print(table)
+
+
+def _print_dub_result(result) -> None:
+    from rich.markup import escape
+
+    console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
+    console.print(f"  legenda: {result.srt_path}", markup=False, highlight=False, soft_wrap=True)
+    table = Table("fala", "início", "tradução", "fala (s)", "toca (s)", "situação", "cache")
+    for r in result.report:
+        table.add_row(
+            r.id,
+            f"{r.start:.1f}",
+            escape(r.text),
+            f"{r.speech_seconds:.1f}",
+            f"{r.played_seconds:.1f}",
+            escape(r.message),
+            "sim" if r.cached else "não",
+        )
+    console.print(table)
+    for warning in result.warnings:
+        err.print(f"Atenção: {warning}", markup=False, highlight=False, soft_wrap=True)
+    steps = "; ".join(f"{name} {seconds:.0f} s" for name, seconds in result.timings.items())
+    console.print(
+        f"  {result.regenerated} fala(s) sintetizada(s) agora. Tempos: {steps}", markup=False, soft_wrap=True
+    )
+
+
+def _prepare_dub(
+    service,
+    file: Path,
+    target: str,
+    source: str,
+    speaker: str,
+    voice: str | None,
+    keep_original: float | None,
+    glossary: list[str] | None,
+    brand: str | None,
+    project_path: Path | None,
+) -> tuple:
+    from .pipeline.dubbing import default_project_path
+
+    if speaker not in SPEAKER_MODES:
+        _fail(f"Modo de falante {speaker!r} inválido; use {' ou '.join(SPEAKER_MODES)}.")
+    path = project_path or default_project_path(file, target)
+    project = service.prepare(
+        file,
+        target,
+        source,
+        speaker_mode=speaker,
+        voice=voice,
+        keep_original_db=keep_original,
+        glossary=glossary or [],
+        brand=brand,
+        project_path=path,
+    )
+    return project, path
+
+
+@dub_app.command("prepare")
+def dub_prepare(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
+    target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
+    source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
+    speaker: Annotated[
+        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
+    ] = "per_segment",
+    voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
+    keep_original: Annotated[
+        float | None,
+        typer.Option(help="Mantém a voz original por baixo, em dB (ex.: -18). Sem isso, só a dublada."),
+    ] = None,
+    glossary: Annotated[
+        list[str] | None, typer.Option(help="Termo que não se traduz (repita a opção para vários).")
+    ] = None,
+    brand: Annotated[str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale.")] = None,
+    project: Annotated[
+        Path | None,
+        typer.Option(help="Onde gravar o projeto (padrão: output/dublagem/<nome>.<idioma>.dub.json)."),
+    ] = None,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Separa a voz, transcreve, parte em frases e traduz; grava o projeto `.dub.json` para você revisar.
+
+    Corrija as traduções no JSON (ou na aba Voz da interface) e rode `dmaker dub render`. A tradução usa o
+    Ollama local (modelo em DMAKER_TRANSLATE_MODEL) e leva minutos na CPU."""
+    import time
+
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dubbing import default_dubbing_service
+
+    started = time.perf_counter()
+    try:
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        dub, path = _prepare_dub(
+            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+        )
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_segments(dub)
+    console.print(f"[green]Projeto:[/green] {path}", highlight=False, soft_wrap=True)
+    console.print(f"  tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+@dub_app.command("render")
+def dub_render(
+    project: Annotated[Path, typer.Argument(help="Projeto .dub.json (de `dmaker dub prepare`).")],
+    out: Annotated[
+        Path | None, typer.Option(help="Arquivo de saída (padrão: output/dublagem/<nome>.<idioma>.<ext>).")
+    ] = None,
+    steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Gera a dublagem: sintetiza as traduções com a voz de cada falante e monta com o fundo original.
+
+    Só as falas novas ou editadas são sintetizadas; o resto sai do cache. Grava o vídeo e a legenda (.srt)."""
+    from .domain.dub import load_dub_project
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dubbing import default_dubbing_service
+    from .voice.synth import DRAFT_STEPS
+
+    try:
+        dub = load_dub_project(project)
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_dub_result(result)
+
+
+@dub_app.command("retranslate")
+def dub_retranslate(
+    project: Annotated[Path, typer.Argument(help="Projeto .dub.json.")],
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Traduz de novo as falas do projeto que não estão travadas (`locked`), sem tocar nas travadas."""
+    from .domain.dub import load_dub_project, save_dub_project
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dubbing import default_dubbing_service
+
+    try:
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        dub = service.retranslate(load_dub_project(project))
+        save_dub_project(dub, project)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_segments(dub)
+
+
+@dub_app.command("run")
+def dub_run(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
+    target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
+    source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
+    speaker: Annotated[
+        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
+    ] = "per_segment",
+    voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
+    keep_original: Annotated[
+        float | None, typer.Option(help="Mantém a voz original por baixo, em dB (ex.: -18).")
+    ] = None,
+    glossary: Annotated[
+        list[str] | None, typer.Option(help="Termo que não se traduz (repita a opção).")
+    ] = None,
+    brand: Annotated[str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale.")] = None,
+    out: Annotated[Path | None, typer.Option(help="Arquivo de saída da dublagem.")] = None,
+    project: Annotated[Path | None, typer.Option(help="Onde gravar o projeto .dub.json.")] = None,
+    steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Prepara e gera a dublagem de uma vez (é o que `dmaker dub ARQUIVO --to en` faz).
+
+    Para revisar as traduções antes de sintetizar, use `dub prepare` e depois `dub render`."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dubbing import default_dubbing_service
+    from .voice.synth import DRAFT_STEPS
+
+    try:
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        dub, path = _prepare_dub(
+            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+        )
+        _print_segments(dub)
+        result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"  projeto: {path}", markup=False, highlight=False, soft_wrap=True)
+    _print_dub_result(result)
 
 
 if __name__ == "__main__":  # pragma: no cover

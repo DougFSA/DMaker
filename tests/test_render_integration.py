@@ -345,3 +345,216 @@ def test_narration_concat_joins_parts_with_pauses(tmp_path, extension):
     info = probe(out)
     assert info.has_audio and info.sample_rate == 48000 and info.channels == 1
     assert abs(info.duration - 2.0) < 0.08  # 1,0 + 0,5 de pausa + 0,5 (mp3/m4a acrescentam um pouco)
+
+
+class _SilencingSeparator:
+    """Separador falso para o ffmpeg de verdade: a voz sai muda e o fundo é a própria entrada."""
+
+    model_id = "teste:mudo"
+
+    def separate(self, wav, out_dir, on_progress=None):
+        import numpy as np
+
+        from dmaker.media.separation import Stems
+        from dmaker.media.wavio import read_wav_channels, write_wav_channels
+
+        samples, rate = read_wav_channels(wav)
+        stems = Stems.in_directory(out_dir)
+        write_wav_channels(stems.vocals, np.zeros_like(samples), rate)
+        write_wav_channels(stems.background, samples, rate)
+        return stems
+
+
+def _mean_volume_db(path: Path) -> float:
+    import re
+
+    from dmaker.media.ffmpeg import SubprocessRunner
+
+    report = SubprocessRunner(quiet=True).capture(
+        ["-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"]
+    )
+    return float(re.search(r"mean_volume: (-?[\d.]+|-inf) dB", report).group(1))
+
+
+@pytest.mark.parametrize(("mode", "audible"), [("original", True), ("background", True), ("voice", False)])
+def test_audio_mode_swaps_the_camera_audio_for_the_isolated_stem(synthetic_media, tmp_path, mode, audible):
+    """O clipe de teste tem um tom de 440 Hz; com o separador falso, `voice` fica mudo e `background`
+    mantém o tom: prova que o stem entra no mezanino de verdade."""
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.pipeline.isolation import IsolationService
+
+    project = Project.model_validate(
+        {
+            "name": f"audio_mode_{mode}",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [
+                {
+                    "type": "clip",
+                    "src": str(synthetic_media["clip_a"]),
+                    "start": 0.5,
+                    "end": 2.5,
+                    "audio_mode": mode,
+                }
+            ],
+            "audio": {"normalize": "off"},
+        }
+    )
+    project.base_dir = tmp_path
+    runner = SubprocessRunner(quiet=True)
+    isolator = IsolationService(_SilencingSeparator(), runner, cache_dir=tmp_path / "stems")
+    out = tmp_path / f"{mode}.mp4"
+    RenderPipeline(
+        project, RenderOptions(preview=True, out=out, quiet=True), isolator=isolator, runner=runner
+    ).run()
+
+    level = _mean_volume_db(out)
+    assert (level > -40) if audible else (level < -60)
+
+
+def _segment_db(path: Path, start: float, end: float) -> float:
+    import re
+
+    from dmaker.media.ffmpeg import SubprocessRunner
+
+    report = SubprocessRunner(quiet=True).capture(
+        [
+            "-ss",
+            str(start),
+            "-t",
+            str(end - start),
+            "-i",
+            str(path),
+            "-vn",
+            "-af",
+            "volumedetect",
+            "-f",
+            "null",
+            "-",
+        ]
+    )
+    return float(re.search(r"mean_volume: (-?[\d.]+|-inf) dB", report).group(1))
+
+
+def test_speech_splice_replaces_only_the_region_and_keeps_length_and_video(tmp_path):
+    """Original com tom de 220 Hz em 6 s; a região 2 a 4 s vira fundo mudo mais uma fala de 880 Hz entre
+    2,5 e 3,5 s. Fora da região o original continua; dentro, só a fala; o vídeo é copiado sem recodificar."""
+    import numpy as np
+
+    from dmaker.filtergraph.speech_edit import speech_splice_command
+    from dmaker.media import ffmpeg
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.media.wavio import write_wav, write_wav_channels
+    from dmaker.voice.speech_edit import SplicePlan
+
+    source = tmp_path / "original.mp4"
+    ffmpeg.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x240:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=220:sample_rate=48000",
+        ]
+        + [
+            "-t",
+            "6",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        quiet=True,
+    )
+    background = write_wav_channels(tmp_path / "bg.wav", np.zeros((6 * 44100, 2), dtype=np.float32), 44100)
+    tone = (0.3 * np.sin(2 * np.pi * 880 * np.arange(24000) / 24000)).astype(np.float32)
+    speech = write_wav(tmp_path / "fala.wav", tone, 24000)
+    plan = SplicePlan(2.0, 4.0, 2.5, 1.0, 1.0, 0.03, "teste")
+    out = tmp_path / "corrigido.mp4"
+
+    SubprocessRunner(quiet=True).run(
+        speech_splice_command(source, background, speech, out, plan, 0.0, has_video=True, source_duration=6.0)
+    )
+
+    info, original = probe(out), probe(source)
+    assert abs(info.duration - original.duration) < 0.1  # o arquivo não encolhe nem estica
+    assert info.video_codec == original.video_codec and (info.width, info.height) == (320, 240)
+    assert _segment_db(out, 0.2, 1.8) > -25  # antes da região: o original (220 Hz)
+    assert _segment_db(out, 4.2, 5.8) > -25  # depois dela: o original de novo
+    assert _segment_db(out, 2.1, 2.4) < -60  # entre a emenda e a fala: só o fundo, mudo
+    assert -25 < _segment_db(out, 2.6, 3.4) < -5  # a fala nova, no volume em que foi gerada
+
+
+def test_dub_mix_places_each_speech_over_the_background_and_keeps_length_and_video(tmp_path):
+    """Fundo de 110 Hz em 6 s; fala A de 880 Hz em 1 s e fala B de 1320 Hz em 3,5 s (cortada em 0,5 s, com
+    fade). Cada fala toca na sua posição, o fundo continua inteiro, o vídeo é copiado e o comprimento não muda."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_command
+    from dmaker.media import ffmpeg
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.media.wavio import write_wav, write_wav_channels
+
+    source = tmp_path / "original.mp4"
+    ffmpeg.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x240:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=220:sample_rate=48000",
+        ]
+        + [
+            "-t",
+            "6",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        quiet=True,
+    )
+    t = np.arange(6 * 44100) / 44100
+    hum = (0.05 * np.sin(2 * np.pi * 110 * t)).astype(np.float32)
+    background = write_wav_channels(tmp_path / "fundo.wav", np.stack([hum, hum], axis=1), 44100)
+    speech_t = np.arange(2 * 24000) / 24000  # 2 s a 24 kHz, mono (o formato da síntese)
+    first = write_wav(
+        tmp_path / "a.wav", (0.3 * np.sin(2 * np.pi * 880 * speech_t)).astype(np.float32), 24000
+    )
+    second = write_wav(
+        tmp_path / "b.wav", (0.3 * np.sin(2 * np.pi * 1320 * speech_t)).astype(np.float32), 24000
+    )
+    clips = [DubClip(first, 1.0, gain_db=0.0), DubClip(second, 3.5, gain_db=0.0, max_seconds=0.5)]
+    out = tmp_path / "dublado.mp4"
+    graph_file = tmp_path / "grafo.txt"
+
+    mix = dub_mix_command(source, background, clips, out, graph_file, 6.0, True)
+    graph_file.write_text(mix.graph, encoding="utf-8")
+    SubprocessRunner(quiet=True).run(mix.command)
+
+    info, original = probe(out), probe(source)
+    assert abs(info.duration - original.duration) < 0.1
+    assert info.video_codec == original.video_codec and (info.width, info.height) == (320, 240)
+    assert info.has_audio and info.sample_rate == 48000 and info.channels == 2
+    assert _segment_db(out, 0.2, 0.8) < -20  # antes das falas: só o fundo, baixo
+    assert _segment_db(out, 0.2, 0.8) > -50  # mas presente: a música de fundo não some
+    assert _segment_db(out, 1.2, 2.8) > _segment_db(out, 0.2, 0.8) + 10  # fala A, na posição pedida
+    assert _segment_db(out, 3.0, 3.4) < _segment_db(out, 1.2, 2.8) - 10  # antes da fala B, só o fundo
+    assert _segment_db(out, 3.55, 3.95) > _segment_db(out, 3.0, 3.4) + 10  # fala B começa em 3,5 s
+    assert _segment_db(out, 4.2, 5.8) < -20  # B foi cortada em 0,5 s: depois dela, só o fundo
+    assert _segment_db(out, 4.2, 5.8) > -50  # e o fundo segue até o fim

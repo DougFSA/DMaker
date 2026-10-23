@@ -160,6 +160,34 @@ def test_prepare_synthesizes_with_the_library_voice_and_reuses_the_cache(tmp_pat
     assert len(synthesizer.requests) == 1  # a segunda vez veio do cache
 
 
+def test_prepare_uses_the_pronunciation_of_the_project_brand(tmp_path):
+    from dmaker.voice.pronunciation import Lexicon
+
+    spellings = {None: Lexicon.of({"DMaker": "Di Meiker"}), "medlycare": Lexicon.of({"DMaker": "Dimêiker"})}
+    synthesizer = FakeSynthesizer()
+    runner = _runner()
+    library = VoiceLibrary(tmp_path / "voices")
+    project = _project(tmp_path, [{"text": "Olá, este é o DMaker."}], brand="medlycare")
+    service = NarrationService(
+        synthesizer,
+        runner,
+        tmp_path / "cache",
+        lexicons=lambda brand, _language: spellings.get(brand, Lexicon()),
+    )
+
+    ctx = _context(project, tmp_path, runner)
+    ctx.narrator = service
+    [item] = VoiceoverPreparer(library).prepare(ctx)
+
+    assert synthesizer.requests[0].text == "Olá, este é o Dimêiker."
+    assert item.cues[0][2] == "Olá, este é o DMaker."  # a legenda mostra o que está escrito
+    assert VoiceoverPreparer(library).cached_durations(project, service)[0] == pytest.approx(item.duration)
+    unbranded = _project(tmp_path, [{"text": "Olá, este é o DMaker."}])
+    assert VoiceoverPreparer(library).cached_durations(unbranded, service) == [
+        None
+    ]  # outra pronúncia, outro cache
+
+
 def test_prepare_builds_the_service_lazily_and_only_when_there_is_narration(tmp_path):
     built: list[RenderContext] = []
 

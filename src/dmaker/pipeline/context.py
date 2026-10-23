@@ -15,6 +15,7 @@ from ..media.matting import Matter
 from ..media.probe import MediaInfo
 
 if TYPE_CHECKING:  # pragma: no cover
+    from .isolation import IsolationService
     from .narration import NarrationService
 
 Prober = Callable[[Path], MediaInfo]
@@ -62,6 +63,7 @@ class RenderContext:
     prober: Prober
     matter: Matter | None = None  # recorte de pessoa para trocar o fundo (só quando um trecho pede)
     narrator: NarrationService | None = None  # síntese das narrações; criado na primeira que o projeto pede
+    isolator: IsolationService | None = None  # isolamento vocal; criado no primeiro clipe com `audio_mode`
     warnings: list[str] = field(default_factory=list)
     log: Callable[[str], None] = lambda message: None  # noqa: E731 - etapas do render (terminal, interface)
     session: dict[str, Any] = field(

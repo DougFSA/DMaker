@@ -26,8 +26,25 @@ MEDIA = STATIC_DIR / "media.js"
 PROGRESS = STATIC_DIR / "progress.js"
 LAYOUT = STATIC_DIR / "layout.js"
 VOICE = STATIC_DIR / "voice.js"
+SPEECH = STATIC_DIR / "speech.js"
+DUB = STATIC_DIR / "dub.js"
 
-ALL_JS = (JS, KEYMAP, TIMELINE, WAVEFORM, PLAYER, EDITOR, OPTIONS, FILTERS, MEDIA, PROGRESS, LAYOUT, VOICE)
+ALL_JS = (
+    JS,
+    KEYMAP,
+    TIMELINE,
+    WAVEFORM,
+    PLAYER,
+    EDITOR,
+    OPTIONS,
+    FILTERS,
+    MEDIA,
+    PROGRESS,
+    LAYOUT,
+    VOICE,
+    SPEECH,
+    DUB,
+)
 
 requires_node = pytest.mark.skipif(shutil.which("node") is None, reason="node não instalado")
 
@@ -354,3 +371,299 @@ def test_voice_narration_item_for_the_project_spec():
     assert bare == {"text": "Oi", "start": 0, "speed": 1, "language": "en"}
     error = json.dumps("ValueError: voz sumiu\nTraceback (most recent call last)")
     assert _run_voice_pure(f"pure.jobErrorMessage({error})") == "voz sumiu"
+
+
+def test_voice_studio_has_pronunciation_section_wired_to_the_api():
+    html = INDEX.read_text(encoding="utf-8")
+    for element_id in (
+        "voice-pron-brand",
+        "voice-pron-language",
+        "voice-pron-rows",
+        "voice-pron-term",
+        "voice-pron-spoken",
+        "voice-pron-add",
+    ):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+    assert "[[termo|pronúncia]]" in html
+    js = VOICE.read_text(encoding="utf-8")
+    assert "/api/voices/pronunciation" in js and "data-pron-action" in js and "/api/voices/speak" in js
+
+
+@requires_node
+def test_voice_pure_helpers_understand_inline_pronunciation():
+    assert (
+        _run_voice_pure('pure.spokenForm("Fale [[DMaker|Di Meiker]] e [[Samanta]].")')
+        == "Fale Di Meiker e Samanta."
+    )
+    assert _run_voice_pure('pure.spokenForm("sem marcacao")') == "sem marcacao"
+    assert (
+        _run_voice_pure('pure.estimateSeconds("[[" + "a".repeat(140) + "|" + "b".repeat(14) + "]]", 1)') == 1
+    )
+    assert _run_voice_pure('pure.pronunciationPreviewText(" DMaker ")') == "Eu falo DMaker. Repito: DMaker."
+
+
+# ---------- isolar voz e corrigir fala (speech.js) ----------
+
+
+def test_speech_file_is_referenced_after_voice_js_and_before_app_js():
+    html = INDEX.read_text(encoding="utf-8")
+    assert SPEECH.is_file() and "window.DMakerSpeech" in SPEECH.read_text(encoding="utf-8")
+    assert html.index("/static/voice.js") < html.index("/static/speech.js") < html.index("/static/app.js")
+    app_js = JS.read_text(encoding="utf-8")
+    assert "DMakerSpeech.init" in app_js and "DMakerSpeech.onShow" in app_js
+    assert "followJob" in VOICE.read_text(encoding="utf-8")
+
+
+def test_index_has_the_isolate_and_fix_speech_sections():
+    html = INDEX.read_text(encoding="utf-8")
+    for element_id in (
+        "speech-iso-source",
+        "speech-iso-file",
+        "speech-iso-start",
+        "speech-iso-end",
+        "speech-iso-format",
+        "speech-iso-run",
+        "speech-iso-progress",
+        "speech-iso-voice",
+        "speech-iso-background",
+        "speech-iso-voice-download",
+        "speech-iso-background-download",
+        "speech-fix-source",
+        "speech-fix-file",
+        "speech-fix-from",
+        "speech-fix-to",
+        "speech-fix-transcribe",
+        "speech-words",
+        "speech-selection",
+        "speech-fix-text",
+        "speech-fix-voice",
+        "speech-fix-expand",
+        "speech-fix-run",
+        "speech-fix-progress",
+        "speech-ab-original",
+        "speech-ab-fixed",
+        "speech-fix-original",
+        "speech-fix-fixed",
+        "speech-fix-download",
+        "speech-fix-use",
+    ):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+    assert "<legend>Isolar voz</legend>" in html and "<legend>Corrigir fala</legend>" in html
+    assert "—" not in html and "—" not in html  # a marca não usa travessão em texto na tela
+
+
+def test_speech_js_uses_the_speech_api_with_jobs_upload_and_project_ops():
+    js = SPEECH.read_text(encoding="utf-8")
+    for token in (
+        "/api/speech/upload",
+        "/api/speech/isolate",
+        "/api/speech/words",
+        "/api/speech/fix",
+        "DMakerVoice.followJob",
+        "collectMediaEntries",
+        "DMakerEditor.applyOp",
+        "saveProject",
+        "set_field",
+        "data-word",
+    ):
+        assert token in js, f"{token!r} não encontrado em speech.js"
+    assert all(rule in CSS.read_text(encoding="utf-8") for rule in (".speech-word.selected", ".speech-words"))
+
+
+def _run_speech_pure(expression: str):
+    """Avalia `expression` com as funções puras de speech.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(SPEECH))});"
+        "const pure = window.DMakerSpeech.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+WORDS_JS = (
+    "[{start:1.0,end:1.4,text:'Hoje'},{start:1.4,end:1.9,text:'é'},{start:2.5,end:3.0,text:'o'},"
+    "{start:3.0,end:3.6,text:'casamento'},{start:5.0,end:5.4,text:'Depois'}]"
+)
+
+
+@requires_node
+def test_speech_words_are_grouped_by_breath():
+    assert _run_speech_pure(f"pure.groupWordsByBreath({WORDS_JS})") == [[0, 1], [2, 3], [4]]
+    assert _run_speech_pure(f"pure.groupWordsByBreath({WORDS_JS}, 1)") == [[0, 1, 2, 3], [4]]
+    assert _run_speech_pure("pure.groupWordsByBreath([])") == []
+
+
+@requires_node
+def test_speech_selection_accepts_the_clicks_in_any_order():
+    forward = _run_speech_pure(f"pure.selectionFor({WORDS_JS}, 2, 3)")
+    assert forward == {"first": 2, "last": 3, "start": 2.5, "end": 3.6, "text": "o casamento"}
+    assert _run_speech_pure(f"pure.selectionFor({WORDS_JS}, 3, 2)") == forward
+    single = _run_speech_pure(f"pure.selectionFor({WORDS_JS}, 4, 4)")
+    assert single["text"] == "Depois" and (single["start"], single["end"]) == (5.0, 5.4)
+
+
+@requires_node
+def test_speech_project_sources_only_list_media_with_audio_and_a_path():
+    entries = (
+        "[{kind:'clip',label:'a.mp4',path:'D:/a.mp4',src:'a.mp4'},{kind:'image',label:'f.png',path:'D:/f.png'},"
+        "{kind:'audio',label:'m.mp3',path:'D:/m.mp3',src:'m.mp3'},{kind:'clip',label:'x',path:''}]"
+    )
+    options = _run_speech_pure(f"pure.projectSourceOptions({entries}).map(o => [o.value, o.label, o.path])")
+    assert options == [["project:0", "a.mp4", "D:/a.mp4"], ["project:1", "m.mp3", "D:/m.mp3"]]
+
+
+@requires_node
+def test_speech_replace_source_ops_cover_clips_overlays_and_named_sources():
+    spec = (
+        "{timeline:[{type:'clip',src:'a.mp4'},{type:'card'},{type:'clip',src:'b.mp4'},{type:'clip',src:'a.mp4'}],"
+        "overlays:[{type:'video',src:'a.mp4'},{type:'image',src:'a.mp4'}]}"
+    )
+    ops = _run_speech_pure(f"pure.replaceSourceOps({spec}, {{src:'a.mp4'}}, 'out/c.mp4')")
+    assert [op["path"] for op in ops] == ["timeline.0.src", "timeline.3.src", "overlays.0.src"]
+    assert all(op["type"] == "set_field" and op["value"] == "out/c.mp4" for op in ops)
+    named = _run_speech_pure(f"pure.replaceSourceOps({spec}, {{source:'cam1'}}, 'out/c.mp4')")
+    assert named == [{"type": "set_field", "path": "sources.cam1.src", "value": "out/c.mp4"}]
+    assert _run_speech_pure(f"pure.replaceSourceOps({spec}, null, 'x')") == []
+
+
+@requires_node
+def test_speech_ab_window_pads_the_region_and_never_goes_negative():
+    assert _run_speech_pure("pure.abWindow([21.4, 23.4])") == {"start": 19.9, "end": 24.9}
+    assert _run_speech_pure("pure.abWindow([0.5, 2], 1)") == {"start": 0, "end": 3}
+
+
+@requires_node
+def test_speech_number_parsing_and_summary():
+    assert _run_speech_pure("['', ' 3,5 ', 'abc', '-2', '0', 12].map(pure.numberOrNull)") == [
+        None,
+        3.5,
+        None,
+        None,
+        0,
+        12,
+    ]
+    summary = _run_speech_pure(
+        "pure.describeFix({old_text:'João',new_text:'Pedro',region:[21.44,23.4],rule:'duração mantida (1.2 s)',squeezed:true})"
+    )
+    assert summary.startswith('Trocado "João" por "Pedro" (região 21.4 a 23.4 s). Duração: duração mantida')
+    assert "apertada" in summary
+
+
+# ---------- dublagem (dub.js) ----------
+
+
+def test_dub_file_is_referenced_after_speech_js_and_before_app_js():
+    html = INDEX.read_text(encoding="utf-8")
+    assert DUB.is_file() and "window.DMakerDub" in DUB.read_text(encoding="utf-8")
+    assert html.index("/static/speech.js") < html.index("/static/dub.js") < html.index("/static/app.js")
+    app_js = JS.read_text(encoding="utf-8")
+    assert "DMakerDub.init" in app_js and "DMakerDub.onShow" in app_js
+
+
+def test_index_has_the_dubbing_section_with_every_element_dub_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = DUB.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("(dub-[a-z-]+)"\)', js)) | set(re.findall(r'"(dub-[a-z-]+-progress)"', js))
+    assert len(used) > 20
+    for element_id in sorted(used):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em dub.js não existe em index.html"
+    assert "<legend>Dublar</legend>" in html
+    assert "—" not in html and "—" not in js  # a marca não usa travessão em texto na tela
+
+
+def test_dub_js_uses_the_dub_api_with_jobs_upload_and_project_ops():
+    js = DUB.read_text(encoding="utf-8")
+    for token in (
+        "/api/speech/upload",
+        "/api/dub/prepare",
+        "/api/dub/project",
+        "/api/dub/projects",
+        "/api/dub/retranslate",
+        "/api/dub/render",
+        "DMakerVoice.followJob",
+        "collectMediaEntries",
+        "DMakerSpeech.pure.replaceSourceOps",
+        "DMakerEditor.applyOp",
+        "saveProject",
+    ):
+        assert token in js, f"{token!r} não encontrado em dub.js"
+    css = CSS.read_text(encoding="utf-8")
+    assert all(rule in css for rule in (".dub-row", ".dub-segments", ".dub-ab"))
+
+
+def _run_dub_pure(expression: str):
+    """Avalia `expression` com as funções puras de dub.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(DUB))});"
+        "const pure = window.DMakerDub.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_dub_glossary_is_split_trimmed_and_deduplicated():
+    assert _run_dub_pure("pure.parseGlossary(' DMaker, medlycare\\nDMAKER ,, Ollama ')") == [
+        "DMaker",
+        "medlycare",
+        "Ollama",
+    ]
+    assert _run_dub_pure("pure.parseGlossary('')") == []
+
+
+@requires_node
+def test_dub_keep_level_is_always_a_negative_db_or_null():
+    assert _run_dub_pure("['', ' ', '-18', '18', '-6,5', 'abc', '0'].map(pure.parseKeepDb)") == [
+        None,
+        None,
+        -18,
+        -18,
+        -6.5,
+        None,
+        0,
+    ]
+
+
+@requires_node
+def test_dub_segment_rows_escape_text_and_mark_locked_segments():
+    html = _run_dub_pure(
+        "pure.segmentRowsHtml([{id:'s1',start:1.04,end:3.5,original:'a <b> & c',text:'x \"q\"',locked:true},"
+        "{id:'s2',start:4,end:6,original:'o',text:'t',locked:false}])"
+    )
+    assert 'data-id="s1"' in html and "1.0 a 3.5 s" in html
+    assert "a &lt;b&gt; &amp; c" in html and "&quot;q&quot;" in html and "<b>" not in html
+    assert html.count("checked") == 1 and html.count("dub-row") == 2
+
+
+@requires_node
+def test_dub_edits_and_result_summary():
+    edits = _run_dub_pure(
+        "pure.segmentEdits([{id:'s1',text:'  Olá  ',locked:1},{id:'s2',text:null,locked:false}])"
+    )
+    assert edits == [{"id": "s1", "text": "Olá", "locked": True}, {"id": "s2", "text": "", "locked": False}]
+    summary = _run_dub_pure("pure.describeResult({report:[1,2,3],regenerated:1,timings:{a:10.2,b:5}})")
+    assert summary == "1 fala(s) sintetizada(s) agora e 2 reaproveitada(s) do cache, em 15 s."
+    assert _run_dub_pure("['fits','squeezed','overflow','empty','x'].map(pure.statusLabel)") == [
+        "cabe",
+        "comprimida",
+        "não coube",
+        "sem tradução",
+        "x",
+    ]
+
+
+@requires_node
+def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
+    assert (
+        _run_voice_pure('pure.pronunciationPreviewText("DMaker", "en-US")') == "I say DMaker. Again: DMaker."
+    )
+    assert (
+        _run_voice_pure('pure.pronunciationPreviewText("DMaker", "pt")') == "Eu falo DMaker. Repito: DMaker."
+    )
+    assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."

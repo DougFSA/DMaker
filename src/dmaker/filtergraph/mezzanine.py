@@ -78,14 +78,16 @@ def clip_mezzanine(
     in_point: float | None = None,
     tracks: tuple[TrackSlice, ...] = (),
     audio_stream: int = 0,
+    camera_audio: Path | None = None,
     backdrop: Path | None = None,
     reframe: Reframe | None = None,
     has_brand: bool = False,
     label: str = "trecho",
 ) -> FFmpegCommand:
     """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
-    `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `backdrop` é o PNG de fundo
-    do modo brand; `reframe` substitui o enquadramento da spec."""
+    `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
+    já recortado no trecho (começa no `in_point`) que substitui o da câmera, como a voz isolada;
+    `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec."""
     reframe = reframe or seg.reframe
     post, afades = _post_chain(seg.color, seg.fade_in, seg.fade_out, duration)
     inputs = Inputs()
@@ -103,9 +105,12 @@ def clip_mezzanine(
     # áudio: câmera (se houver e não estiver muda) + faixas externas, tudo já alinhado ao trecho
     voices: list[str] = []
     if info.has_audio and not seg.mute and seg.volume > 0:
-        lines.append(
-            f"[0:a:{audio_stream}]" + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]"
-        )
+        if camera_audio is not None:
+            index = inputs.add(camera_audio, "-t", f"{length:.3f}")
+            camera = f"[{index}:a:0]"
+        else:
+            camera = f"[0:a:{audio_stream}]"
+        lines.append(camera + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]")
         voices.append("[mz_cam]")
     for k, track in enumerate(tracks):
         idx = inputs.add(track.path, "-ss", f"{max(track.in_point, 0):.3f}", "-t", f"{length:.3f}")

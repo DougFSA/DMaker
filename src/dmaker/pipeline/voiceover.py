@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..domain.spec import Narration, Project
 from ..text.captions import Cue, Word
+from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary
 from .context import RenderContext
 
@@ -117,7 +118,7 @@ def default_service(ctx: RenderContext) -> NarrationService:
     from .narration import NarrationService
     from .voices import shared_synthesizer
 
-    return NarrationService(shared_synthesizer(), ctx.runner, log=ctx.log)
+    return NarrationService(shared_synthesizer(), ctx.runner, log=ctx.log, lexicons=LexiconStore().for_brand)
 
 
 class VoiceoverPreparer:
@@ -156,6 +157,7 @@ class VoiceoverPreparer:
                 speed=narration.speed,
                 instruct=narration.instruct,
                 seed=narration.seed,
+                brand=ctx.project.brand,
             )
             prepared.append(
                 PreparedVoiceover(
@@ -182,6 +184,7 @@ class VoiceoverPreparer:
                     speed=narration.speed,
                     instruct=narration.instruct,
                     seed=narration.seed,
+                    brand=project.brand,
                 )
             )
         return durations

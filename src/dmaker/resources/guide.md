@@ -66,6 +66,7 @@ Regras e valores:
 - **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; senão usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, separa melhor cadeira/objeto que encosta na pessoa, mais lento na CPU) ou `mobilenetv3` (mais leve e rápido, bom para rascunho). O recorte fica em cache: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos podem falhar na borda.
+- **audio_mode** (só em `clip`): `original` (padrão), `voice` (só a voz, limpa de música e ruído) ou `background` (só o fundo, para dublar ou trocar a fala). Usa o isolamento vocal, lento na CPU; veja a seção "Isolamento vocal". Vale só para o áudio da própria câmera, não para `audio.tracks`.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
 - **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `uppercase`, `align`, `max_width`, `font`, `weight`. `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição.
 - **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `opacity`, `start`/`end`, `fade`.
@@ -246,6 +247,20 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
   plano que devolve `job_id`; o resultado traz `output`, `duration_s` e `cues` (início, fim e texto de cada
   fala). Linha em branco é pausa de parágrafo, `[pausa 1.2]` fixa uma pausa em segundos, R$, % e números
   são lidos por extenso. Saída `.wav`, `.mp3` ou `.m4a` (48 kHz, mono). `speed` vai de 0.5 a 2 no Kokoro.
+- Pronúncia: o modelo lê "DMaker" como "DeMaker"; o dicionário de pronúncia troca o termo por uma grafia
+  que ele fala certo, só na hora de sintetizar (legendas, SRT e `cues` mantêm o texto escrito). Há um
+  global (`assets/pronunciation.json`) e um por marca (`assets/brands/<marca>/pronunciation.json`), que
+  vale por cima. Cada termo vale por idioma, porque a grafia feita para o português estraga a fala em
+  inglês: `{"pt": {"DMaker": "Di Mêiker"}, "en": {"MedlyCare": "Medly Care"}}`. O formato antigo
+  `{"termo": "pronúncia"}` solto na raiz continua valendo e conta como `pt`. `pt-BR` e `pt_br` são `pt`;
+  sem entrada no idioma da fala, o termo é lido como está (em inglês, "DMaker" já sai certo). A dublagem
+  usa a pronúncia do idioma de destino, e o glossário dela mantém os termos de todos os idiomas sem
+  traduzir. Casa sem diferenciar maiúsculas, só palavra inteira, termo mais longo primeiro. Gerencie com a
+  ferramenta `pronunciation(action=list|add|remove, term, spoken, brand, language)`,
+  `dmaker voice lexicon list|add|remove [--brand] [--language]` ou a seção Pronúncia do painel Voz. Em `synthesize_speech`, `brand` escolhe a marca (sem ele vale a da voz; numa narração do
+  projeto, a `brand` do projeto). Para uma só ocorrência, escreva no texto `[[termo|pronúncia]]` (fala a
+  pronúncia, a legenda mostra o termo) ou `[[pronúncia]]`, em qualquer idioma. A pronúncia entra na chave do cache: mudar o
+  dicionário ressintetiza só as falas afetadas.
 - Qualidade, seguindo o VoiceStudio: `steps` 16 (padrão, o "balanced" dele), `draft=true` ou `steps` 8 para
   rascunho (o "fast" dele, mais áspero), `steps` 32 para o máximo. O DMaker fixa também `guidance_scale` 2.0,
   `denoise` e `postprocess_output` ligados, e `preprocess_prompt` ligado nas referências. O texto passa por
@@ -261,6 +276,89 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
   refazer um roteiro com poucas mudanças só sintetiza o que mudou. Vozes por descrição ganham uma frase de
   âncora gerada uma vez, para o timbre não mudar entre as falas.
 - CLI equivalente: `dmaker voice say "texto" --voice ID --out narracao.wav [--draft] [--steps 32]`.
+
+### Isolamento vocal (voz x fundo)
+
+Separa a fala da música e do ruído com o Demucs htdemucs (local, MIT), em dois arquivos: `voice` e
+`background` (a soma de tudo que não é voz). Três caminhos:
+
+- `isolate_vocals(path, start, end, out_dir, format)`: job em segundo plano (`job_status`); grava
+  `<nome>_voz` e `<nome>_fundo` (wav ou mp3) em `out_dir` (padrão `output/isolamento`) e devolve os dois
+  caminhos em `result.voice` e `result.background`. CLI: `dmaker audio isolate ARQUIVO [--start --end
+  --out-dir --format wav|mp3]`.
+- `audio_mode: "voice"` ou `"background"` num `clip`: o mezanino usa o stem no lugar do áudio da câmera.
+- Custo na CPU deste projeto (4 núcleos físicos): conte de 3x a 6x a duração do trecho (medido com a CPU compartilhada) mais ~30 s para carregar o
+  modelo na primeira vez. O resultado fica em `cache/stems` (por arquivo, trecho, modelo e versão):
+  preview, render final e novas exportações do mesmo trecho não separam de novo. Para economizar, use
+  `start`/`end` estreitos no clipe.
+- Não é mágica: música muito alta, voz cantada ou várias pessoas falando ao mesmo tempo deixam resíduos de
+  fundo na voz e pedaços de voz no fundo.
+
+### Corrigir fala (regravar um trecho com a voz do próprio falante)
+
+Troca uma palavra ou frase dita errado, sem gravar de novo: o DMaker acha o trecho pela transcrição, separa
+a voz do fundo só em volta dele, clona a voz do falante a partir de outro pedaço do mesmo arquivo
+(temporário: não entra na biblioteca, a menos que `save_voice` dê um nome), sintetiza o texto certo e emenda.
+O arquivo mantém a duração, o vídeo é copiado sem recodificar e só a região trocada muda (o resto do áudio é
+o original). Dublagem reaproveita estas peças (`SpeechFixService`).
+
+- `speech_words(path, start, end)`: job que devolve as palavras com tempo (`dmaker voice words ARQUIVO
+  [--start --end --words]`). Em vídeo longo, limite `start`/`end`: transcrever tudo leva tempo.
+- `fix_speech(path, text, find | start+end, ...)`: job (`job_status`). `find` é o texto errado como foi dito
+  (sem acento nem caixa; `occurrence` escolhe entre repetidas, e sem ele a repetição é erro); `start`/`end`
+  apontam por tempo; `text` é o certo; `voice` usa uma voz da biblioteca no lugar do clone do falante;
+  `expand=false` fala só o trecho (por padrão fala também as palavras vizinhas até o próximo fôlego, para a
+  entonação ficar natural); `search_from`/`search_to` limitam a transcrição; `draft=true` usa 8 passos.
+  CLI: `dmaker voice fix ARQUIVO (--find "errado" | --start S --end E) --text "certo" [--voice ID]
+  [--no-expand] [--save-voice NOME] [--out]`. Saída padrão: `output/correcao/<nome>.corrigido.<ext>`.
+- Duração: o texto novo cabe no trecho original (diferença de até 10% nas letras mantém a duração). Mais
+  longo estica o trecho para dentro das pausas vizinhas (até meia pausa de cada lado, no máximo 0,5 s); se nem
+  assim couber, a fala é comprimida (`squeezed`) e `duration_rule` avisa. O comprimento do arquivo nunca muda.
+- A emenda cai no ponto mais quieto da pausa (crossfade de 30 ms) e o volume da fala nova é igualado ao do
+  falante em volta. O dicionário de pronúncia vale (`[[termo|pronúncia]]` em `text`).
+- Custo na CPU: ~20 s por segundo de fala sintetizada (o grupo de fôlego, 2 a 6 s) mais a separação da janela
+  de 60 s em volta do trecho (3x a 6x, em cache) e a transcrição. Reparos próximos reaproveitam a separação.
+- Na interface, aba Voz: seções "Isolar voz" e "Corrigir fala" (transcreve, clique na primeira e na última
+  palavra, ouça original e corrigido, "Usar no projeto" troca o arquivo nos trechos).
+
+### Dublar (traduzir a fala e refazê-la com a voz clonada de quem fala)
+
+Troca a fala de um vídeo ou áudio por outro idioma, mantendo música e ruído de fundo. É feito em dois passos
+com a revisão no meio, e o roteiro vive num projeto editável `<nome>.<idioma>.dub.json` em `output/dublagem`.
+
+1. **Preparar** (`dub_prepare`, ou `dmaker dub prepare ARQUIVO --to en [--from pt]`): separa voz e fundo
+   (Demucs, em cache), transcreve a voz com tempo por palavra (Whisper), parte em frases de 1 a 12 s
+   (pontuação, pausas de fôlego e tamanho) e traduz com o Ollama local (modelo em `DMAKER_TRANSLATE_MODEL`,
+   padrão `gpt-oss:20b`; sem o Ollama aberto o erro diz como abrir). A tradução recebe o roteiro inteiro em
+   JSON para ter contexto, pede fala natural de tamanho parecido com o original e mantém intactos os termos
+   do dicionário de pronúncia (marcas) e `glossary` (termos extras). Opções: `speaker_mode` (`per_segment`,
+   padrão: cada frase clona a voz de quem fala ali, serve a vários falantes; `single`: um clone para o
+   arquivo), `voice` (voz da biblioteca no lugar do clone), `keep_original_db` (ex.: -18: voz original por
+   baixo, estilo voice-over; sem ele só a dublada), `brand` (dicionário de pronúncia).
+2. **Revisar**: `dub_get(project)` lista as falas (`id`, tempo, `original`, `text`); `dub_update_segment(project,
+   segment_id, text, locked)` corrige a tradução (aceita `[[termo|pronúncia]]`); `locked=true` protege a fala de
+   `dub_retranslate` (traduz de novo só as destravadas). O JSON também pode ser editado à mão.
+3. **Gerar** (`dub_render`, ou `dmaker dub render PROJETO.dub.json [--out] [--draft]`): para cada fala clona a voz
+   (a janela de fala em volta dela, ou a vizinha se ela for curta; usa o cache de clones da correção de fala),
+   sintetiza a tradução no idioma alvo com a duração que cabe e monta fundo inteiro + falas dubladas nas
+   posições originais (+ voz original atenuada) sobre o vídeo, copiado sem recodificar. Grava o vídeo
+   (`output/dublagem/<nome>.<idioma>.<ext>`) e a legenda `.srt` no idioma alvo. `dmaker dub ARQUIVO --to en` faz
+   os dois passos de uma vez.
+
+Encaixe de duração (por fala): a duração natural da tradução é estimada pelo ritmo do falante original e pelas
+letras de cada idioma. Se cabe, a fala dura isso; se passa, avança na pausa seguinte (até 1,2 s, deixando 0,15 s
+de silêncio); se ainda passa, o modelo é pedido para falar mais rápido (até 1,25x) e o áudio pronto é acelerado
+sem mudar o tom (`atempo`, até 1,15x); acima disso o fim da fala é cortado com fade e o resultado traz
+`warnings` pedindo uma tradução mais curta. Cada fala tem `status` (`fits`, `advances`, `squeezed`,
+`overflow`, `empty`) no relatório.
+
+Cache por fala: o áudio de cada fala sai do cache quando texto, voz, idioma, duração e passos são os mesmos,
+então corrigir uma tradução e gerar de novo sintetiza só ela (`regenerated` no resultado). Custo na CPU: ~20 s
+por segundo de fala sintetizada, mais a separação (3x a 6x a duração, uma vez) e a tradução (minutos com o
+`gpt-oss:20b`). `draft=true` usa 8 passos. Na interface, aba Voz, seção "Dublar": escolher o arquivo, idiomas,
+preparar, editar a tabela de falas (tempo, original, tradução, travar), gerar com progresso "fala i de n",
+comparar original e dublado, baixar vídeo e legenda e "Usar no projeto". Fora do escopo: separação de
+falantes por diarização (o campo `speaker` do projeto está reservado) e sincronia labial.
 
 ### Narração no projeto
 

@@ -18,6 +18,7 @@ from ..voice.library import VoiceLibrary
 from .assembly import LoudnessMeter, build_assembly
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
+from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
 from .segments import MezzanineBuilder
@@ -46,6 +47,7 @@ class RenderPipeline:
         offset_finder: OffsetFinder | None = None,
         matter: Matter | None = None,
         narrator: NarrationService | None = None,
+        isolator: IsolationService | None = None,
         voice_library: VoiceLibrary | None = None,
     ):
         self.project = project
@@ -57,6 +59,7 @@ class RenderPipeline:
         self.matter = matter or RvmMatter()
         self.mezzanines = mezzanines or MezzanineBuilder()
         self.narrator = narrator
+        self.isolator = isolator
         self.voiceover = VoiceoverPreparer(voice_library)
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
@@ -92,6 +95,7 @@ class RenderPipeline:
             prober=self.prober,
             matter=self.matter,
             narrator=self.narrator,
+            isolator=self.isolator,
             log=self.log,
         )
 

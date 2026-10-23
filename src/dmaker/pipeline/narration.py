@@ -14,10 +14,18 @@ from ..media.wavio import wav_duration, write_wav
 from ..text.captions import Cue, to_srt
 from ..voice.library import VoiceProfile
 from ..voice.postprocess import POSTPROCESS_VERSION, finish_speech
+from ..voice.pronunciation import Lexicon, spoken_text, written_text
 from ..voice.script import Utterance, normalize_for_speech, parse_script
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
 
 DEFAULT_STEPS: int | None = None  # passos de síntese: None deixa cada motor escolher o seu padrão
+
+# léxico de pronúncia de uma marca (None = só o global) num idioma; idioma None junta todos (só para listar termos)
+LexiconProvider = Callable[[str | None, str | None], Lexicon]
+
+
+def no_pronunciation(_brand: str | None, _language: str | None) -> Lexicon:
+    return Lexicon()
 
 
 @dataclass(frozen=True)
@@ -49,7 +57,9 @@ class NarrationService:
         runner: FFmpegRunner,
         cache_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
+        lexicons: LexiconProvider = no_pronunciation,
     ) -> None:
+        self.lexicons = lexicons
         self.synthesizer = synthesizer
         self.runner = runner
         self.cache_dir = cache_dir or VOICE_CACHE_DIR
@@ -70,12 +80,18 @@ class NarrationService:
             "" if request.steps is None else str(request.steps),
             "" if request.seed is None else str(request.seed),
         ]
+        if request.duration is not None:  # a mesma frase forçada a durar 3 s ou 5 s são falas diferentes
+            parts.append(f"{request.duration:.3f}")
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def _cache_path(self, request: VoiceRequest) -> Path:
         return self.cache_dir / f"{self.cache_key(request)}.wav"
 
-    def _speak(self, request: VoiceRequest) -> tuple[Path, float]:
+    def is_cached(self, request: VoiceRequest) -> bool:
+        """A fala deste pedido já está em disco (a próxima chamada de `speak` não sintetiza)."""
+        return self._cache_path(request).exists()
+
+    def speak(self, request: VoiceRequest) -> tuple[Path, float]:
         """Arquivo da fala (do cache ou recém-sintetizado) e a duração dele."""
         path = self._cache_path(request)
         if not path.exists():
@@ -86,6 +102,7 @@ class NarrationService:
     @staticmethod
     def _request(
         utterance: Utterance,
+        lexicon: Lexicon,
         voice: VoiceProfile | None,
         language: str,
         speed: float,
@@ -94,7 +111,7 @@ class NarrationService:
         steps: int | None,
     ) -> VoiceRequest:
         return VoiceRequest(
-            text=normalize_for_speech(utterance.text, language),
+            text=normalize_for_speech(spoken_text(utterance.text, lexicon), language),
             language=language,
             voice=voice,
             instruct=instruct,
@@ -112,15 +129,18 @@ class NarrationService:
         instruct: str | None = None,
         seed: int | None = None,
         steps: int | None = DEFAULT_STEPS,
+        brand: str | None = None,
     ) -> float | None:
         """Duração da narração quando todas as falas já estão no cache; None se alguma faltar.
 
         Serve para mostrar o tempo real na linha do tempo sem pagar uma síntese.
         """
         utterances = parse_script(text)
+        lexicon = self.lexicons(brand, language)
         spans: list[tuple[float, Utterance]] = []
         for utterance in utterances:
-            path = self._cache_path(self._request(utterance, voice, language, speed, instruct, seed, steps))
+            request = self._request(utterance, lexicon, voice, language, speed, instruct, seed, steps)
+            path = self._cache_path(request)
             if not path.exists():
                 return None
             spans.append((wav_duration(path), utterance))
@@ -139,20 +159,26 @@ class NarrationService:
         write_srt: bool = False,
         steps: int | None = DEFAULT_STEPS,
         master: bool = True,
+        brand: str | None = None,
     ) -> NarrationResult:
+        """Narra `text`; `brand` escolhe o dicionário de pronúncia (o global vale sempre).
+
+        A pronúncia só muda o que vai ao sintetizador: legendas e SRT mantêm o texto escrito.
+        """
         utterances = parse_script(text)
         if not utterances:
             raise ValueError("O texto da narração está vazio.")
+        lexicon = self.lexicons(brand, language)
         parts: list[tuple[Path, float]] = []
         spans: list[tuple[float, Utterance]] = []
         for index, utterance in enumerate(utterances, 1):
             self.log(f"Fala {index} de {len(utterances)}")
             if on_progress:
                 on_progress(index, len(utterances))
-            request = self._request(utterance, voice, language, speed, instruct, seed, steps)
-            path, duration = self._speak(request)
+            request = self._request(utterance, lexicon, voice, language, speed, instruct, seed, steps)
+            path, duration = self.speak(request)
             parts.append((path, utterance.pause_after))
-            spans.append((duration, utterance))
+            spans.append((duration, Utterance(written_text(utterance.text), utterance.pause_after)))
 
         cues, total = cue_timeline(spans)
         out.parent.mkdir(parents=True, exist_ok=True)
