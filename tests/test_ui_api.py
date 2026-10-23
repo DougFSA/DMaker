@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import pytest
@@ -766,6 +767,129 @@ def test_speak_output_file_follows_the_pronunciation_of_the_spoken_language(voic
     ]
 
     assert first == same and first != changed
+
+
+def _job_events(client, job_id: str) -> list[dict]:
+    events = []
+    with client.stream("GET", f"/api/jobs/{job_id}/events") as stream:
+        for line in stream.iter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+    return events
+
+
+LIVE_TEXT = "Primeira fala da prévia.\n\nSegunda fala da prévia. Terceira fala da prévia."
+
+
+def test_speak_publishes_each_ready_utterance_as_an_sse_event_before_the_job_ends(voice_client, studio):
+    job_id = voice_client.post("/api/voices/speak", json={"text": LIVE_TEXT}).json()["job_id"]
+    job = _wait_for_job(job_id)
+    assert job.status == "done", job.error
+
+    events = _job_events(voice_client, job_id)
+    utterances = [e for e in events if e["kind"] == "utterance"]
+    assert [(e["index"], e["total"]) for e in utterances] == [(1, 3), (2, 3), (3, 3)]
+    assert [e["pause_after_s"] for e in utterances] == [0.7, 0.35, 0.0]  # a pausa do roteiro viaja junto
+
+    for event in utterances:
+        assert event["audio_url"].startswith("/api/voices/audio?path=")
+        chunk = voice_client.get(event["audio_url"])
+        assert chunk.status_code == 200 and chunk.content[:4] == b"RIFF"  # a fala crua do cache, em WAV
+    durations = [e["duration_s"] for e in utterances]
+    assert durations == [pytest.approx(0.05 * len(r.text), abs=0.01) for r in studio.synthesizer.requests]
+
+    # cada fala é avisada logo depois do progresso dela e antes do fim do job
+    kinds = [e["kind"] for e in events]
+    assert kinds.index("utterance") < kinds.index("end") and kinds[-1] == "end"
+    labels = [e["label"] for e in events if e["kind"] == "progress"]
+    assert labels == ["fala 1 de 3", "fala 2 de 3", "fala 3 de 3"]
+    for position, event in enumerate(utterances, 1):
+        progress_at = next(i for i, e in enumerate(events) if e.get("label") == f"fala {position} de 3")
+        assert progress_at < events.index(event)
+
+
+def test_utterance_chunks_are_served_from_the_cache_and_never_outside_it(voice_client, studio, tmp_path):
+    job_id = voice_client.post("/api/voices/speak", json={"text": LIVE_TEXT}).json()["job_id"]
+    _wait_for_job(job_id)
+    chunk_url = next(e["audio_url"] for e in _job_events(voice_client, job_id) if e["kind"] == "utterance")
+    served = Path(parse_qs(urlparse(chunk_url).query)["path"][0])
+    assert served.parent == config.VOICE_CACHE_DIR.resolve()
+
+    secret = tmp_path / "segredo.wav"
+    secret.write_bytes(b"RIFFsecreto")
+    for escape in (config.VOICE_CACHE_DIR / ".." / "segredo.wav", config.VOICE_CACHE_DIR / ".." / ".." / "x"):
+        reply = voice_client.get("/api/voices/audio", params={"path": str(escape)})
+        assert reply.status_code == 404
+
+
+class GatedSynthesizer(FakeSynthesizer):
+    """Segura a síntese de uma fala até o teste mandar seguir, para cancelar com o job no meio da narração."""
+
+    def __init__(self, hold_call: int):
+        super().__init__()
+        self.hold_call = hold_call
+        self.reached = threading.Event()
+        self.release = threading.Event()
+
+    def synthesize(self, request: VoiceRequest) -> Speech:
+        speech = super().synthesize(request)
+        if len(self.requests) == self.hold_call:
+            self.reached.set()
+            assert self.release.wait(10)
+        return speech
+
+
+FIVE_UTTERANCES = " ".join(f"Esta é a fala número {n} da narração de teste." for n in range(1, 6))
+
+
+def test_stop_cancels_between_utterances_and_generating_again_reuses_what_was_ready(voice_client, studio):
+    studio.synthesizer = GatedSynthesizer(hold_call=2)
+    body = {"text": FIVE_UTTERANCES}
+    job_id = voice_client.post("/api/voices/speak", json=body).json()["job_id"]
+    assert studio.synthesizer.reached.wait(10)  # a fala 2 está sendo gerada
+
+    reply = voice_client.post(f"/api/jobs/{job_id}/cancel")
+    assert reply.status_code == 200 and reply.json()["cancellable"] is True
+    studio.synthesizer.release.set()
+    job = _wait_for_job(job_id)
+
+    assert job.status == "cancelled" and job.error is None
+    assert job.result == {"ready": 2, "total": 5}
+    assert len(studio.synthesizer.requests) == 2  # a fala 3 nunca foi sintetizada
+    events = _job_events(voice_client, job_id)
+    assert [e["index"] for e in events if e["kind"] == "utterance"] == [1, 2]
+    assert events[-1]["kind"] == "end" and events[-1]["status"] == "cancelled"
+    assert not list(config.OUTPUT_DIR.glob("narracao-*.wav"))  # sem arquivo final de narração pela metade
+
+    again = _wait_for_job(voice_client.post("/api/voices/speak", json=body).json()["job_id"])
+    assert again.status == "done", again.error
+    texts = [r.text for r in studio.synthesizer.requests]
+    assert len(texts) == 5 and len(set(texts)) == 5  # só as 3 que faltavam foram sintetizadas agora
+
+
+def test_stop_while_waiting_in_the_queue_never_touches_the_synthesizer(voice_client, studio):
+    from dmaker.ui import voice_routes
+
+    voice_routes._synthesis_lock.acquire()  # outro trabalho de voz ocupando a CPU
+    try:
+        job_id = voice_client.post("/api/voices/speak", json={"text": LIVE_TEXT}).json()["job_id"]
+        assert voice_client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+        job = _wait_for_job(job_id)
+    finally:
+        voice_routes._synthesis_lock.release()
+    assert job.status == "cancelled" and studio.synthesizer.requests == []
+
+
+def test_cancel_rejects_unknown_jobs_and_jobs_that_cannot_be_cancelled(voice_client):
+    assert voice_client.post("/api/jobs/fantasma/cancel").status_code == 404
+    release = threading.Event()
+    job = server.jobs.start("render qualquer", lambda _job: release.wait(10))
+    try:
+        assert voice_client.post(f"/api/jobs/{job.id}/cancel").status_code == 409
+    finally:
+        release.set()
+        server.jobs.wait(job, 10)
+    assert job.status == "done"
 
 
 def test_timeline_endpoint_shows_real_duration_of_synthesized_narration_and_estimate_for_new_ones(

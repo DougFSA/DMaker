@@ -36,6 +36,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Added
 
+- **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
 - **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
 
 ### Fixed

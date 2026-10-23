@@ -475,7 +475,7 @@ def export_project(
 
 
 @server.tool(
-    description="Situação de um render em segundo plano (running | done | error) e o resultado quando pronto."
+    description="Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto."
 )
 def job_status(job_id: str) -> dict:
     job = jobs.get(job_id)

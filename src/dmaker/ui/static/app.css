@@ -362,6 +362,7 @@ h2 {
 .job-status-running { background: #2A4A50; color: var(--mint); }
 .job-status-done { background: var(--success-bg); color: var(--success); }
 .job-status-error { background: var(--danger-bg); color: var(--danger); }
+.job-status-cancelled { background: var(--panel-alt); color: var(--text-muted); }
 
 .mini-bar-track {
   height: 5px;
@@ -2071,6 +2072,18 @@ h2 {
 
 .voice-progress .progress-bar-label {
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-live {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  background: var(--panel-alt);
+  border-radius: 4px;
+}
+
+.voice-live-status {
   font-variant-numeric: tabular-nums;
 }
 

@@ -669,6 +669,192 @@ def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
     assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."
 
 
+def test_voice_studio_has_live_preview_and_stop_wired_to_the_job_api():
+    html = INDEX.read_text(encoding="utf-8")
+    for element_id in ("voice-stop", "voice-live", "voice-live-status", "voice-live-mute"):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+    assert "fala crua" in html and "acabamento" in html  # avisa que a prévia não tem o acabamento final
+    # a prévia fica fora do bloco de progresso: ele some quando o job acaba, e o áudio ainda toca depois
+    before_live = html[html.index('id="voice-progress"') : html.index('id="voice-live"')]
+    assert before_live.count("<div") == before_live.count("</div>")
+    js = VOICE.read_text(encoding="utf-8")
+    for token in ('"utterance"', "/cancel", "decodeAudioData", "createLivePlayer", "cancelled"):
+        assert token in js, f"{token!r} não encontrado em voice.js"
+    assert "—" not in html and "—" not in js  # sem travessão em texto de tela
+
+
+FAKE_AUDIO_CONTEXT = """
+class Param {
+  constructor() { this.events = []; this.value = 1; }
+  setValueAtTime(value, time) { this.events.push(["set", value, time]); return this; }
+  linearRampToValueAtTime(value, time) { this.events.push(["ramp", value, time]); return this; }
+  cancelScheduledValues() { return this; }
+}
+function fakeContext(startTime) {
+  const ctx = { currentTime: startTime, destination: {}, gains: [], sources: [] };
+  ctx.createGain = () => {
+    const node = { gain: new Param(), connect() {}, disconnect() {} };
+    ctx.gains.push(node);
+    return node;
+  };
+  ctx.createBufferSource = () => {
+    const source = { buffer: null, connect() {}, start(when) { this.startedAt = when; },
+                     stop(when) { this.stoppedAt = when; } };
+    ctx.sources.push(source);
+    return source;
+  };
+  ctx.decodeAudioData = async (bytes) => ({ duration: bytes.duration });
+  return ctx;
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+"""
+
+
+def _run_voice_script(body: str):
+    """Roda `body` (que define `result`) com voice.js carregado e um AudioContext falso que só registra."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(VOICE))});"
+        "const pure = window.DMakerVoice.pure;"
+        f"{FAKE_AUDIO_CONTEXT}"
+        f"(async () => {{ let result; {body}; console.log(JSON.stringify(result)); }})();"
+    )
+    run = subprocess.run(["node", "-e", script], capture_output=True, text=True, encoding="utf-8")
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+@requires_node
+def test_live_plan_chains_each_utterance_right_after_the_previous_one_plus_the_script_pause():
+    plans = _run_voice_script(
+        """
+        let cursor = null; const out = [];
+        for (const [duration, pause] of [[1.0, 0.35], [2.0, 0.7], [0.5, 0]]) {
+          const plan = pure.planLiveChunk(cursor, 10, duration, pause);
+          out.push(plan); cursor = plan.nextCursor;
+        }
+        result = out;
+        """
+    )
+    starts = [round(p["startAt"], 6) for p in plans]
+    assert starts == [10.06, 11.41, 14.11]  # fala 1 + 0,35 s de pausa, fala 2 + 0,7 s de pausa
+    assert [round(p["endAt"] - p["startAt"], 6) for p in plans] == [1.0, 2.0, 0.5]
+    assert round(plans[1]["startAt"] - plans[0]["endAt"], 6) == 0.35  # a pausa do roteiro, ao centésimo
+    assert [p["late"] for p in plans] == [False, False, False]
+
+
+@requires_node
+def test_live_plan_flags_a_late_utterance_and_never_schedules_it_in_the_past():
+    late = _run_voice_script("result = pure.planLiveChunk(12.0, 20.0, 1.0, 0.35)")
+    assert late["late"] is True and late["startAt"] == pytest.approx(20.06)
+    on_time = _run_voice_script("result = pure.planLiveChunk(20.02, 20.0, 1.0, 0)")
+    assert on_time["late"] is False and on_time["startAt"] == pytest.approx(
+        20.02
+    )  # dentro da folga: mantém a emenda
+
+
+@requires_node
+def test_live_plan_fade_is_5ms_but_never_more_than_half_of_a_very_short_utterance():
+    fades = _run_voice_script(
+        "result = [pure.planLiveChunk(null, 0, 1.0, 0).fade, pure.planLiveChunk(null, 0, 0.004, 0).fade]"
+    )
+    assert fades == [0.005, 0.002]
+
+
+@requires_node
+def test_live_player_schedules_in_arrival_order_with_a_fade_on_both_ends_of_each_utterance():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(10);
+        const bytes = { a: { duration: 1.0 }, b: { duration: 2.0 } };
+        const slowFirst = async (url) => { if (url === "a") await wait(40); return bytes[url]; };
+        const player = pure.createLivePlayer(ctx, slowFirst);
+        player.enqueue({ index: 1, url: "a", pauseAfter: 0.35 });
+        await player.enqueue({ index: 2, url: "b", pauseAfter: 0 });  // a 1ª demora mais para decodificar
+        const chunkGain = ctx.gains[1];  // ctx.gains[0] é o ganho geral
+        result = {
+          starts: ctx.sources.map((s) => Number(s.startedAt.toFixed(6))),
+          indexes: player.plans.map((p) => p.index),
+          firstEvents: chunkGain.gain.events.map(([kind, value, time]) => [kind, value, Number(time.toFixed(6))]),
+        };
+        """
+    )
+    assert result["indexes"] == [1, 2] and result["starts"] == [10.06, 11.41]
+    assert result["firstEvents"] == [
+        ["set", 0, 10.06],
+        ["ramp", 1, 10.065],
+        ["set", 1, 11.055],
+        ["ramp", 0, 11.06],
+    ]
+
+
+@requires_node
+def test_live_player_stop_ramps_to_silence_and_ignores_utterances_that_arrive_later():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(5);
+        const player = pure.createLivePlayer(ctx, async () => ({ duration: 1.0 }));
+        await player.enqueue({ index: 1, url: "a", pauseAfter: 0 });
+        player.stop();
+        await player.enqueue({ index: 2, url: "b", pauseAfter: 0 });
+        result = {
+          scheduled: ctx.sources.length,
+          stoppedAt: ctx.sources[0].stoppedAt,
+          masterEvents: ctx.gains[0].gain.events,
+        };
+        """
+    )
+    assert result["scheduled"] == 1  # a fala 2 chegou depois do Parar e não foi agendada
+    assert result["stoppedAt"] == pytest.approx(5.025)
+    assert ["ramp", 0, pytest.approx(5.02)] in result["masterEvents"]
+
+
+@requires_node
+def test_live_player_reports_load_errors_without_breaking_the_next_utterances():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(0);
+        const errors = [];
+        const loader = async (url) => { if (url === "ruim") throw new Error("falhou"); return { duration: 1.0 }; };
+        const player = pure.createLivePlayer(ctx, loader, (err) => errors.push(err.message));
+        player.enqueue({ index: 1, url: "ruim", pauseAfter: 0 });
+        await player.enqueue({ index: 2, url: "boa", pauseAfter: 0 });
+        result = { errors, indexes: player.plans.map((p) => p.index) };
+        """
+    )
+    assert result == {"errors": ["falhou"], "indexes": [2]}
+
+
+@requires_node
+def test_live_status_follows_what_is_playing_and_what_is_still_being_generated():
+    result = _run_voice_script(
+        """
+        const plans = [{ index: 1, nextCursor: 11.4 }, { index: 2, nextCursor: 14.0 }];
+        result = {
+          playing: [9, 10.5, 11.4, 13.9, 14.0].map((t) => pure.playingIndexAt(plans, t)),
+          none: pure.playingIndexAt([], 3),
+          texts: [
+            pure.liveStatusText({ total: 5, ready: 0, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 2, playing: 1, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 5, playing: 4, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 2, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 5, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 3, playing: 2, stoppedAfter: 3 }),
+          ],
+        };
+        """
+    )
+    assert result["playing"] == [1, 1, 2, 2, None] and result["none"] is None
+    assert result["texts"] == [
+        "Esperando a primeira fala ficar pronta...",
+        "Tocando fala 1 de 5 · 2 prontas",
+        "Tocando fala 4 de 5",
+        "Esperando a fala 3 de 5 ficar pronta...",
+        "Prévia ao vivo terminada.",
+        "Parado depois da fala 3 de 5. O que já saiu ficou guardado.",
+    ]
+
+
 def _run_timeline_pure(expression: str):
     """Avalia `expression` com as funções puras da linha do tempo carregadas num `window` falso."""
     script = (

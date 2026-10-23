@@ -613,6 +613,18 @@ def get_job(job_id: str) -> dict:
     return {**job.snapshot(), "result": job.result, "events": job.events[-200:]}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Pede para o job parar no próximo ponto seguro; só vale para os que se declaram cancelável."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise _error(404, "job desconhecido")
+    if not job.cancellable:
+        raise _error(409, "este tipo de trabalho não pode ser cancelado")
+    jobs.cancel(job_id)
+    return job.snapshot()
+
+
 @app.get("/api/jobs/{job_id}/events")
 def job_events(job_id: str) -> StreamingResponse:
     job = jobs.get(job_id)
