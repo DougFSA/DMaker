@@ -16,7 +16,7 @@
  * window.DMakerDub:
  *   init()      chamado por app.js ao terminar de carregar o estado
  *   onShow()    chamado por app.js quando a aba Voz aparece (atualiza arquivos do projeto, vozes e projetos salvos)
- *   pure        parseGlossary, parseKeepDb, segmentEdits, describeResult, statusLabel, segmentRowsHtml
+ *   pure        parseGlossary, parseKeepDb, segmentEdits, describeResult, describeStems, statusLabel, segmentRowsHtml
  */
 (function () {
   const UPLOAD_VALUE = "upload";
@@ -55,6 +55,14 @@
   /** Lista {id, text, locked} a partir das linhas da tabela (cada linha: { id, text, locked }). */
   function segmentEdits(rows) {
     return rows.map((row) => ({ id: row.id, text: String(row.text || "").trim(), locked: !!row.locked }));
+  }
+
+  /** Frase de resumo das trilhas exportadas, com o quanto a voz original ficava baixa no vídeo dublado. */
+  function describeStems(result) {
+    const kept = result.original_voice_db === null || result.original_voice_db === undefined
+      ? ""
+      : ` O vídeo dublado usa a voz original a ${result.original_voice_db} dB; a trilha dela vem sem atenuar.`;
+    return `Trilhas prontas (${result.files.join(", ")}), cada uma com ${result.duration.toFixed(2)} s.${kept}`;
   }
 
   function statusLabel(status) {
@@ -187,7 +195,7 @@
   function updateButtons() {
     el("dub-prepare").disabled = dub.busy || !chosenSource() || el("dub-from").value === el("dub-to").value;
     el("dub-open-run").disabled = dub.busy || !el("dub-open").value;
-    ["dub-save", "dub-retranslate", "dub-render"].forEach((id) => { el(id).disabled = dub.busy || !dub.project; });
+    ["dub-save", "dub-retranslate", "dub-render", "dub-stems"].forEach((id) => { el(id).disabled = dub.busy || !dub.project; });
     el("dub-use").disabled = !(dub.result && dub.result.entry);
   }
 
@@ -285,6 +293,31 @@
       dub.result = { ...result, entry: dub.entry || null };
       showResult(dub.result);
       showAlert(result.warnings.length ? "Dublagem pronta, com avisos." : "Dublagem pronta. Ouça o original e o dublado.", result.warnings.length ? "error" : "success");
+    } catch (err) {
+      handleError(err);
+    } finally {
+      dub.busy = false;
+      updateButtons();
+    }
+  }
+
+  /** Gera as trilhas separadas (as falas já sintetizadas vêm do cache) e baixa o .zip. */
+  async function downloadStems() {
+    dub.busy = true;
+    updateButtons();
+    try {
+      await saveProjectEdits();
+      const result = await runJob(
+        () => api.post("/api/dub/stems", { project: dub.project.project, draft: el("dub-draft").checked }),
+        "dub-render-progress", "dub-render-fill", "dub-render-label",
+      );
+      const link = document.createElement("a");
+      link.href = result.zip_url;
+      link.download = "";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showAlert(describeStems(result), "success");
     } catch (err) {
       handleError(err);
     } finally {
@@ -407,6 +440,7 @@
     });
     el("dub-retranslate").addEventListener("click", retranslate);
     el("dub-render").addEventListener("click", render);
+    el("dub-stems").addEventListener("click", downloadStems);
     el("dub-play-original").addEventListener("click", () => play("original"));
     el("dub-play-dubbed").addEventListener("click", () => play("dubbed"));
     el("dub-use").addEventListener("click", useInProject);
@@ -431,6 +465,6 @@
   window.DMakerDub = {
     init,
     onShow,
-    pure: { parseGlossary, parseKeepDb, segmentEdits, describeResult, statusLabel, segmentRowsHtml },
+    pure: { parseGlossary, parseKeepDb, segmentEdits, describeResult, describeStems, statusLabel, segmentRowsHtml },
   };
 })();

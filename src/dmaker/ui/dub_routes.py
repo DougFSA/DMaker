@@ -19,6 +19,7 @@ from .. import config
 from ..domain.dub import PROJECT_SUFFIX, DubProject, load_dub_project, save_dub_project
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
+from ..pipeline.dub_stems import StemsOptions
 from ..pipeline.dubbing import (
     OUTPUT_SUBDIR,
     DubbingService,
@@ -33,7 +34,7 @@ from .speech_routes import file_url, isolation_service, media_file, stage_report
 from .voice_routes import Services, VoiceServices, audio_url, exclusive_synthesis, existing_voice
 
 MAX_TEXT_CHARS = 2000  # uma fala dublada é uma frase; isto só barra colagem de texto errado
-SERVABLE_SUFFIXES = (".srt", PROJECT_SUFFIX)
+SERVABLE_SUFFIXES = (".srt", ".zip", PROJECT_SUFFIX)  # .zip: as trilhas separadas
 
 
 class PrepareRequest(BaseModel):
@@ -168,6 +169,22 @@ def _run_render(job: Job, services: VoiceServices, path: Path, draft: bool) -> d
     }
 
 
+def _run_stems(job: Job, services: VoiceServices, path: Path, draft: bool) -> dict:
+    project = _load(path)
+    with exclusive_synthesis(job):
+        stems = _dubbing_service(job, services).export_stems(
+            project, StemsOptions(make_zip=True), stage_reporter(job), DRAFT_STEPS if draft else None
+        )
+    return {
+        "folder": str(stems.folder),
+        "files": [file.name for file in stems.files],
+        "zip": str(stems.zip_path),
+        "zip_url": dub_file_url(stems.zip_path, download=True),
+        "duration": round(stems.duration, 3),
+        "original_voice_db": stems.original_voice_db,
+    }
+
+
 def _apply_update(project: DubProject, update: ProjectUpdate) -> DubProject:
     edited = project
     for item in update.segments:
@@ -249,6 +266,21 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: gerar ({path.name})",
             lambda job: _run_render(job, services, path, req.draft),
+            meta={"kind": "voice"},
+        )
+        return {"job_id": job.id}
+
+    @router.post("/stems")
+    def stems(req: RenderRequest, services: Services) -> dict:
+        path = _project_file(req.project)
+        project = _load(path)
+        if not Path(project.source).is_file():
+            raise HTTPException(status_code=404, detail=f"Arquivo de origem não encontrado: {project.source}")
+        if not any(s.text.strip() for s in project.segments):
+            raise HTTPException(status_code=400, detail="Nenhuma fala está traduzida.")
+        job = jobs.start(
+            f"dublagem: trilhas ({path.name})",
+            lambda job: _run_stems(job, services, path, req.draft),
             meta={"kind": "voice"},
         )
         return {"job_id": job.id}

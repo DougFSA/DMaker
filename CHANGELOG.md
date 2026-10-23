@@ -34,6 +34,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-18**: exportar as trilhas separadas da dublagem (voz dublada, fundo e voz original) para mixar em outro editor
+
 ---
 
 ## Linha de base — 2026-10-22

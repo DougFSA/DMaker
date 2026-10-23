@@ -1328,6 +1328,62 @@ def dub_render(
     return {**job.snapshot(), "result": job.result}
 
 
+def _dub_stems_work(
+    job: Job, project_path: str, out_dir: str | None, make_zip: bool, steps: int | None
+) -> dict:
+    from .domain.dub import load_dub_project
+    from .pipeline.dub_stems import StemsOptions
+
+    stems = _dubbing_service(job).export_stems(
+        load_dub_project(Path(project_path)),
+        StemsOptions(Path(out_dir) if out_dir else None, make_zip),
+        _stage_progress(job),
+        steps,
+    )
+    return {
+        "folder": str(stems.folder),
+        "voice_dubbed": str(stems.outputs.voice_dubbed),
+        "background": str(stems.outputs.background),
+        "voice_original": str(stems.outputs.voice_original),
+        "zip": str(stems.zip_path) if stems.zip_path else None,
+        "duration": round(stems.duration, 3),
+        "original_voice_db": stems.original_voice_db,
+    }
+
+
+@server.tool(
+    description=(
+        "Dublagem: exporta as trilhas separadas de um projeto `.dub.json` para remixar em outro editor "
+        "(Premiere, DaVinci, CapCut): voz-dublada.wav (só as falas dubladas, posicionadas no tempo), fundo.wav "
+        "(música e ruído) e voz-original.wav (a voz original isolada, sem atenuar). WAV 48 kHz estéreo, com a "
+        "duração exata do vídeo e alinhados no zero, sem loudnorm nem limitador. Grava em "
+        "output/dublagem/<nome>.<idioma>.trilhas (out_dir troca); make_zip=true junta as três num .zip ao lado. Usa as "
+        "falas já sintetizadas do cache (só sintetiza o que falta). O resultado traz original_voice_db: o quanto o "
+        "vídeo dublado atenua a voz original (null: ela não toca). Devolve job_id, consulte com job_status."
+    )
+)
+def dub_stems(
+    project: str,
+    out_dir: str | None = None,
+    make_zip: bool = False,
+    draft: bool = False,
+    steps: int | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .domain.dub import load_dub_project
+    from .voice.synth import DRAFT_STEPS
+
+    load_dub_project(Path(project))  # falha já na chamada se o projeto não existe ou está inválido
+    job = jobs.start(
+        f"dublagem: trilhas ({Path(project).name})",
+        lambda job: _dub_stems_work(
+            job, project, out_dir, make_zip, DRAFT_STEPS if draft and steps is None else steps
+        ),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
 @server.tool(description="Lê um projeto de dublagem (.dub.json): as falas com tempo, original e tradução.")
 def dub_get(project: str) -> dict:
     from .domain.dub import load_dub_project
