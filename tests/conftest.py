@@ -12,6 +12,8 @@ from pathlib import Path
 SESSION_DATA_DIR = Path(tempfile.mkdtemp(prefix="dmaker-testes-"))
 os.environ["DMAKER_DATA_DIR"] = str(SESSION_DATA_DIR)
 os.environ.setdefault("DMAKER_TEST", "1")
+# a marca d'água de voz (AudioSeal) carrega um modelo: os testes usam marcadores falsos, só o smoke usa o real
+os.environ["DMAKER_WATERMARK"] = "0"
 
 import pytest  # noqa: E402
 

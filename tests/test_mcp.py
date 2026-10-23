@@ -65,6 +65,7 @@ def test_lists_tools_and_prompt():
         "clone_voice",
         "design_voice",
         "synthesize_speech",
+        "verify_watermark",
         "voice_queue_add",
         "voice_queue_list",
         "pronunciation",

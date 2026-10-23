@@ -17,6 +17,7 @@ from ..voice.postprocess import POSTPROCESS_VERSION, finish_speech
 from ..voice.pronunciation import Lexicon, spoken_text, written_text
 from ..voice.script import Utterance, normalize_for_speech, parse_script
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
+from ..voice.watermark import Watermarker, default_watermarker
 
 DEFAULT_STEPS: int | None = None  # passos de síntese: None deixa cada motor escolher o seu padrão
 
@@ -77,7 +78,11 @@ class NarrationService:
         cache_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
         lexicons: LexiconProvider = no_pronunciation,
+        watermarker: Watermarker | None = None,
     ) -> None:
+        """`watermarker` marca cada fala sintetizada; sem ele vale o padrão (AudioSeal, ligada, a menos que
+        `DMAKER_WATERMARK=0` ou a biblioteca falte)."""
+        self.watermarker = watermarker if watermarker is not None else default_watermarker()
         self.lexicons = lexicons
         self.synthesizer = synthesizer
         self.runner = runner
@@ -101,6 +106,10 @@ class NarrationService:
         ]
         if request.duration is not None:  # a mesma frase forçada a durar 3 s ou 5 s são falas diferentes
             parts.append(f"{request.duration:.3f}")
+        if (
+            self.watermarker.identity
+        ):  # falas com e sem marca não se misturam; sem marca a chave é a de sempre
+            parts.append(self.watermarker.identity)
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def _cache_path(self, request: VoiceRequest) -> Path:
@@ -115,7 +124,9 @@ class NarrationService:
         path = self._cache_path(request)
         if not path.exists():
             speech = self.synthesizer.synthesize(request)
-            write_wav(path, finish_speech(speech.samples, speech.sample_rate), speech.sample_rate)
+            samples = finish_speech(speech.samples, speech.sample_rate)
+            # a marca é o último passo antes de gravar: nada depois dela altera as amostras que a carregam
+            write_wav(path, self.watermarker.embed(samples, speech.sample_rate), speech.sample_rate)
         return path, wav_duration(path)
 
     @staticmethod

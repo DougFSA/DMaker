@@ -36,6 +36,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Added
 
+- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
 - **DMK-6**: fila de narrações que roda em segundo plano e retoma de onde parou, com importação de roteiro em txt, md ou docx por capítulos
 - **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
 - **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
@@ -46,6 +47,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   importação dos módulos e lidos do `cache/` e `output/` reais), suíte estável com síntese real rodando
   ao mesmo tempo. Os dados passam a morar em `DMAKER_DATA_DIR` (padrão: a raiz), e um gancho de auditoria
   reprova qualquer teste que escreva em `cache/`, `output/`, `projects/`, `assets/voices/` ou no léxico real.
+
+### Pré-requisitos na máquina
+
+- **DMK-7**: pacote `audioseal` no extra `voice` (`.venv\Scripts\pip install -e .[voice]`); os pesos (~90 MB) são baixados na primeira marca ou verificação, para `cache/models/audioseal`.
 
 ---
 

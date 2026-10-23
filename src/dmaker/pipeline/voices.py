@@ -7,12 +7,15 @@ não recebe, usa as reais; assim os dois adaptadores ficam finos e os testes inj
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
 from .. import config
+from ..filtergraph.voice import detection_audio_command
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
+from ..media.wavio import read_wav
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from ..voice.design import VoiceDesign, parse_instruct
 from ..voice.kokoro import KokoroSynthesizer
@@ -20,6 +23,14 @@ from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
 from ..voice.router import RoutingSynthesizer
 from ..voice.synth import OmniVoiceSynthesizer, SpeechSynthesizer
+from ..voice.watermark import (
+    MODEL_RATE,
+    AudioSealWatermarker,
+    Watermarker,
+    WatermarkResult,
+    audioseal_installed,
+    default_watermarker,
+)
 from .narration import DEFAULT_STEPS, NarrationResult, NarrationService, UtteranceListener
 
 PREVIEW_TEXTS = {
@@ -124,20 +135,25 @@ def speak(
     synthesizer: SpeechSynthesizer | None = None,
     brand: str | None = None,
     lexicons: LexiconStore | None = None,
+    watermark: bool = True,
+    watermarker: Watermarker | None = None,
     on_utterance: UtteranceListener | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> NarrationResult:
     """Narra `text` com a voz `voice_id` (ou uma voz automática/descrita por `instruct`) e grava o áudio.
 
     Sem `language`, vale o idioma da voz escolhida (ou português quando não há voz). A pronúncia vem do
-    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz). `on_utterance` e
-    `should_stop` repassam à narração o aviso de cada fala pronta e o pedido de parada entre falas."""
+    dicionário global mais o da marca `brand` (sem ela, o da marca dona da voz). Toda fala sai com a marca
+    d'água inaudível de voz gerada por IA; `watermark=False` (ou `DMAKER_WATERMARK=0`) a desliga.
+    `on_utterance` e `should_stop` repassam à narração o aviso de cada fala pronta e o pedido de parada
+    entre falas."""
     voice = (library or VoiceLibrary()).get(voice_id) if voice_id else None
     service = NarrationService(
         synthesizer or shared_synthesizer(),
         runner or SubprocessRunner(quiet=True),
         log=log,
         lexicons=(lexicons or LexiconStore()).for_brand,
+        watermarker=watermarker or default_watermarker(enabled=watermark),
     )
     return service.render(
         text,
@@ -182,3 +198,36 @@ def preview_voice(
         synthesizer=synthesizer,
         log=log,
     )
+
+
+def verify_watermark(
+    path: Path,
+    runner: FFmpegRunner | None = None,
+    watermarker: Watermarker | None = None,
+) -> WatermarkResult:
+    """Diz se o áudio de `path` (wav, mp3, m4a, mp4...) carrega a marca d'água de voz gerada por IA.
+
+    O ffmpeg extrai a faixa em mono na taxa do detector; a verificação não obedece ao `DMAKER_WATERMARK`
+    (ele só desliga a marcação) e, sem a biblioteca, falha em vez de responder "sem marca".
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    if watermarker is None:
+        if not audioseal_installed():
+            raise RuntimeError(
+                "A biblioteca audioseal não está instalada. Rode: .venv\\Scripts\\pip install -e .[voice]"
+            )
+        watermarker = AudioSealWatermarker()
+    with tempfile.TemporaryDirectory(prefix="dmaker-marca-") as scratch:
+        extracted = Path(scratch) / "audio.wav"
+        (runner or SubprocessRunner(quiet=True)).run(detection_audio_command(path, extracted, MODEL_RATE))
+        samples, sample_rate = read_wav(extracted)
+    return watermarker.detect(samples, sample_rate)
+
+
+def watermark_verdict(result: WatermarkResult) -> str:
+    """Frase do veredito, a mesma na CLI e no MCP."""
+    percent = f"{result.probability * 100:.0f}%"
+    if result.detected:
+        return f"Marca d'água encontrada ({percent}): este áudio foi gerado por IA pelo DMaker."
+    return f"Marca d'água não encontrada ({percent}): nada indica que o áudio tenha sido gerado pelo DMaker."
