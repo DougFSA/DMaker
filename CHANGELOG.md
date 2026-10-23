@@ -34,6 +34,13 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Fixed
+
+- **DMK-8**: testes de voz e áudio isolados em pasta temporária (diretórios de dados fixados na
+  importação dos módulos e lidos do `cache/` e `output/` reais), suíte estável com síntese real rodando
+  ao mesmo tempo. Os dados passam a morar em `DMAKER_DATA_DIR` (padrão: a raiz), e um gancho de auditoria
+  reprova qualquer teste que escreva em `cache/`, `output/`, `projects/`, `assets/voices/` ou no léxico real.
+
 ---
 
 ## Linha de base — 2026-10-22

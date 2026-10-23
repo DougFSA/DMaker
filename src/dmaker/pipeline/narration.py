@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import VOICE_CACHE_DIR
+from .. import config
 from ..filtergraph.voice import narration_concat_command
 from ..media.ffmpeg import FFmpegRunner
 from ..media.wavio import wav_duration, write_wav
@@ -62,7 +62,7 @@ class NarrationService:
         self.lexicons = lexicons
         self.synthesizer = synthesizer
         self.runner = runner
-        self.cache_dir = cache_dir or VOICE_CACHE_DIR
+        self.cache_dir = cache_dir or config.VOICE_CACHE_DIR
         self.log = log or (lambda _message: None)
 
     def cache_key(self, request: VoiceRequest) -> str:

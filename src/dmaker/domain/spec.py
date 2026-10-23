@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..config import PROJECTS_DIR
+from .. import config
 
 
 class Strict(BaseModel):
@@ -614,7 +614,7 @@ class Project(Strict):
         path = Path(p).expanduser()
         if path.is_absolute():
             return path
-        for base in (self.base_dir, PROJECTS_DIR / self.name, Path.cwd()):
+        for base in (self.base_dir, config.PROJECTS_DIR / self.name, Path.cwd()):
             if base and (base / path).exists():
                 return (base / path).resolve()
         return ((self.base_dir or Path.cwd()) / path).resolve()

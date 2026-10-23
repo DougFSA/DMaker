@@ -376,7 +376,6 @@ def studio(tmp_path, monkeypatch):
     cache_dir = tmp_path / "voice-cache"
     monkeypatch.setattr(config, "OUTPUT_DIR", output_dir)
     monkeypatch.setattr(config, "VOICE_CACHE_DIR", cache_dir)
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", cache_dir)
     (tmp_path / "assets" / "brands" / "medlycare").mkdir(parents=True)
     services = VoiceServices(
         library=VoiceLibrary(tmp_path / "voices"),
