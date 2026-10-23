@@ -552,6 +552,46 @@ def test_speech_number_parsing_and_summary():
     assert "apertada" in summary
 
 
+# ---------- trocar voz (speech.js) ----------
+
+
+def test_index_has_the_voice_swap_section_with_every_element_speech_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = SPEECH.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("(speech-conv-[a-z-]+)"\)', js)) | set(
+        re.findall(r'"(speech-conv-[a-z-]+)"', js)
+    )
+    assert len(used) >= 15
+    for element_id in sorted(used):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em speech.js não existe em index.html"
+    assert "<legend>Trocar voz</legend>" in html
+    assert "/api/speech/convert" in js
+    assert "—" not in html and "—" not in js  # a marca não usa travessão em texto na tela
+
+
+@requires_node
+def test_voice_swap_summary_says_what_was_converted_and_how_the_volume_changed():
+    whole = _run_speech_pure(
+        "pure.describeConversion({voice:'dora',seconds:30,blocks:2,gain_db:-3.04,excerpt:false})"
+    )
+    assert (
+        whole
+        == "Arquivo convertido para a voz dora: 30.0 s em 2 bloco(s); volume desceu 3.0 dB para igualar ao original."
+    )
+    excerpt = _run_speech_pure(
+        "pure.describeConversion({voice:'alex',seconds:20,blocks:1,gain_db:0.01,excerpt:true})"
+    )
+    assert excerpt.startswith("Trecho convertido para a voz alex") and "volume igual ao original" in excerpt
+
+
+@requires_node
+def test_voice_swap_only_replaces_the_original_in_the_project_when_the_whole_file_was_converted():
+    assert _run_speech_pure("pure.canUseConversion({entry:{src:'a.mp4'},excerpt:false})") is True
+    assert _run_speech_pure("pure.canUseConversion({entry:{src:'a.mp4'},excerpt:true})") is False
+    assert _run_speech_pure("pure.canUseConversion({entry:null,excerpt:false})") is False
+    assert _run_speech_pure("pure.canUseConversion(null)") is False
+
+
 # ---------- dublagem (dub.js) ----------
 
 

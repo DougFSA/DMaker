@@ -31,6 +31,7 @@ from ..pipeline.jobs import Job, JobManager
 from ..text.transcribe import Transcriber
 from ..text.translate import Translator
 from ..voice import design as voice_design
+from ..voice.conversion import VoiceConverter
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceNotFoundError
 from ..voice.pronunciation import DEFAULT_LANGUAGE, Lexicon, language_code
@@ -87,6 +88,7 @@ class VoiceServices:
     isolation: IsolationService | None = None  # separador de voz e fundo; None usa o Demucs
     prober: Callable[[Path], MediaInfo] | None = None  # leitor de mídia; None usa o ffprobe
     translator: Translator | None = None  # tradutor da dublagem; None usa o Ollama local
+    converter: VoiceConverter | None = None  # conversor de timbre da troca de voz; None usa o OpenVoice
 
 
 def get_voice_services() -> VoiceServices:

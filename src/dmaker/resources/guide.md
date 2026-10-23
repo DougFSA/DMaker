@@ -321,6 +321,28 @@ o original). Dublagem reaproveita estas peças (`SpeechFixService`).
 - Na interface, aba Voz: seções "Isolar voz" e "Corrigir fala" (transcreve, clique na primeira e na última
   palavra, ouça original e corrigido, "Usar no projeto" troca o arquivo nos trechos).
 
+### Trocar voz (a gravação inteira fala com outra voz da biblioteca)
+
+Troca o timbre de quem fala por uma voz da biblioteca (clonada ou desenhada), mantendo as palavras, o ritmo,
+as pausas, a entonação e o fundo. Não traduz (isso é a dublagem) nem refaz um trecho (isso é a correção): cada
+quadro da fala original vira um quadro da fala nova, então a duração não muda. A voz é separada do fundo
+(cache do isolamento), só a voz passa pelo modelo (OpenVoice V2, local, na CPU) e o fundo volta como estava.
+
+- `convert_voice(path, voice, start, end, out)`: job (`job_status`). `voice` é o id de `list_voices`; `start`
+  e `end` convertem só um trecho (bom para testar a voz em 20 a 30 s antes do arquivo todo). CLI: `dmaker voice
+  convert ARQUIVO --voice ID [--start S --end E] [--out]`. Saída padrão:
+  `output/troca-de-voz/<nome>.<voz>-<id>.<ext>`.
+- O alvo é descrito por poucos segundos de fala: a gravação do clone, ou, para voz pronta ou desenhada, uma
+  frase de ~8 s sintetizada uma vez e guardada em `cache/voice/convert-refs`.
+- Arquivos longos são convertidos em blocos de ~25 s, cortados nos vales de silêncio, com 1 s de sobreposição e
+  fade complementar na emenda. O volume da fala nova é igualado ao da original (no máximo 9 dB).
+- Vídeo inteiro: a imagem passa sem recodificar. Trecho (`start`/`end`) de vídeo: recortado e recodificado.
+- Limites: o motor muda o timbre, não o sotaque nem a melodia (a fala nova mantém o jeito de falar da original).
+  Gravação com muita reverberação ou ruído sobra pior: use `isolate_vocals` para conferir a fala antes.
+- Custo na CPU: ~1,5 a 2 s por segundo de fala, mais a separação (3x a 6x, em cache).
+- Na interface, aba Voz: seção "Trocar voz" (arquivo do projeto ou enviado, voz, trecho opcional, ouvir
+  original e voz trocada, baixar, "Usar no projeto" quando o arquivo inteiro foi convertido).
+
 ### Dublar (traduzir a fala e refazê-la com a voz clonada de quem fala)
 
 Troca a fala de um vídeo ou áudio por outro idioma, mantendo música e ruído de fundo. É feito em dois passos

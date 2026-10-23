@@ -1205,6 +1205,51 @@ def voice_fix(
     console.print(f"  voz: {result.voice}; tempo de processamento: {time.perf_counter() - started:.1f}s")
 
 
+@voice_app.command("convert")
+def voice_convert(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com a fala a converter.")],
+    voice: Annotated[
+        str, typer.Option(help="Voz da biblioteca que vai falar no lugar (clonada ou desenhada).")
+    ],
+    start: Annotated[float | None, typer.Option(help="Início do trecho (s no arquivo).")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do trecho (s no arquivo).")] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Arquivo de saída (padrão: output/troca-de-voz/<nome>.<voz>-<id>.<ext>)."),
+    ] = None,
+) -> None:
+    """Troca a voz de uma gravação pela de uma voz da biblioteca, mantendo ritmo, pausas, entonação e o fundo.
+
+    Diferente de `dub` (que traduz e fala de novo) e de `fix` (que troca um trecho): todas as palavras são as
+    da gravação, só o timbre muda. A voz e o fundo são separados antes (fica em cache) e só a voz é convertida.
+    Na CPU a conversão leva de 1,5 a 2 s por segundo de fala, além da separação."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.voice_conversion import ConversionRequest, default_voice_conversion_service
+
+    announced: list[str] = []
+
+    def report(stage: str, fraction: float) -> None:
+        if stage not in announced:
+            announced.append(stage)
+            console.print(f"[dim]{stage}...[/dim]")
+
+    try:
+        request = ConversionRequest(src=file, voice=voice, start=start, end=end, out=out)
+        service = default_voice_conversion_service(SubprocessRunner(quiet=True), _console_log)
+        result = service.convert(request, report)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
+    console.print(
+        f"  voz: {result.voice}; {result.seconds:.1f}s em {result.blocks} bloco(s); "
+        f"volume ajustado em {result.gain_db:+.1f} dB",
+        markup=False,
+        highlight=False,
+    )
+    spent = ", ".join(f"{stage} {seconds:.1f}s" for stage, seconds in result.timings.items())
+    console.print(f"  tempo: {spent}", markup=False, highlight=False)
+
+
 lexicon_app = typer.Typer(
     help="Dicionário de pronúncia: como a voz fala cada termo (global ou por marca).", no_args_is_help=True
 )

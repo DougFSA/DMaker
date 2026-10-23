@@ -59,7 +59,7 @@ MCP: `list_voices`, `synthesize_speech` (job: `job_status`). CLI: `dmaker voice 
 remove|preview`. Pronúncia ("DMaker" sai "DeMaker"): ferramenta `pronunciation` ou `dmaker voice lexicon
 add|list|remove [--brand --language]`; no texto, `[[termo|pronúncia]]`. Veja o guia.
 Separar voz de música/ruído: `isolate_vocals` (job) ou `audio_mode: voice|background` no clipe; lento, em cache.
-Palavra dita errado: `speech_words` e `fix_speech` (jobs) regravam o trecho na voz do falante; veja o guia.
+Palavra dita errado: `speech_words` e `fix_speech` (jobs) regravam o trecho na voz do falante; veja o guia. Trocar a voz da gravação: `convert_voice`.
 Dublar para outro idioma (voz clonada, fundo mantido): `dub_prepare`, revisar com `dub_get` e
 `dub_update_segment`, `dub_render` (jobs; só a fala editada é refeita). CLI: `dmaker dub ARQUIVO --to en`.
 

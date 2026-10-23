@@ -1206,6 +1206,60 @@ def fix_speech(
     return {**job.snapshot(), "result": job.result}
 
 
+# ---------- troca de voz ----------
+
+
+def _convert_voice_work(job: Job, request: Any) -> dict:
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.voice_conversion import default_voice_conversion_service
+
+    service = default_voice_conversion_service(
+        SubprocessRunner(sink=job.sink()), job.log, library=_voice_library(), synthesizer=_voice_synthesizer()
+    )
+    result = service.convert(request, _stage_progress(job))
+    return {
+        "output": str(result.path),
+        "voice": result.voice,
+        "seconds": round(result.seconds, 2),
+        "blocks": result.blocks,
+        "gain_db": round(result.gain_db, 2),
+        "engine": result.engine,
+        "timings": result.timings,
+    }
+
+
+@server.tool(
+    description=(
+        "Troca a voz de uma gravação inteira pela de uma voz da biblioteca (clonada ou desenhada), mantendo "
+        "as palavras, o ritmo, as pausas, a entonação e o fundo (música, ambiente). Diferente de dub (traduz e "
+        "fala de novo) e de fix_speech (troca um trecho): aqui só o timbre muda. voice é o id da voz "
+        "(list_voices). start/end (segundos no arquivo) convertem só um trecho; sem eles, o arquivo todo. A "
+        "saída vai para output/troca-de-voz/<nome>.<voz>-<id>.<ext> (out troca); vídeo inteiro mantém a "
+        "imagem sem recodificar. Roda em segundo plano e é lento na CPU (~1,5 a 2 s por segundo de fala, mais a "
+        "separação de voz, ~3x a 6x a duração, em cache): devolve job_id, consulte com job_status."
+    )
+)
+def convert_voice(
+    path: str,
+    voice: str,
+    start: float | None = None,
+    end: float | None = None,
+    out: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.voice_conversion import ConversionRequest
+
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
+    request = ConversionRequest(
+        src=Path(path), voice=voice, start=start, end=end, out=Path(out) if out else None
+    )
+    job = jobs.start(f"trocar voz ({Path(path).name})", lambda job: _convert_voice_work(job, request))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
 # ---------- dublagem ----------
 
 
