@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from ..config import STEMS_DIR
+from .. import config
 from ..filtergraph.stems import convert_stem, extract_for_separation
 from ..media.ffmpeg import FFmpegRunner
 from ..media.separation import DemucsSeparator, ProgressCallback, Stems, VocalSeparator
@@ -58,7 +58,7 @@ class IsolationService:
     ) -> None:
         self.separator = separator
         self.runner = runner
-        self.cache_dir = cache_dir or STEMS_DIR
+        self.cache_dir = cache_dir or config.STEMS_DIR
         self.log = log or (lambda message: None)
         self._lock = threading.Lock()  # separar é pesado e o modelo é um só: um trecho por vez
 

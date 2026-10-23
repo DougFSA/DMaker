@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -32,9 +33,14 @@ class LayoutStore:
     servidor local (a interface pode ter mais de uma aba aberta).
     """
 
-    def __init__(self, path: Path) -> None:
-        self._path = path
+    def __init__(self, path: Path | Callable[[], Path]) -> None:
+        # a função deixa o caminho ser lido a cada uso, sem fixar na importação a pasta de dados
+        self._locate = path if callable(path) else lambda: path
         self._lock = threading.Lock()
+
+    @property
+    def path(self) -> Path:
+        return self._locate()
 
     def list(self) -> dict[str, dict]:
         with self._lock:
@@ -60,10 +66,10 @@ class LayoutStore:
             return True
 
     def _read(self) -> dict[str, dict]:
-        if not self._path.exists():
+        if not self.path.exists():
             return {}
-        return deserialize_layouts(self._path.read_text(encoding="utf-8"))
+        return deserialize_layouts(self.path.read_text(encoding="utf-8"))
 
     def _write(self, layouts: dict[str, dict]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(serialize_layouts(layouts), encoding="utf-8")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(serialize_layouts(layouts), encoding="utf-8")

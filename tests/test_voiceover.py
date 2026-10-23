@@ -254,7 +254,7 @@ def test_cached_durations_know_only_what_was_synthesized(tmp_path):
 
 
 def test_view_durations_read_the_cache_without_synthesizing(tmp_path, monkeypatch):
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
     synthesizer = FakeSynthesizer()
     project = _project(tmp_path, [{"text": "Já sintetizada."}, {"text": "Ainda não."}])
     NarrationService(synthesizer, _runner()).render("Já sintetizada.", tmp_path / "out.wav", None)
@@ -283,7 +283,7 @@ def test_view_durations_fall_back_to_unknown_when_the_engine_is_unavailable(tmp_
         def cache_identity(self, request: VoiceRequest) -> str:
             raise RuntimeError("O motor de voz 'omnivoice' não está disponível.")
 
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
     project = _project(tmp_path, [{"text": "Qualquer fala."}])
     assert view_narration_durations(project, VoiceLibrary(tmp_path / "voices"), BrokenEngine()) == [None]
 

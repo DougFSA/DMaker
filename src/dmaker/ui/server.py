@@ -49,7 +49,7 @@ SHUTDOWN_DELAY_S = 0.3
 
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
-layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
+layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
 app.include_router(build_voice_router(jobs))
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
@@ -674,11 +674,9 @@ def shutdown() -> dict:
 def _allowed_file(path: Path) -> bool:
     if not path.is_file():
         return False
-    try:
-        path.relative_to(config.ROOT)
+    if any(path.is_relative_to(base) for base in (config.ROOT, config.DATA_DIR)):
         return True
-    except ValueError:
-        return path.suffix.lower() in MEDIA_EXTS
+    return path.suffix.lower() in MEDIA_EXTS
 
 
 @app.get("/api/file")
