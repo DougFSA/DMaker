@@ -29,7 +29,7 @@ from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
 from .dub_routes import build_dub_router
 from .speech_routes import build_speech_router
-from .voice_routes import build_voice_router
+from .voice_routes import Services, VoiceServices, build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -473,8 +473,15 @@ def _project_from_body(name: str, spec: dict) -> Project:
     return project
 
 
+def _narration_durations(project: Project, services: VoiceServices) -> list[float | None]:
+    """Duração real das narrações já sintetizadas (cache), sem carregar modelo de voz."""
+    from ..pipeline.voiceover import view_narration_durations
+
+    return view_narration_durations(project, services.library, services.synthesizer, services.lexicons)
+
+
 @app.post("/api/projects/{name}/timeline")
-def project_timeline(name: str, req: TimelineRequest) -> dict:
+def project_timeline(name: str, req: TimelineRequest, services: Services) -> dict:
     from ..pipeline.layout import project_layout
     from ..pipeline.projects import load_project
     from ..pipeline.timeline_view import build_timeline_view
@@ -487,11 +494,12 @@ def project_timeline(name: str, req: TimelineRequest) -> dict:
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = _narration_durations(project, services)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @app.post("/api/projects/{name}/edit")
-def project_edit(name: str, req: EditRequest) -> dict:
+def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
     from ..pipeline.edits import apply_edit
     from ..pipeline.layout import project_layout
@@ -503,7 +511,8 @@ def project_edit(name: str, req: EditRequest) -> dict:
     except EditError as exc:
         raise _error(400, str(exc)) from exc
     layout = project_layout(new_project)
-    view = build_timeline_view(new_project, layout)
+    durations = _narration_durations(new_project, services)
+    view = build_timeline_view(new_project, layout, narration_durations=durations)
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
         "timeline": view.to_dict(),
