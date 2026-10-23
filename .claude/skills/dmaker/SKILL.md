@@ -52,14 +52,14 @@ dele. Tom e regras completas de comunicação: skill `medlycare-marketing`.
 
 ## Voz e narração
 
-Voz local, sem custo. OmniVoice (clones `clone_voice`, vozes por descrição `design_voice`): ~50 s por
+Voz local. OmniVoice (clones `clone_voice`, vozes por descrição `design_voice`): ~50 s por
 segundo de áudio (`draft=true`: metade). Para conferir o roteiro, Kokoro (`dora`, `alex`, `santa`; ~3 s/s).
-Toda fala sai com marca d'água inaudível de IA; confira: `verify_watermark`, `dmaker voice verify`.
+Toda fala leva marca d'água inaudível; confira: `verify_watermark`, `dmaker voice verify`.
 MCP: `list_voices`, `synthesize_speech` (job: `job_status`). CLI: `dmaker voice say|clone|design|list|
 remove|preview`. Pronúncia ("DMaker" sai "DeMaker"): ferramenta `pronunciation` ou `dmaker voice lexicon
 add|list|remove [--brand --language]`; no texto, `[[termo|pronúncia]]`. Veja o guia.
 Separar voz de música/ruído: `isolate_vocals` (job) ou `audio_mode: voice|background`; lento, em cache.
-Palavra dita errado: `speech_words` e `fix_speech` (jobs) regravam o trecho na voz do falante.
+Palavra dita errado: `speech_words` e `fix_speech` (jobs) regravam o trecho na voz do falante. Trocar a voz da gravação: `convert_voice`.
 Dublar para outro idioma (uma voz clonada por pessoa, fundo mantido): `dub_prepare`, revisar com `dub_get` e
 `dub_update_segment` (texto ou `speaker`), `dub_render` (jobs; só a fala editada é refeita). CLI: `dmaker dub ARQUIVO --to en`.
 

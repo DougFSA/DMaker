@@ -36,6 +36,9 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Added
 
+- **DMK-5**: trocar a voz de uma gravação inteira por uma voz da biblioteca,
+  mantendo ritmo, entonação e o fundo (`dmaker voice convert`, ferramenta MCP
+  `convert_voice` e seção "Trocar voz" na aba Voz).
 - **DMK-4**: dublagem com uma voz clonada por pessoa, separando quem fala (diarização local).
   O novo modo `per_speaker` (padrão da dublagem) descobre quem fala em cada trecho, monta um
   clone por falante a partir do melhor trecho de 3 a 15 s só com a fala dele e dubla cada fala
@@ -57,6 +60,11 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Pré-requisitos na máquina
 
+- **DMK-5**: os pesos do conversor de timbre OpenVoice V2 (MIT, 131 MB) baixam
+  sozinhos para `cache/models/openvoice` na primeira troca de voz, com versão e
+  SHA-256 fixados. Nenhum pacote novo do pip: o conversor usa o `torch` e o
+  `torchaudio` que já precisam estar instalados para a voz (o código de
+  inferência está em `src/dmaker/voice/third_party/openvoice`).
 - **DMK-4**: `.venv\Scripts\pip install -e .[voice]` instala o `sherpa-onnx` (diarização na
   CPU, sem token nem conta). Na primeira dublagem no modo `per_speaker`, os modelos baixam para
   `cache/models/diarization` (cerca de 34 MB, versão e SHA-256 fixados): segmentação

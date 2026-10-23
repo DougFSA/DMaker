@@ -1,7 +1,8 @@
 "use strict";
 /*
- * DMaker - áudio na aba "Voz": isolar a voz de um arquivo (voz de um lado, música e ruído do outro) e
- * corrigir uma fala (trocar uma palavra dita errado pela certa, na voz do próprio falante).
+ * DMaker - áudio na aba "Voz": isolar a voz de um arquivo (voz de um lado, música e ruído do outro),
+ * corrigir uma fala (trocar uma palavra dita errado pela certa, na voz do próprio falante) e trocar a voz
+ * de uma gravação inteira por uma voz da biblioteca.
  *
  * Tudo aqui é lento na CPU (separar voz, transcrever, sintetizar), então cada ação é um job: o POST devolve
  * job_id e o andamento chega por SSE, pelo acompanhamento de jobs do voice.js (DMakerVoice.followJob).
@@ -13,7 +14,8 @@
  * window.DMakerSpeech:
  *   init()      chamado por app.js ao terminar de carregar o estado
  *   onShow()    chamado por app.js quando a aba Voz aparece (atualiza arquivos do projeto e vozes)
- *   pure        groupWordsByBreath, selectionFor, projectSourceOptions, replaceSourceOps, abWindow...
+ *   pure        groupWordsByBreath, selectionFor, projectSourceOptions, replaceSourceOps, abWindow,
+ *               describeConversion, canUseConversion...
  */
 (function () {
   const BREATH_PAUSE_S = 0.25; // pausa que o falante usa para tomar fôlego; o servidor devolve o mesmo valor
@@ -100,17 +102,33 @@
     return `Trocado "${result.old_text}" por "${result.new_text}" (região ${region}). Duração: ${result.rule}.${warning}`;
   }
 
+  /** Frase de resumo da troca de voz: trecho, blocos e o ajuste de volume que igualou à original. */
+  function describeConversion(result) {
+    const gain = result.gain_db;
+    const level = Math.abs(gain) < 0.05
+      ? "volume igual ao original"
+      : `volume ${gain > 0 ? "subiu" : "desceu"} ${Math.abs(gain).toFixed(1)} dB para igualar ao original`;
+    const part = result.excerpt ? "Trecho convertido" : "Arquivo convertido";
+    return `${part} para a voz ${result.voice}: ${result.seconds.toFixed(1)} s em ${result.blocks} bloco(s); ${level}.`;
+  }
+
+  /** O arquivo convertido só substitui o original no projeto quando cobre o arquivo inteiro. */
+  function canUseConversion(result) {
+    return !!(result && result.entry && !result.excerpt);
+  }
+
   /* ==================== estado ==================== */
 
   const speech = {
     ready: false,
-    uploads: { iso: null, fix: null }, // { path, name } do último arquivo enviado em cada seção
-    options: { iso: [], fix: [] },
+    uploads: { iso: null, fix: null, conv: null }, // { path, name } do último arquivo enviado em cada seção
+    options: { iso: [], fix: [], conv: [] },
     words: [],
     selection: null,
     anchor: null,
     result: null,
-    busy: { iso: false, words: false, fix: false },
+    conversion: null,
+    busy: { iso: false, words: false, fix: false, conv: false },
   };
 
   const el = (id) => document.getElementById(id);
@@ -214,6 +232,9 @@
     const ready = !!fix && !!speech.selection && !!el("speech-fix-text").value.trim();
     el("speech-fix-run").disabled = speech.busy.fix || !ready;
     el("speech-fix-use").disabled = !(speech.result && speech.result.entry);
+    const conv = chosenSource("conv");
+    el("speech-conv-run").disabled = speech.busy.conv || !conv || !el("speech-conv-voice").value;
+    el("speech-conv-use").disabled = !canUseConversion(speech.conversion);
   }
 
   /* ==================== isolar voz ==================== */
@@ -385,22 +406,93 @@
     }
   }
 
+  /* ==================== trocar voz ==================== */
+
+  async function convertVoice() {
+    const source = chosenSource("conv");
+    const voice = el("speech-conv-voice").value;
+    if (!source || !voice) return;
+    const body = {
+      path: source.path,
+      voice,
+      start: numberOrNull(el("speech-conv-start").value),
+      end: numberOrNull(el("speech-conv-end").value),
+    };
+    speech.busy.conv = true;
+    el("speech-conv-result").hidden = true;
+    updateButtons();
+    try {
+      const result = await runJob(() => api.post("/api/speech/convert", body), "speech-conv-progress", "speech-conv-fill", "speech-conv-label");
+      speech.conversion = { ...result, entry: source.entry };
+      showConversion(speech.conversion);
+      showAlert("Voz trocada. Ouça o original e o resultado.", "success");
+    } catch (err) {
+      handleError(err);
+    } finally {
+      speech.busy.conv = false;
+      updateButtons();
+    }
+  }
+
+  function showConversion(result) {
+    el("speech-conv-summary").textContent = describeConversion(result);
+    el("speech-conv-original").src = result.original_url;
+    el("speech-conv-converted").src = `${result.audio_url}&t=${Date.now()}`;
+    el("speech-conv-download").href = `${result.audio_url}&download=true`;
+    el("speech-conv-result").hidden = false;
+    updateButtons();
+  }
+
+  /** A/B: toca o original ou o convertido do ponto em que o outro estava, para comparar a mesma fala. */
+  function playConversion(which) {
+    const target = el(which === "original" ? "speech-conv-original" : "speech-conv-converted");
+    const other = el(which === "original" ? "speech-conv-converted" : "speech-conv-original");
+    const position = other.currentTime || 0;
+    other.pause();
+    target.currentTime = position;
+    target.play().catch(() => showAlert("Use o player para ouvir.", "success"));
+  }
+
+  /** Troca o original pelo convertido nos trechos do projeto aberto e salva pelo fluxo normal. */
+  async function useConversionInProject() {
+    const result = speech.conversion;
+    if (!canUseConversion(result) || !state.currentProject || !state.spec) {
+      showAlert("Escolha um arquivo do projeto aberto e converta o arquivo inteiro para usar a troca nele.", "error");
+      return;
+    }
+    const ops = replaceSourceOps(state.spec, result.entry, result.output);
+    if (!ops.length) {
+      showAlert("Nenhum trecho do projeto usa este arquivo.", "error");
+      return;
+    }
+    for (const op of ops) {
+      if (!(await DMakerEditor.applyOp(op))) return;
+    }
+    if (await saveProject()) {
+      showAlert(`Voz trocada usada em ${ops.length} ponto(s) do projeto ${state.currentProject}.`, "success");
+    }
+  }
+
   /* ==================== ligação com a página ==================== */
 
   async function loadVoices() {
-    const select = el("speech-fix-voice");
+    const fixSelect = el("speech-fix-voice");
+    const convSelect = el("speech-conv-voice");
+    const previous = convSelect.value;
     try {
       const voices = await api.get("/api/voices");
-      const items = voices.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }));
-      select.innerHTML = '<option value="">Voz do próprio falante (automática)</option>'
-        + items.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
+      const options = voices.map((v) => `<option value="${esc(v.id)}">${esc(`${v.name} (${v.kind})`)}</option>`).join("");
+      fixSelect.innerHTML = `<option value="">Voz do próprio falante (automática)</option>${options}`;
+      convSelect.innerHTML = `<option value="">Escolha a voz...</option>${options}`;
+      if (voices.some((v) => v.id === previous)) convSelect.value = previous;
+      updateButtons();
     } catch (err) {
       handleError(err);
     }
   }
 
   function bindEvents() {
-    ["iso", "fix"].forEach((prefix) => {
+    ["iso", "fix", "conv"].forEach((prefix) => {
       el(`speech-${prefix}-source`).addEventListener("change", () => {
         updateSourceFields(prefix);
         if (prefix === "fix") { speech.words = []; speech.selection = null; speech.anchor = null; el("speech-words-block").hidden = true; }
@@ -418,6 +510,11 @@
     el("speech-ab-original").addEventListener("click", () => playRegion("original"));
     el("speech-ab-fixed").addEventListener("click", () => playRegion("fixed"));
     el("speech-fix-use").addEventListener("click", useInProject);
+    el("speech-conv-voice").addEventListener("change", updateButtons);
+    el("speech-conv-run").addEventListener("click", convertVoice);
+    el("speech-conv-ab-original").addEventListener("click", () => playConversion("original"));
+    el("speech-conv-ab-converted").addEventListener("click", () => playConversion("converted"));
+    el("speech-conv-use").addEventListener("click", useConversionInProject);
   }
 
   function init() {
@@ -426,6 +523,7 @@
     bindEvents();
     renderSources("iso");
     renderSources("fix");
+    renderSources("conv");
     updateButtons();
     loadVoices();
   }
@@ -434,12 +532,23 @@
     if (!speech.ready) return;
     renderSources("iso");
     renderSources("fix");
+    renderSources("conv");
     loadVoices();
   }
 
   window.DMakerSpeech = {
     init,
     onShow,
-    pure: { groupWordsByBreath, selectionFor, projectSourceOptions, replaceSourceOps, abWindow, numberOrNull, describeFix },
+    pure: {
+      groupWordsByBreath,
+      selectionFor,
+      projectSourceOptions,
+      replaceSourceOps,
+      abWindow,
+      numberOrNull,
+      describeFix,
+      describeConversion,
+      canUseConversion,
+    },
   };
 })();

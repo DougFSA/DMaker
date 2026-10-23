@@ -591,6 +591,54 @@
                   </div>
                 </fieldset>
 
+                <fieldset class="form-block" id="speech-convert-block">
+                  <legend>Trocar voz</legend>
+                  <p class="voice-notice">Troca a voz de uma gravação inteira pela de uma voz da biblioteca (clonada ou desenhada), mantendo as palavras, o ritmo, as pausas e a entonação, e a música e o ruído de fundo. Diferente de Dublar, não traduz: só o timbre muda. Na CPU leva de 1,5 a 2 s por segundo de fala, mais a separação da voz (que fica guardada).</p>
+                  <div class="field">
+                    <label for="speech-conv-source">Arquivo</label>
+                    <select id="speech-conv-source" data-speech-source="conv"></select>
+                  </div>
+                  <div class="field" id="speech-conv-upload-field" hidden>
+                    <label for="speech-conv-file">Enviar vídeo ou áudio</label>
+                    <input type="file" id="speech-conv-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.mp4,.mov,.mkv">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="speech-conv-voice">Voz que vai falar</label>
+                      <select id="speech-conv-voice"></select>
+                    </div>
+                    <div class="field">
+                      <label for="speech-conv-start">Início (s, opcional)</label>
+                      <input type="number" id="speech-conv-start" min="0" step="0.1" placeholder="Começo do arquivo">
+                    </div>
+                    <div class="field">
+                      <label for="speech-conv-end">Fim (s, opcional)</label>
+                      <input type="number" id="speech-conv-end" min="0" step="0.1" placeholder="Fim do arquivo">
+                    </div>
+                  </div>
+                  <div class="hint-text">Para testar uma voz, converta só um trecho de 20 a 30 s antes de fazer o arquivo inteiro. Funciona melhor com gravação limpa: eco forte e ruído na fala pioram a pronúncia da voz trocada.</div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="speech-conv-run" disabled>Trocar voz</button>
+                  </div>
+                  <div class="voice-progress" id="speech-conv-progress" hidden>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="speech-conv-fill"></div></div>
+                    <div class="progress-bar-label" id="speech-conv-label"></div>
+                  </div>
+                  <div class="voice-result" id="speech-conv-result" hidden>
+                    <div class="voice-item-meta" id="speech-conv-summary"></div>
+                    <div class="voice-item-actions">
+                      <button type="button" class="btn btn-small" id="speech-conv-ab-original">Ouvir o original</button>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-conv-ab-converted">Ouvir a voz trocada</button>
+                    </div>
+                    <audio id="speech-conv-original" class="voice-audio" controls></audio>
+                    <audio id="speech-conv-converted" class="voice-audio" controls></audio>
+                    <div class="voice-item-actions">
+                      <a class="btn btn-small" id="speech-conv-download" href="#">Baixar com a voz trocada</a>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-conv-use" title="Troca o arquivo original pelo convertido nos trechos do projeto aberto e salva">Usar no projeto</button>
+                    </div>
+                  </div>
+                </fieldset>
+
                 <fieldset class="form-block" id="dub-block">
                   <legend>Dublar</legend>
                   <p class="voice-notice">Traduz a fala de um vídeo ou áudio e a refaz no outro idioma com a voz clonada de quem fala, mantendo a música e o ruído de fundo. Primeiro prepare (transcreve e traduz com o Ollama local), depois revise as traduções e gere. Na CPU leva vários minutos; cada fala sintetizada fica em cache, então corrigir uma tradução refaz só aquela fala.</p>
