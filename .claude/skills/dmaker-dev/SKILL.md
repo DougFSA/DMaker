@@ -9,7 +9,7 @@ Objetivo: entregar features/bugs do DMaker (`D:\DMaker`) gastando poucos tokens 
 
 ## Relação com o fluxo do Jira
 
-Trabalho que é de um chamado do projeto DMK entra pelas skills de fluxo: `dmaker-rodada` (chamados novos) e `dmaker-redesenvolvimento` / `dmaker-redesenvolvimento-develop` (reprovados no teste manual). Elas usam os agentes `dmaker-executor` e `dmaker-apurador` e as regras de `.claude/skills/_comum/` (git, Jira, qualidade).
+Trabalho que é de um chamado do projeto DMK entra pelas skills de fluxo: `dmaker-rodada` (chamados novos) e `dmaker-redesenvolvimento` (reprovados no teste manual na `develop`). Elas usam os agentes `dmaker-executor` e `dmaker-apurador` e as regras de `.claude/skills/_comum/` (git, Jira, qualidade). O fluxo é: o executor abre o PR para a `develop` **e já o mergeia** ao entregar, só então move o card para `Teste Manual`; o Douglas testa sempre pela `develop`, e quem reprova é corrigido pelo mesmo caminho (branch `fix/dmk-XXX-ajuste-N`, PR, merge imediato). A `dmaker-producao` leva a `develop` para a `main` quando todos os cards da versão estão em `Concluído`. `dmaker-merge-develop` é exceção (PRs que ficaram abertos), fora do fluxo normal.
 
 `dmaker-dev` serve para **pedidos avulsos**, sem chamado, e para o **planejamento de cada card**: o formato de plano abaixo é o esqueleto do briefing que a rodada manda ao executor. O princípio é o mesmo (Opus planeja e revisa, Sonnet implementa).
 
@@ -27,7 +27,7 @@ Trabalho que é de um chamado do projeto DMK entra pelas skills de fluxo: `dmake
 2. **Planejar** (Opus): localizar os pontos de mudança com Grep/Glob; escrever o plano no formato abaixo. Para bug: primeiro o teste que reproduz.
 3. **Implementar** (Sonnet): `Agent` com `model: "sonnet"`, `subagent_type: "general-purpose"`, prompt = template abaixo preenchido. Para várias tarefas independentes, vários agentes em paralelo.
 4. **Verificar** (Opus): rodar `.venv\Scripts\ruff check src tests`, `.venv\Scripts\ruff format --check src tests` e `.venv\Scripts\python -m pytest -q` (o agente já rodou; a sessão confirma). Ler `git diff --stat` e os trechos críticos (novas interfaces, mudanças em `pipeline/`, `filtergraph/`, `spec.py`). Se algo estiver errado: mandar o ajuste ao **mesmo agente** por `SendMessage` (mantém o contexto), não abrir outro.
-5. **Entregar** (Opus): resumo de 5 a 10 linhas: o que mudou, arquivos, testes novos, o que ficou de fora. Commit só se o usuário pedir (mensagem em português com o `Co-Authored-By` da sessão). Mesmo avulso, **nada vai direto na `main` nem na `develop`**: o trabalho sai num branch da `develop` (`feat/...` ou `fix/...`, sem chave de card se não houver) e entra por PR, a menos que o Douglas peça outra coisa. Convenções em `.claude/skills/_comum/git.md`.
+5. **Entregar** (Opus): resumo de 5 a 10 linhas: o que mudou, arquivos, testes novos, o que ficou de fora. Commit só se o usuário pedir (mensagem em português com o `Co-Authored-By` da sessão). Mesmo avulso, **nada vai direto na `main` nem na `develop`**: o trabalho sai num branch da `develop` (`feat/...` ou `fix/...`, sem chave de card se não houver) e entra por PR, a menos que o Douglas peça outra coisa. Num pedido avulso o merge do PR só acontece se ele pedir; quando acontecer, vale o procedimento de `_comum/git.md` (develop trazida para o branch, portões na mistura). Convenções em `.claude/skills/_comum/git.md`.
 
 ## Formato do plano
 
