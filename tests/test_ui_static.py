@@ -28,6 +28,7 @@ LAYOUT = STATIC_DIR / "layout.js"
 VOICE = STATIC_DIR / "voice.js"
 SPEECH = STATIC_DIR / "speech.js"
 DUB = STATIC_DIR / "dub.js"
+QUEUE = STATIC_DIR / "queue.js"
 
 ALL_JS = (
     JS,
@@ -44,6 +45,7 @@ ALL_JS = (
     VOICE,
     SPEECH,
     DUB,
+    QUEUE,
 )
 
 requires_node = pytest.mark.skipif(shutil.which("node") is None, reason="node não instalado")
@@ -667,6 +669,150 @@ def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
         _run_voice_pure('pure.pronunciationPreviewText("DMaker", "pt")') == "Eu falo DMaker. Repito: DMaker."
     )
     assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."
+
+
+# ---------- fila de narrações (queue.js) ----------
+
+
+def test_queue_file_is_referenced_after_voice_js_and_before_app_js():
+    html = INDEX.read_text(encoding="utf-8")
+    assert QUEUE.is_file() and "window.DMakerQueue" in QUEUE.read_text(encoding="utf-8")
+    assert html.index("/static/voice.js") < html.index("/static/queue.js") < html.index("/static/app.js")
+    app_js = JS.read_text(encoding="utf-8")
+    for hook in ("DMakerQueue.init", "DMakerQueue.onShow", "DMakerQueue.onHide"):
+        assert hook in app_js
+
+
+def test_index_has_the_queue_section_with_every_element_queue_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = QUEUE.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("((?:voice-queue|voice-enqueue)[a-z-]*)"\)', js)) | {"voice-script"}
+    assert {"voice-queue-list", "voice-queue-summary", "voice-queue-file", "voice-enqueue"} <= used
+    for element_id in sorted(used):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em queue.js não existe em index.html"
+    assert "<legend>Fila de narrações</legend>" in html and "Mandar para a fila" in html
+    assert "—" not in html and "—" not in js  # a marca não usa travessão em texto na tela
+
+
+def test_queue_js_uses_the_queue_api_with_sse_upload_and_every_command():
+    js = QUEUE.read_text(encoding="utf-8")
+    for token in (
+        "/api/voices/queue",
+        "/api/voices/queue/events",
+        "/api/voices/queue/upload",
+        "EventSource",
+        "FormData",
+        "/move",
+        "clear-finished",
+        "data-queue-action",
+    ):
+        assert token in js, f"{token!r} não encontrado em queue.js"
+    for state in ("pending", "running", "paused", "done", "failed", "cancelled"):
+        assert f"{state}:" in js, f"estado {state!r} sem botões definidos"
+    assert all(rule in CSS.read_text(encoding="utf-8") for rule in (".queue-file", ".queue-state-running"))
+
+
+def test_every_queue_endpoint_called_by_queue_js_exists_on_the_server():
+    from dmaker.ui.queue_routes import build_queue_router
+
+    js = QUEUE.read_text(encoding="utf-8")
+    paths = {route.path for route in build_queue_router().routes}
+    for needed in (
+        "/api/voices/queue",
+        "/api/voices/queue/events",
+        "/api/voices/queue/upload",
+        "/api/voices/queue/clear-finished",
+        "/api/voices/queue/{item_id}/move",
+        "/api/voices/queue/{item_id}",
+    ):
+        assert needed in paths, needed
+    # as ações dos botões viram o último trecho do caminho: precisam existir como rotas POST
+    for action in ("pause", "resume", "cancel", "retry"):
+        assert f"/api/voices/queue/{{item_id}}/{action}" in paths and action in js
+
+
+def _run_queue_pure(expression: str):
+    """Avalia `expression` com as funções puras de queue.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(QUEUE))});"
+        "const pure = window.DMakerQueue.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_queue_actions_follow_the_state_of_the_item():
+    assert _run_queue_pure("pure.actionsFor('running')") == ["pause", "cancel"]
+    assert _run_queue_pure("pure.actionsFor('pending')") == ["pause", "cancel", "up", "down"]
+    assert _run_queue_pure("pure.actionsFor('paused')") == ["resume", "cancel", "up", "down"]
+    assert _run_queue_pure("pure.actionsFor('failed')") == ["retry", "remove"]
+    assert _run_queue_pure("pure.actionsFor('done')") == ["remove"]
+    assert _run_queue_pure("pure.actionsFor('inexistente')") == []
+
+
+@requires_node
+def test_queue_progress_line_names_chapter_utterance_and_time_left():
+    running = "{state:'running',chapter:2,chapters_total:5,utterance:12,utterances:40,percent:30,eta_label:'25 min'}"
+    assert _run_queue_pure(f"pure.describeProgress({running})") == (
+        "capítulo 2 de 5, fala 12 de 40 · faltam cerca de 25 min"
+    )
+    one = "{state:'running',chapter:1,chapters_total:1,utterance:3,utterances:9,eta_label:null}"
+    assert _run_queue_pure(f"pure.describeProgress({one})") == "fala 3 de 9"
+    waiting = "{state:'pending',chapters_total:3,eta_label:'2 h 05 min'}"
+    assert _run_queue_pure(f"pure.describeProgress({waiting})") == (
+        "Aguardando a vez · 3 capítulos · faltam cerca de 2 h 05 min"
+    )
+    done = "{state:'done',chapters_total:1,duration_s:125}"
+    assert _run_queue_pure(f"pure.describeProgress({done})") == "Pronto · 1 capítulo · 2 min de áudio"
+    failed = "{state:'failed',error:'ValueError: voz inexistente\\nTraceback...'}"
+    assert _run_queue_pure(f"pure.describeProgress({failed})") == "voz inexistente"
+    assert _run_queue_pure("pure.describeProgress({state:'paused',percent:40,chapters_total:2})") == (
+        "Pausado em 40% · 2 capítulos"
+    )
+
+
+@requires_node
+def test_queue_summary_and_file_links_escape_and_explain():
+    assert _run_queue_pure("pure.queueSummary({items:[]})") == "A fila está vazia."
+    busy = "{items:[{state:'pending'},{state:'done'}],eta_label:'10 min',running:false,worker:false}"
+    summary = _run_queue_pure(f"pure.queueSummary({busy})")
+    assert summary.startswith("2 itens · tempo estimado para esvaziar: 10 min · nenhum executor ativo")
+    working = "{items:[{state:'running'}],eta_label:'1 min',running:true,worker:false}"
+    assert _run_queue_pure(f"pure.queueSummary({working})") == "1 item · tempo estimado para esvaziar: 1 min"
+
+    links = _run_queue_pure(
+        "pure.fileLinks([{name:'<b>.wav',url:'/api/x/%3Cb%3E.wav',audio:true},{name:'a.srt',url:'/a.srt',audio:false}])"
+    )
+    assert "&lt;b&gt;.wav" in links and "<b>.wav" not in links
+    assert links.count("Ouvir") == 1 and links.count("Baixar") == 2  # a legenda só baixa
+    assert "/a.srt?download=true" in links
+
+
+@requires_node
+def test_queue_text_body_matches_the_server_contract():
+    body = _run_queue_pure(
+        "pure.textBody({text:'Oi',voice:'',language:'',speed:1.2,brand:'',draft:true,format:'mp3',title:'  Meu  '})"
+    )
+    assert body == {
+        "text": "Oi",
+        "voice": None,
+        "language": None,
+        "speed": 1.2,
+        "brand": None,
+        "draft": True,
+        "format": "mp3",
+        "title": "Meu",
+    }
+    bare = _run_queue_pure("pure.textBody({text:'Oi',speed:1})")
+    assert "title" not in bare and bare["format"] == "wav" and bare["draft"] is False
+
+    from dmaker.ui.queue_routes import QueueTextRequest
+
+    QueueTextRequest.model_validate(body)  # o corpo que a tela monta é aceito pelo servidor
 
 
 def test_voice_studio_has_live_preview_and_stop_wired_to_the_job_api():

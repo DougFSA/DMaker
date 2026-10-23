@@ -288,6 +288,20 @@ def test_inline_override_wins_in_any_language_even_without_an_entry(tmp_path):
     assert result.cues[0][2] == "Say DMaker now."
 
 
+def test_plan_reports_each_utterance_size_and_whether_it_is_already_cached(tmp_path):
+    service, synthesizer, _ = _service(tmp_path)
+    before = service.plan(TEXT, voice=None)
+    assert [(p.chars, p.cached) for p in before] == [(28, False), (29, False), (28, False)]
+    assert synthesizer.requests == []  # planejar não sintetiza
+
+    service.render(TEXT, tmp_path / "saida.wav", voice=None)
+    assert all(p.cached for p in service.plan(TEXT, voice=None))
+    # outra velocidade ou outros passos são outras falas: nada do cache anterior vale
+    assert not any(p.cached for p in service.plan(TEXT, voice=None, speed=1.2))
+    assert not any(p.cached for p in service.plan(TEXT, voice=None, steps=8))
+    assert len(synthesizer.requests) == 3  # e o plano continua sem sintetizar
+
+
 def test_on_utterance_reports_each_ready_utterance_in_order_with_its_pause(tmp_path):
     ready: list[tuple[int, int, Path, float, float]] = []
     service, synthesizer, _ = _service(tmp_path)

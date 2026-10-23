@@ -13,7 +13,7 @@ import re
 import tempfile
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -258,20 +258,27 @@ def _utterance_reporter(job: Job):
 
 
 @contextmanager
-def exclusive_synthesis(job: Job) -> Iterator[None]:
-    """Só um trabalho pesado de voz por vez (síntese, separação, transcrição); os outros esperam na fila.
+def hold_synthesis(
+    on_wait: Callable[[str], None], cancelled: Callable[[], bool] = lambda: False
+) -> Iterator[None]:
+    """Segura a trava de síntese; se outro trabalho a tem, avisa por `on_wait` e espera a vez.
 
-    Quem está esperando na fila pode ser cancelado sem nunca ter ocupado a CPU.
+    Quem está esperando na fila pode ser cancelado (`cancelled`) sem nunca ter ocupado a CPU.
     """
     if not _synthesis_lock.acquire(blocking=False):
-        job.log("Aguardando outro trabalho de voz terminar")
+        on_wait("Aguardando outro trabalho de voz terminar")
         while not _synthesis_lock.acquire(timeout=QUEUE_POLL_S):
-            if job.cancel_requested:
+            if cancelled():
                 raise JobCancelled("Cancelado na fila.", result={"ready": 0, "total": 0})
     try:
         yield
     finally:
         _synthesis_lock.release()
+
+
+def exclusive_synthesis(job: Job) -> AbstractContextManager[None]:
+    """Só um trabalho pesado de voz por vez (síntese, separação, transcrição); os outros esperam na fila."""
+    return hold_synthesis(job.log, lambda: job.cancel_requested)
 
 
 def _run_speech(job: Job, services: VoiceServices, text: str, out: Path, options: dict[str, Any]) -> dict:
