@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from dmaker import config
 from dmaker.media.ffmpeg import RecordingRunner
+from dmaker.pipeline.narration import NarrationService
 from dmaker.text.captions import Cue
 from dmaker.text.transcribe import Transcript
 from dmaker.ui import server
@@ -377,7 +378,6 @@ def studio(tmp_path, monkeypatch):
     cache_dir = tmp_path / "voice-cache"
     monkeypatch.setattr(config, "OUTPUT_DIR", output_dir)
     monkeypatch.setattr(config, "VOICE_CACHE_DIR", cache_dir)
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", cache_dir)
     (tmp_path / "assets" / "brands" / "medlycare").mkdir(parents=True)
     services = VoiceServices(
         library=VoiceLibrary(tmp_path / "voices"),
@@ -890,3 +890,39 @@ def test_cancel_rejects_unknown_jobs_and_jobs_that_cannot_be_cancelled(voice_cli
         release.set()
         server.jobs.wait(job, 10)
     assert job.status == "done"
+
+
+def test_timeline_endpoint_shows_real_duration_of_synthesized_narration_and_estimate_for_new_ones(
+    client, studio, tmp_path
+):
+    spec = dict(
+        SPEC,
+        audio={
+            "normalize": "off",
+            "narration": [{"text": "Fala pronta.", "start": 1.0}, {"text": "Fala nova.", "start": 4.0}],
+        },
+    )
+    client.put(f"/api/projects/{PROJECT}", json=spec)
+    cache = tmp_path / "voice-cache"
+    NarrationService(studio.synthesizer, studio.runner, cache).render(
+        "Fala pronta.", tmp_path / "pronta.wav", None, brand="medlycare"
+    )
+    asked = len(studio.synthesizer.requests)
+
+    view = client.post(f"/api/projects/{PROJECT}/timeline", json={}).json()
+
+    nar = next(t for t in view["tracks"] if t["id"] == "NAR")
+    ready, new = nar["items"]
+    assert ready["kind"] == "narration" and ready["extra"]["estimated"] is False
+    assert ready["start"] == 1.0 and ready["end"] == pytest.approx(1.0 + len("Fala pronta.") * 0.05)
+    assert new["extra"]["estimated"] is True and new["start"] == 4.0
+    assert len(studio.synthesizer.requests) == asked  # a vista nunca sintetiza
+
+    # mover a fala pelo set_field da linha do tempo troca o início e mantém a duração real
+    moved = client.post(
+        f"/api/projects/{PROJECT}/edit",
+        json={"spec": spec, "op": {"type": "set_field", "path": "audio.narration.0.start", "value": 2.5}},
+    ).json()
+    assert moved["spec"]["audio"]["narration"][0]["start"] == 2.5
+    item = next(t for t in moved["timeline"]["tracks"] if t["id"] == "NAR")["items"][0]
+    assert item["start"] == 2.5 and item["extra"]["estimated"] is False

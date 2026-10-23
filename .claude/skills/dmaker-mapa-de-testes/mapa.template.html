@@ -348,7 +348,7 @@
   // ─────────────────────────────────────────────────────────────────────
   const DADOS = {
     versao: '0',
-    titulo: 'Onde sentar para testar o que falta',
+    titulo: 'O que testar na develop',
     lede: 'Substituido pela skill.',
     placar: [],
     postos: [],
@@ -469,7 +469,7 @@
   // ── Fecho ──
   if ((DADOS.avisos && DADOS.avisos.length) || (DADOS.notas && DADOS.notas.length)) {
     const fecho = el('div', 'fecho');
-    fecho.appendChild(el('h3', null, escapar(DADOS.tituloFecho || 'Na hora de mergear')));
+    fecho.appendChild(el('h3', null, escapar(DADOS.tituloFecho || 'Para lembrar')));
 
     if (DADOS.avisos && DADOS.avisos.length) {
       const box = el('div', 'aviso');

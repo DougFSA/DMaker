@@ -1636,6 +1636,12 @@ h2 {
 .tl-item-clip-audio { background: #244A55; }
 .tl-item-track { background: #24555A; }
 .tl-item-music { background: #245A4E; }
+.tl-item-narration { background: #6B3F73; }
+/* duração só estimada (a fala ainda não foi sintetizada): borda tracejada; a real fica com a borda cheia */
+.tl-item-narration.tl-item-estimated {
+  border: 1px dashed var(--mint);
+  background: rgba(107, 63, 115, 0.55);
+}
 .tl-item-captions { background: #555; }
 .tl-item-progress-bar { background: #3A3A3A; }
 .tl-item-other { background: var(--teal); }

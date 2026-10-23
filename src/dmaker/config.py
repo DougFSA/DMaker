@@ -21,13 +21,17 @@ def _detect_root() -> Path:
 
 
 ROOT = _detect_root()
+# Onde nascem os dados gerados (cache, saída, projetos, vozes, léxico, layouts). Por padrão é a própria raiz;
+# os testes apontam DMAKER_DATA_DIR para uma pasta temporária para nunca tocar nos dados de quem usa o editor.
+DATA_DIR = Path(os.environ.get("DMAKER_DATA_DIR") or ROOT).expanduser().resolve()
 BIN_DIR = ROOT / "bin"
 FFMPEG_DIR = BIN_DIR / "ffmpeg"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 BRANDS_DIR = ASSETS_DIR / "brands"
-VOICES_DIR = ASSETS_DIR / "voices"
-CACHE_DIR = ROOT / "cache"
+VOICES_DIR = DATA_DIR / "assets" / "voices"
+LEXICON_DIR = DATA_DIR / "assets"  # pronunciation.json global e brands/<marca>/pronunciation.json
+CACHE_DIR = DATA_DIR / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
 WAVEFORM_DIR = CACHE_DIR / "waveform"
@@ -41,10 +45,10 @@ DEFAULT_VOICE_ID = os.environ.get("DMAKER_DEFAULT_VOICE") or None
 TRANSLATE_MODEL = os.environ.get("DMAKER_TRANSLATE_MODEL") or "gpt-oss:20b"
 JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
-OUTPUT_DIR = ROOT / "output"
-PROJECTS_DIR = ROOT / "projects"
+OUTPUT_DIR = DATA_DIR / "output"
+PROJECTS_DIR = DATA_DIR / "projects"
 TEMPLATES_DIR = ROOT / "templates"
-LAYOUTS_FILE = ROOT / "layouts.json"
+LAYOUTS_FILE = DATA_DIR / "layouts.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 

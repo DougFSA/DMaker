@@ -6,15 +6,20 @@ Referência compartilhada pelas skills do DMaker e pelos subagentes
 ## Sem CI: o portão local é o último portão
 
 O DMaker **não tem CI**. Isso muda o peso de tudo abaixo: no MedlyCare, o CI
-reprova o que passou local e segura o merge; aqui, nada segura. O que você não
-rodar, o Douglas descobre testando, e uma `develop` quebrada trava o trabalho
-dele. **O portão local é obrigatório antes de cada PR e não pode ser pulado**,
-nem para "ajuste pequeno", nem para mudança só de texto que mexe em código.
+reprova o que passou local e segura o merge; aqui, nada segura. E desde a mudança
+de fluxo (23/10/2026) **o PR é mergeado na `develop` na entrega, antes do teste
+manual**: o que você deixar passar entra direto no lugar onde o Douglas testa. O
+que você não rodar, ele descobre testando, e uma `develop` quebrada trava o
+trabalho dele e o de todos os outros cards. **O portão local é obrigatório antes de
+cada merge e não pode ser pulado**, nem para "ajuste pequeno", nem para mudança só
+de texto que mexe em código.
 
-## Portões: todos verdes antes de mover o card
+## Portões: todos verdes antes de mergear e de mover o card
 
-Nenhum card vai para `Teste Manual` com portão vermelho. Rode sempre os três, da
-raiz `D:\DMaker`, com o Python do venv (nunca o global):
+Nenhum card é mergeado, nem vai para `Teste Manual`, com portão vermelho. Rode
+sempre os três, da raiz da sua pasta de trabalho (a principal `D:\DMaker` ou o seu
+worktree; em worktree, com o `PYTHONPATH` e o venv de `_comum/git.md` →
+"Worktrees"), com o Python do venv (nunca o global):
 
 ```powershell
 .venv\Scripts\ruff check src tests
@@ -24,6 +29,24 @@ raiz `D:\DMaker`, com o Python do venv (nunca o global):
 
 Para consertar o que o lint acusa, `ruff check --fix src tests` e
 `ruff format src tests`, e rode os três de novo para confirmar.
+
+### Os portões valem na mistura, não só no branch
+
+O seu branch passando sozinho **não prova** que a `develop` vai ficar sã: é na
+`develop` que o código de vários cards coexiste, e dois cards que passaram cada um
+no seu branch podem se contradizer quando juntos (é o defeito de integração que o
+`dmaker-redesenvolvimento` mais encontra). Por isso:
+
+1. Antes do merge, traga a `develop` para o seu branch (`_comum/git.md`). **Se veio
+   código novo, rode os três portões de novo** no resultado. Sem código novo, vale
+   o portão que já rodou.
+2. Só se mergeia árvore que já contém toda a `develop` e passou nos portões; logo, a
+   ponta que resulta é a árvore testada. Depois do merge, confirme isso com
+   `git diff --quiet` entre o seu HEAD testado e `origin/develop`. **Se diferir**
+   (outro card entrou na fila), rode os portões na ponta da `develop`.
+3. **Ponta quebrada = card não entregue.** Não mova o card, não siga para o
+   próximo: conserte primeiro, por branch + PR + merge imediato, e só então entregue.
+   Aviso ao planejador no relatório (`DÚVIDA / RISCO`).
 
 O `pytest` leva **cerca de 5 minutos**: a integração renderiza com ffmpeg de
 verdade e o servidor MCP sobe por stdio. Isso não é lentidão a contornar, é o que
@@ -69,10 +92,12 @@ imagem e som, e nenhum teste unitário enxerga o resultado final.
   olhe imagem (`dmaker sheet`, `dmaker frames`) quando o relatório apontar algo ou
   o card for sobre aparência. Qualidade visual mensurável ganha teste numérico
   (como `test_rendered_zoom_is_smooth_without_jitter`).
-- **Interface (`dmaker ui`):** suba pelo `preview_start` com a configuração
-  `dmaker-ui-8769` (`.claude/launch.json`) e use o navegador embutido
-  (`mcp__Claude_Browser__*`): navegue, leia a página, confira console e rede. Não
-  suba a UI por outro caminho nem em outra porta: a 8765 é a do Douglas.
+- **Interface (`dmaker ui`):** na pasta principal, suba pelo `preview_start` com a
+  configuração `dmaker-ui-8769` (`.claude/launch.json`) e use o navegador embutido
+  (`mcp__Claude_Browser__*`): navegue, leia a página, confira console e rede. Em
+  worktree, suba na **porta própria** (8771, 8772, 8773...) com o `PYTHONPATH` do
+  worktree, como em `_comum/git.md` → "Worktrees". Nunca a 8765, que é a do
+  Douglas, nem a 8769, que é do executor da pasta principal.
 - **Voz e áudio:** não dá para ouvir. Meça: transcreva o resultado com o
   `WhisperTranscriber` e compare com o texto esperado; meça RMS, duração e
   silêncios. "Gerou um wav" não prova que a fala está certa.

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
-from ..config import OUTPUT_DIR
+from .. import config
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from ..voice.design import VoiceDesign, parse_instruct
@@ -103,7 +103,7 @@ def design_voice(
 
 def default_narration_path(text: str) -> Path:
     digest = hashlib.sha1(text.encode()).hexdigest()[:8]
-    return OUTPUT_DIR / f"narracao-{digest}.wav"
+    return config.OUTPUT_DIR / f"narracao-{digest}.wav"
 
 
 def speak(
@@ -170,7 +170,7 @@ def preview_voice(
     library = library or VoiceLibrary()
     voice = library.get(voice_id)
     sample = text or PREVIEW_TEXTS.get(voice.language, PREVIEW_TEXTS["pt"])
-    destination = out or OUTPUT_DIR / f"voz-{voice.id}-amostra.wav"
+    destination = out or config.OUTPUT_DIR / f"voz-{voice.id}-amostra.wav"
     return speak(
         sample,
         destination,
