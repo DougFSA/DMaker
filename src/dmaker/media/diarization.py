@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from ..config import MODELS_DIR
+from .. import config
 from .cpu import compute_threads
 from .downloads import Downloader, RemoteFile, download_file, ensure_archive_member, ensure_file
 from .wavio import read_wav
@@ -236,7 +236,7 @@ class SherpaDiarizer:
 
     @property
     def models_dir(self) -> Path:
-        return self._models_dir or MODELS_DIR / "diarization"
+        return self._models_dir or config.MODELS_DIR / "diarization"
 
     def _load_engine(self) -> DiarizationEngine:
         return SherpaEngine(

@@ -43,6 +43,17 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   aparece no `.dub.json`, na tabela da seção Dublar (coluna editável) e em `dub_get`; trocar
   o falante (`dub_update_segment`, `speaker`) refaz só aquela fala. CLI: `dmaker dub prepare
   --speakers N` força o número de pessoas. `per_segment` e `single` seguem como estavam.
+- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
+- **DMK-6**: fila de narrações que roda em segundo plano e retoma de onde parou, com importação de roteiro em txt, md ou docx por capítulos
+- **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
+- **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
+
+### Fixed
+
+- **DMK-8**: testes de voz e áudio isolados em pasta temporária (diretórios de dados fixados na
+  importação dos módulos e lidos do `cache/` e `output/` reais), suíte estável com síntese real rodando
+  ao mesmo tempo. Os dados passam a morar em `DMAKER_DATA_DIR` (padrão: a raiz), e um gancho de auditoria
+  reprova qualquer teste que escreva em `cache/`, `output/`, `projects/`, `assets/voices/` ou no léxico real.
 
 ### Pré-requisitos na máquina
 
@@ -52,6 +63,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   pyannote-segmentation-3.0 em ONNX (licença MIT) e embeddings CAM++ do 3D-Speaker (Apache-2.0),
   das releases oficiais do k2-fsa. Sem o `sherpa-onnx`, ou com `DMAKER_DIARIZATION=off`, o padrão
   volta a ser `per_segment`.
+- **DMK-7**: pacote `audioseal` no extra `voice` (`.venv\Scripts\pip install -e .[voice]`); os pesos (~90 MB) são baixados na primeira marca ou verificação, para `cache/models/audioseal`.
 
 ---
 

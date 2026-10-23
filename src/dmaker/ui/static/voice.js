@@ -4,7 +4,9 @@
  * por atributos, narração de um roteiro e inserção da narração no projeto aberto.
  *
  * Toda síntese na CPU é lenta (dezenas de segundos por segundo de áudio), então ouvir a prévia e gerar
- * a narração são jobs: o POST devolve job_id e o andamento chega por SSE (/api/jobs/{id}/events).
+ * a narração são jobs: o POST devolve job_id e o andamento chega por SSE (/api/jobs/{id}/events). Na narração
+ * cada fala pronta chega como evento "utterance" e toca na hora (prévia ao vivo, Web Audio); "Parar" cancela
+ * o job entre falas (POST /api/jobs/{id}/cancel) e o que já saiu fica no cache.
  *
  * O módulo roda dentro de uma função para não poluir o escopo global (os outros scripts declaram
  * constantes de nível superior). Usa em tempo de execução, vindos de app.js: api, state, showAlert,
@@ -15,7 +17,8 @@
  *   init({ brands })   chamado por app.js ao terminar de carregar o estado
  *   onShow()           chamado por app.js quando a aba Voz aparece (atualiza a lista de vozes)
  *   followJob(id, cb)  acompanha um job por SSE (usado por speech.js, que cuida de isolar voz e corrigir fala)
- *   pure               estimateSeconds, formatDuration, formatClock, recordingAdvice, buildNarrationItem...
+ *   pure               estimateSeconds, formatDuration, formatClock, recordingAdvice, buildNarrationItem,
+ *                      planLiveChunk, playingIndexAt, liveStatusText, createLivePlayer...
  */
 (function () {
   const CHARS_PER_SECOND = 14; // ritmo médio da fala em português, para estimar a duração do roteiro
@@ -28,6 +31,9 @@
   const HISTORY_LIMIT = 30;
   const LAST_VOICE_KEY = "dmaker.voice.lastVoice";
   const KIND_LABELS = { clone: "clonada", design: "desenhada" };
+  const LIVE_FADE_S = 0.005; // fade nas pontas de cada fala da prévia ao vivo (ver planLiveChunk)
+  const LIVE_LEAD_S = 0.06; // folga para agendar a primeira fala (ou uma atrasada) no futuro do relógio de áudio
+  const LIVE_STOP_FADE_S = 0.02; // rampa de silêncio ao parar
 
   /* ==================== funções puras ==================== */
 
@@ -101,6 +107,109 @@
     return item;
   }
 
+  /* ---------- prévia ao vivo (Web Audio) ---------- */
+
+  /**
+   * Onde e quando tocar a próxima fala da prévia ao vivo. Funde as falas na linha do tempo do AudioContext:
+   * cada uma começa exatamente onde a anterior terminou mais a pausa do roteiro (`cursor`), então a emenda
+   * não depende de timers (que oscilam dezenas de ms) e sim do relógio de áudio. Se a fala chegou depois do
+   * ponto previsto (`cursor` já passou), toca assim que der: `late` avisa que a CPU não acompanhou.
+   * O fade de 5 ms nas duas pontas tira o degrau que o corte seco de uma amostra não nula faz (o estalo);
+   * é curto demais para ser ouvido como queda de volume (menos que qualquer fonema) e nunca passa de metade
+   * da fala, para não apagar uma fala curtíssima.
+   */
+  function planLiveChunk(cursor, now, duration, pauseAfter) {
+    const earliest = now + LIVE_LEAD_S;
+    const late = cursor !== null && cursor < now;
+    const startAt = cursor !== null && !late ? cursor : earliest;
+    const endAt = startAt + duration;
+    return {
+      startAt,
+      endAt,
+      fade: Math.min(LIVE_FADE_S, duration / 2),
+      nextCursor: endAt + Math.max(0, pauseAfter || 0),
+      late,
+    };
+  }
+
+  /** Índice (a partir de 1) da fala que toca no instante `time`, contando a pausa depois dela; null se nada
+   * foi agendado ou se tudo o que chegou já terminou. `plans` vem na ordem, cada um com `index` e `nextCursor`. */
+  function playingIndexAt(plans, time) {
+    const current = plans.find((plan) => time < plan.nextCursor);
+    return current ? current.index : null;
+  }
+
+  /** Frase de andamento da prévia ao vivo. `view`: { total, ready, playing, stoppedAfter }. */
+  function liveStatusText(view) {
+    const { total, ready, playing } = view;
+    if (view.stoppedAfter !== null && view.stoppedAfter !== undefined) {
+      return `Parado depois da fala ${view.stoppedAfter} de ${total}. O que já saiu ficou guardado.`;
+    }
+    if (!ready) return "Esperando a primeira fala ficar pronta...";
+    if (playing) return `Tocando fala ${playing} de ${total}${ready < total ? ` · ${ready} prontas` : ""}`;
+    if (ready < total) return `Esperando a fala ${ready + 1} de ${total} ficar pronta...`;
+    return "Prévia ao vivo terminada.";
+  }
+
+  /**
+   * Toca os pedaços (falas) na ordem em que chegam, sem esperar o roteiro inteiro. `context` é um
+   * AudioContext (ou OfflineAudioContext, nos testes); `loadChunk(url)` devolve os bytes do WAV. Cada
+   * fala é decodificada e agendada pelo relógio do contexto, uma depois da outra, mesmo que a decodificação
+   * de uma demore mais que a da seguinte (a cadeia de promessas preserva a ordem).
+   */
+  function createLivePlayer(context, loadChunk, onError) {
+    const master = context.createGain();
+    master.connect(context.destination);
+    const plans = [];
+    const sources = [];
+    let cursor = null;
+    let chain = Promise.resolve();
+    let stopped = false;
+
+    function place(chunk, buffer) {
+      const plan = planLiveChunk(cursor, context.currentTime, buffer.duration, chunk.pauseAfter);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0, plan.startAt);
+      gain.gain.linearRampToValueAtTime(1, plan.startAt + plan.fade);
+      gain.gain.setValueAtTime(1, plan.endAt - plan.fade);
+      gain.gain.linearRampToValueAtTime(0, plan.endAt);
+      source.connect(gain);
+      gain.connect(master);
+      source.onended = () => gain.disconnect();
+      source.start(plan.startAt);
+      sources.push(source);
+      cursor = plan.nextCursor;
+      plans.push({ index: chunk.index, ...plan });
+    }
+
+    return {
+      enqueue(chunk) {
+        chain = chain
+          .then(async () => {
+            if (stopped) return;
+            const buffer = await context.decodeAudioData(await loadChunk(chunk.url));
+            if (!stopped) place(chunk, buffer);
+          })
+          .catch((err) => { if (onError) onError(err); });
+        return chain;
+      },
+      /** Silencia em 20 ms (rampa, não corte seco, pelo mesmo motivo do fade) e descarta o que faltava tocar. */
+      stop() {
+        stopped = true;
+        const now = context.currentTime;
+        master.gain.cancelScheduledValues(now);
+        master.gain.setValueAtTime(master.gain.value, now);
+        master.gain.linearRampToValueAtTime(0, now + LIVE_STOP_FADE_S);
+        sources.forEach((source) => { try { source.stop(now + LIVE_STOP_FADE_S + 0.005); } catch { /* já terminou */ } });
+      },
+      plans,
+      ready: () => plans.length,
+      playingIndex: () => playingIndexAt(plans, context.currentTime),
+    };
+  }
+
   /** Última linha útil de um erro de job ("ValueError: mensagem\nTraceback...") sem o nome da exceção. */
   function jobErrorMessage(error) {
     const first = String(error || "Erro desconhecido").split("\n")[0];
@@ -133,6 +242,11 @@
     recordingTicker: null,
     recordingStream: null,
     elapsedTicker: null,
+    stopping: false,
+    jobId: null, // job de narração em andamento (para o botão Parar)
+    audioContext: null,
+    live: null, // prévia ao vivo da narração em andamento
+    liveTicker: null,
   };
 
   const el = (id) => document.getElementById(id);
@@ -157,21 +271,26 @@
 
   /* ==================== job com andamento por SSE ==================== */
 
-  /** Acompanha um job até o fim; resolve com o resultado ou rejeita com a mensagem do erro. */
-  function followJob(jobId, onProgress) {
+  /** Acompanha um job até o fim; resolve com o resultado ou rejeita com a mensagem do erro. Um job parado
+   * a pedido rejeita com `cancelled = true` e o que já ficou pronto em `result`. `onEvent` recebe todo
+   * evento cru (é por ele que a prévia ao vivo recebe cada fala pronta). */
+  function followJob(jobId, onProgress, onEvent) {
     return new Promise((resolve, reject) => {
       const source = new EventSource(`/api/jobs/${jobId}/events`);
       let finished = false;
       source.onmessage = (message) => {
         let evt;
         try { evt = JSON.parse(message.data); } catch { return; }
+        if (onEvent) onEvent(evt);
         if (evt.kind === "progress" && onProgress) onProgress(evt);
         if (evt.kind === "log" && onProgress) onProgress({ log: evt.message });
         if (evt.kind === "end") {
           finished = true;
           source.close();
           if (evt.status === "done") resolve(evt.result);
-          else reject(new Error(jobErrorMessage(evt.error)));
+          else if (evt.status === "cancelled") {
+            reject(Object.assign(new Error("Cancelado."), { cancelled: true, result: evt.result }));
+          } else reject(new Error(jobErrorMessage(evt.error)));
         }
       };
       source.onerror = () => {
@@ -558,6 +677,90 @@
   function showGenerating(visible) {
     el("voice-progress").hidden = !visible;
     if (!visible) el("voice-progress-fill").style.width = "0%";
+    el("voice-stop").disabled = false;
+    el("voice-stop").textContent = "Parar";
+  }
+
+  /* ---------- prévia ao vivo na tela ---------- */
+
+  function liveAudioContext() {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) return null;
+    if (!studio.audioContext) studio.audioContext = new Context();
+    return studio.audioContext;
+  }
+
+  async function fetchChunkBytes(url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Não consegui carregar uma fala da prévia ao vivo.");
+    return response.arrayBuffer();
+  }
+
+  /** Começa uma prévia ao vivo nova (chamada dentro do clique, que é o que libera o áudio do navegador).
+   * Sem Web Audio no navegador devolve null e a narração segue só com o arquivo final. */
+  function startLivePreview() {
+    stopLivePreview();
+    const context = liveAudioContext();
+    if (!context) return null;
+    context.resume().catch(() => {});
+    const live = {
+      player: createLivePlayer(context, fetchChunkBytes, () => showAlert("Uma fala da prévia ao vivo não tocou; o arquivo final não é afetado.", "error")),
+      total: 0,
+      jobEnded: false,
+      stoppedAfter: null,
+    };
+    studio.live = live;
+    el("voice-live").hidden = false;
+    drawLivePreview();
+    studio.liveTicker = setInterval(drawLivePreview, 150);
+    return live;
+  }
+
+  function drawLivePreview() {
+    const live = studio.live;
+    if (!live) return;
+    const playing = live.player.playingIndex();
+    el("voice-live-status").textContent = liveStatusText({
+      total: live.total, ready: live.player.ready(), playing, stoppedAfter: live.stoppedAfter,
+    });
+    if ((live.jobEnded && playing === null) || live.stoppedAfter !== null) clearInterval(studio.liveTicker);
+  }
+
+  function stopLivePreview() {
+    clearInterval(studio.liveTicker);
+    if (studio.live) studio.live.player.stop();
+    studio.live = null;
+  }
+
+  /** Silencia só a prévia ao vivo; a geração continua e o arquivo final sai do mesmo jeito. */
+  function muteLivePreview() {
+    if (!studio.live) return;
+    stopLivePreview();
+    el("voice-live-status").textContent = "Prévia ao vivo silenciada. A geração continua.";
+  }
+
+  function onJobEvent(evt) {
+    const live = studio.live;
+    if (!live || evt.kind !== "utterance") return;
+    live.total = evt.total;
+    live.player.enqueue({ index: evt.index, url: evt.audio_url, pauseAfter: evt.pause_after_s });
+  }
+
+  async function stopGeneration() {
+    if (!studio.jobId || el("voice-stop").disabled) return;
+    el("voice-stop").disabled = true;
+    el("voice-stop").textContent = "Parando...";
+    studio.stopping = true;
+    if (studio.live) {
+      studio.live.player.stop();
+      studio.live.stoppedAfter = studio.live.player.ready();
+      drawLivePreview();
+    }
+    try {
+      await api.post(`/api/jobs/${studio.jobId}/cancel`);
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   async function generate() {
@@ -580,18 +783,23 @@
     let label = "Na fila...";
     let percent = 0;
     const draw = (elapsedMs) => {
-      el("voice-progress-label").textContent = `${label} · ${formatClock(elapsedMs)} decorridos`;
+      const shown = studio.stopping ? "Parando assim que a fala atual terminar" : label;
+      el("voice-progress-label").textContent = `${shown} · ${formatClock(elapsedMs)} decorridos`;
       el("voice-progress-fill").style.width = `${percent}%`;
     };
+    studio.stopping = false;
     startElapsedTicker(draw);
+    const live = startLivePreview();
     try {
       const { job_id } = await api.post("/api/voices/speak", {
         text: entry.text, voice: entry.voiceId, speed: entry.speed, language: entry.language, seed: entry.seed, brand,
       });
+      studio.jobId = job_id;
       const result = await followJob(job_id, (evt) => {
         if (evt.label) { label = evt.label; percent = evt.percent || 0; }
         else if (evt.log) label = evt.log;
-      });
+      }, onJobEvent);
+      if (live) live.jobEnded = true;
       const voice = studio.voices.find((v) => v.id === entry.voiceId);
       addToHistory({
         ...entry,
@@ -603,8 +811,18 @@
       });
       showAlert("Narração pronta.", "success");
     } catch (err) {
-      handleError(err);
+      if (live) live.jobEnded = true;
+      if (err.cancelled) {
+        if (live) live.stoppedAfter = err.result && err.result.ready !== undefined ? err.result.ready : live.player.ready();
+        drawLivePreview();
+        showAlert("Narração parada. As falas prontas ficaram guardadas: gerar o mesmo texto de novo não as sintetiza outra vez.", "success");
+      } else {
+        stopLivePreview();
+        el("voice-live").hidden = true;
+        handleError(err);
+      }
     } finally {
+      studio.jobId = null;
       stopElapsedTicker();
       studio.busy = false;
       showGenerating(false);
@@ -731,6 +949,8 @@
     el("voice-speed").addEventListener("input", updateScriptStats);
     el("voice-script-voice").addEventListener("change", (e) => rememberVoice(e.target.value));
     el("voice-generate").addEventListener("click", generate);
+    el("voice-stop").addEventListener("click", stopGeneration);
+    el("voice-live-mute").addEventListener("click", muteLivePreview);
     el("voice-result-insert").addEventListener("click", () => { if (studio.current) insertIntoProject(studio.current); });
     el("voice-rec-toggle").addEventListener("click", toggleRecording);
     el("voice-clone-submit").addEventListener("click", submitClone);
@@ -798,6 +1018,10 @@
       extensionForMime,
       buildNarrationItem,
       jobErrorMessage,
+      planLiveChunk,
+      playingIndexAt,
+      liveStatusText,
+      createLivePlayer,
     },
   };
 })();

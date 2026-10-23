@@ -247,6 +247,22 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
   plano que devolve `job_id`; o resultado traz `output`, `duration_s` e `cues` (início, fim e texto de cada
   fala). Linha em branco é pausa de parágrafo, `[pausa 1.2]` fixa uma pausa em segundos, R$, % e números
   são lidos por extenso. Saída `.wav`, `.mp3` ou `.m4a` (48 kHz, mono). `speed` vai de 0.5 a 2 no Kokoro.
+- Marca d'água: toda fala sintetizada (narração, projeto, correção de fala, dublagem) sai com uma marca
+  inaudível de voz gerada por IA (AudioSeal, sobrevive ao AAC do vídeo). Ligada por padrão; desligue com
+  `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`. `verify_watermark(path)` ou
+  `dmaker voice verify ARQUIVO` (wav, mp3, m4a, mp4) devolve probabilidade e veredito. A marca entra na
+  chave do cache de falas; áudio que o DMaker não sintetizou (vídeo do cliente, música) nunca é marcado.
+- Fila de narrações (roteiro longo, audiobook, vários roteiros de uma vez): `voice_queue_add(text | file_path,
+  voice, title, draft, format, language, speed, brand)` enfileira e `voice_queue_list()` mostra estado,
+  capítulo e fala em andamento, porcentagem e tempo estimado restante. A fila roda um item por vez, sozinha,
+  no `dmaker ui` aberto (seção Fila de narrações do painel Voz) ou em primeiro plano com `dmaker voice queue
+  run`; se o processo cair, o item em andamento volta a pendente e retoma sem ressintetizar as falas que já
+  estão em `cache/voice`. O roteiro vem de texto ou de arquivo `.txt`, `.md` ou `.docx`: linha com `# `,
+  `Capítulo N` ou `Parte N` (no Markdown, `#` e `##`; no Word, estilo Título/Heading 1 ou 2) abre um
+  capítulo. Cada item grava em `output/narracoes/<título>/`: `NN-<capítulo>.wav` (ou mp3), o
+  `<título>-completo.wav` com 1,5 s de silêncio entre capítulos e o `.srt` do completo. O tempo estimado
+  parte de ~1,4 s por caractere a 16 passos (~0,7 s no rascunho, ~0,2 s no Kokoro) e passa a usar a
+  velocidade medida nas últimas falas desta máquina. CLI: `dmaker voice queue add|list|cancel|pause|resume|run`.
 - Pronúncia: o modelo lê "DMaker" como "DeMaker"; o dicionário de pronúncia troca o termo por uma grafia
   que ele fala certo, só na hora de sintetizar (legendas, SRT e `cues` mantêm o texto escrito). Há um
   global (`assets/pronunciation.json`) e um por marca (`assets/brands/<marca>/pronunciation.json`), que

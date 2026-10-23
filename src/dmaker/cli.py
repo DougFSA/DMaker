@@ -944,9 +944,17 @@ def voice_say(
     brand: Annotated[
         str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale (padrão: a da voz).")
     ] = None,
+    watermark: Annotated[
+        bool,
+        typer.Option(
+            "--watermark/--no-watermark",
+            help="Marca d'água inaudível de voz gerada por IA (ligada por padrão; DMAKER_WATERMARK=0 também desliga).",
+        ),
+    ] = True,
 ) -> None:
     """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache."""
+    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível
+    (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak
@@ -972,11 +980,28 @@ def voice_say(
             log=_console_log,
             synthesizer=synthesizer,
             brand=brand,
+            watermark=watermark,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     _print_narration(result)
     console.print(f"  tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+@voice_app.command("verify")
+def voice_verify(
+    file: Annotated[Path, typer.Argument(help="Áudio ou vídeo a conferir: .wav, .mp3, .m4a, .mp4...")],
+) -> None:
+    """Confere se o áudio carrega a marca d'água de voz gerada por IA do DMaker (sobrevive ao AAC do vídeo)."""
+    from .pipeline.voices import verify_watermark, watermark_verdict
+
+    try:
+        result = verify_watermark(file)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    style = "green" if result.detected else "yellow"
+    console.print(f"[{style}]{watermark_verdict(result)}[/{style}]")
+    console.print(f"  probabilidade: {result.probability:.3f}")
 
 
 @voice_app.command("clone")
@@ -1057,6 +1082,133 @@ def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) ->
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     console.print(f"[green]Voz removida:[/green] {voice_id}")
+
+
+queue_app = typer.Typer(
+    help="Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano e retoma de onde parou.",
+    no_args_is_help=True,
+)
+voice_app.add_typer(queue_app, name="queue")
+
+
+def _queue_service():
+    from .pipeline.voice_queue_service import VoiceQueueService
+
+    return VoiceQueueService()
+
+
+def _queue_describe(view: dict) -> str:
+    """Resumo de uma linha do andamento de um item: capítulo e fala em andamento, ou o desfecho."""
+    if view["state"] == "running" and view["chapter"]:
+        return f"capítulo {view['chapter']} de {view['chapters_total']}, fala {view['utterance']} de {view['utterances']}"
+    if view["state"] == "failed":
+        return (view["error"] or "").splitlines()[0] if view["error"] else ""
+    if view["state"] == "done":
+        return view["output_dir"]
+    return f"{view['chapters_total']} capítulo(s)"
+
+
+@queue_app.command("add")
+def queue_add(
+    text: Annotated[str | None, typer.Option(help="Texto a narrar (ou use --file).")] = None,
+    file: Annotated[
+        Path | None, typer.Option(help="Roteiro em .txt, .md ou .docx, um capítulo por título.")
+    ] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="Id da voz (dmaker voice list). Sem ela, a voz padrão.")
+    ] = None,
+    title: Annotated[str | None, typer.Option(help="Nome do item e da pasta em output/narracoes.")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    format: Annotated[str, typer.Option(help="Formato dos áudios: wav ou mp3.")] = "wav",
+    language: Annotated[str | None, typer.Option(help="Idioma (pt, en...). Padrão: o da voz.")] = None,
+    speed: Annotated[float, typer.Option(help="Velocidade da fala (1.0 normal).")] = 1.0,
+    brand: Annotated[str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale.")] = None,
+) -> None:
+    """Põe um roteiro no fim da fila. Quem executa é o `dmaker ui` aberto ou o `dmaker voice queue run`."""
+    from .pipeline.voice_queue import QueueOptions
+
+    if bool(text) == bool(file):
+        _fail("Informe o texto (--text) ou o arquivo de roteiro (--file), um dos dois.")
+    try:
+        options = QueueOptions(
+            voice=voice, language=language, speed=speed, brand=brand, draft=draft, audio_format=format
+        )
+        service = _queue_service()
+        item = service.add_text(text, options, title) if text else service.add_path(file, options, title)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Na fila:[/green] {item.id}  {item.title}  ({item.chapters_total} capítulo(s))")
+    console.print(f"  saída: {item.output_dir}", markup=False, highlight=False)
+
+
+@queue_app.command("list")
+def queue_list() -> None:
+    """Mostra a fila: estado, andamento e tempo estimado de cada item."""
+    view = _queue_service().view()
+    if not view["items"]:
+        console.print("A fila está vazia. Use `dmaker voice queue add`.")
+        return
+    table = Table("id", "título", "estado", "andamento", "restante")
+    for item in view["items"]:
+        table.add_row(
+            item["id"],
+            item["title"],
+            item["state_label"],
+            _queue_describe(item),
+            item["eta_label"] or "-",
+        )
+    console.print(table)
+    if view["eta_label"]:
+        console.print(f"Tempo estimado para esvaziar a fila: {view['eta_label']}")
+
+
+def _queue_transition(item_id: str, action: str, success: str) -> None:
+    queue = _queue_service().queue
+    try:
+        getattr(queue, action)(item_id)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc.args[0]) if isinstance(exc, KeyError) else str(exc))
+    console.print(f"[green]{success}:[/green] {item_id}")
+
+
+@queue_app.command("cancel")
+def queue_cancel(
+    item_id: Annotated[str, typer.Argument(help="Id do item (dmaker voice queue list).")],
+) -> None:
+    """Cancela um item; o que estava em andamento para na próxima fala."""
+    _queue_transition(item_id, "cancel", "Cancelado")
+
+
+@queue_app.command("pause")
+def queue_pause(item_id: Annotated[str, typer.Argument(help="Id do item.")]) -> None:
+    """Pausa um item sem perder o que já foi narrado."""
+    _queue_transition(item_id, "pause", "Pausado")
+
+
+@queue_app.command("resume")
+def queue_resume(item_id: Annotated[str, typer.Argument(help="Id do item.")]) -> None:
+    """Devolve um item pausado à fila."""
+    _queue_transition(item_id, "resume", "Retomado")
+
+
+@queue_app.command("run")
+def queue_run() -> None:
+    """Executa a fila em primeiro plano, um item por vez, e volta quando ela esvazia. Ctrl+C interrompe e
+    o item em andamento retoma de onde parou na próxima execução."""
+    from .pipeline.voice_queue import VoiceQueue
+    from .pipeline.voice_queue_service import build_worker
+    from .pipeline.voice_worker import WorkerBusyError
+
+    queue = VoiceQueue()
+    worker = build_worker(queue, log=_console_log)
+    try:
+        processed = worker.run_pending()
+    except WorkerBusyError as exc:
+        _fail(str(exc))
+    except KeyboardInterrupt:
+        queue.requeue_interrupted()
+        _fail("Interrompido; o item em andamento volta para a fila e retoma na próxima execução.")
+    console.print(f"[green]Fila concluída:[/green] {processed} item(ns) executado(s)")
 
 
 @voice_app.command("preview")

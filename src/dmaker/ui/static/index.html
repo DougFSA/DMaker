@@ -433,11 +433,20 @@
                   <div class="hint-text">Para fixar a pronúncia só de uma ocorrência, escreva [[termo|pronúncia]], por exemplo [[DMaker|Di-mêiker]]. A fala usa a pronúncia e as legendas mostram o termo.</div>
                   <div class="add-row">
                     <button type="button" class="btn btn-accent" id="voice-generate" disabled>Gerar narração</button>
+                    <button type="button" class="btn" id="voice-enqueue" disabled title="Narra em segundo plano, um roteiro por vez, sem travar a tela. Roteiro longo ou vários de uma vez: use a fila.">Mandar para a fila</button>
                   </div>
                   <div class="voice-progress" id="voice-progress" hidden>
                     <div class="progress-bar-track"><div class="progress-bar-fill" id="voice-progress-fill"></div></div>
                     <div class="progress-bar-label" id="voice-progress-label"></div>
                     <div class="hint-text">Na CPU a síntese é lenta: cada segundo de áudio leva dezenas de segundos. Falas repetidas saem do cache.</div>
+                    <div class="add-row">
+                      <button type="button" class="btn btn-small btn-danger" id="voice-stop" title="Para depois da fala que está sendo gerada; o que já ficou pronto continua guardado">Parar</button>
+                    </div>
+                  </div>
+                  <div class="voice-live" id="voice-live" hidden>
+                    <div class="voice-live-status" id="voice-live-status" role="status" aria-live="polite"></div>
+                    <div class="hint-text">Prévia ao vivo: cada fala toca assim que fica pronta e é a fala crua, sem o acabamento final. O arquivo final, com acabamento broadcast, aparece abaixo quando o roteiro terminar.</div>
+                    <button type="button" class="btn btn-small" id="voice-live-mute" title="Silencia a prévia ao vivo; não interrompe a geração">Silenciar prévia</button>
                   </div>
                   <div class="voice-result" id="voice-result" hidden>
                     <audio id="voice-result-audio" class="voice-audio" controls></audio>
@@ -447,6 +456,38 @@
                       <button type="button" class="btn btn-small btn-accent" id="voice-result-insert" title="Acrescenta em audio.narration, na posição atual do player, e salva">Inserir no projeto aberto</button>
                     </div>
                   </div>
+                </fieldset>
+
+                <fieldset class="form-block" id="voice-queue-block">
+                  <legend>Fila de narrações</legend>
+                  <p class="voice-notice">Para roteiros longos (um audiobook, um manual narrado) e vários de uma vez. A fila narra um item por vez, sozinha, enquanto o DMaker estiver aberto, e retoma de onde parou se o programa fechar. Usa a voz, o idioma e a velocidade da seção Narração. Cada item gera um áudio por capítulo, o áudio completo e as legendas dele em output/narracoes.</p>
+                  <div class="field">
+                    <label for="voice-queue-file">Importar roteiro (.txt, .md ou .docx)</label>
+                    <input type="file" id="voice-queue-file" accept=".txt,.md,.markdown,.docx">
+                  </div>
+                  <div class="hint-text">Cada título (linha com "# ", "Capítulo 1" ou "Parte 2"; no Word, estilo Título 1 ou 2) abre um capítulo. Sem títulos, o roteiro vira um capítulo só.</div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="voice-queue-title">Título do item (opcional)</label>
+                      <input type="text" id="voice-queue-title" placeholder="Nome da pasta de saída">
+                    </div>
+                    <div class="field">
+                      <label for="voice-queue-format">Formato</label>
+                      <select id="voice-queue-format">
+                        <option value="wav">wav (sem perdas)</option>
+                        <option value="mp3">mp3</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="voice-source-choice">
+                    <label><input type="checkbox" id="voice-queue-draft"> Rascunho (8 passos no OmniVoice, metade do tempo, mais áspero)</label>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="voice-queue-upload" disabled>Mandar arquivo para a fila</button>
+                    <button type="button" class="btn" id="voice-queue-clear" disabled title="Tira da lista os itens concluídos e cancelados; os áudios continuam na pasta">Limpar concluídos</button>
+                  </div>
+                  <div class="hint-text" id="voice-queue-summary">Carregando a fila...</div>
+                  <ul class="voice-list" id="voice-queue-list"><li class="empty-hint">Carregando a fila...</li></ul>
                 </fieldset>
 
                 <fieldset class="form-block" id="voice-pron-block">
@@ -708,6 +749,7 @@
 <script src="/static/layout.js"></script>
 <script src="/static/voice.js"></script>
 <script src="/static/speech.js"></script>
+<script src="/static/queue.js"></script>
 <script src="/static/dub.js"></script>
 <script src="/static/app.js"></script>
 </body>

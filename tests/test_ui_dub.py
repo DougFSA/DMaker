@@ -20,7 +20,7 @@ from tests.test_dubbing import S1, DubHarness
 def dub(tmp_path: Path, monkeypatch) -> DubHarness:
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "voice-cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
     return DubHarness(tmp_path / "media")
 
 

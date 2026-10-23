@@ -21,7 +21,7 @@ avulsos, sem Jira. Aqui o trabalho nasce de um chamado do projeto DMK.
 | Agente | Faz | Devolve |
 | --- | --- | --- |
 | `dmaker-apurador` | Levantamento sem mudar nada: Jira com comentários, mapa de PRs, portões, log do git, CHANGELOG, comandos da CLI | Fatos condensados |
-| `dmaker-executor` | Um card: implementa, portões, CHANGELOG, commit, push, PR, transição e comentário | Relatório curto do que fez |
+| `dmaker-executor` | Um card: implementa, portões, CHANGELOG, commit, push, PR, **merge do PR na `develop`**, portões na mistura, transição e comentário | Relatório curto do que fez |
 
 Os dois já vêm fixados em `model: sonnet` na definição: **não passe `model` na
 chamada**, senão você sobrescreve isso sem querer.
@@ -42,28 +42,45 @@ Quando as tarefas são independentes, dispare os `Agent` **na mesma mensagem** e
 eles rodam em paralelo. Isso vale para o `dmaker-apurador`, que só lê: quatro
 auditorias juntas é o uso certo.
 
-## Nunca dois executores ao mesmo tempo
+## Um executor por pasta; em paralelo, só em worktree
 
-**`dmaker-executor` sempre em série, um por vez**, mesmo quando os cards são
-independentes, mesmo quando mexem em arquivos diferentes.
-
-O motivo não é o código: é o git. Todos os subagentes trabalham no mesmo
-diretório (`D:\DMaker`), e um repositório tem **um HEAD e um index só**. Dois
-executores em paralelo trocam de branch um debaixo do outro, e o commit de um
-nasce no branch do outro.
+**Dois `dmaker-executor` na mesma pasta, nunca.** O motivo não é o código: é o git.
+Uma pasta tem **um HEAD e um index só**. Dois executores nela trocam de branch um
+debaixo do outro, e o commit de um nasce no branch do outro.
 
 Aconteceu no MedlyCare, em 09/08/2026: dois cards independentes (telas
-diferentes, camadas diferentes) foram despachados juntos. O commit de um nasceu no
-branch do outro; desfazer isso exigiu `reset`, `stash` por pathspec e `restore` em
-cima do trabalho não commitado, com risco real de apagá-lo. Os dois PRs
-sobreviveram, mas por pouco, e a limpeza custou mais que a serialização teria
-custado.
+diferentes, camadas diferentes) foram despachados juntos na mesma pasta. O commit
+de um nasceu no branch do outro; desfazer isso exigiu `reset`, `stash` por
+pathspec e `restore` em cima do trabalho não commitado, com risco real de
+apagá-lo.
 
-**Independência de arquivo não é independência de repositório.** A fila em série
-é mais lenta e é o preço certo. No DMaker há um agravante: o `cache/` e o
-`projects/` são compartilhados no disco, e dois renders ao mesmo tempo disputam
-ffmpeg e CPU. Se o paralelismo for mesmo necessário, cada executor precisa de um
-worktree isolado, não basta que os cards não se toquem.
+**Em paralelo, com worktree isolado, pode.** O Douglas autorizou (23/10/2026)
+rodar chamados ao mesmo tempo **quando são independentes e tocam coisas
+diferentes**. Cada worktree tem HEAD, index e pasta próprios, e o branch de um
+não mexe no do outro. A regra fica assim:
+
+- **Um executor fica na pasta principal `D:\DMaker`; cada outro vai com
+  `isolation: "worktree"`.** O preparo do worktree (venv da pasta principal,
+  `PYTHONPATH`, junções `mklink /J`, remoção com `rmdir`, porta da interface,
+  `tests/test_mcp.py`) está em `_comum/git.md` → "Worktrees". Mande, no briefing de
+  cada executor em worktree, ler essa seção.
+- **Independente de verdade:** módulos diferentes e nenhum depende do código do
+  outro. Mesmo arquivo em trechos distintos é aceitável (o conflito, se vier, é
+  pequeno e a resolução mantém os dois lados); mesma etapa do pipeline ou mesma
+  tela, não: serialize esses. Na dúvida, em série.
+- **O merge na `develop` é serializado.** Os executores trabalham em paralelo, mas
+  mergeiam um por vez, com a trava e a conferência de `_comum/git.md` → "Antes de
+  mergear: a develop andou?". Quem chega depois traz a `develop` para o seu
+  branch e roda os portões de novo se veio código novo. É isso que faz o código de
+  vários cards coexistir testado.
+- **Portas da interface** distintas: 8769 é do executor da pasta principal; os
+  worktrees usam 8771, 8772, 8773...; a 8765 é do Douglas. No briefing, diga a
+  porta de cada um.
+- **`cache/` e `projects/` são compartilhados no disco** (pelas junções) e dois
+  renders pesados ao mesmo tempo disputam ffmpeg e CPU. Mais de dois executores
+  juntos raramente compensa.
+- O planejador decide **quem roda em paralelo e quem espera**; o executor não
+  decide isso.
 
 ## O briefing é o produto do planejamento
 
@@ -105,13 +122,19 @@ CRITÉRIO DE ACEITE
 <como se sabe que ficou pronto: o comportamento observável, não "passar o lint">
 
 ENTREGA
-- Branch: <novo a partir da develop | o branch existente <nome> | direto na develop>
+- Pasta de trabalho: <pasta principal (porta 8769) | worktree (porta 877x; leia
+  _comum/git.md "Worktrees")>
+- Branch: <novo a partir da develop: feat/dmk-XXX-... | fix/dmk-XXX-ajuste-N>
 - CHANGELOG: <seção e texto da linha | não entra, motivo>
 - Portões: ruff check, ruff format --check, pytest (sempre os três; sem CI, são o
-  último portão)
+  último portão e a develop recebe o código antes do teste manual)
 - Verificação real: <render/QA/interface/transcrição que precisa rodar, e o que medir>
-- PR: <abrir com base <x> | já existe, só empurrar o commit>
-- Jira: <transições na ordem> + poste este comentário VERBATIM:
+- PR e merge: abrir o PR com base `develop`, trazer a `develop` para o branch,
+  rodar os portões de novo se veio código novo, mergear com `--merge
+  --delete-branch` sob a trava (`_comum/git.md`) e conferir a ponta da `develop`.
+  Ponta quebrada = card não entregue.
+- Jira: `41` ao começar; `51` SÓ depois do merge; poste este comentário VERBATIM
+  (completando PR e commit de merge, que só existem depois):
   ---
   <texto pronto>
   ---
@@ -149,7 +172,8 @@ arriscado: ele é o único portão.
   da auditoria, escrever o relatório final.
 - **Diagnóstico de causa** num redesenvolvimento. Ele existe porque a leitura
   anterior do problema estava errada; delegar diagnóstico é repetir a hipótese.
-- **A ordem da fila** e a decisão de empilhar ou não branch.
+- **A ordem da fila** e a decisão de quais cards rodam em paralelo (worktree) e
+  quais esperam.
 - **O merge na `main` e a tag do release.** É a publicação da versão, depende de
   autorização explícita nesta conversa. Este comando é do planejador, sempre.
 - **Decidir contornar uma verificação que reprovou.**

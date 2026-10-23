@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import dmaker.mcp_server as mcp_server
+from dmaker import config
 from dmaker.cli import app
 from dmaker.media.ffmpeg import FFmpegCommand, RecordingRunner
 from dmaker.pipeline.isolation import IsolationService
@@ -38,7 +39,7 @@ def separator() -> FakeSeparator:
 @pytest.fixture(autouse=True)
 def fake_backends(monkeypatch, tmp_path: Path, separator: FakeSeparator):
     runner = RecordingRunner(on_run=touch_any_output)
-    monkeypatch.setattr("dmaker.pipeline.isolation.STEMS_DIR", tmp_path / "stems")
+    monkeypatch.setattr(config, "STEMS_DIR", tmp_path / "stems")
     monkeypatch.setattr("dmaker.media.separation.DemucsSeparator", lambda device="auto": separator)
     monkeypatch.setattr("dmaker.media.ffmpeg.SubprocessRunner", lambda quiet=False, sink=None: runner)
     monkeypatch.setattr(

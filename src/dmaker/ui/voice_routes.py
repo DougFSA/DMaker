@@ -13,7 +13,7 @@ import re
 import tempfile
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -28,7 +28,8 @@ from ..media.diarization import SpeakerDiarizer
 from ..media.ffmpeg import FFmpegError, FFmpegRunner
 from ..media.probe import MediaInfo
 from ..pipeline.isolation import IsolationService
-from ..pipeline.jobs import Job, JobManager
+from ..pipeline.jobs import Job, JobCancelled, JobManager
+from ..pipeline.narration import NarrationCancelled
 from ..text.transcribe import Transcriber
 from ..text.translate import Translator
 from ..voice import design as voice_design
@@ -74,6 +75,7 @@ DISPLAY_LABELS = {
 
 # uma síntese por vez: o modelo ocupa a CPU toda, e duas ao mesmo tempo só deixariam as duas mais lentas
 _synthesis_lock = threading.Lock()
+QUEUE_POLL_S = 0.25  # de quanto em quanto tempo quem espera na fila confere se foi cancelado
 
 
 @dataclass
@@ -243,33 +245,67 @@ def _progress_reporter(job: Job):
     return report
 
 
+def _utterance_reporter(job: Job):
+    """Cada fala pronta vira o evento SSE `utterance`, com a URL do pedaço (no cache de falas, que é servível)."""
+
+    def report(index: int, total: int, path: Path, duration: float, pause_after: float) -> None:
+        job.emit(
+            "utterance",
+            index=index,
+            total=total,
+            audio_url=audio_url(path),
+            duration_s=round(duration, 3),
+            pause_after_s=round(pause_after, 3),
+        )
+
+    return report
+
+
 @contextmanager
-def exclusive_synthesis(job: Job) -> Iterator[None]:
-    """Só um trabalho pesado de voz por vez (síntese, separação, transcrição); os outros esperam na fila."""
+def hold_synthesis(
+    on_wait: Callable[[str], None], cancelled: Callable[[], bool] = lambda: False
+) -> Iterator[None]:
+    """Segura a trava de síntese; se outro trabalho a tem, avisa por `on_wait` e espera a vez.
+
+    Quem está esperando na fila pode ser cancelado (`cancelled`) sem nunca ter ocupado a CPU.
+    """
     if not _synthesis_lock.acquire(blocking=False):
-        job.log("Aguardando outro trabalho de voz terminar")
-        _synthesis_lock.acquire()
+        on_wait("Aguardando outro trabalho de voz terminar")
+        while not _synthesis_lock.acquire(timeout=QUEUE_POLL_S):
+            if cancelled():
+                raise JobCancelled("Cancelado na fila.", result={"ready": 0, "total": 0})
     try:
         yield
     finally:
         _synthesis_lock.release()
 
 
+def exclusive_synthesis(job: Job) -> AbstractContextManager[None]:
+    """Só um trabalho pesado de voz por vez (síntese, separação, transcrição); os outros esperam na fila."""
+    return hold_synthesis(job.log, lambda: job.cancel_requested)
+
+
 def _run_speech(job: Job, services: VoiceServices, text: str, out: Path, options: dict[str, Any]) -> dict:
     from ..pipeline.voices import speak
 
     with exclusive_synthesis(job):
-        result = speak(
-            text,
-            out,
-            on_progress=_progress_reporter(job),
-            log=job.log,
-            library=services.library,
-            runner=services.runner,
-            synthesizer=services.synthesizer,
-            lexicons=services.lexicons,
-            **options,
-        )
+        try:
+            result = speak(
+                text,
+                out,
+                on_progress=_progress_reporter(job),
+                log=job.log,
+                library=services.library,
+                runner=services.runner,
+                synthesizer=services.synthesizer,
+                lexicons=services.lexicons,
+                on_utterance=_utterance_reporter(job),
+                should_stop=lambda: job.cancel_requested,
+                **options,
+            )
+        except NarrationCancelled as stop:
+            job.log(f"Parado depois da fala {stop.ready} de {stop.total}; o que já saiu ficou guardado")
+            raise JobCancelled(str(stop), result={"ready": stop.ready, "total": stop.total}) from stop
     return {
         "output": str(result.path),
         "audio_url": audio_url(result.path),
@@ -411,7 +447,7 @@ def build_voice_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"narração ({req.voice or 'voz automática'}, {len(text)} caracteres)",
             lambda job: _run_speech(job, services, text, out, options),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 
@@ -427,7 +463,7 @@ def build_voice_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"prévia da voz {voice.name}",
             lambda job: _run_speech(job, services, text, out, options),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 

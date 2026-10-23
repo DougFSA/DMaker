@@ -1,9 +1,10 @@
 """Jobs em segundo plano: eventos, progresso e assinantes (o que a interface e o MCP consomem)."""
 
 import threading
+import time
 
 from dmaker.media.ffmpeg import NullSink, RichSink
-from dmaker.pipeline.jobs import JobManager
+from dmaker.pipeline.jobs import JobCancelled, JobManager
 
 
 def test_job_runs_work_and_emits_lifecycle_events():
@@ -123,3 +124,38 @@ def test_clear_finished_removes_only_jobs_not_running():
     finally:
         gate.set()
         manager.wait(running_job, timeout=5)
+
+
+def test_cancel_is_cooperative_and_ends_the_job_as_cancelled_with_the_partial_result():
+    manager = JobManager()
+    started = threading.Event()
+
+    def work(job):
+        started.set()
+        while not job.cancel_requested:
+            time.sleep(0.01)
+        raise JobCancelled("parado", result={"ready": 2})
+
+    job = manager.start("longo", work, meta={"cancellable": True})
+    assert started.wait(5) and job.snapshot()["cancellable"] is True
+    assert manager.cancel(job.id) is job
+    manager.wait(job, timeout=5)
+
+    assert job.status == "cancelled" and job.error is None and job.result == {"ready": 2}
+    end = job.events[-1]
+    assert end["kind"] == "end" and end["status"] == "cancelled" and end["result"] == {"ready": 2}
+
+
+def test_cancel_ignores_jobs_that_did_not_declare_themselves_cancellable_and_finished_ones():
+    manager = JobManager()
+    release = threading.Event()
+    rigid = manager.start("render", lambda job: release.wait(5))
+    assert manager.cancel(rigid.id) is rigid and not rigid.cancel_requested
+    release.set()
+    manager.wait(rigid, timeout=5)
+
+    done = manager.start("curto", lambda job: 1, meta={"cancellable": True})
+    manager.wait(done, timeout=5)
+    manager.cancel(done.id)
+    assert not done.cancel_requested and done.status == "done"
+    assert manager.cancel("inexistente") is None

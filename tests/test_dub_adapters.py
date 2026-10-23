@@ -30,7 +30,6 @@ def wired(monkeypatch, dub: DubHarness, tmp_path: Path) -> DubHarness:
         "dmaker.pipeline.dubbing.default_dubbing_service", lambda *args, **kwargs: dub.service
     )
     monkeypatch.setattr(mcp_server, "_dubbing_service", lambda job: dub.service)
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", tmp_path / "voices")
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: dub.base.library)
     return dub
 

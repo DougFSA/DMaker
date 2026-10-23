@@ -244,6 +244,7 @@ def edit_project(name: str, op: dict) -> dict:
     description=(
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
+        "NAR narrações (duração real quando já sintetizadas, senão estimada), "
         "MUS música, CC legendas), com o intervalo de cada item já calculado."
     )
 )
@@ -251,10 +252,12 @@ def timeline_view(name: str) -> dict:
     from .pipeline.layout import project_layout
     from .pipeline.projects import load_project
     from .pipeline.timeline_view import build_timeline_view
+    from .pipeline.voiceover import view_narration_durations
 
     project = load_project(name)
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = view_narration_durations(project)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @server.tool(
@@ -472,7 +475,7 @@ def export_project(
 
 
 @server.tool(
-    description="Situação de um render em segundo plano (running | done | error) e o resultado quando pronto."
+    description="Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto."
 )
 def job_status(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -946,6 +949,90 @@ def synthesize_speech(
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+def _voice_queue_service():
+    from .pipeline.voice_queue_service import VoiceQueueService
+
+    return VoiceQueueService(library=_voice_library())
+
+
+@server.tool(
+    description=(
+        "Põe uma narração longa (audiobook, manual narrado, vários roteiros) na fila de narrações, que roda "
+        "um item por vez e retoma de onde parou se o processo cair. Informe text (capítulos marcados com "
+        "'# Título' ou 'Capítulo N' viram arquivos separados) ou file_path (.txt, .md ou .docx; títulos viram "
+        "capítulos). Cada item gera output/narracoes/<título>/NN-<capítulo>.wav, o <título>-completo.wav "
+        "com 1,5 s entre capítulos e o .srt do completo. voice = id da voz; draft=true usa 8 passos no "
+        "OmniVoice (rascunho); format = wav | mp3. A ferramenta só enfileira: quem executa é o `dmaker ui` "
+        "aberto ou o comando `dmaker voice queue run`. Acompanhe com voice_queue_list."
+    )
+)
+def voice_queue_add(
+    text: str | None = None,
+    file_path: str | None = None,
+    voice: str | None = None,
+    title: str | None = None,
+    draft: bool = False,
+    format: Literal["wav", "mp3"] = "wav",
+    language: str | None = None,
+    speed: float = 1.0,
+    brand: str | None = None,
+) -> dict:
+    from .pipeline.voice_queue import STATE_LABELS, QueueOptions
+
+    if bool(text) == bool(file_path):
+        raise ValueError("Informe text ou file_path, um dos dois.")
+    options = QueueOptions(
+        voice=voice, language=language, speed=speed, brand=brand, draft=draft, audio_format=format
+    )
+    service = _voice_queue_service()
+    item = (
+        service.add_text(text, options, title) if text else service.add_path(Path(file_path), options, title)
+    )
+    return {
+        "id": item.id,
+        "title": item.title,
+        "chapters": item.chapters_total,
+        "output_dir": item.output_dir,
+        "state": STATE_LABELS[item.state],
+        "runs_with": "dmaker ui aberto ou dmaker voice queue run",
+    }
+
+
+@server.tool(
+    description=(
+        "Lista a fila de narrações: estado de cada item (Pendente, Rodando, Pausado, Cancelado, Concluído, "
+        "Falhou), capítulo e fala em andamento, porcentagem, tempo estimado restante (medido nesta máquina) "
+        "e os arquivos prontos. eta_label no topo é o tempo para esvaziar a fila."
+    )
+)
+def voice_queue_list() -> dict:
+    view = _voice_queue_service().view()
+    for item in view["items"]:
+        item["files"] = [f["name"] for f in item["files"]]
+    return view
+
+
+@server.tool(
+    description=(
+        "Confere se um áudio ou vídeo (wav, mp3, m4a, mp4...) carrega a marca d'água inaudível de voz "
+        "gerada por IA que o DMaker põe em toda fala sintetizada (sobrevive à exportação em AAC). Devolve "
+        "detected, probability (0 a 1) e verdict em português. Roda na hora (alguns segundos, mais o "
+        "carregamento do modelo na primeira vez). A marca está ligada por padrão e DMAKER_WATERMARK=0 a "
+        "desliga; a verificação funciona sempre."
+    )
+)
+def verify_watermark(path: str) -> dict:
+    from .pipeline.voices import verify_watermark as _verify
+    from .pipeline.voices import watermark_verdict
+
+    result = _verify(Path(path))
+    return {
+        "detected": result.detected,
+        "probability": result.probability,
+        "verdict": watermark_verdict(result),
+    }
 
 
 @server.tool(
