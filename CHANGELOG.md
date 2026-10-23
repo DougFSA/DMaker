@@ -34,6 +34,14 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
+
+### Pré-requisitos na máquina
+
+- **DMK-7**: pacote `audioseal` no extra `voice` (`.venv\Scripts\pip install -e .[voice]`); os pesos (~90 MB) são baixados na primeira marca ou verificação, para `cache/models/audioseal`.
+
 ---
 
 ## Linha de base — 2026-10-22

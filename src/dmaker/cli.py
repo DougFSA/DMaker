@@ -944,9 +944,17 @@ def voice_say(
     brand: Annotated[
         str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale (padrão: a da voz).")
     ] = None,
+    watermark: Annotated[
+        bool,
+        typer.Option(
+            "--watermark/--no-watermark",
+            help="Marca d'água inaudível de voz gerada por IA (ligada por padrão; DMAKER_WATERMARK=0 também desliga).",
+        ),
+    ] = True,
 ) -> None:
     """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache."""
+    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível
+    (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak
@@ -972,11 +980,28 @@ def voice_say(
             log=_console_log,
             synthesizer=synthesizer,
             brand=brand,
+            watermark=watermark,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     _print_narration(result)
     console.print(f"  tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+@voice_app.command("verify")
+def voice_verify(
+    file: Annotated[Path, typer.Argument(help="Áudio ou vídeo a conferir: .wav, .mp3, .m4a, .mp4...")],
+) -> None:
+    """Confere se o áudio carrega a marca d'água de voz gerada por IA do DMaker (sobrevive ao AAC do vídeo)."""
+    from .pipeline.voices import verify_watermark, watermark_verdict
+
+    try:
+        result = verify_watermark(file)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    style = "green" if result.detected else "yellow"
+    console.print(f"[{style}]{watermark_verdict(result)}[/{style}]")
+    console.print(f"  probabilidade: {result.probability:.3f}")
 
 
 @voice_app.command("clone")

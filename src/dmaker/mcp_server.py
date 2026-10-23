@@ -950,6 +950,27 @@ def synthesize_speech(
 
 @server.tool(
     description=(
+        "Confere se um áudio ou vídeo (wav, mp3, m4a, mp4...) carrega a marca d'água inaudível de voz "
+        "gerada por IA que o DMaker põe em toda fala sintetizada (sobrevive à exportação em AAC). Devolve "
+        "detected, probability (0 a 1) e verdict em português. Roda na hora (alguns segundos, mais o "
+        "carregamento do modelo na primeira vez). A marca está ligada por padrão e DMAKER_WATERMARK=0 a "
+        "desliga; a verificação funciona sempre."
+    )
+)
+def verify_watermark(path: str) -> dict:
+    from .pipeline.voices import verify_watermark as _verify
+    from .pipeline.voices import watermark_verdict
+
+    result = _verify(Path(path))
+    return {
+        "detected": result.detected,
+        "probability": result.probability,
+        "verdict": watermark_verdict(result),
+    }
+
+
+@server.tool(
+    description=(
         "Dicionário de pronúncia da narração: como a voz fala cada termo (ex.: DMaker -> Di-mêiker). "
         "action = list | add | remove. Cada entrada vale para um idioma (language, padrão pt; pt-BR e pt "
         "são o mesmo): a grafia feita para o português não vale na fala em inglês, onde o termo é lido "

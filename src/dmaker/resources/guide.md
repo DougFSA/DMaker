@@ -247,6 +247,11 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
   plano que devolve `job_id`; o resultado traz `output`, `duration_s` e `cues` (início, fim e texto de cada
   fala). Linha em branco é pausa de parágrafo, `[pausa 1.2]` fixa uma pausa em segundos, R$, % e números
   são lidos por extenso. Saída `.wav`, `.mp3` ou `.m4a` (48 kHz, mono). `speed` vai de 0.5 a 2 no Kokoro.
+- Marca d'água: toda fala sintetizada (narração, projeto, correção de fala, dublagem) sai com uma marca
+  inaudível de voz gerada por IA (AudioSeal, sobrevive ao AAC do vídeo). Ligada por padrão; desligue com
+  `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`. `verify_watermark(path)` ou
+  `dmaker voice verify ARQUIVO` (wav, mp3, m4a, mp4) devolve probabilidade e veredito. A marca entra na
+  chave do cache de falas; áudio que o DMaker não sintetizou (vídeo do cliente, música) nunca é marcado.
 - Pronúncia: o modelo lê "DMaker" como "DeMaker"; o dicionário de pronúncia troca o termo por uma grafia
   que ele fala certo, só na hora de sintetizar (legendas, SRT e `cues` mantêm o texto escrito). Há um
   global (`assets/pronunciation.json`) e um por marca (`assets/brands/<marca>/pronunciation.json`), que

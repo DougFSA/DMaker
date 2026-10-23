@@ -61,6 +61,7 @@ def test_lists_tools_and_prompt():
         "clone_voice",
         "design_voice",
         "synthesize_speech",
+        "verify_watermark",
         "pronunciation",
     } <= tools
     assert "editar-video" in prompts

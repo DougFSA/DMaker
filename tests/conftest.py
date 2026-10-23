@@ -11,6 +11,8 @@ from dmaker.media import ffmpeg
 # cache e saída dos testes ficam fora dos diretórios de trabalho normais
 _TEST_CACHE = config.ROOT / "cache" / "_tests"
 os.environ.setdefault("DMAKER_TEST", "1")
+# a marca d'água de voz (AudioSeal) carrega um modelo: os testes usam marcadores falsos, só o smoke usa o real
+os.environ["DMAKER_WATERMARK"] = "0"
 
 
 def ffmpeg_available() -> bool:
