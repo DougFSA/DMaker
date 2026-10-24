@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from dmaker.domain.dub import DubProject, DubSegment, load_dub_project, save_dub_project
+from dmaker.domain.dub import DubProject, DubSegment, DubSpeaker, load_dub_project, save_dub_project
 
 
 def segment(id: str = "s1", start: float = 1.0, end: float = 3.0, **extra) -> DubSegment:
@@ -79,3 +80,63 @@ def test_loading_a_missing_or_invalid_project_explains(tmp_path: Path):
     broken.write_text('{"source": "a"}', encoding="utf-8")
     with pytest.raises(ValidationError):
         load_dub_project(broken)
+
+
+# ---------- falantes (diarização) ----------
+
+
+def speakers_project() -> DubProject:
+    return project(
+        speaker_mode="per_speaker",
+        speakers=[
+            DubSpeaker(name="Falante 1", reference_start=1.0, reference_end=6.0, reference_text="uma frase"),
+            DubSpeaker(name="Falante 2"),
+        ],
+        segments=[segment("s1", speaker="Falante 1"), segment("s2", 4.0, 6.0, speaker="Falante 2")],
+    )
+
+
+def test_a_project_without_speakers_still_loads_as_before(tmp_path: Path):
+    path = tmp_path / "antigo.dub.json"
+    save_dub_project(project(), path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["speakers"]  # um projeto gravado antes da diarização não tem o campo
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_dub_project(path)
+    assert loaded.speakers == [] and loaded.speaker_names == [] and loaded.speaker_mode == "per_segment"
+
+
+def test_the_per_speaker_project_goes_through_the_disk(tmp_path: Path):
+    saved = save_dub_project(speakers_project(), tmp_path / "p.dub.json")
+    loaded = load_dub_project(saved)
+    assert loaded == speakers_project() and loaded.speaker_names == ["Falante 1", "Falante 2"]
+    assert loaded.speakers[0].has_reference and not loaded.speakers[1].has_reference
+
+
+def test_a_speaker_reference_needs_both_ends_in_order_and_its_text():
+    with pytest.raises(ValidationError, match="início e fim juntos"):
+        DubSpeaker(name="Falante 1", reference_start=1.0)
+    with pytest.raises(ValidationError, match="maior que o início"):
+        DubSpeaker(name="Falante 1", reference_start=5.0, reference_end=5.0, reference_text="x")
+    with pytest.raises(ValidationError, match="texto falado"):
+        DubSpeaker(name="Falante 1", reference_start=1.0, reference_end=5.0)
+
+
+def test_segments_may_only_name_speakers_the_project_lists():
+    with pytest.raises(ValidationError, match="Falante 3"):
+        project(speakers=[DubSpeaker(name="Falante 1")], segments=[segment("s1", speaker="Falante 3")])
+    with pytest.raises(ValidationError, match="repetidos"):
+        project(speakers=[DubSpeaker(name="Falante 1"), DubSpeaker(name="Falante 1")])
+
+
+def test_edited_swaps_the_speaker_of_one_segment_only():
+    changed = speakers_project().edited("s1", speaker="Falante 2")
+    assert [s.speaker for s in changed.segments] == ["Falante 2", "Falante 2"]
+    assert changed.segment("s1").text == "Hello." and speakers_project().segment("s1").speaker == "Falante 1"
+
+
+def test_edited_refuses_an_unknown_speaker_and_says_which_exist():
+    with pytest.raises(ValueError, match="Falante 9.*Falante 1, Falante 2"):
+        speakers_project().edited("s1", speaker="Falante 9")
+    with pytest.raises(ValueError, match="per_speaker"):
+        project().edited("s1", speaker="Falante 1")

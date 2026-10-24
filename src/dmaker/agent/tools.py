@@ -13,6 +13,7 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from .. import config
@@ -39,8 +40,13 @@ AGENT_TOOLS: list[str] = [
     "job_status",
 ]
 
-# Onde ficam as imagens que uma ferramenta devolveu, para o usuário abrir (o agente só aponta o caminho).
-AGENT_IMAGES_DIR = config.JOBS_DIR / "agent"
+
+def agent_images_dir() -> Path:
+    """Onde ficam as imagens que uma ferramenta devolveu (o agente só aponta o caminho).
+
+    Lida a cada uso, porque a pasta de jobs pode ser trocada depois da importação (testes, DMAKER_DATA_DIR).
+    """
+    return config.JOBS_DIR / "agent"
 
 
 @dataclass
@@ -86,10 +92,11 @@ def _format_tool_error(exc: Exception) -> str:
 
 
 def _save_image(block: Any) -> str:
-    AGENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    folder = agent_images_dir()
+    folder.mkdir(parents=True, exist_ok=True)
     data = base64.b64decode(block.data)
     ext = "png" if "png" in (block.mime_type or "") else "jpg"
-    path = AGENT_IMAGES_DIR / f"{uuid.uuid4().hex}.{ext}"
+    path = folder / f"{uuid.uuid4().hex}.{ext}"
     path.write_bytes(data)
     return f"[imagem: {len(data)} bytes, salva em {path}]"
 

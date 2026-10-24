@@ -61,3 +61,23 @@ def quietest_time(
     # a distância ao centro desempata sem pesar: 1e-6 por segundo é menor que qualquer diferença de nível real
     best = int(np.argmin(levels + 1e-6 * np.abs(centers - center)))
     return float(centers[best])
+
+
+def speech_only(samples: np.ndarray, sample_rate: int, limit_seconds: float | None = None) -> np.ndarray:
+    """Só os quadros com fala, emendados: tira pausa e respiração antes de medir o timbre de quem fala.
+
+    Com `limit_seconds`, devolve no máximo esse tanto, tirado do meio dos quadros ativos (o começo e o fim
+    de uma gravação costumam ser hesitação e despedida). Sem nenhum quadro ativo, devolve as amostras como estão.
+    """
+    levels = frame_rms(samples, sample_rate)
+    loud = float(np.percentile(levels, 95)) if levels.size else 0.0
+    if loud < SILENCE_FLOOR:
+        return samples
+    size = max(1, int(sample_rate * FRAME_SECONDS))
+    active = np.flatnonzero(levels >= loud * 10.0 ** (-ACTIVE_BELOW_PEAK_DB / 20.0))
+    if limit_seconds is not None:
+        keep = int(limit_seconds / FRAME_SECONDS)
+        middle = max(0, (len(active) - keep) // 2)
+        active = active[middle : middle + keep]
+    frames = np.asarray(samples[: levels.size * size]).reshape(levels.size, size)
+    return frames[active].reshape(-1)

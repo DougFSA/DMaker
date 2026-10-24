@@ -362,6 +362,7 @@ h2 {
 .job-status-running { background: #2A4A50; color: var(--mint); }
 .job-status-done { background: var(--success-bg); color: var(--success); }
 .job-status-error { background: var(--danger-bg); color: var(--danger); }
+.job-status-cancelled { background: var(--panel-alt); color: var(--text-muted); }
 
 .mini-bar-track {
   height: 5px;
@@ -1635,6 +1636,12 @@ h2 {
 .tl-item-clip-audio { background: #244A55; }
 .tl-item-track { background: #24555A; }
 .tl-item-music { background: #245A4E; }
+.tl-item-narration { background: #6B3F73; }
+/* duração só estimada (a fala ainda não foi sintetizada): borda tracejada; a real fica com a borda cheia */
+.tl-item-narration.tl-item-estimated {
+  border: 1px dashed var(--mint);
+  background: rgba(107, 63, 115, 0.55);
+}
 .tl-item-captions { background: #555; }
 .tl-item-progress-bar { background: #3A3A3A; }
 .tl-item-other { background: var(--teal); }
@@ -2068,6 +2075,18 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
+.voice-live {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  background: var(--panel-alt);
+  border-radius: 4px;
+}
+
+.voice-live-status {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- isolar voz e corrigir fala (aba Voz, speech.js) ---------- */
 
 .speech-words {
@@ -2147,8 +2166,23 @@ h2 {
   border-bottom: 1px solid var(--border);
 }
 
+.dub-with-speakers .dub-row {
+  grid-template-columns: 124px minmax(0, 1fr) minmax(0, 1.2fr) 92px 64px;
+}
+
+.dub-who {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .dub-row:last-child {
   border-bottom: 0;
+}
+
+.dub-speaker-pick {
+  width: 100%;
+  font-size: 12px;
 }
 
 .dub-time {
@@ -2212,11 +2246,68 @@ h2 {
 }
 
 @media (max-width: 760px) {
-  .dub-row {
+  .dub-row,
+  .dub-with-speakers .dub-row {
     grid-template-columns: 1fr;
   }
 
   .dub-ab {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------- fila de narrações (aba Voz, queue.js) ---------- */
+
+.queue-item .progress-bar-track {
+  margin: 6px 0 2px;
+}
+
+.queue-progress {
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-badge.queue-state-running {
+  background: var(--green);
+  color: var(--bg);
+}
+
+.voice-badge.queue-state-failed {
+  background: var(--danger);
+  color: var(--text);
+}
+
+.voice-badge.queue-state-paused,
+.voice-badge.queue-state-cancelled {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.queue-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-file-name {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.queue-file a.btn {
+  text-decoration: none;
+}
+
+.queue-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queue-files summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
 }

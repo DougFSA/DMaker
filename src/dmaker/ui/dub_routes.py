@@ -8,7 +8,6 @@ roda por vez. O projeto `.dub.json` vive em `output/dublagem`; a página só lê
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException
@@ -16,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config
-from ..domain.dub import PROJECT_SUFFIX, DubProject, load_dub_project, save_dub_project
+from ..domain.dub import PROJECT_SUFFIX, DubProject, SpeakerMode, load_dub_project, save_dub_project
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
 from ..pipeline.dub_stems import StemsOptions
@@ -33,6 +32,7 @@ from ..voice.synth import DRAFT_STEPS
 from .speech_routes import file_url, isolation_service, media_file, stage_reporter
 from .voice_routes import Services, VoiceServices, audio_url, exclusive_synthesis, existing_voice
 
+MAX_SPEAKERS = 12  # mais pessoas que isto num vídeo curto é erro de digitação, não conversa
 MAX_TEXT_CHARS = 2000  # uma fala dublada é uma frase; isto só barra colagem de texto errado
 SERVABLE_SUFFIXES = (".srt", ".zip", PROJECT_SUFFIX)  # .zip: as trilhas separadas
 
@@ -41,7 +41,8 @@ class PrepareRequest(BaseModel):
     path: str
     target_language: str = Field(min_length=2, max_length=12)
     source_language: str = Field(default="pt", min_length=2, max_length=12)
-    speaker_mode: Literal["per_segment", "single"] = "per_segment"
+    speaker_mode: SpeakerMode | None = None  # None: o padrão do serviço (per_speaker se a diarização existe)
+    num_speakers: int | None = Field(default=None, ge=1, le=MAX_SPEAKERS)
     voice: str | None = None
     keep_original_db: float | None = Field(default=None, le=0)
     glossary: list[str] = Field(default_factory=list, max_length=100)
@@ -51,13 +52,14 @@ class SegmentEdit(BaseModel):
     id: str
     text: str = Field(max_length=MAX_TEXT_CHARS)
     locked: bool = False
+    speaker: str | None = None  # None: o falante da fala não muda
 
 
 class ProjectUpdate(BaseModel):
     project: str
     segments: list[SegmentEdit]
     keep_original_db: float | None = Field(default=None, le=0)
-    speaker_mode: Literal["per_segment", "single"] = "per_segment"
+    speaker_mode: SpeakerMode | None = None  # None: o modo do projeto não muda
     voice: str | None = None
 
 
@@ -118,6 +120,7 @@ def _dubbing_service(job: Job, services: VoiceServices) -> DubbingService:
         lexicons=services.lexicons,
         translator=services.translator,
         prober=services.prober or probe,
+        diarizer=services.diarizer,
     )
 
 
@@ -132,6 +135,7 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
             req.target_language,
             req.source_language,
             speaker_mode=req.speaker_mode,
+            num_speakers=req.num_speakers,
             voice=req.voice or None,
             keep_original_db=req.keep_original_db,
             glossary=req.glossary,
@@ -189,13 +193,15 @@ def _apply_update(project: DubProject, update: ProjectUpdate) -> DubProject:
     edited = project
     for item in update.segments:
         try:
-            edited = edited.edited(item.id, item.text, item.locked)
+            edited = edited.edited(item.id, item.text, item.locked, item.speaker)
         except KeyError as exc:
             raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     return edited.model_copy(
         update={
             "keep_original_db": update.keep_original_db,
-            "speaker_mode": update.speaker_mode,
+            "speaker_mode": update.speaker_mode or edited.speaker_mode,
             "voice": update.voice or None,
         }
     )

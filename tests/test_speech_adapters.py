@@ -27,7 +27,6 @@ def wired(monkeypatch, harness: Harness) -> Harness:
         "dmaker.pipeline.speech_fix.default_speech_fix_service", lambda *args, **kwargs: harness.service
     )
     monkeypatch.setattr(mcp_server, "_speech_fix_service", lambda job: harness.service)
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", harness.tmp_path / "voices")
     return harness
 
 

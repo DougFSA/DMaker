@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from dmaker import config
 from dmaker.voice.lexicon_store import LexiconStore
 from dmaker.voice.pronunciation import Lexicon, apply_lexicon
 
@@ -98,7 +99,7 @@ def test_file_that_is_not_an_object_is_reported(store, tmp_path):
 
 
 def test_default_root_is_the_assets_folder(monkeypatch, tmp_path):
-    monkeypatch.setattr("dmaker.voice.lexicon_store.ASSETS_DIR", tmp_path)
+    monkeypatch.setattr(config, "LEXICON_DIR", tmp_path)
     LexiconStore().add("DMaker", "Di Meiker")
 
     assert (tmp_path / "pronunciation.json").is_file()

@@ -16,7 +16,7 @@ from typing import Protocol
 
 import numpy as np
 
-from ..config import MODELS_DIR
+from .. import config
 from .ffmpeg import ffmpeg_path
 
 MATTE_VERSION = "k1"  # muda quando o modelo ou a composição mudam (invalida o cache)
@@ -74,7 +74,7 @@ def composite(foreground: np.ndarray, alpha: np.ndarray, background: tuple[int, 
 
 
 def model_path(model: str = DEFAULT_MODEL) -> Path:
-    return MODELS_DIR / MODEL_FILES[model]
+    return config.MODELS_DIR / MODEL_FILES[model]
 
 
 def ensure_model(model: str = DEFAULT_MODEL) -> Path:

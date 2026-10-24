@@ -2,6 +2,9 @@
 
 Cada job guarda os eventos (mensagens de etapa, progresso de cada comando ffmpeg, fim) e
 alimenta filas de quem estiver assistindo, o que permite streaming por SSE.
+
+O cancelamento é cooperativo: `Job.cancel()` só levanta uma bandeira, e quem executa o trabalho a consulta
+nos pontos seguros (entre falas, por exemplo) e encerra com `JobCancelled`. Nada é morto à força.
 """
 
 from __future__ import annotations
@@ -16,11 +19,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class JobCancelled(Exception):
+    """O trabalho parou a pedido de quem o disparou; `result` guarda o que já ficou pronto."""
+
+    def __init__(self, message: str = "Cancelado.", result: Any = None) -> None:
+        super().__init__(message)
+        self.result = result
+
+
 @dataclass
 class Job:
     id: str
     description: str
-    status: str = "running"  # running | done | error
+    status: str = "running"  # running | done | error | cancelled
     result: Any = None
     error: str | None = None
     started_at: float = field(default_factory=time.time)
@@ -30,6 +41,20 @@ class Job:
     meta: dict = field(default_factory=dict)  # dados de quem criou o job (ex.: focus, project)
     _listeners: list[queue.Queue] = field(default_factory=list, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _cancel_requested: threading.Event = field(default_factory=threading.Event, repr=False)
+
+    @property
+    def cancellable(self) -> bool:
+        """O trabalho consulta `cancel_requested`; só esses aceitam o pedido (renders, por ora, não)."""
+        return bool(self.meta.get("cancellable", False))
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_requested.is_set()
+
+    def cancel(self) -> None:
+        self._cancel_requested.set()
+        self.log("Cancelamento pedido")
 
     def snapshot(self) -> dict:
         return {
@@ -39,6 +64,7 @@ class Job:
             "elapsed_s": round((self.finished_at or time.time()) - self.started_at, 1),
             "progress": self.progress,
             "error": self.error,
+            "cancellable": self.cancellable,
             "focus": bool(self.meta.get("focus", False)),
             "project": self.meta.get("project"),
         }
@@ -127,6 +153,9 @@ class JobManager:
             try:
                 job.result = work(job)
                 job.status = "done"
+            except JobCancelled as exc:
+                job.result = exc.result
+                job.status = "cancelled"
             except Exception as exc:  # noqa: BLE001 - o erro é reportado ao cliente
                 job.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}"
                 job.status = "error"
@@ -145,6 +174,13 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self._jobs.get(job_id)
+
+    def cancel(self, job_id: str) -> Job | None:
+        """Pede o cancelamento do job (None se não existe); quem decide o momento de parar é o trabalho."""
+        job = self.get(job_id)
+        if job is not None and job.status == "running" and job.cancellable:
+            job.cancel()
+        return job
 
     def wait(self, job: Job, timeout: float) -> Job:
         deadline = time.time() + timeout

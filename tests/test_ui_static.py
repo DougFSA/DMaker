@@ -28,6 +28,7 @@ LAYOUT = STATIC_DIR / "layout.js"
 VOICE = STATIC_DIR / "voice.js"
 SPEECH = STATIC_DIR / "speech.js"
 DUB = STATIC_DIR / "dub.js"
+QUEUE = STATIC_DIR / "queue.js"
 
 ALL_JS = (
     JS,
@@ -44,6 +45,7 @@ ALL_JS = (
     VOICE,
     SPEECH,
     DUB,
+    QUEUE,
 )
 
 requires_node = pytest.mark.skipif(shutil.which("node") is None, reason="node não instalado")
@@ -552,6 +554,46 @@ def test_speech_number_parsing_and_summary():
     assert "apertada" in summary
 
 
+# ---------- trocar voz (speech.js) ----------
+
+
+def test_index_has_the_voice_swap_section_with_every_element_speech_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = SPEECH.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("(speech-conv-[a-z-]+)"\)', js)) | set(
+        re.findall(r'"(speech-conv-[a-z-]+)"', js)
+    )
+    assert len(used) >= 15
+    for element_id in sorted(used):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em speech.js não existe em index.html"
+    assert "<legend>Trocar voz</legend>" in html
+    assert "/api/speech/convert" in js
+    assert "—" not in html and "—" not in js  # a marca não usa travessão em texto na tela
+
+
+@requires_node
+def test_voice_swap_summary_says_what_was_converted_and_how_the_volume_changed():
+    whole = _run_speech_pure(
+        "pure.describeConversion({voice:'dora',seconds:30,blocks:2,gain_db:-3.04,excerpt:false})"
+    )
+    assert (
+        whole
+        == "Arquivo convertido para a voz dora: 30.0 s em 2 bloco(s); volume desceu 3.0 dB para igualar ao original."
+    )
+    excerpt = _run_speech_pure(
+        "pure.describeConversion({voice:'alex',seconds:20,blocks:1,gain_db:0.01,excerpt:true})"
+    )
+    assert excerpt.startswith("Trecho convertido para a voz alex") and "volume igual ao original" in excerpt
+
+
+@requires_node
+def test_voice_swap_only_replaces_the_original_in_the_project_when_the_whole_file_was_converted():
+    assert _run_speech_pure("pure.canUseConversion({entry:{src:'a.mp4'},excerpt:false})") is True
+    assert _run_speech_pure("pure.canUseConversion({entry:{src:'a.mp4'},excerpt:true})") is False
+    assert _run_speech_pure("pure.canUseConversion({entry:null,excerpt:false})") is False
+    assert _run_speech_pure("pure.canUseConversion(null)") is False
+
+
 # ---------- dublagem (dub.js) ----------
 
 
@@ -676,3 +718,426 @@ def test_pronunciation_preview_phrase_follows_the_language_of_the_entry():
         _run_voice_pure('pure.pronunciationPreviewText("DMaker", "pt")') == "Eu falo DMaker. Repito: DMaker."
     )
     assert _run_voice_pure('pure.pronunciationPreviewText("DMaker")') == "Eu falo DMaker. Repito: DMaker."
+
+
+@requires_node
+def test_dub_table_shows_a_speaker_select_only_when_the_project_has_two_or_more():
+    segments = "[{id:'s1',start:1,end:3,original:'a',text:'b',locked:false,speaker:'Falante 2'},{id:'s2',start:4,end:6,original:'o',text:'t',locked:false,speaker:null}]"
+    alone = _run_dub_pure(f"pure.segmentRowsHtml({segments}, ['Falante 1'])")
+    assert "dub-speaker-pick" not in alone
+    shared = _run_dub_pure(f"pure.segmentRowsHtml({segments}, ['Falante 1', 'Falante <2>'])")
+    assert shared.count("dub-speaker-pick") == 2 and "Falante &lt;2&gt;" in shared
+    first, second = shared.split('data-id="s2"')
+    assert '<option value="Falante 1">' in first and '<option value="Falante 1" selected>' not in first
+    assert "Sem falante" not in first and "Sem falante" in second  # fala sem falante ainda deixa escolher
+
+
+@requires_node
+def test_dub_edits_carry_the_speaker_only_when_one_is_chosen_and_the_count_is_a_small_integer():
+    edits = _run_dub_pure(
+        "pure.segmentEdits([{id:'s1',text:'a',locked:false,speaker:'Falante 2'},{id:'s2',text:'b',locked:false,speaker:null}])"
+    )
+    assert edits == [
+        {"id": "s1", "text": "a", "locked": False, "speaker": "Falante 2"},
+        {"id": "s2", "text": "b", "locked": False},
+    ]
+    assert _run_dub_pure("['', ' 3 ', '2', '0', '13', '1,5', 'dois', '-1'].map(pure.parseSpeakerCount)") == [
+        None,
+        3,
+        2,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
+def test_the_dub_form_offers_the_per_speaker_mode_first_and_a_speaker_count():
+    html = INDEX.read_text(encoding="utf-8")
+    select = html[html.index('id="dub-speaker"') : html.index("</select>", html.index('id="dub-speaker"'))]
+    assert (
+        select.index('value="per_speaker"')
+        < select.index('value="per_segment"')
+        < select.index('value="single"')
+    )
+    assert 'id="dub-speaker-count"' in html and 'id="dub-speaker-count-field"' in html
+    css = CSS.read_text(encoding="utf-8")
+    assert ".dub-with-speakers .dub-row" in css and ".dub-speaker-pick" in css and ".dub-who" in css
+
+
+# ---------- fila de narrações (queue.js) ----------
+
+
+def test_queue_file_is_referenced_after_voice_js_and_before_app_js():
+    html = INDEX.read_text(encoding="utf-8")
+    assert QUEUE.is_file() and "window.DMakerQueue" in QUEUE.read_text(encoding="utf-8")
+    assert html.index("/static/voice.js") < html.index("/static/queue.js") < html.index("/static/app.js")
+    app_js = JS.read_text(encoding="utf-8")
+    for hook in ("DMakerQueue.init", "DMakerQueue.onShow", "DMakerQueue.onHide"):
+        assert hook in app_js
+
+
+def test_index_has_the_queue_section_with_every_element_queue_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = QUEUE.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("((?:voice-queue|voice-enqueue)[a-z-]*)"\)', js)) | {"voice-script"}
+    assert {"voice-queue-list", "voice-queue-summary", "voice-queue-file", "voice-enqueue"} <= used
+    for element_id in sorted(used):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em queue.js não existe em index.html"
+    assert "<legend>Fila de narrações</legend>" in html and "Mandar para a fila" in html
+    assert "—" not in html and "—" not in js  # a marca não usa travessão em texto na tela
+
+
+def test_queue_js_uses_the_queue_api_with_sse_upload_and_every_command():
+    js = QUEUE.read_text(encoding="utf-8")
+    for token in (
+        "/api/voices/queue",
+        "/api/voices/queue/events",
+        "/api/voices/queue/upload",
+        "EventSource",
+        "FormData",
+        "/move",
+        "clear-finished",
+        "data-queue-action",
+    ):
+        assert token in js, f"{token!r} não encontrado em queue.js"
+    for state in ("pending", "running", "paused", "done", "failed", "cancelled"):
+        assert f"{state}:" in js, f"estado {state!r} sem botões definidos"
+    assert all(rule in CSS.read_text(encoding="utf-8") for rule in (".queue-file", ".queue-state-running"))
+
+
+def test_every_queue_endpoint_called_by_queue_js_exists_on_the_server():
+    from dmaker.ui.queue_routes import build_queue_router
+
+    js = QUEUE.read_text(encoding="utf-8")
+    paths = {route.path for route in build_queue_router().routes}
+    for needed in (
+        "/api/voices/queue",
+        "/api/voices/queue/events",
+        "/api/voices/queue/upload",
+        "/api/voices/queue/clear-finished",
+        "/api/voices/queue/{item_id}/move",
+        "/api/voices/queue/{item_id}",
+    ):
+        assert needed in paths, needed
+    # as ações dos botões viram o último trecho do caminho: precisam existir como rotas POST
+    for action in ("pause", "resume", "cancel", "retry"):
+        assert f"/api/voices/queue/{{item_id}}/{action}" in paths and action in js
+
+
+def _run_queue_pure(expression: str):
+    """Avalia `expression` com as funções puras de queue.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(QUEUE))});"
+        "const pure = window.DMakerQueue.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_queue_actions_follow_the_state_of_the_item():
+    assert _run_queue_pure("pure.actionsFor('running')") == ["pause", "cancel"]
+    assert _run_queue_pure("pure.actionsFor('pending')") == ["pause", "cancel", "up", "down"]
+    assert _run_queue_pure("pure.actionsFor('paused')") == ["resume", "cancel", "up", "down"]
+    assert _run_queue_pure("pure.actionsFor('failed')") == ["retry", "remove"]
+    assert _run_queue_pure("pure.actionsFor('done')") == ["remove"]
+    assert _run_queue_pure("pure.actionsFor('inexistente')") == []
+
+
+@requires_node
+def test_queue_progress_line_names_chapter_utterance_and_time_left():
+    running = "{state:'running',chapter:2,chapters_total:5,utterance:12,utterances:40,percent:30,eta_label:'25 min'}"
+    assert _run_queue_pure(f"pure.describeProgress({running})") == (
+        "capítulo 2 de 5, fala 12 de 40 · faltam cerca de 25 min"
+    )
+    one = "{state:'running',chapter:1,chapters_total:1,utterance:3,utterances:9,eta_label:null}"
+    assert _run_queue_pure(f"pure.describeProgress({one})") == "fala 3 de 9"
+    waiting = "{state:'pending',chapters_total:3,eta_label:'2 h 05 min'}"
+    assert _run_queue_pure(f"pure.describeProgress({waiting})") == (
+        "Aguardando a vez · 3 capítulos · faltam cerca de 2 h 05 min"
+    )
+    done = "{state:'done',chapters_total:1,duration_s:125}"
+    assert _run_queue_pure(f"pure.describeProgress({done})") == "Pronto · 1 capítulo · 2 min de áudio"
+    failed = "{state:'failed',error:'ValueError: voz inexistente\\nTraceback...'}"
+    assert _run_queue_pure(f"pure.describeProgress({failed})") == "voz inexistente"
+    assert _run_queue_pure("pure.describeProgress({state:'paused',percent:40,chapters_total:2})") == (
+        "Pausado em 40% · 2 capítulos"
+    )
+
+
+@requires_node
+def test_queue_summary_and_file_links_escape_and_explain():
+    assert _run_queue_pure("pure.queueSummary({items:[]})") == "A fila está vazia."
+    busy = "{items:[{state:'pending'},{state:'done'}],eta_label:'10 min',running:false,worker:false}"
+    summary = _run_queue_pure(f"pure.queueSummary({busy})")
+    assert summary.startswith("2 itens · tempo estimado para esvaziar: 10 min · nenhum executor ativo")
+    working = "{items:[{state:'running'}],eta_label:'1 min',running:true,worker:false}"
+    assert _run_queue_pure(f"pure.queueSummary({working})") == "1 item · tempo estimado para esvaziar: 1 min"
+
+    links = _run_queue_pure(
+        "pure.fileLinks([{name:'<b>.wav',url:'/api/x/%3Cb%3E.wav',audio:true},{name:'a.srt',url:'/a.srt',audio:false}])"
+    )
+    assert "&lt;b&gt;.wav" in links and "<b>.wav" not in links
+    assert links.count("Ouvir") == 1 and links.count("Baixar") == 2  # a legenda só baixa
+    assert "/a.srt?download=true" in links
+
+
+@requires_node
+def test_queue_text_body_matches_the_server_contract():
+    body = _run_queue_pure(
+        "pure.textBody({text:'Oi',voice:'',language:'',speed:1.2,brand:'',draft:true,format:'mp3',title:'  Meu  '})"
+    )
+    assert body == {
+        "text": "Oi",
+        "voice": None,
+        "language": None,
+        "speed": 1.2,
+        "brand": None,
+        "draft": True,
+        "format": "mp3",
+        "title": "Meu",
+    }
+    bare = _run_queue_pure("pure.textBody({text:'Oi',speed:1})")
+    assert "title" not in bare and bare["format"] == "wav" and bare["draft"] is False
+
+    from dmaker.ui.queue_routes import QueueTextRequest
+
+    QueueTextRequest.model_validate(body)  # o corpo que a tela monta é aceito pelo servidor
+
+
+def test_voice_studio_has_live_preview_and_stop_wired_to_the_job_api():
+    html = INDEX.read_text(encoding="utf-8")
+    for element_id in ("voice-stop", "voice-live", "voice-live-status", "voice-live-mute"):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} não encontrado em index.html"
+    assert "fala crua" in html and "acabamento" in html  # avisa que a prévia não tem o acabamento final
+    # a prévia fica fora do bloco de progresso: ele some quando o job acaba, e o áudio ainda toca depois
+    before_live = html[html.index('id="voice-progress"') : html.index('id="voice-live"')]
+    assert before_live.count("<div") == before_live.count("</div>")
+    js = VOICE.read_text(encoding="utf-8")
+    for token in ('"utterance"', "/cancel", "decodeAudioData", "createLivePlayer", "cancelled"):
+        assert token in js, f"{token!r} não encontrado em voice.js"
+    assert "—" not in html and "—" not in js  # sem travessão em texto de tela
+
+
+FAKE_AUDIO_CONTEXT = """
+class Param {
+  constructor() { this.events = []; this.value = 1; }
+  setValueAtTime(value, time) { this.events.push(["set", value, time]); return this; }
+  linearRampToValueAtTime(value, time) { this.events.push(["ramp", value, time]); return this; }
+  cancelScheduledValues() { return this; }
+}
+function fakeContext(startTime) {
+  const ctx = { currentTime: startTime, destination: {}, gains: [], sources: [] };
+  ctx.createGain = () => {
+    const node = { gain: new Param(), connect() {}, disconnect() {} };
+    ctx.gains.push(node);
+    return node;
+  };
+  ctx.createBufferSource = () => {
+    const source = { buffer: null, connect() {}, start(when) { this.startedAt = when; },
+                     stop(when) { this.stoppedAt = when; } };
+    ctx.sources.push(source);
+    return source;
+  };
+  ctx.decodeAudioData = async (bytes) => ({ duration: bytes.duration });
+  return ctx;
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+"""
+
+
+def _run_voice_script(body: str):
+    """Roda `body` (que define `result`) com voice.js carregado e um AudioContext falso que só registra."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(VOICE))});"
+        "const pure = window.DMakerVoice.pure;"
+        f"{FAKE_AUDIO_CONTEXT}"
+        f"(async () => {{ let result; {body}; console.log(JSON.stringify(result)); }})();"
+    )
+    run = subprocess.run(["node", "-e", script], capture_output=True, text=True, encoding="utf-8")
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+@requires_node
+def test_live_plan_chains_each_utterance_right_after_the_previous_one_plus_the_script_pause():
+    plans = _run_voice_script(
+        """
+        let cursor = null; const out = [];
+        for (const [duration, pause] of [[1.0, 0.35], [2.0, 0.7], [0.5, 0]]) {
+          const plan = pure.planLiveChunk(cursor, 10, duration, pause);
+          out.push(plan); cursor = plan.nextCursor;
+        }
+        result = out;
+        """
+    )
+    starts = [round(p["startAt"], 6) for p in plans]
+    assert starts == [10.06, 11.41, 14.11]  # fala 1 + 0,35 s de pausa, fala 2 + 0,7 s de pausa
+    assert [round(p["endAt"] - p["startAt"], 6) for p in plans] == [1.0, 2.0, 0.5]
+    assert round(plans[1]["startAt"] - plans[0]["endAt"], 6) == 0.35  # a pausa do roteiro, ao centésimo
+    assert [p["late"] for p in plans] == [False, False, False]
+
+
+@requires_node
+def test_live_plan_flags_a_late_utterance_and_never_schedules_it_in_the_past():
+    late = _run_voice_script("result = pure.planLiveChunk(12.0, 20.0, 1.0, 0.35)")
+    assert late["late"] is True and late["startAt"] == pytest.approx(20.06)
+    on_time = _run_voice_script("result = pure.planLiveChunk(20.02, 20.0, 1.0, 0)")
+    assert on_time["late"] is False and on_time["startAt"] == pytest.approx(
+        20.02
+    )  # dentro da folga: mantém a emenda
+
+
+@requires_node
+def test_live_plan_fade_is_5ms_but_never_more_than_half_of_a_very_short_utterance():
+    fades = _run_voice_script(
+        "result = [pure.planLiveChunk(null, 0, 1.0, 0).fade, pure.planLiveChunk(null, 0, 0.004, 0).fade]"
+    )
+    assert fades == [0.005, 0.002]
+
+
+@requires_node
+def test_live_player_schedules_in_arrival_order_with_a_fade_on_both_ends_of_each_utterance():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(10);
+        const bytes = { a: { duration: 1.0 }, b: { duration: 2.0 } };
+        const slowFirst = async (url) => { if (url === "a") await wait(40); return bytes[url]; };
+        const player = pure.createLivePlayer(ctx, slowFirst);
+        player.enqueue({ index: 1, url: "a", pauseAfter: 0.35 });
+        await player.enqueue({ index: 2, url: "b", pauseAfter: 0 });  // a 1ª demora mais para decodificar
+        const chunkGain = ctx.gains[1];  // ctx.gains[0] é o ganho geral
+        result = {
+          starts: ctx.sources.map((s) => Number(s.startedAt.toFixed(6))),
+          indexes: player.plans.map((p) => p.index),
+          firstEvents: chunkGain.gain.events.map(([kind, value, time]) => [kind, value, Number(time.toFixed(6))]),
+        };
+        """
+    )
+    assert result["indexes"] == [1, 2] and result["starts"] == [10.06, 11.41]
+    assert result["firstEvents"] == [
+        ["set", 0, 10.06],
+        ["ramp", 1, 10.065],
+        ["set", 1, 11.055],
+        ["ramp", 0, 11.06],
+    ]
+
+
+@requires_node
+def test_live_player_stop_ramps_to_silence_and_ignores_utterances_that_arrive_later():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(5);
+        const player = pure.createLivePlayer(ctx, async () => ({ duration: 1.0 }));
+        await player.enqueue({ index: 1, url: "a", pauseAfter: 0 });
+        player.stop();
+        await player.enqueue({ index: 2, url: "b", pauseAfter: 0 });
+        result = {
+          scheduled: ctx.sources.length,
+          stoppedAt: ctx.sources[0].stoppedAt,
+          masterEvents: ctx.gains[0].gain.events,
+        };
+        """
+    )
+    assert result["scheduled"] == 1  # a fala 2 chegou depois do Parar e não foi agendada
+    assert result["stoppedAt"] == pytest.approx(5.025)
+    assert ["ramp", 0, pytest.approx(5.02)] in result["masterEvents"]
+
+
+@requires_node
+def test_live_player_reports_load_errors_without_breaking_the_next_utterances():
+    result = _run_voice_script(
+        """
+        const ctx = fakeContext(0);
+        const errors = [];
+        const loader = async (url) => { if (url === "ruim") throw new Error("falhou"); return { duration: 1.0 }; };
+        const player = pure.createLivePlayer(ctx, loader, (err) => errors.push(err.message));
+        player.enqueue({ index: 1, url: "ruim", pauseAfter: 0 });
+        await player.enqueue({ index: 2, url: "boa", pauseAfter: 0 });
+        result = { errors, indexes: player.plans.map((p) => p.index) };
+        """
+    )
+    assert result == {"errors": ["falhou"], "indexes": [2]}
+
+
+@requires_node
+def test_live_status_follows_what_is_playing_and_what_is_still_being_generated():
+    result = _run_voice_script(
+        """
+        const plans = [{ index: 1, nextCursor: 11.4 }, { index: 2, nextCursor: 14.0 }];
+        result = {
+          playing: [9, 10.5, 11.4, 13.9, 14.0].map((t) => pure.playingIndexAt(plans, t)),
+          none: pure.playingIndexAt([], 3),
+          texts: [
+            pure.liveStatusText({ total: 5, ready: 0, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 2, playing: 1, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 5, playing: 4, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 2, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 5, playing: null, stoppedAfter: null }),
+            pure.liveStatusText({ total: 5, ready: 3, playing: 2, stoppedAfter: 3 }),
+          ],
+        };
+        """
+    )
+    assert result["playing"] == [1, 1, 2, 2, None] and result["none"] is None
+    assert result["texts"] == [
+        "Esperando a primeira fala ficar pronta...",
+        "Tocando fala 1 de 5 · 2 prontas",
+        "Tocando fala 4 de 5",
+        "Esperando a fala 3 de 5 ficar pronta...",
+        "Prévia ao vivo terminada.",
+        "Parado depois da fala 3 de 5. O que já saiu ficou guardado.",
+    ]
+
+
+def _run_timeline_pure(expression: str):
+    """Avalia `expression` com as funções puras da linha do tempo carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(TIMELINE))});"
+        "const tl = window.DMakerTimeline;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_timeline_narration_blocks_drag_whole_but_have_no_trim_handles():
+    item = '{kind: "narration", index: 1}'
+    assert _run_timeline_pure(f'tl.isDraggable("NAR", {item})') is True
+    assert _run_timeline_pure(f'tl.hasTrimHandles("NAR", {item})') is False
+    assert _run_timeline_pure('tl.hasTrimHandles("V1", {kind: "clip"})') is True
+    assert _run_timeline_pure('tl.isDraggable("A1", {kind: "clip-audio"})') is False
+
+
+@requires_node
+def test_timeline_narration_drag_becomes_a_set_field_on_its_own_start():
+    assert _run_timeline_pure("tl.narrationMoveOp({index: 2}, 3.14159)") == {
+        "type": "set_field",
+        "path": "audio.narration.2.start",
+        "value": 3.142,
+    }
+    assert _run_timeline_pure("tl.narrationMoveOp({index: 0}, -0.4)")["value"] == 0
+
+
+@requires_node
+def test_timeline_narration_title_tells_real_from_estimated_duration():
+    real = '{kind: "narration", label: "Olá", start: 1, end: 3.25, extra: {estimated: false}}'
+    guess = '{kind: "narration", label: "Olá", start: 1, end: 6, extra: {estimated: true}}'
+    assert _run_timeline_pure(f"tl.itemTitle({real})") == "Olá (duração real: 2,3 s)"
+    assert _run_timeline_pure(f"tl.itemTitle({guess})") == "Olá (duração estimada: 5,0 s)"
+    assert _run_timeline_pure('tl.itemTitle({kind: "clip", label: "a.mp4"})') == "a.mp4"
+
+
+def test_timeline_styles_dashed_border_for_estimated_narration():
+    css = CSS.read_text(encoding="utf-8")
+    assert ".tl-item-narration" in css and ".tl-item-narration.tl-item-estimated" in css
+    assert "tl-item-estimated" in TIMELINE.read_text(encoding="utf-8")
