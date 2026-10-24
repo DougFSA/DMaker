@@ -30,9 +30,9 @@ O lançado é a branch **`main`**. Nada mais conta:
   feature com meia versão nova dentro.
 - O bloco `## [Não lançado]` do CHANGELOG é a `develop`. É exatamente o que **não**
   entra no catálogo.
-- Card em `Concluído` no Jira também não prova nada sozinho: a coluna agrupa
-  "aprovado, aguardando merge" e "já na `develop`" (`_comum/jira.md`), e não conhece
-  a data do release.
+- Card em `Concluído` (ou em `Teste Manual`) no Jira também não prova nada
+  sozinho: ele está na `develop`, aprovado ou não, mas a coluna não conhece a data
+  do release nem se a `develop` já subiu para a `main` (`_comum/jira.md`).
 
 A versão lançada é o **primeiro cabeçalho `## vX`** do CHANGELOG **da main**:
 

@@ -16,7 +16,8 @@
  * window.DMakerDub:
  *   init()      chamado por app.js ao terminar de carregar o estado
  *   onShow()    chamado por app.js quando a aba Voz aparece (atualiza arquivos do projeto, vozes e projetos salvos)
- *   pure        parseGlossary, parseKeepDb, segmentEdits, describeResult, describeStretch, statusLabel, segmentRowsHtml
+ *   pure        parseGlossary, parseKeepDb, parseSpeakerCount, segmentEdits, describeResult, describeStretch, describeStems,
+ *               statusLabel, segmentRowsHtml
  */
 (function () {
   const UPLOAD_VALUE = "upload";
@@ -53,9 +54,30 @@
     return Number.isFinite(number) ? -Math.abs(number) : null;
   }
 
-  /** Lista {id, text, locked} a partir das linhas da tabela (cada linha: { id, text, locked }). */
+  /** Quantidade de pessoas falando: vazio é "deixar o áudio decidir" (null); só inteiros de 1 a 12 valem. */
+  function parseSpeakerCount(value) {
+    const text = String(value ?? "").trim();
+    if (!/^\d+$/.test(text)) return null;
+    const number = Number(text);
+    return number >= 1 && number <= 12 ? number : null;
+  }
+
+  /** Lista {id, text, locked, speaker?} a partir das linhas da tabela; sem falante escolhido, a chave some. */
   function segmentEdits(rows) {
-    return rows.map((row) => ({ id: row.id, text: String(row.text || "").trim(), locked: !!row.locked }));
+    return rows.map((row) => ({
+      id: row.id,
+      text: String(row.text || "").trim(),
+      locked: !!row.locked,
+      speaker: row.speaker || undefined,
+    }));
+  }
+
+  /** Frase de resumo das trilhas exportadas, com o quanto a voz original ficava baixa no vídeo dublado. */
+  function describeStems(result) {
+    const kept = result.original_voice_db === null || result.original_voice_db === undefined
+      ? ""
+      : ` O vídeo dublado usa a voz original a ${result.original_voice_db} dB; a trilha dela vem sem atenuar.`;
+    return `Trilhas prontas (${result.files.join(", ")}), cada uma com ${result.duration.toFixed(2)} s.${kept}`;
   }
 
   function statusLabel(status) {
@@ -84,10 +106,19 @@
     return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  /** HTML da tabela de falas: tempo, original, tradução editável e a trava. */
-  function segmentRowsHtml(segments) {
+  /** O select de falante de uma fala: um item por falante do projeto, o da fala marcado. */
+  function speakerSelectHtml(segment, speakers) {
+    const options = speakers.map((name) => `<option value="${escapeHtml(name)}"${name === segment.speaker ? " selected" : ""}>${escapeHtml(name)}</option>`);
+    const empty = segment.speaker ? "" : '<option value="" selected>Sem falante</option>';
+    return `<select class="dub-speaker-pick" aria-label="Falante da fala ${escapeHtml(segment.id)}" title="Quem fala: a fala dubla com a voz dele">${empty}${options.join("")}</select>`;
+  }
+
+  /** HTML da tabela de falas: tempo, falante (com 2 ou mais no projeto), original, tradução editável e a trava. */
+  function segmentRowsHtml(segments, speakers = []) {
+    const withSpeakers = speakers.length > 1;
     return segments.map((s) => `<div class="dub-row" data-id="${escapeHtml(s.id)}">`
-      + `<div class="dub-time">${s.start.toFixed(1)} a ${s.end.toFixed(1)} s</div>`
+      + `<div class="dub-who"><div class="dub-time">${s.start.toFixed(1)} a ${s.end.toFixed(1)} s</div>`
+      + `${withSpeakers ? speakerSelectHtml(s, speakers) : ""}</div>`
       + `<div class="dub-original">${escapeHtml(s.original)}</div>`
       + `<textarea class="dub-text" rows="2" aria-label="Tradução da fala ${escapeHtml(s.id)}">${escapeHtml(s.text)}</textarea>`
       + '<div class="dub-status"></div>'
@@ -130,6 +161,11 @@
     const wanted = items.some((o) => o.value === previous) ? previous : items[0].value;
     select.value = wanted === UPLOAD_VALUE && dub.upload ? "uploaded" : wanted;
     updateSourceFields();
+  }
+
+  /** A quantidade de pessoas só faz sentido no modo "uma voz por pessoa". */
+  function updateSpeakerFields() {
+    el("dub-speaker-count-field").hidden = el("dub-speaker").value !== "per_speaker";
   }
 
   function updateSourceFields() {
@@ -197,7 +233,7 @@
   function updateButtons() {
     el("dub-prepare").disabled = dub.busy || !chosenSource() || el("dub-from").value === el("dub-to").value;
     el("dub-open-run").disabled = dub.busy || !el("dub-open").value;
-    ["dub-save", "dub-retranslate", "dub-render"].forEach((id) => { el(id).disabled = dub.busy || !dub.project; });
+    ["dub-save", "dub-retranslate", "dub-render", "dub-stems"].forEach((id) => { el(id).disabled = dub.busy || !dub.project; });
     el("dub-use").disabled = !(dub.result && dub.result.entry);
   }
 
@@ -205,12 +241,16 @@
 
   function showProject(project) {
     dub.project = project;
-    el("dub-segments").innerHTML = segmentRowsHtml(project.segments);
+    const speakers = project.speakers || [];
+    el("dub-segments").innerHTML = segmentRowsHtml(project.segments, speakers);
+    el("dub-segments").classList.toggle("dub-with-speakers", speakers.length > 1);
     const model = project.translator_model ? ` Tradução: ${project.translator_model}.` : "";
-    el("dub-project-summary").textContent = `${project.segments.length} fala(s), ${project.source_language} para ${project.target_language}.${model} Corrija o que precisar; as traduções travadas não mudam ao traduzir de novo.`;
+    const people = speakers.length > 1 ? ` ${speakers.length} falantes: troque o falante de uma fala se o programa errou; só essa fala é refeita.` : "";
+    el("dub-project-summary").textContent = `${project.segments.length} fala(s), ${project.source_language} para ${project.target_language}.${model}${people} Corrija o que precisar; as traduções travadas não mudam ao traduzir de novo.`;
     el("dub-keep").value = project.keep_original_db === null || project.keep_original_db === undefined ? "" : project.keep_original_db;
     el("dub-speaker").value = project.speaker_mode;
     el("dub-fit").value = project.fit_mode || "voz";
+    updateSpeakerFields();
     el("dub-voice").value = project.voice || "";
     el("dub-project-block").hidden = false;
     updateButtons();
@@ -221,6 +261,7 @@
       id: row.dataset.id,
       text: row.querySelector(".dub-text").value,
       locked: row.querySelector(".dub-locked").checked,
+      speaker: row.querySelector(".dub-speaker-pick")?.value || null,
     }));
   }
 
@@ -247,6 +288,7 @@
       target_language: el("dub-to").value,
       speaker_mode: el("dub-speaker").value,
       fit_mode: el("dub-fit").value,
+      num_speakers: el("dub-speaker").value === "per_speaker" ? parseSpeakerCount(el("dub-speaker-count").value) : null,
       voice: el("dub-voice").value || null,
       keep_original_db: parseKeepDb(el("dub-keep").value),
       glossary: parseGlossary(el("dub-glossary").value),
@@ -298,6 +340,31 @@
       dub.result = { ...result, entry: dub.entry || null };
       showResult(dub.result);
       showAlert(result.warnings.length ? "Dublagem pronta, com avisos." : "Dublagem pronta. Ouça o original e o dublado.", result.warnings.length ? "error" : "success");
+    } catch (err) {
+      handleError(err);
+    } finally {
+      dub.busy = false;
+      updateButtons();
+    }
+  }
+
+  /** Gera as trilhas separadas (as falas já sintetizadas vêm do cache) e baixa o .zip. */
+  async function downloadStems() {
+    dub.busy = true;
+    updateButtons();
+    try {
+      await saveProjectEdits();
+      const result = await runJob(
+        () => api.post("/api/dub/stems", { project: dub.project.project, draft: el("dub-draft").checked }),
+        "dub-render-progress", "dub-render-fill", "dub-render-label",
+      );
+      const link = document.createElement("a");
+      link.href = result.zip_url;
+      link.download = "";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showAlert(describeStems(result), "success");
     } catch (err) {
       handleError(err);
     } finally {
@@ -411,6 +478,7 @@
   function bindEvents() {
     el("dub-source").addEventListener("change", updateSourceFields);
     el("dub-file").addEventListener("change", uploadChosenFile);
+    el("dub-speaker").addEventListener("change", updateSpeakerFields);
     el("dub-from").addEventListener("change", updateButtons);
     el("dub-to").addEventListener("change", updateButtons);
     el("dub-open").addEventListener("change", updateButtons);
@@ -421,6 +489,7 @@
     });
     el("dub-retranslate").addEventListener("click", retranslate);
     el("dub-render").addEventListener("click", render);
+    el("dub-stems").addEventListener("click", downloadStems);
     el("dub-play-original").addEventListener("click", () => play("original"));
     el("dub-play-dubbed").addEventListener("click", () => play("dubbed"));
     el("dub-use").addEventListener("click", useInProject);
@@ -430,6 +499,7 @@
     if (dub.ready || !el("dub-block")) return;
     dub.ready = true;
     bindEvents();
+    updateSpeakerFields();
     renderSources();
     loadVoicesAndLanguages();
     loadSavedProjects();
@@ -445,6 +515,16 @@
   window.DMakerDub = {
     init,
     onShow,
-    pure: { parseGlossary, parseKeepDb, segmentEdits, describeResult, describeStretch, statusLabel, segmentRowsHtml },
+    pure: {
+      parseGlossary,
+      parseKeepDb,
+      parseSpeakerCount,
+      segmentEdits,
+      describeResult,
+      describeStretch,
+      describeStems,
+      statusLabel,
+      segmentRowsHtml,
+    },
   };
 })();

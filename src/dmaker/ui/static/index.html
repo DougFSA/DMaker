@@ -433,11 +433,20 @@
                   <div class="hint-text">Para fixar a pronúncia só de uma ocorrência, escreva [[termo|pronúncia]], por exemplo [[DMaker|Di-mêiker]]. A fala usa a pronúncia e as legendas mostram o termo.</div>
                   <div class="add-row">
                     <button type="button" class="btn btn-accent" id="voice-generate" disabled>Gerar narração</button>
+                    <button type="button" class="btn" id="voice-enqueue" disabled title="Narra em segundo plano, um roteiro por vez, sem travar a tela. Roteiro longo ou vários de uma vez: use a fila.">Mandar para a fila</button>
                   </div>
                   <div class="voice-progress" id="voice-progress" hidden>
                     <div class="progress-bar-track"><div class="progress-bar-fill" id="voice-progress-fill"></div></div>
                     <div class="progress-bar-label" id="voice-progress-label"></div>
                     <div class="hint-text">Na CPU a síntese é lenta: cada segundo de áudio leva dezenas de segundos. Falas repetidas saem do cache.</div>
+                    <div class="add-row">
+                      <button type="button" class="btn btn-small btn-danger" id="voice-stop" title="Para depois da fala que está sendo gerada; o que já ficou pronto continua guardado">Parar</button>
+                    </div>
+                  </div>
+                  <div class="voice-live" id="voice-live" hidden>
+                    <div class="voice-live-status" id="voice-live-status" role="status" aria-live="polite"></div>
+                    <div class="hint-text">Prévia ao vivo: cada fala toca assim que fica pronta e é a fala crua, sem o acabamento final. O arquivo final, com acabamento broadcast, aparece abaixo quando o roteiro terminar.</div>
+                    <button type="button" class="btn btn-small" id="voice-live-mute" title="Silencia a prévia ao vivo; não interrompe a geração">Silenciar prévia</button>
                   </div>
                   <div class="voice-result" id="voice-result" hidden>
                     <audio id="voice-result-audio" class="voice-audio" controls></audio>
@@ -447,6 +456,38 @@
                       <button type="button" class="btn btn-small btn-accent" id="voice-result-insert" title="Acrescenta em audio.narration, na posição atual do player, e salva">Inserir no projeto aberto</button>
                     </div>
                   </div>
+                </fieldset>
+
+                <fieldset class="form-block" id="voice-queue-block">
+                  <legend>Fila de narrações</legend>
+                  <p class="voice-notice">Para roteiros longos (um audiobook, um manual narrado) e vários de uma vez. A fila narra um item por vez, sozinha, enquanto o DMaker estiver aberto, e retoma de onde parou se o programa fechar. Usa a voz, o idioma e a velocidade da seção Narração. Cada item gera um áudio por capítulo, o áudio completo e as legendas dele em output/narracoes.</p>
+                  <div class="field">
+                    <label for="voice-queue-file">Importar roteiro (.txt, .md ou .docx)</label>
+                    <input type="file" id="voice-queue-file" accept=".txt,.md,.markdown,.docx">
+                  </div>
+                  <div class="hint-text">Cada título (linha com "# ", "Capítulo 1" ou "Parte 2"; no Word, estilo Título 1 ou 2) abre um capítulo. Sem títulos, o roteiro vira um capítulo só.</div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="voice-queue-title">Título do item (opcional)</label>
+                      <input type="text" id="voice-queue-title" placeholder="Nome da pasta de saída">
+                    </div>
+                    <div class="field">
+                      <label for="voice-queue-format">Formato</label>
+                      <select id="voice-queue-format">
+                        <option value="wav">wav (sem perdas)</option>
+                        <option value="mp3">mp3</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="voice-source-choice">
+                    <label><input type="checkbox" id="voice-queue-draft"> Rascunho (8 passos no OmniVoice, metade do tempo, mais áspero)</label>
+                  </div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="voice-queue-upload" disabled>Mandar arquivo para a fila</button>
+                    <button type="button" class="btn" id="voice-queue-clear" disabled title="Tira da lista os itens concluídos e cancelados; os áudios continuam na pasta">Limpar concluídos</button>
+                  </div>
+                  <div class="hint-text" id="voice-queue-summary">Carregando a fila...</div>
+                  <ul class="voice-list" id="voice-queue-list"><li class="empty-hint">Carregando a fila...</li></ul>
                 </fieldset>
 
                 <fieldset class="form-block" id="voice-pron-block">
@@ -550,6 +591,54 @@
                   </div>
                 </fieldset>
 
+                <fieldset class="form-block" id="speech-convert-block">
+                  <legend>Trocar voz</legend>
+                  <p class="voice-notice">Troca a voz de uma gravação inteira pela de uma voz da biblioteca (clonada ou desenhada), mantendo as palavras, o ritmo, as pausas e a entonação, e a música e o ruído de fundo. Diferente de Dublar, não traduz: só o timbre muda. Na CPU leva de 1,5 a 2 s por segundo de fala, mais a separação da voz (que fica guardada).</p>
+                  <div class="field">
+                    <label for="speech-conv-source">Arquivo</label>
+                    <select id="speech-conv-source" data-speech-source="conv"></select>
+                  </div>
+                  <div class="field" id="speech-conv-upload-field" hidden>
+                    <label for="speech-conv-file">Enviar vídeo ou áudio</label>
+                    <input type="file" id="speech-conv-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.mp4,.mov,.mkv">
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="speech-conv-voice">Voz que vai falar</label>
+                      <select id="speech-conv-voice"></select>
+                    </div>
+                    <div class="field">
+                      <label for="speech-conv-start">Início (s, opcional)</label>
+                      <input type="number" id="speech-conv-start" min="0" step="0.1" placeholder="Começo do arquivo">
+                    </div>
+                    <div class="field">
+                      <label for="speech-conv-end">Fim (s, opcional)</label>
+                      <input type="number" id="speech-conv-end" min="0" step="0.1" placeholder="Fim do arquivo">
+                    </div>
+                  </div>
+                  <div class="hint-text">Para testar uma voz, converta só um trecho de 20 a 30 s antes de fazer o arquivo inteiro. Funciona melhor com gravação limpa: eco forte e ruído na fala pioram a pronúncia da voz trocada.</div>
+                  <div class="add-row">
+                    <button type="button" class="btn btn-accent" id="speech-conv-run" disabled>Trocar voz</button>
+                  </div>
+                  <div class="voice-progress" id="speech-conv-progress" hidden>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="speech-conv-fill"></div></div>
+                    <div class="progress-bar-label" id="speech-conv-label"></div>
+                  </div>
+                  <div class="voice-result" id="speech-conv-result" hidden>
+                    <div class="voice-item-meta" id="speech-conv-summary"></div>
+                    <div class="voice-item-actions">
+                      <button type="button" class="btn btn-small" id="speech-conv-ab-original">Ouvir o original</button>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-conv-ab-converted">Ouvir a voz trocada</button>
+                    </div>
+                    <audio id="speech-conv-original" class="voice-audio" controls></audio>
+                    <audio id="speech-conv-converted" class="voice-audio" controls></audio>
+                    <div class="voice-item-actions">
+                      <a class="btn btn-small" id="speech-conv-download" href="#">Baixar com a voz trocada</a>
+                      <button type="button" class="btn btn-small btn-accent" id="speech-conv-use" title="Troca o arquivo original pelo convertido nos trechos do projeto aberto e salva">Usar no projeto</button>
+                    </div>
+                  </div>
+                </fieldset>
+
                 <fieldset class="form-block" id="dub-block">
                   <legend>Dublar</legend>
                   <p class="voice-notice">Traduz a fala de um vídeo ou áudio e a refaz no outro idioma com a voz clonada de quem fala, mantendo a música e o ruído de fundo. Primeiro prepare (transcreve e traduz com o Ollama local), depois revise as traduções e gere. Na CPU leva vários minutos; cada fala sintetizada fica em cache, então corrigir uma tradução refaz só aquela fala.</p>
@@ -573,9 +662,14 @@
                     <div class="field">
                       <label for="dub-speaker">Voz</label>
                       <select id="dub-speaker">
-                        <option value="per_segment">Clonar a voz de cada fala (vários falantes)</option>
+                        <option value="per_speaker">Uma voz clonada por pessoa (separa quem fala)</option>
+                        <option value="per_segment">Clonar a voz em volta de cada fala</option>
                         <option value="single">Um só clone para o arquivo todo</option>
                       </select>
+                    </div>
+                    <div class="field" id="dub-speaker-count-field">
+                      <label for="dub-speaker-count">Quantas pessoas falam (opcional)</label>
+                      <input type="number" id="dub-speaker-count" min="1" max="12" step="1" placeholder="Vazio: o áudio decide">
                     </div>
                     <div class="field">
                       <label for="dub-voice">Voz da biblioteca (opcional)</label>
@@ -621,6 +715,7 @@
                     </div>
                     <div class="add-row">
                       <button type="button" class="btn btn-accent" id="dub-render">Gerar dublagem</button>
+                      <button type="button" class="btn" id="dub-stems" disabled title="Baixa um .zip com a voz dublada, o fundo e a voz original em WAV, para remixar em outro editor">Baixar trilhas</button>
                     </div>
                     <div class="voice-progress" id="dub-render-progress" hidden>
                       <div class="progress-bar-track"><div class="progress-bar-fill" id="dub-render-fill"></div></div>
@@ -711,6 +806,7 @@
 <script src="/static/layout.js"></script>
 <script src="/static/voice.js"></script>
 <script src="/static/speech.js"></script>
+<script src="/static/queue.js"></script>
 <script src="/static/dub.js"></script>
 <script src="/static/app.js"></script>
 </body>

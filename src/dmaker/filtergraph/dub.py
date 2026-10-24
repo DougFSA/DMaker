@@ -46,7 +46,7 @@ class DubMix:
     graph: str  # texto do filtergraph; quem executa o grava em `graph_file` antes de rodar o comando
 
 
-def _stereo_48k() -> str:
+def stereo_48k() -> str:
     """Mesma taxa, formato e canais em todos os ramos, que o amix exige iguais (a fala mono vira estéreo)."""
     return f"aresample={MIX_SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo"
 
@@ -61,7 +61,7 @@ def _clip_chain(clip: DubClip) -> str:
         fade_start = max(0.0, clip.max_seconds - FADE_OUT_SECONDS)
         chain.append(f"atrim=duration={clip.max_seconds:.3f}")
         chain.append(f"afade=t=out:st={fade_start:.3f}:d={FADE_OUT_SECONDS}")
-    chain.append(_stereo_48k())
+    chain.append(stereo_48k())
     chain.append(f"adelay=delays={max(0, round(clip.start * 1000))}:all=1")  # em ms; all=1: todos os canais
     return ",".join(chain)
 
@@ -139,6 +139,14 @@ def _active(retime: RetimePlan | None) -> RetimePlan | None:
     return retime if retime is not None and not retime.is_identity else None
 
 
+def dub_clip_lines(clips: list[DubClip], first_clip_input: int) -> tuple[list[str], list[str]]:
+    """Uma cadeia por fala dublada, as mesmas na mixagem do vídeo e na trilha `voz-dublada`; devolve (linhas, rótulos)."""
+    lines = [
+        f"[{first_clip_input + index}:a]{_clip_chain(clip)}[dub{index}]" for index, clip in enumerate(clips)
+    ]
+    return lines, [f"[dub{index}]" for index in range(len(clips))]
+
+
 def dub_mix_graph(
     clips: list[DubClip],
     first_clip_input: int,
@@ -149,12 +157,14 @@ def dub_mix_graph(
     retime: RetimePlan | None = None,
     video_input: int | None = None,
     fps: float = 0.0,
+    limit_peaks: bool = True,
 ) -> str:
     """Grafo da mixagem. A saída é `[out]`, com a duração do arquivo (a do original, ou a esticada).
 
     `amix` com `normalize=0` soma sem dividir pelo número de entradas (o padrão baixaria o fundo e as falas a
     cada fala nova); `duration=first` acompanha o fundo, que é a entrada mais longa; `apad` e `atrim` fixam
-    a duração para a imagem e o som terminarem juntos.
+    a duração no original para a imagem e o som terminarem juntos. `limit_peaks=False` omite o limitador: é a
+    mixagem anterior ao acabamento, a que as trilhas separadas devem reproduzir quando somadas.
 
     Com `retime` (e `video_input`), o vídeo vira `[vout]` esticado nos trechos do plano e o fundo e a voz
     original atenuada passam pelos mesmos trechos, para a música acompanhar a imagem; `duration` deve ser a do
@@ -165,21 +175,22 @@ def dub_mix_graph(
     if plan is not None and video_input is not None:
         lines += video_retime_lines(plan, video_input, fps)
     background = "[background]" if plan is None else "[backgroundfull]"
-    lines.append(f"[{background_input}:a]{_stereo_48k()}{background}")
+    lines.append(f"[{background_input}:a]{stereo_48k()}{background}")
     labels = ["[background]"]
     if plan is not None:
         lines += audio_retime_lines(plan, background, "background")
     if original_voice_input is not None:
         original = "[original]" if plan is None else "[originalfull]"
-        lines.append(f"[{original_voice_input}:a]volume={original_voice_db:.1f}dB,{_stereo_48k()}{original}")
+        lines.append(f"[{original_voice_input}:a]volume={original_voice_db:.1f}dB,{stereo_48k()}{original}")
         labels.append("[original]")
         if plan is not None:
             lines += audio_retime_lines(plan, original, "original")
-    for index, clip in enumerate(clips):
-        lines.append(f"[{first_clip_input + index}:a]{_clip_chain(clip)}[dub{index}]")
-        labels.append(f"[dub{index}]")
+    clip_lines, clip_labels = dub_clip_lines(clips, first_clip_input)
+    lines += clip_lines
+    labels += clip_labels
+    limiter = f"{LIMITER}," if limit_peaks else ""
     lines.append(
-        f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0,{LIMITER},"
+        f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0,{limiter}"
         f"apad=whole_dur={duration:.3f},atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[out]"
     )
     return ";".join(lines)

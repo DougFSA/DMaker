@@ -688,3 +688,124 @@ def test_dub_mix_without_a_stretched_piece_still_copies_the_picture(tmp_path):
         retime=IDENTITY, fps=25.0,
     )  # fmt: skip
     assert mix.command.args[mix.command.args.index("-c:v") + 1] == "copy"
+
+
+def test_dub_stems_have_the_video_duration_and_sum_to_the_mix_before_the_finish(tmp_path):
+    """Fundo curto (5,9 s) e voz original longa (6,1 s) saem em 6 s exatos; a fala B (cortada em 0,5 s) e a fala
+    A tocam onde a mixagem as põe; voz dublada + fundo reproduzem a mixagem sem limitador, a menos do
+    arredondamento de 16 bits."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_graph
+    from dmaker.filtergraph.dub_stems import StemOutputs, dub_stems_command
+    from dmaker.media.ffmpeg import FFmpegCommand, SubprocessRunner
+    from dmaker.media.wavio import read_wav_channels, wav_duration, write_wav, write_wav_channels
+
+    def tone(seconds: float, rate: int, hertz: int, level: float) -> np.ndarray:
+        t = np.arange(round(seconds * rate)) / rate
+        return (level * np.sin(2 * np.pi * hertz * t)).astype(np.float32)
+
+    hum = tone(5.9, 44100, 110, 0.05)
+    background = write_wav_channels(tmp_path / "fundo-in.wav", np.stack([hum, hum], axis=1), 44100)
+    voice = tone(6.1, 44100, 220, 0.2)
+    original = write_wav_channels(tmp_path / "voz-in.wav", np.stack([voice, voice], axis=1), 44100)
+    first = write_wav(tmp_path / "a.wav", tone(2.0, 24000, 880, 0.3), 24000)
+    second = write_wav(tmp_path / "b.wav", tone(2.0, 24000, 1320, 0.3), 24000)
+    clips = [
+        DubClip(first, 1.0, gain_db=-3.0),
+        DubClip(second, 3.5, gain_db=2.0, tempo=1.25, max_seconds=0.5),
+    ]
+    duration = 6.0
+    runner = SubprocessRunner(quiet=True)
+
+    outputs = StemOutputs(tmp_path / "voz-dublada.wav", tmp_path / "fundo.wav", tmp_path / "voz-original.wav")
+    built = dub_stems_command(background, original, clips, outputs, tmp_path / "trilhas.txt", duration)
+    (tmp_path / "trilhas.txt").write_text(built.graph, encoding="utf-8")
+    runner.run(built.command)
+
+    premix = tmp_path / "premix.wav"
+    (tmp_path / "premix.txt").write_text(
+        dub_mix_graph(clips, 1, 0, duration, limit_peaks=False), encoding="utf-8"
+    )
+    args = ["-i", str(background), *[a for c in clips for a in ("-i", str(c.path))]]
+    runner.run(
+        FFmpegCommand([*args, "-/filter_complex", str(tmp_path / "premix.txt"), "-map", "[out]", str(premix)])
+    )
+
+    for path in (outputs.voice_dubbed, outputs.background, outputs.voice_original):
+        info = probe(path)
+        assert info.sample_rate == 48000 and info.channels == 2
+        assert wav_duration(path) == duration  # a duração do vídeo, ao quadro de áudio
+    voice_dubbed, _ = read_wav_channels(outputs.voice_dubbed)
+    rate = 48000
+    assert np.abs(voice_dubbed[: int(0.95 * rate)]).max() == 0  # alinhada no zero: nada antes da fala A
+    assert np.abs(voice_dubbed[int(1.1 * rate) : int(2.9 * rate)]).max() > 0.1  # fala A na posição pedida
+    assert np.abs(voice_dubbed[int(4.1 * rate) :]).max() == 0  # B foi cortada em 0,5 s; depois, silêncio
+    background_out, _ = read_wav_channels(outputs.background)
+    assert np.abs(background_out[int(5.95 * rate) :]).max() == 0  # o fundo curto foi completado com silêncio
+    original_out, _ = read_wav_channels(outputs.voice_original)
+    assert abs(float(np.abs(original_out).max()) - 0.2) < 0.01  # a voz original sai sem atenuar
+
+    mix, _ = read_wav_channels(premix)
+    summed = voice_dubbed + background_out
+    difference = summed - mix[: len(summed)]
+    assert abs(len(mix) - len(summed)) <= 1
+    assert float(np.abs(difference).max()) < 2e-4  # ~6 passos de 16 bits (-74 dB); o limitador não participa
+
+
+def test_dub_stems_of_a_stretched_video_follow_the_new_timeline_with_the_pitch_intact(tmp_path):
+    """Fundo de 8 s com um bipe de 1320 Hz em 5,0 s e o trecho de 2 a 6 s esticado 1,25x: as trilhas saem com 9 s
+    exatos, o bipe cai em 5,75 s (onde a imagem está) e continua em 1320 Hz; a mixagem sem limitador do arquivo
+    esticado e a soma da voz dublada com o fundo continuam iguais."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_graph
+    from dmaker.filtergraph.dub_stems import StemOutputs, dub_stems_command
+    from dmaker.media.ffmpeg import FFmpegCommand, SubprocessRunner
+    from dmaker.media.wavio import read_wav_channels, wav_duration, write_wav, write_wav_channels
+    from dmaker.voice.dub_retime import StretchWindow, plan_retime, retimed_span
+
+    rate = 48000
+    t = np.arange(8 * rate) / rate
+    bed = (0.05 * np.sin(2 * np.pi * 110 * t)).astype(np.float32)
+    beep = (t >= 5.0) & (t < 5.2)
+    bed[beep] += (0.3 * np.sin(2 * np.pi * 1320 * t[beep])).astype(np.float32)
+    background = write_wav_channels(tmp_path / "fundo-in.wav", np.stack([bed, bed], axis=1), rate)
+    original = write_wav_channels(tmp_path / "voz-in.wav", np.stack([bed, bed], axis=1), rate)
+    speech_t = np.arange(int(0.5 * 24000)) / 24000
+    speech = write_wav(
+        tmp_path / "fala.wav", (0.3 * np.sin(2 * np.pi * 880 * speech_t)).astype(np.float32), 24000
+    )
+    plan = plan_retime([StretchWindow(2.0, 6.0, 1.25)], 8.0, fps=25.0)
+    speech_start, _ = retimed_span(plan, 6.5, 0.5)
+    clips = [DubClip(speech, speech_start, gain_db=0.0)]
+    runner = SubprocessRunner(quiet=True)
+
+    outputs = StemOutputs(tmp_path / "voz-dublada.wav", tmp_path / "fundo.wav", tmp_path / "voz-original.wav")
+    built = dub_stems_command(background, original, clips, outputs, tmp_path / "trilhas.txt", 8.0, plan)
+    (tmp_path / "trilhas.txt").write_text(built.graph, encoding="utf-8")
+    runner.run(built.command)
+
+    for path in (outputs.voice_dubbed, outputs.background, outputs.voice_original):
+        assert wav_duration(path) == pytest.approx(9.0, abs=1 / rate)
+    background_out, _ = read_wav_channels(outputs.background)
+    mono = background_out[:, 0]
+    loud = np.flatnonzero(np.abs(mono) > 0.2)
+    assert loud[0] / rate == pytest.approx(5.75, abs=0.04)  # o bipe acompanha a imagem esticada
+    window = mono[int(5.80 * rate) : int(5.80 * rate) + int(0.15 * rate)]
+    spectrum = np.abs(np.fft.rfft(window * np.hanning(len(window))))
+    assert abs(np.fft.rfftfreq(len(window), 1 / rate)[int(np.argmax(spectrum))] - 1320) < 30
+
+    voice_dubbed, _ = read_wav_channels(outputs.voice_dubbed)
+    assert np.flatnonzero(np.abs(voice_dubbed[:, 0]) > 0.1)[0] / rate == pytest.approx(7.5, abs=0.04)
+
+    premix = tmp_path / "premix.wav"
+    graph = dub_mix_graph(clips, 1, 0, plan.total_seconds, retime=plan, limit_peaks=False)
+    (tmp_path / "premix.txt").write_text(graph, encoding="utf-8")
+    args = ["-i", str(background), "-i", str(speech)]
+    runner.run(
+        FFmpegCommand([*args, "-/filter_complex", str(tmp_path / "premix.txt"), "-map", "[out]", str(premix)])
+    )
+    mix, _ = read_wav_channels(premix)
+    summed = voice_dubbed + background_out
+    assert float(np.abs(summed - mix[: len(summed)]).max()) < 2e-4

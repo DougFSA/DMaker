@@ -20,7 +20,7 @@ from tests.test_dubbing import S1, DubHarness, text_taking
 def dub(tmp_path: Path, monkeypatch) -> DubHarness:
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "voice-cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
     return DubHarness(tmp_path / "media")
 
 
@@ -274,6 +274,70 @@ def test_render_validates_before_starting_a_job(client, dub: DubHarness, tmp_pat
     assert len(server.jobs.list()) == before
 
 
+# ---------- trilhas separadas ----------
+
+
+def test_stems_job_zips_the_tracks_and_the_zip_downloads_from_the_dubbing_folder(client, dub: DubHarness):
+    import io
+    import zipfile
+
+    project = prepared(client, dub)["project"]
+    response = client.post("/api/dub/stems", json={"project": project})
+    assert response.status_code == 200, response.text
+    job = finished(response.json()["job_id"])
+    assert job.status == "done", job.error
+    result = job.result
+    assert Path(result["folder"]) == dub_folder() / "entrevista.en.trilhas"
+    assert (
+        result["files"] == ["voz-dublada.wav", "fundo.wav", "voz-original.wav"] and result["duration"] == 40.0
+    )
+    download = client.get(result["zip_url"])
+    assert download.status_code == 200 and "attachment" in download.headers["content-disposition"]
+    assert "entrevista.en.trilhas.zip" in download.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        assert archive.namelist() == result["files"]
+    assert len(dub.synthesizer.requests) == 3
+
+
+def test_stems_after_a_render_synthesize_nothing_new(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    finished(client.post("/api/dub/render", json={"project": project}).json()["job_id"])
+    finished(client.post("/api/dub/stems", json={"project": project}).json()["job_id"])
+    assert len(dub.synthesizer.requests) == 3
+
+
+def test_stems_draft_uses_eight_steps_like_the_render(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    finished(client.post("/api/dub/stems", json={"project": project, "draft": True}).json()["job_id"])
+    assert {r.steps for r in dub.synthesizer.requests} == {8}
+
+
+def test_stems_validate_before_starting_a_job(client, dub: DubHarness, tmp_path: Path):
+    path = Path(prepared(client, dub)["project"])
+    before = len(server.jobs.list())
+    assert client.post("/api/dub/stems", json={"project": str(tmp_path / "x.dub.json")}).status_code == 400
+    project = load_dub_project(path)
+    gone = project.model_copy(update={"source": str(tmp_path / "sumiu.mp4")})
+    path.write_text(gone.model_dump_json(), encoding="utf-8")
+    assert client.post("/api/dub/stems", json={"project": str(path)}).status_code == 404
+    blank = project.model_copy(
+        update={"segments": [s.model_copy(update={"text": ""}) for s in project.segments]}
+    )
+    path.write_text(blank.model_dump_json(), encoding="utf-8")
+    assert client.post("/api/dub/stems", json={"project": str(path)}).status_code == 400
+    assert len(server.jobs.list()) == before
+
+
+def test_a_zip_outside_the_dubbing_folder_is_not_served(client, tmp_path: Path):
+    dub_folder().mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "output" / "fora.zip"
+    outside.write_bytes(b"PK")
+    assert client.get("/api/dub/file", params={"path": str(outside)}).status_code == 404
+    inside = dub_folder() / "dentro.zip"
+    inside.write_bytes(b"PK")
+    assert client.get("/api/dub/file", params={"path": str(inside)}).status_code == 200
+
+
 # ---------- arquivos ----------
 
 
@@ -331,3 +395,69 @@ def test_file_route_only_serves_srt_and_projects_from_the_dubbing_folder(
     other.write_text("1", encoding="utf-8")
     assert client.get("/api/dub/file", params={"path": str(other)}).status_code == 404
     assert client.get("/api/dub/file", params={"path": str(srt) + ".nada"}).status_code == 404
+
+
+# ---------- falantes (diarização) ----------
+
+
+def with_two_people(client, dub: DubHarness):
+    from tests.test_dubbing_speakers import TWO_PEOPLE, FakeDiarizer
+
+    client.services.diarizer = FakeDiarizer(TWO_PEOPLE)
+    return client.services.diarizer
+
+
+def test_prepare_job_separates_the_speakers_and_returns_them_with_each_segment(client, dub: DubHarness):
+    diarizer = with_two_people(client, dub)
+    result = prepared(client, dub, num_speakers=2)
+    assert result["speaker_mode"] == "per_speaker" and result["speakers"] == ["Falante 1", "Falante 2"]
+    assert [s["speaker"] for s in result["segments"]] == ["Falante 1", "Falante 2", "Falante 1"]
+    assert diarizer.calls[0][1] == 2
+
+
+def test_prepare_validates_the_speaker_count_and_mode(client, dub: DubHarness):
+    base = {"path": str(dub.src), "target_language": "en"}
+    assert client.post("/api/dub/prepare", json={**base, "num_speakers": 0}).status_code == 422
+    assert client.post("/api/dub/prepare", json={**base, "num_speakers": 50}).status_code == 422
+    assert client.post("/api/dub/prepare", json={**base, "speaker_mode": "per_speaker"}).status_code == 200
+
+
+def test_prepare_without_a_diarizer_keeps_the_old_per_segment_default(client, dub: DubHarness):
+    result = prepared(client, dub)
+    assert result["speaker_mode"] == "per_segment" and result["speakers"] == []
+
+
+def test_update_swaps_the_speaker_of_one_segment_and_keeps_the_mode(client, dub: DubHarness):
+    with_two_people(client, dub)
+    result = prepared(client, dub)
+    body = {
+        "project": result["project"],
+        "segments": [{"id": "s3", "text": "EN fixa", "speaker": "Falante 2"}],
+    }
+    response = client.put("/api/dub/project", json=body)
+    assert response.status_code == 200, response.text
+    saved = load_dub_project(Path(result["project"]))
+    assert [s.speaker for s in saved.segments] == ["Falante 1", "Falante 2", "Falante 2"]
+    assert saved.speaker_mode == "per_speaker"  # o corpo não trouxe modo: o do projeto fica
+    assert response.json()["segments"][2]["speaker"] == "Falante 2"
+
+
+def test_update_refuses_a_speaker_the_project_does_not_have(client, dub: DubHarness):
+    with_two_people(client, dub)
+    result = prepared(client, dub)
+    body = {"project": result["project"], "segments": [{"id": "s1", "text": "x", "speaker": "Falante 9"}]}
+    response = client.put("/api/dub/project", json=body)
+    assert response.status_code == 400 and "Falante 9" in response.json()["detail"]
+    assert load_dub_project(Path(result["project"])).segment("s1").speaker == "Falante 1"
+
+
+def test_render_job_returns_the_speaker_and_voice_of_each_line(client, dub: DubHarness):
+    with_two_people(client, dub)
+    result = prepared(client, dub)
+    job = finished(
+        client.post("/api/dub/render", json={"project": result["project"], "draft": True}).json()["job_id"]
+    )
+    assert job.status == "done", job.error
+    report = job.result["report"]
+    assert [r["speaker"] for r in report] == ["Falante 1", "Falante 2", "Falante 1"]
+    assert report[0]["voice"] == report[2]["voice"] != report[1]["voice"]

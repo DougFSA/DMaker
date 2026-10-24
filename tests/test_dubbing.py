@@ -9,6 +9,7 @@ import pytest
 
 from dmaker.domain.dub import DubProject, load_dub_project, save_dub_project
 from dmaker.media.ffmpeg import FFmpegCommand
+from dmaker.pipeline.dub_stems import StemsOptions
 from dmaker.pipeline.dubbing import (
     DubbingService,
     default_dubbing_service,
@@ -83,7 +84,17 @@ class DubHarness:
         )
         self.commands: list[FFmpegCommand] = []
         record = self.base.runner.on_run
-        self.base.runner.on_run = lambda command: (self.commands.append(command), record(command))[1]
+
+        def on_run(command: FFmpegCommand) -> None:
+            self.commands.append(command)
+            record(command)
+            if command.label == "trilhas":  # o runner gravado não cria arquivos: as três trilhas saem vazias
+                folder = Path(command.args[-1]).parent
+                for arg in command.args:
+                    if arg.endswith(".wav") and Path(arg).parent == folder:
+                        Path(arg).write_bytes(b"RIFF")
+
+        self.base.runner.on_run = on_run
         self.src = self.base.src
         self.project_path = tmp_path / "saida" / "entrevista.en.dub.json"
         self.out = tmp_path / "saida" / "entrevista.en.mp4"
@@ -341,6 +352,100 @@ def test_render_refuses_bad_projects(dub: DubHarness, tmp_path: Path):
         dub.service.render(project, dub.src)
 
 
+# ---------- trilhas separadas ----------
+
+
+def test_export_stems_writes_the_three_tracks_next_to_the_dubbing(
+    dub: DubHarness, monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr("dmaker.config.OUTPUT_DIR", tmp_path / "out")
+    stems = dub.service.export_stems(dub.prepare())
+    folder = tmp_path / "out" / "dublagem" / "entrevista.en.trilhas"
+    assert stems.folder == folder
+    assert [p.name for p in stems.files] == ["voz-dublada.wav", "fundo.wav", "voz-original.wav"]
+    assert all(p.parent == folder and p.exists() for p in stems.files)
+    assert stems.duration == 40.0 and stems.zip_path is None and stems.original_voice_db is None
+
+
+def test_export_stems_runs_one_command_with_the_clips_of_the_render(dub: DubHarness):
+    project = dub.prepare()
+    dub.service.export_stems(project, StemsOptions(out_dir=dub.out.parent / "trilhas"))
+    (command,) = dub.labeled("trilhas")
+    assert not dub.mix_commands()  # o vídeo não é remontado
+    graph_file = next(Path(arg) for arg in command.args if arg.endswith(".graph.txt"))
+    graph = graph_file.read_text(encoding="utf-8")
+    assert "adelay=delays=2000:all=1" in graph and "adelay=delays=14000:all=1" in graph
+    assert "amix=inputs=3:duration=longest" in graph  # só as 3 falas dubladas
+    assert command.total == 40.0
+
+
+def test_export_stems_reuses_the_speech_already_synthesized_by_the_render(dub: DubHarness):
+    project = dub.prepare()
+    dub.service.render(project, dub.out)
+    synthesized = len(dub.synthesizer.requests)
+    dub.service.export_stems(project, StemsOptions(out_dir=dub.out.parent / "trilhas"))
+    assert len(dub.synthesizer.requests) == synthesized  # nada foi sintetizado de novo
+    assert dub.base.isolation.calls.count((None, None)) >= 2  # o isolamento é o mesmo (cache)
+
+
+def test_export_stems_synthesizes_only_what_is_missing_from_the_cache(dub: DubHarness):
+    project = dub.prepare()
+    dub.service.export_stems(project, StemsOptions(out_dir=dub.out.parent / "trilhas"))
+    assert len(dub.synthesizer.requests) == 3
+    dub.service.export_stems(
+        project.edited("s2", text="Pick the right song."), StemsOptions(out_dir=dub.out.parent / "trilhas")
+    )
+    assert len(dub.synthesizer.requests) == 4
+
+
+def test_export_stems_can_zip_the_three_tracks_next_to_the_folder(dub: DubHarness):
+    import zipfile
+
+    folder = dub.out.parent / "trilhas-casamento"
+    stems = dub.service.export_stems(dub.prepare(), StemsOptions(out_dir=folder, make_zip=True))
+    assert stems.zip_path == dub.out.parent / "trilhas-casamento.zip"
+    with zipfile.ZipFile(stems.zip_path) as archive:
+        assert archive.namelist() == ["voz-dublada.wav", "fundo.wav", "voz-original.wav"]
+
+
+def test_export_stems_tells_the_attenuation_the_video_uses_for_the_original_voice(dub: DubHarness):
+    project = dub.prepare(keep_original_db=-18.0)
+    stems = dub.service.export_stems(project, StemsOptions(out_dir=dub.out.parent / "trilhas"))
+    assert stems.original_voice_db == -18.0
+    (command,) = dub.labeled("trilhas")
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "-18" not in graph  # a trilha da voz original sai sem atenuar
+
+
+def test_export_stems_reports_progress_and_refuses_bad_projects(dub: DubHarness, tmp_path: Path):
+    project = dub.prepare()
+    labels: list[str] = []
+    dub.service.export_stems(
+        project,
+        StemsOptions(out_dir=dub.out.parent / "t"),
+        on_progress=lambda label, _f: labels.append(label),
+    )
+    assert "Sintetizando a fala 2 de 3" in labels and labels[-1] == "Trilhas prontas"
+    blank = project.model_copy(
+        update={"segments": [s.model_copy(update={"text": ""}) for s in project.segments]}
+    )
+    with pytest.raises(ValueError, match="Nenhuma fala está traduzida"):
+        dub.service.export_stems(blank)
+    gone = project.model_copy(update={"source": str(tmp_path / "sumiu.mp4")})
+    with pytest.raises(FileNotFoundError, match="origem"):
+        dub.service.export_stems(gone)
+
+
+def test_render_with_stems_exports_them_from_the_same_speech(dub: DubHarness):
+    result = dub.service.render(
+        dub.prepare(), dub.out, stems=StemsOptions(out_dir=dub.out.parent / "trilhas", make_zip=True)
+    )
+    assert result.stems is not None and result.stems.zip_path is not None
+    assert len(dub.synthesizer.requests) == 3 and len(dub.mix_commands()) == 1
+    assert "Trilhas separadas" in result.timings
+    assert dub.service.render(load_dub_project(dub.project_path), dub.out).stems is None
+
+
 def test_audio_only_sources_are_dubbed_to_audio(tmp_path: Path):
     audio = DubHarness(tmp_path)
     audio.base.src.rename(tmp_path / "radio.wav")
@@ -405,6 +510,7 @@ def test_project_summary_lists_the_segments(dub: DubHarness):
         "original": S1,
         "text": f"EN {S1}",
         "locked": False,
+        "speaker": None,
     }
 
 
@@ -652,3 +758,31 @@ def test_the_result_dictionary_lists_the_stretched_speeches_and_the_final_length
     assert summary["stretched"][0]["added_seconds"] > 0
     row = report_dict(result.report[0])
     assert row["video_stretch"] > 1.0 and row["retimed_start"] == pytest.approx(2.0)
+
+
+def test_stems_of_a_stretched_video_follow_the_new_timeline_like_the_dubbed_file(dub: DubHarness):
+    """As trilhas separadas somam de volta o arquivo dublado: com o vídeo esticado, o fundo, a voz original e as
+    falas acompanham a linha do tempo nova e a duração das trilhas é a do arquivo esticado."""
+    project = stretched_project(dub, "video")
+    result = dub.service.render(project, dub.out, stems=StemsOptions(out_dir=dub.out.parent / "trilhas"))
+
+    assert result.output_seconds > 40.0
+    assert result.stems is not None and result.stems.duration == pytest.approx(result.output_seconds)
+    (command,) = dub.labeled("trilhas")
+    assert command.total == pytest.approx(result.output_seconds)
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "[backgroundfull]asplit=" in graph and "[originalfull]asplit=" in graph
+    start_after_stretch = result.report[1].retimed_start
+    assert start_after_stretch is not None and start_after_stretch > result.report[1].start
+    assert (
+        f"adelay=delays={round(start_after_stretch * 1000)}:all=1" in graph
+    )  # a fala seguinte foi empurrada
+
+
+def test_stems_without_stretching_keep_the_original_timeline(dub: DubHarness):
+    result = dub.service.render(
+        dub.prepare(), dub.out, stems=StemsOptions(out_dir=dub.out.parent / "trilhas")
+    )
+    (command,) = dub.labeled("trilhas")
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "full]" not in graph and result.stems is not None and result.stems.duration == 40.0

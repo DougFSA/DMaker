@@ -10,6 +10,7 @@ from dmaker.filtergraph.dub import (
     DubClip,
     _atempo_chain,
     audio_retime_lines,
+    dub_clip_lines,
     dub_mix_command,
     dub_mix_graph,
     video_retime_lines,
@@ -243,3 +244,17 @@ def test_audio_only_never_gets_a_video_stretch(tmp_path: Path):
         fps=25.0,
     )
     assert "[vout]" not in mix.graph and "-c:v" not in mix.command.args and mix.command.total == 30.0
+
+
+def test_without_the_limiter_the_mix_is_the_pre_finish_sum_of_the_stems():
+    mix = graph(limit_peaks=False).split(";")[-1]
+    assert "alimiter" not in mix
+    assert mix.startswith("[background][dub0][dub1]amix=inputs=3:duration=first:normalize=0,apad=")
+    assert graph(limit_peaks=False).split(";")[:-1] == graph().split(";")[:-1]  # as cadeias não mudam
+
+
+def test_clip_lines_are_shared_by_the_mix_and_the_stems_with_labels_in_order():
+    lines, labels = dub_clip_lines(CLIPS, first_clip_input=5)
+    assert labels == ["[dub0]", "[dub1]"]
+    assert lines[0].startswith("[5:a]volume=2.50dB") and lines[1].startswith("[6:a]atempo=1.1000")
+    assert all(line in graph(first_clip_input=5).split(";") for line in lines)
