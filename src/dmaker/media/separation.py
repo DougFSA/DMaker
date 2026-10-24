@@ -167,6 +167,10 @@ class DemucsSeparator:
             model = get_model(self.model)
         return model.eval()
 
+    def preload(self) -> None:
+        """Baixa os pesos, se faltarem, e deixa o modelo carregado (é o que o gerenciador de modelos usa)."""
+        self._loaded()
+
     def _loaded(self) -> Any:
         with self._load_lock:
             if self._model is None:

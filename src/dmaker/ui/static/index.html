@@ -72,6 +72,7 @@
         <button class="tab-btn" data-tab="json" type="button">JSON</button>
         <button class="tab-btn" data-tab="preview" type="button">Preview</button>
         <button class="tab-btn" data-tab="voice" type="button" id="tab-btn-voice">Voz</button>
+        <button class="tab-btn" data-tab="models" type="button" id="tab-btn-models">Modelos</button>
         <button class="tab-btn" data-tab="captions" type="button" hidden id="tab-btn-captions">Legendas</button>
       </nav>
 
@@ -755,6 +756,31 @@
           </div>
         </section>
 
+        <section class="tab-panel" id="panel-models">
+          <div class="models-panel">
+            <div class="models-header">
+              <h2>Modelos de IA</h2>
+              <button type="button" class="btn btn-small" id="models-refresh">Medir de novo</button>
+            </div>
+            <p class="hint-text">Os modelos baixam sozinhos na primeira vez que uma função precisa deles. Aqui você vê o que ocupa o disco, a licença de cada um e pode baixar antes ou apagar o que não usa. Pasta: <span id="models-dir"></span></p>
+            <p class="models-summary" id="models-summary">Medindo o disco...</p>
+            <table class="captions-table models-table">
+              <thead>
+                <tr><th>Modelo</th><th>Estado</th><th>No disco</th><th>Licença</th><th></th></tr>
+              </thead>
+              <tbody id="models-rows"></tbody>
+            </table>
+            <fieldset class="form-block" id="models-leftovers-block" hidden>
+              <legend>Sobras</legend>
+              <p class="hint-text">Arquivos e pastas em cache/models que nenhum modelo do DMaker usa. <strong id="models-leftovers-total"></strong></p>
+              <ul class="models-paths" id="models-leftovers"></ul>
+              <div class="voice-item-actions">
+                <button type="button" class="btn btn-small btn-danger" id="models-prune">Apagar sobras</button>
+              </div>
+            </fieldset>
+          </div>
+        </section>
+
         <section class="tab-panel" id="panel-captions">
           <p class="hint-text">Depois de salvar, gere o preview de novo para ver as legendas corrigidas.</p>
           <div class="captions-toolbar">
@@ -808,6 +834,7 @@
 <script src="/static/speech.js"></script>
 <script src="/static/queue.js"></script>
 <script src="/static/dub.js"></script>
+<script src="/static/models.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -28,6 +28,7 @@ LAYOUT = STATIC_DIR / "layout.js"
 VOICE = STATIC_DIR / "voice.js"
 SPEECH = STATIC_DIR / "speech.js"
 DUB = STATIC_DIR / "dub.js"
+MODELS = STATIC_DIR / "models.js"
 QUEUE = STATIC_DIR / "queue.js"
 
 ALL_JS = (
@@ -45,6 +46,7 @@ ALL_JS = (
     VOICE,
     SPEECH,
     DUB,
+    MODELS,
     QUEUE,
 )
 
@@ -860,6 +862,122 @@ def _run_queue_pure(expression: str):
     result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+# ---------- modelos de IA (models.js) ----------
+
+
+def test_models_file_is_referenced_before_app_js_and_hooked_into_the_tabs():
+    html = INDEX.read_text(encoding="utf-8")
+    assert MODELS.is_file() and "window.DMakerModels" in MODELS.read_text(encoding="utf-8")
+    assert html.index("/static/voice.js") < html.index("/static/models.js") < html.index("/static/app.js")
+    app_js = JS.read_text(encoding="utf-8")
+    assert "DMakerModels.init" in app_js and "DMakerModels.onShow" in app_js
+    assert 'data-tab="models"' in html and 'id="panel-models"' in html
+
+
+def test_index_has_every_element_models_js_uses():
+    html = INDEX.read_text(encoding="utf-8")
+    js = MODELS.read_text(encoding="utf-8")
+    used = set(re.findall(r'el\("(models-[a-z-]+)"\)', js)) | {"panel-models"}
+    assert len(used) >= 8
+    for element_id in sorted(used - {"models-cancel", "models-remove-confirm", "models-prune-confirm"}):
+        assert f'id="{element_id}"' in html, f"id {element_id!r} usado em models.js não existe em index.html"
+    assert "Modelos de IA" in html and "—" not in html and "—" not in js  # a marca não usa travessão na tela
+
+
+def test_models_js_uses_the_models_api_with_jobs_and_asks_before_deleting():
+    js = MODELS.read_text(encoding="utf-8")
+    for token in (
+        "/api/models",
+        "/download",
+        "/removal",
+        "/remove",
+        "/api/models/prune",
+        "DMakerVoice.followJob",
+        "confirm: true",
+        "openModal",
+    ):
+        assert token in js, f"{token!r} não encontrado em models.js"
+    css = CSS.read_text(encoding="utf-8")
+    assert all(rule in css for rule in (".models-panel", ".models-state", ".models-progress"))
+
+
+def _run_models_pure(expression: str):
+    """Avalia `expression` com as funções puras de models.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(MODELS))});"
+        "const pure = window.DMakerModels.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_models_sizes_match_the_python_formatter():
+    """O servidor manda o rótulo pronto, mas o andamento é formatado na página: os dois têm que concordar."""
+    from dmaker.domain.models import format_size
+
+    samples = [0, 512, 2048, 84_025_501, 3_267_869_931, 120_575_669]
+    shown = _run_models_pure(f"{json.dumps(samples)}.map(pure.formatBytes)")
+    assert shown == [format_size(size) for size in samples]
+
+
+@requires_node
+def test_models_row_shows_state_size_license_and_the_right_buttons():
+    base = (
+        "{id:'demucs',name:'Demucs',purpose:'Separa a voz',license:'MIT',required_by:['Isolamento vocal'],"
+        "expected_label:'80,1 MB',size_label:'80,1 MB',state:'%s'}"
+    )
+    installed = _run_models_pure(f"pure.modelRowHtml({base % 'installed'})")
+    assert "baixado" in installed and "MIT" in installed and "Usado por: Isolamento vocal" in installed
+    assert 'data-models-action="remove"' in installed and 'data-models-action="download"' not in installed
+
+    absent = _run_models_pure(f"pure.modelRowHtml({base % 'absent'})")
+    assert (
+        "não baixado" in absent
+        and "Baixar (80,1 MB)" in absent
+        and 'data-models-action="remove"' not in absent
+    )
+
+    partial = _run_models_pure(f"pure.modelRowHtml({base % 'partial'})")
+    assert (
+        "Continuar download" in partial
+        and 'data-models-action="remove"' in partial
+        and "de ~80,1 MB" in partial
+    )
+
+    busy = _run_models_pure(
+        f"pure.modelRowHtml({base % 'absent'}, {{percent: 42, label: 'Demucs: 30 MB de 80 MB'}})"
+    )
+    assert "width:42%" in busy and "Demucs: 30 MB de 80 MB" in busy and busy.count("disabled") == 1
+
+
+@requires_node
+def test_models_rows_escape_text_from_the_server():
+    html = _run_models_pure(
+        "pure.modelRowHtml({id:'x',name:'<b>A</b>',purpose:'p & q',license:'MIT',required_by:[],"
+        "expected_label:'1 MB',size_label:'0 B',state:'absent'})"
+    )
+    assert "&lt;b&gt;A&lt;/b&gt;" in html and "p &amp; q" in html and "<b>" not in html
+
+
+@requires_node
+def test_models_summary_and_leftover_list():
+    inventory = (
+        "{total_label:'4,40 GB',disk_free_label:'137,8 GB',leftover_label:'30 B',"
+        "leftovers:[{path:'sobra',size_label:'30 B',is_dir:true}]}"
+    )
+    assert _run_models_pure(f"pure.summaryText({inventory})") == (
+        "Ocupado em cache/models: 4,40 GB · Livre no disco: 137,8 GB · Sobras: 30 B"
+    )
+    assert "sobra/: 30 B" in _run_models_pure(f"pure.leftoverItemsHtml({inventory}.leftovers)")
+    assert _run_models_pure("pure.summaryText({total_label:'1 KB',disk_free_label:null,leftovers:[]})") == (
+        "Ocupado em cache/models: 1 KB"
+    )
 
 
 @requires_node

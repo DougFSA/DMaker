@@ -69,6 +69,7 @@ def test_lists_tools_and_prompt():
         "voice_queue_add",
         "voice_queue_list",
         "pronunciation",
+        "models",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources

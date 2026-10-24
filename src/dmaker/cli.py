@@ -10,10 +10,11 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 from rich.console import Console
-from rich.table import Table
+from rich.table import Column, Table
 from typer.core import TyperGroup
 
 from . import __version__, config
+from .domain.models import format_size
 from .domain.presets import get_preset, list_presets
 
 app = typer.Typer(
@@ -1518,6 +1519,181 @@ def audio_isolate(
     console.print(f"[green]Voz:[/green]   {stems.vocals}", highlight=False, soft_wrap=True)
     console.print(f"[green]Fundo:[/green] {stems.background}", highlight=False, soft_wrap=True)
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
+
+
+# ---------- modelos ----------
+
+models_app = typer.Typer(
+    help="Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, apagar e limpar sobras.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
+
+STATE_LABELS = {"installed": "baixado", "partial": "parcial", "absent": "ausente"}
+STATE_STYLES = {"installed": "green", "partial": "yellow", "absent": "dim"}
+
+
+def _models_service():
+    from .pipeline.models_service import ModelService
+
+    return ModelService()
+
+
+def _models_fail(exc: Exception) -> None:
+    _fail(str(exc))
+
+
+def _ask_yes_no(question: str) -> bool:
+    """Pergunta em português (s/N); o `typer.confirm` só entende y/n. Sem resposta (stdin fechado), é não."""
+    try:
+        answer = console.input(f"{question} [s/N] ", markup=False)
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"s", "sim", "y", "yes"}
+
+
+def _confirm_removal(plan, assume_yes: bool) -> None:
+    """Mostra o que vai embora e pergunta; `--yes` pula a pergunta (para scripts), nunca o aviso."""
+    console.print(plan.warning(), highlight=False)
+    for path in plan.paths:
+        console.print(f"  {path}", markup=False, highlight=False)
+    if not assume_yes and not _ask_yes_no("Apagar?"):
+        console.print("Nada foi apagado.")
+        raise typer.Exit()
+
+
+@models_app.command("list")
+def models_list() -> None:
+    """Lista os modelos com estado, tamanho medido em disco, licença e para que servem, mais as sobras."""
+    from .pipeline.models_service import ModelError
+
+    try:
+        inventory = _models_service().inventory()
+    except ModelError as exc:
+        _models_fail(exc)
+    # id, estado e tamanho não quebram linha (o id é o que se digita em `download` e `remove`); o resto cede
+    table = Table(
+        Column("id", no_wrap=True),
+        "modelo",
+        Column("estado", no_wrap=True),
+        Column("no disco", no_wrap=True),
+        "licença",
+        "serve para",
+    )
+    for status in inventory.models:
+        spec = status.spec
+        size = (
+            format_size(status.size_bytes)
+            if status.state != "absent"
+            else f"(~{format_size(spec.expected_size)})"
+        )
+        table.add_row(
+            spec.id,
+            spec.name,
+            f"[{STATE_STYLES[status.state]}]{STATE_LABELS[status.state]}[/]",
+            size,
+            spec.license,
+            spec.purpose,
+        )
+    console.print(table)
+    if inventory.leftovers:
+        console.print(
+            f"[yellow]Sobras[/yellow] (nenhum modelo usa; `dmaker models prune` apaga, "
+            f"{format_size(inventory.leftover_bytes)}):"
+        )
+        for item in inventory.leftovers:
+            console.print(f"  {item.path}  {format_size(item.size_bytes)}", markup=False, highlight=False)
+    free = (
+        f" · livre no disco: {format_size(inventory.disk_free_bytes)}"
+        if inventory.disk_free_bytes is not None
+        else ""
+    )
+    console.print(
+        f"Total ocupado em {inventory.models_dir}: {format_size(inventory.total_bytes)}{free}",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+@models_app.command("download")
+def models_download(
+    model_id: Annotated[str, typer.Argument(help="Id do modelo (veja `dmaker models list`).")],
+) -> None:
+    """Baixa o modelo (se faltar) e confere que ficou inteiro. Os de ~3 GB levam minutos."""
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeRemainingColumn
+
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        name = service.spec(model_id).name
+        with Progress(
+            TextColumn("[cyan]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(name, total=None)
+
+            def on_progress(done: int, total: int) -> None:
+                progress.update(task, completed=done, total=total)
+
+            status = service.download(model_id, on_progress)
+    except ModelError as exc:
+        _models_fail(exc)
+    except Exception as exc:  # noqa: BLE001 - rede, disco e biblioteca de cada motor falham de jeitos próprios
+        _fail(f"Não consegui baixar {model_id}: {exc}")
+
+    console.print(
+        f"[green]Pronto:[/green] {status.spec.name} ({format_size(status.size_bytes)})", highlight=False
+    )
+
+
+@models_app.command("remove")
+def models_remove(
+    model_id: Annotated[str, typer.Argument(help="Id do modelo (veja `dmaker models list`).")],
+    yes: Annotated[bool, typer.Option("--yes", help="Apaga sem perguntar.")] = False,
+) -> None:
+    """Apaga o modelo do disco, dizendo antes quais funções dependem dele."""
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        plan = service.plan_removal(model_id)
+        if not plan.paths:
+            _fail(f"{service.spec(model_id).name} não está baixado; não há o que apagar.")
+        _confirm_removal(plan, yes)
+        service.remove(model_id, confirm=True)
+    except ModelError as exc:
+        _models_fail(exc)
+    console.print(
+        f"[green]Apagado:[/green] {plan.title}, {format_size(plan.freed_bytes)} liberados.", highlight=False
+    )
+
+
+@models_app.command("prune")
+def models_prune(
+    yes: Annotated[bool, typer.Option("--yes", help="Apaga sem perguntar.")] = False,
+) -> None:
+    """Apaga as sobras: pastas e arquivos em cache/models que nenhum modelo do DMaker usa."""
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        plan = service.plan_prune()
+        if not plan.paths:
+            console.print("Não há sobras em cache/models.")
+            return
+        _confirm_removal(plan, yes)
+        service.prune(confirm=True, only=plan.paths)
+    except ModelError as exc:
+        _models_fail(exc)
+    console.print(
+        f"[green]Sobras apagadas:[/green] {format_size(plan.freed_bytes)} liberados.", highlight=False
+    )
 
 
 # ---------- dublagem ----------

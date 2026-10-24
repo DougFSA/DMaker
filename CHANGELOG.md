@@ -52,6 +52,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 - **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
 - **DMK-18**: exportar as trilhas separadas da dublagem (voz dublada, fundo e voz original) para mixar em outro editor
 - **DMK-19**: dublagem pode esticar o vídeo nos trechos em que a fala traduzida não cabe, em vez de acelerar ou cortar a voz (modos voz, vídeo e misto)
+- **DMK-17**: gerenciador de modelos (ver tamanho, licença e uso de cada modelo, baixar, apagar e limpar sobras) na CLI, no MCP e na interface
 
 ### Fixed
 

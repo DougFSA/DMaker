@@ -516,6 +516,10 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 - Só transcrever: `transcribe_media(path, language="pt", model="small")`.
 - Cartão avulso para ver o design: `render_card_preview(title, subtitle, brand="medlycare", preset="reels")`.
 - Limpar cache: `clean_cache()`.
+- Modelos de IA baixados (tamanho, licença, sobras): `models()` lista; `models("download", model_id)` baixa em
+  segundo plano (`job_status`); `models("remove", model_id, confirm=true)` e `models("prune", confirm=true)`
+  apagam, e só com `confirm=true` (sem ele o erro traz quais funções deixam de funcionar). Confira o espaço
+  livre do disco que a listagem devolve antes de baixar os modelos grandes (OmniVoice ~3 GB).
 
 ## Depuração
 
