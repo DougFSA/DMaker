@@ -363,7 +363,7 @@ function renderProjectList() {
 }
 
 function statusLabel(status) {
-  return { running: "Em andamento", done: "Concluído", error: "Erro" }[status] || status;
+  return { running: "Em andamento", done: "Concluído", error: "Erro", cancelled: "Parado" }[status] || status;
 }
 
 let jobsPollTimer = null;
@@ -1655,6 +1655,8 @@ function switchTab(tab) {
   if (tab === "voice" && window.DMakerSpeech) DMakerSpeech.onShow();
   if (tab === "voice" && window.DMakerDub) DMakerDub.onShow();
   if (tab === "models" && window.DMakerModels) DMakerModels.onShow();
+  if (tab === "voice" && window.DMakerQueue) DMakerQueue.onShow();
+  if (tab !== "voice" && window.DMakerQueue) DMakerQueue.onHide();
   if (window.DMakerLayout) DMakerLayout.refresh();
 }
 
@@ -1992,6 +1994,7 @@ async function init() {
   if (window.DMakerSpeech) DMakerSpeech.init();
   if (window.DMakerDub) DMakerDub.init();
   if (window.DMakerModels) DMakerModels.init();
+  if (window.DMakerQueue) DMakerQueue.init();
   try {
     await refreshProjectList();
   } catch (err) { handleError(err); }

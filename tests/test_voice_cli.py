@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
+from dmaker import config
 from dmaker.cli import app
 
 runner = CliRunner()
@@ -12,7 +13,7 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def temporary_library(monkeypatch, tmp_path):
-    monkeypatch.setattr("dmaker.voice.library.VOICES_DIR", tmp_path / "voices")
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "voices")
 
 
 def test_design_list_and_remove_roundtrip():
@@ -53,7 +54,7 @@ def test_say_without_text_asks_for_it():
 def temporary_lexicons(monkeypatch, tmp_path):
     root = tmp_path / "assets"
     (root / "brands" / "medlycare").mkdir(parents=True)
-    monkeypatch.setattr("dmaker.voice.lexicon_store.ASSETS_DIR", root)
+    monkeypatch.setattr(config, "LEXICON_DIR", root)
     return root
 
 

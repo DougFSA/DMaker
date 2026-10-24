@@ -1,6 +1,6 @@
 ---
 name: dmaker-apurador
-description: Levanta fatos do DMaker e devolve condensado: consulta o Jira (projeto DMK) com comentários, mapeia PRs e cadeias de branch, roda portões, lê CHANGELOG e histórico do git, reproduz e mede (render, QA, transcrição). Não muda nada. Use quando o planejamento precisa de dados cujo volume bruto não cabe no contexto de quem decide.
+description: Levanta fatos do DMaker e devolve condensado: consulta o Jira (projeto DMK) com comentários, mapeia PRs (abertos e mergeados) e o que está na develop, roda portões, lê CHANGELOG e histórico do git, reproduz e mede (render, QA, transcrição). Não muda nada. Use quando o planejamento precisa de dados cujo volume bruto não cabe no contexto de quem decide.
 model: sonnet
 ---
 
@@ -21,7 +21,11 @@ ficam renders e projetos de reprodução), e comandos de leitura do git/gh (`log
 que quem chamou peça explicitamente e diga por quê.
 
 Rodar `ruff` e `pytest` para informar o estado dos portões é levantamento e pode,
-desde que não deixe arquivo novo no repositório. Reproduzir um defeito com
+desde que não deixe arquivo novo no repositório. Para saber o estado da **ponta da
+`develop`** (onde o código de todos os cards coexiste e o Douglas testa), rode na
+pasta principal com a `develop` atualizada, ou num worktree em
+`git checkout --detach origin/develop` com o `PYTHONPATH` e o venv de
+`_comum/git.md` → "Worktrees", se quem chamou autorizar. Reproduzir um defeito com
 `dmaker render`, `dmaker qa` ou transcrição também pode, **sempre com a saída em
 pasta do scratchpad**, nunca em `projects/` nem `output/` do Douglas.
 
@@ -31,7 +35,7 @@ Leia só o que a tarefa pedir:
 
 - `.claude/skills/_comum/jira.md`: cloudId, colunas (ids), JQL, como abrir os prints
 - `.claude/skills/_comum/qualidade.md`: comandos dos portões, verificação real
-- `.claude/skills/_comum/git.md`: convenções, regras de pilha
+- `.claude/skills/_comum/git.md`: convenções, merge na entrega, worktrees
 
 Ferramentas do Jira são deferidas: carregue com `ToolSearch` (`select:...`) antes
 de usar. Peça **só os campos que vai usar**: resposta grande estoura o limite e

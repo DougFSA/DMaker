@@ -8,7 +8,6 @@ roda por vez. O projeto `.dub.json` vive em `output/dublagem`; a página só lê
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException
@@ -16,9 +15,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config
-from ..domain.dub import PROJECT_SUFFIX, DubProject, load_dub_project, save_dub_project
+from ..domain.dub import (
+    PROJECT_SUFFIX,
+    DubProject,
+    FitMode,
+    SpeakerMode,
+    load_dub_project,
+    save_dub_project,
+)
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
+from ..pipeline.dub_stems import StemsOptions
 from ..pipeline.dubbing import (
     OUTPUT_SUBDIR,
     DubbingService,
@@ -26,38 +33,44 @@ from ..pipeline.dubbing import (
     default_project_path,
     project_summary,
     report_dict,
+    result_dict,
 )
 from ..pipeline.jobs import Job, JobManager
 from ..voice.synth import DRAFT_STEPS
 from .speech_routes import file_url, isolation_service, media_file, stage_reporter
 from .voice_routes import Services, VoiceServices, audio_url, exclusive_synthesis, existing_voice
 
+MAX_SPEAKERS = 12  # mais pessoas que isto num vídeo curto é erro de digitação, não conversa
 MAX_TEXT_CHARS = 2000  # uma fala dublada é uma frase; isto só barra colagem de texto errado
-SERVABLE_SUFFIXES = (".srt", PROJECT_SUFFIX)
+SERVABLE_SUFFIXES = (".srt", ".zip", PROJECT_SUFFIX)  # .zip: as trilhas separadas
 
 
 class PrepareRequest(BaseModel):
     path: str
     target_language: str = Field(min_length=2, max_length=12)
     source_language: str = Field(default="pt", min_length=2, max_length=12)
-    speaker_mode: Literal["per_segment", "single"] = "per_segment"
+    speaker_mode: SpeakerMode | None = None  # None: o padrão do serviço (per_speaker se a diarização existe)
+    num_speakers: int | None = Field(default=None, ge=1, le=MAX_SPEAKERS)
     voice: str | None = None
     keep_original_db: float | None = Field(default=None, le=0)
     glossary: list[str] = Field(default_factory=list, max_length=100)
+    fit_mode: FitMode = "voz"
 
 
 class SegmentEdit(BaseModel):
     id: str
     text: str = Field(max_length=MAX_TEXT_CHARS)
     locked: bool = False
+    speaker: str | None = None  # None: o falante da fala não muda
 
 
 class ProjectUpdate(BaseModel):
     project: str
     segments: list[SegmentEdit]
     keep_original_db: float | None = Field(default=None, le=0)
-    speaker_mode: Literal["per_segment", "single"] = "per_segment"
+    speaker_mode: SpeakerMode | None = None  # None: o modo do projeto não muda
     voice: str | None = None
+    fit_mode: FitMode | None = None  # None mantém o do projeto (clientes antigos não o enviam)
 
 
 class RenderRequest(BaseModel):
@@ -117,6 +130,7 @@ def _dubbing_service(job: Job, services: VoiceServices) -> DubbingService:
         lexicons=services.lexicons,
         translator=services.translator,
         prober=services.prober or probe,
+        diarizer=services.diarizer,
     )
 
 
@@ -131,11 +145,13 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
             req.target_language,
             req.source_language,
             speaker_mode=req.speaker_mode,
+            num_speakers=req.num_speakers,
             voice=req.voice or None,
             keep_original_db=req.keep_original_db,
             glossary=req.glossary,
             project_path=path,
             on_progress=stage_reporter(job),
+            fit_mode=req.fit_mode,
         )
     return _summary(project, path)
 
@@ -162,9 +178,23 @@ def _run_render(job: Job, services: VoiceServices, path: Path, draft: bool) -> d
         "original": project.source,
         "original_url": file_url(Path(project.source)),
         "report": [report_dict(r) for r in result.report],
-        "warnings": result.warnings,
-        "regenerated": result.regenerated,
-        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
+        **result_dict(result),
+    }
+
+
+def _run_stems(job: Job, services: VoiceServices, path: Path, draft: bool) -> dict:
+    project = _load(path)
+    with exclusive_synthesis(job):
+        stems = _dubbing_service(job, services).export_stems(
+            project, StemsOptions(make_zip=True), stage_reporter(job), DRAFT_STEPS if draft else None
+        )
+    return {
+        "folder": str(stems.folder),
+        "files": [file.name for file in stems.files],
+        "zip": str(stems.zip_path),
+        "zip_url": dub_file_url(stems.zip_path, download=True),
+        "duration": round(stems.duration, 3),
+        "original_voice_db": stems.original_voice_db,
     }
 
 
@@ -172,16 +202,19 @@ def _apply_update(project: DubProject, update: ProjectUpdate) -> DubProject:
     edited = project
     for item in update.segments:
         try:
-            edited = edited.edited(item.id, item.text, item.locked)
+            edited = edited.edited(item.id, item.text, item.locked, item.speaker)
         except KeyError as exc:
             raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
-    return edited.model_copy(
-        update={
-            "keep_original_db": update.keep_original_db,
-            "speaker_mode": update.speaker_mode,
-            "voice": update.voice or None,
-        }
-    )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    changes = {
+        "keep_original_db": update.keep_original_db,
+        "speaker_mode": update.speaker_mode or edited.speaker_mode,
+        "voice": update.voice or None,
+    }
+    if update.fit_mode is not None:
+        changes["fit_mode"] = update.fit_mode
+    return edited.model_copy(update=changes)
 
 
 def build_dub_router(jobs: JobManager) -> APIRouter:
@@ -249,6 +282,21 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: gerar ({path.name})",
             lambda job: _run_render(job, services, path, req.draft),
+            meta={"kind": "voice"},
+        )
+        return {"job_id": job.id}
+
+    @router.post("/stems")
+    def stems(req: RenderRequest, services: Services) -> dict:
+        path = _project_file(req.project)
+        project = _load(path)
+        if not Path(project.source).is_file():
+            raise HTTPException(status_code=404, detail=f"Arquivo de origem não encontrado: {project.source}")
+        if not any(s.text.strip() for s in project.segments):
+            raise HTTPException(status_code=400, detail="Nenhuma fala está traduzida.")
+        job = jobs.start(
+            f"dublagem: trilhas ({path.name})",
+            lambda job: _run_stems(job, services, path, req.draft),
             meta={"kind": "voice"},
         )
         return {"job_id": job.id}

@@ -1,6 +1,6 @@
 ---
 name: dmaker-producao
-description: Lança uma versão do DMaker, audita se todos os chamados da versão estão em Concluído no Jira (projeto DMK) e mergeados na develop, sem nada em Redesenvolvimento ou Teste Manual e sem pendência na máquina, fecha a versão no CHANGELOG, faz o release da develop para a main e cria a tag vX. Não há deploy em nuvem: o DMaker roda na máquina do Douglas. Use sempre que ele falar em lançar o DMaker, "sobe para produção", "põe em produção", "fazer o release", "sobe a v1", "manda pra main", "fecha a versão", "publicar a versão" ou qualquer variação de liberar a versão. Para apenas juntar os aprovados na develop sem lançar, use dmaker-merge-develop.
+description: Lança uma versão do DMaker, audita se todos os chamados da versão estão em Concluído no Jira (projeto DMK), testados e aprovados pelo Douglas na develop, sem nada em Redesenvolvimento ou Teste Manual e sem pendência na máquina, fecha a versão no CHANGELOG, faz o release da develop para a main e cria a tag vX. Não há deploy em nuvem: o DMaker roda na máquina do Douglas. Use sempre que ele falar em lançar o DMaker, "sobe para produção", "põe em produção", "fazer o release", "sobe a v1", "manda pra main", "fecha a versão", "publicar a versão" ou qualquer variação de liberar a versão. Os chamados já entram na develop na entrega (o executor mergeia o PR); esta skill só leva a develop inteira para a main.
 ---
 
 # Release da versão: DMaker
@@ -74,19 +74,26 @@ numere os itens e peça a resposta na mesma numeração.
 project = DMK AND fixVersion = "<versão>" ORDER BY status ASC, key ASC
 ```
 
-Todo card tem que estar em **`Concluído`** **e** mergeado na `develop`. As duas
-condições, porque `Concluído` agrupa "aprovado, aguardando merge" e "já na
-`develop`" (`_comum/jira.md`):
+Todo card tem que estar em **`Concluído`**, ou seja, testado e aprovado pelo
+Douglas **na `develop`**. Como o código entra na `develop` na entrega e o merge não
+depende mais da aprovação, o que a auditoria confere é o inverso do fluxo antigo:
+que **nada ficou sem passar pelo teste dele**.
 
-- Para cada card em `Concluído`, peça o estado do PR: `gh pr list --state all
-  --search "DMK-XXX"`. **PR ainda aberto bloqueia:** o card foi aprovado mas não
-  mergeado; falta rodar o `dmaker-merge-develop`.
-- Confirme que o código está na `develop`:
-  `git log --oneline origin/develop | grep -i DMK-XXX`.
-- Qualquer card em `Backlog`, `Aguardando Atendimento`, `Em desenvolvimento`,
-  `Teste Manual` ou `Redesenvolvimento` **bloqueia o release**: ou o trabalho
-  termina, ou o Douglas tira o card da versão. Liste cada um com o status atual e
-  diga qual das duas saídas cabe.
+- **Nenhum card da versão em `Teste Manual` ou `Redesenvolvimento`.** Esses dois
+  status significam "na `develop`, mas ainda não aprovado" e **bloqueiam o
+  release**: a `develop` inteira sobe, e subiria código não testado ou reprovado.
+  Ou o trabalho termina e o Douglas aprova, ou ele tira o card da versão.
+- Qualquer card em `Backlog`, `Aguardando Atendimento` ou `Em desenvolvimento`
+  também bloqueia, pelo mesmo motivo. Liste cada um com o status atual e diga qual
+  das saídas cabe.
+- Para cada card em `Concluído`, confirme que o código **está** na `develop`:
+  `git log --oneline origin/develop | grep -i DMK-XXX`, e que o comentário de
+  entrega traz o commit de merge. Card em `Concluído` sem commit na `develop` é
+  anomalia (aprovado, mas o merge nunca aconteceu, ou se perdeu): bloqueia.
+- **Nenhum PR de card da versão ainda aberto** (`gh pr list --state open --search
+  "DMK-XXX"`): PR aberto de card entregue é entrega que não mergeou, ou PR
+  antigo do fluxo anterior; neste caso o caminho é a skill `dmaker-merge-develop`
+  (exceção), com o Douglas decidindo.
 
 Confira também o contrário: **código na `develop` sem card na versão**:
 
@@ -102,8 +109,9 @@ commits sem chave de card, que o `grep` não acusa.
 ## 3. Auditoria B: cada card tem a aprovação do Douglas
 
 No DMK a aprovação **é** a coluna `Concluído`: não existe um comentário de "ok"
-separado, e não existe a coluna intermediária "Teste em Develop" do MedlyCare. O
-risco é o cartão arrastado por engano, ou movido por outra pessoa/automação.
+separado, e não existe a coluna intermediária "Teste em Develop" do MedlyCare
+(`Teste Manual` já é o teste na `develop`). O risco é o cartão arrastado por
+engano, ou movido por outra pessoa/automação.
 
 Peça ao apurador, por card, o **histórico de transições** (o changelog do card:
 `getJiraIssue` com `expand=changelog`, quando a ferramenta permitir): **quem**
@@ -114,8 +122,9 @@ card: autor, data e o status de origem.
 Quem decide se aquilo é aprovação é você. Card em `Concluído` movido pelo Douglas
 depois da última entrega, a partir de `Teste Manual`, é aprovado. Card movido por
 outro autor, antes da última entrega, ou sem passar por `Teste Manual`, entra na
-lista de bloqueio com a pergunta ao Douglas. Comentário de bot, de entrega da IA e
-o rastro de merge (`🔀 Mergeado na develop`) não contam como aprovação. Não
+lista de bloqueio com a pergunta ao Douglas. Comentário de bot e de entrega da IA
+(inclusive o que cita o PR mergeado e o commit na `develop`) não contam como
+aprovação. Não
 interprete o silêncio como aval: um subagente resumindo "parece aprovado" é
 exatamente o modo de esta auditoria falhar.
 
@@ -186,9 +195,9 @@ bloco da versão no CHANGELOG, a tag `vX`, o que ele precisa instalar ou baixar
 
 ## 7. Com o aval: feche a versão e faça o release
 
-Os passos 1 a 3 vão num `dmaker-executor` (é uma das duas exceções em que ele
-commita na `develop`, e o briefing precisa dizer isso). Os passos 4 e 5 são seus,
-sempre.
+Os passos 1 a 3 vão num `dmaker-executor` (o fechamento do CHANGELOG é a **única**
+exceção em que ele commita direto na `develop`, e o briefing precisa dizer isso).
+Os passos 4 e 5 são seus, sempre.
 
 1. **Feche a versão no CHANGELOG, na `develop`, ANTES do merge.** Troque
    `## [Não lançado]` por `## vX — AAAA-MM-DD` com a data de hoje, e abra um novo

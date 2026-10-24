@@ -331,9 +331,17 @@ class SpeechFixService:
         return self.voice_from_span(span, vocals_path, vocals, language)
 
     def voice_from_span(
-        self, span: ReferenceSpan, vocals_path: Path, vocals: VocalsWindow, language: str
+        self,
+        span: ReferenceSpan,
+        vocals_path: Path,
+        vocals: VocalsWindow,
+        language: str,
+        name: str = "Falante do arquivo",
     ) -> VoiceProfile:
-        """Recorta `span` do stem de voz (em cache por stem e trecho) e devolve o clone temporário dele."""
+        """Recorta `span` do stem de voz (em cache por stem e trecho) e devolve o clone temporário dele.
+
+        `name` é só o rótulo para quem lê (a dublagem por falante passa "Falante 1"); a identidade do som, e com
+        ela o cache das falas, vem do trecho recortado."""
         folder = self._reference_folder(vocals_path, span)
         reference = folder / REFERENCE_FILE
         text_file = folder / "reference.txt"
@@ -345,7 +353,7 @@ class SpeechFixService:
             text_file.write_text(span.text, encoding="utf-8")
         return VoiceProfile(
             id=f"falante-{folder.name[:8]}",
-            name="Falante do arquivo",
+            name=name,
             kind="clone",
             language=language,
             reference=REFERENCE_FILE,

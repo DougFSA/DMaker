@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ..config import JOBS_DIR, MEZ_DIR, OUTPUT_DIR, ensure_dirs
+from .. import config
+from ..config import ensure_dirs
 from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import Project
@@ -40,9 +41,9 @@ class RenderPipeline:
         prober: Prober = probe,
         transcriber_factory: TranscriberFactory = default_transcriber_factory,
         mezzanines: MezzanineBuilder | None = None,
-        cache_dir: Path = MEZ_DIR,
-        jobs_dir: Path = JOBS_DIR,
-        output_dir: Path = OUTPUT_DIR,
+        cache_dir: Path | None = None,
+        jobs_dir: Path | None = None,
+        output_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
         offset_finder: OffsetFinder | None = None,
         matter: Matter | None = None,
@@ -67,9 +68,9 @@ class RenderPipeline:
         self.sync = SyncResolver(
             offset_finder or ffmpeg_offset_finder(self.runner), self.log, prober=self.prober
         )
-        self.cache_dir = cache_dir
-        self.jobs_dir = jobs_dir
-        self.output_dir = output_dir
+        self.cache_dir = cache_dir or config.MEZ_DIR
+        self.jobs_dir = jobs_dir or config.JOBS_DIR
+        self.output_dir = output_dir or config.OUTPUT_DIR
 
     # ---------- preparação ----------
 

@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from ..config import VOICES_DIR
+from .. import config
 from ..domain.spec import Strict
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner
 from ..media.wavio import wav_duration
@@ -142,7 +142,7 @@ def _duration_or_zero(wav: Path) -> float:
 
 class VoiceLibrary:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or VOICES_DIR
+        self.root = root or config.VOICES_DIR
 
     def _folder(self, voice_id: str) -> Path:
         return self.root / voice_id

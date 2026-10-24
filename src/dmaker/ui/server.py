@@ -29,8 +29,10 @@ from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
 from .dub_routes import build_dub_router
 from .models_routes import build_models_router
+from .queue_routes import build_queue_router
+from .queue_routes import runtime as voice_queue_runtime
 from .speech_routes import build_speech_router
-from .voice_routes import build_voice_router
+from .voice_routes import Services, VoiceServices, build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -50,8 +52,9 @@ SHUTDOWN_DELAY_S = 0.3
 
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
-layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
+layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
 app.include_router(build_voice_router(jobs))
+app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
 app.include_router(build_models_router(jobs))
@@ -475,8 +478,15 @@ def _project_from_body(name: str, spec: dict) -> Project:
     return project
 
 
+def _narration_durations(project: Project, services: VoiceServices) -> list[float | None]:
+    """Duração real das narrações já sintetizadas (cache), sem carregar modelo de voz."""
+    from ..pipeline.voiceover import view_narration_durations
+
+    return view_narration_durations(project, services.library, services.synthesizer, services.lexicons)
+
+
 @app.post("/api/projects/{name}/timeline")
-def project_timeline(name: str, req: TimelineRequest) -> dict:
+def project_timeline(name: str, req: TimelineRequest, services: Services) -> dict:
     from ..pipeline.layout import project_layout
     from ..pipeline.projects import load_project
     from ..pipeline.timeline_view import build_timeline_view
@@ -489,11 +499,12 @@ def project_timeline(name: str, req: TimelineRequest) -> dict:
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = _narration_durations(project, services)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @app.post("/api/projects/{name}/edit")
-def project_edit(name: str, req: EditRequest) -> dict:
+def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
     from ..pipeline.edits import apply_edit
     from ..pipeline.layout import project_layout
@@ -505,7 +516,8 @@ def project_edit(name: str, req: EditRequest) -> dict:
     except EditError as exc:
         raise _error(400, str(exc)) from exc
     layout = project_layout(new_project)
-    view = build_timeline_view(new_project, layout)
+    durations = _narration_durations(new_project, services)
+    view = build_timeline_view(new_project, layout, narration_durations=durations)
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
         "timeline": view.to_dict(),
@@ -606,6 +618,18 @@ def get_job(job_id: str) -> dict:
     return {**job.snapshot(), "result": job.result, "events": job.events[-200:]}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Pede para o job parar no próximo ponto seguro; só vale para os que se declaram cancelável."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise _error(404, "job desconhecido")
+    if not job.cancellable:
+        raise _error(409, "este tipo de trabalho não pode ser cancelado")
+    jobs.cancel(job_id)
+    return job.snapshot()
+
+
 @app.get("/api/jobs/{job_id}/events")
 def job_events(job_id: str) -> StreamingResponse:
     job = jobs.get(job_id)
@@ -667,11 +691,9 @@ def shutdown() -> dict:
 def _allowed_file(path: Path) -> bool:
     if not path.is_file():
         return False
-    try:
-        path.relative_to(config.ROOT)
+    if any(path.is_relative_to(base) for base in (config.ROOT, config.DATA_DIR)):
         return True
-    except ValueError:
-        return path.suffix.lower() in MEDIA_EXTS
+    return path.suffix.lower() in MEDIA_EXTS
 
 
 @app.get("/api/file")
@@ -909,6 +931,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) 
     import uvicorn
 
     config.ensure_dirs()
+    voice_queue_runtime.start_worker()  # a fila de narrações roda sozinha enquanto a interface estiver aberta
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

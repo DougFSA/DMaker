@@ -28,10 +28,10 @@ original" vale mais que "Refatora o alinhador de cues".
 | --- | --- | --- | --- |
 | `Backlog` | 10071 | 11 | Ainda não começou. |
 | `Aguardando Atendimento` | 10072 | 21 | Priorizado, esperando alguém pegar. |
-| `Redesenvolvimento` | 10073 | 31 | Ele testou e reprovou. É daqui que o **redesenvolvimento** puxa trabalho. |
+| `Redesenvolvimento` | 10073 | 31 | Ele testou na `develop` e reprovou. É daqui que o **redesenvolvimento** puxa trabalho. |
 | `Em desenvolvimento` | 10074 | 41 | Alguém está desenvolvendo agora. |
-| `Teste Manual` | 10075 | 51 | Entregue, esperando o Douglas testar. **É onde cada card termina.** |
-| `Concluído` | 10076 | 61 | Ele testou e aprovou. |
+| `Teste Manual` | 10075 | 51 | **Já mergeado na `develop`**, esperando o Douglas testar nela. É onde cada card termina o trabalho do executor. |
+| `Concluído` | 10076 | 61 | Ele testou na `develop` e aprovou. |
 
 **Todas as transições do DMK são globais:** de qualquer status se vai para
 qualquer outro com o id da transição de destino. Não há caminho obrigatório, então
@@ -40,41 +40,42 @@ chamada. Mesmo assim, se uma transição falhar, chame `getTransitionsForJiraIss
 e escolha pelo **nome do destino**: id chutado move o card para o lugar errado sem
 erro nenhum.
 
-### `Concluído` agrupa dois estados
+### `Teste Manual` e `Concluído`: o código já está na `develop`
 
-Não existe uma coluna "aprovado, aguardando merge". O Douglas move de
-`Teste Manual` para `Concluído` quando **aprova**, e é isso que libera o merge na
-`develop`. Depois do merge o card continua em `Concluído`. Logo, `Concluído`
-significa duas coisas:
+Um card só chega a `Teste Manual` **depois** de o PR ter sido mergeado na
+`develop` (`_comum/git.md`). Logo, o status do Jira e o estado do código andam
+juntos:
 
-1. **Aprovado, PR ainda aberto:** falta mergear na `develop`.
-2. **Já na `develop` (ou já lançado na `main`):** nada a fazer.
+- `Teste Manual`: mergeado na `develop`, ainda não aprovado.
+- `Concluído`: mergeado na `develop` **e** aprovado pelo Douglas depois de testar.
 
-**O que distingue os dois é o estado do PR**, não o Jira:
-
-```bash
-gh pr list --state open --search "DMK-XXX" --json number,headRefName,baseRefName
-```
-
-PR aberto = estado 1. Sem PR aberto, confirme com
+O merge acontece na entrega, antes do teste, e não depende da coluna. `Concluído`
+significa só "testado e aprovado". Um card em `Teste Manual` ou
+`Concluído` **sem** o commit na `develop` é anomalia (entrega que não mergeou, ou
+merge que se perdeu): confirme com
 `git log --oneline origin/develop | grep -i DMK-XXX` (case-insensitive: há commits
-com a chave em minúsculas) e tire o card da fila de merge. Ao mergear, deixe o
-rastro no card (`🔀 Mergeado na develop: <sha> (PR #N)`), porque é ele que a
-auditoria de produção usa para cruzar "aprovado" com "realmente na develop".
+com a chave em minúsculas) e avise o planejador.
+
+O rastro do merge fica no **próprio comentário de entrega** (PR mergeado e commit
+de merge na `develop`), e é ele que a auditoria de produção cruza com o
+`git log`. Não há um segundo comentário de rastro.
 
 ## Transições por momento do trabalho
 
 - **Começar o card:** `41` (Em desenvolvimento), a partir de `Backlog`,
   `Aguardando Atendimento` ou `Redesenvolvimento`.
-- **Entregar:** `51` (Teste Manual), com o PR aberto para a `develop`, portões
-  verdes e o comentário de entrega postado.
+- **Entregar:** `51` (Teste Manual), **depois** do merge do PR na `develop`, com
+  os portões verdes (no branch e, se a `develop` andou, na mistura) e o
+  comentário de entrega postado. Mova antes de mergear e o quadro mente: dirá
+  "pronto para testar" de um código que ainda não está onde ele testa.
 - **Reprovado:** o Douglas move para `Redesenvolvimento` (`31`). Quem corrige
-  devolve com `51`, passando antes pelo `41` ao começar a correção.
+  passa pelo `41` ao começar a correção, entrega pelo mesmo caminho (branch
+  `fix/dmk-XXX-ajuste-N`, PR, merge imediato) e devolve com `51`.
 - **Aprovado:** o Douglas move para `Concluído` (`61`). Nenhuma skill faz isso por
   ele.
 
 Mova o card **quando o trabalho realmente muda de estado**: `41` ao começar
-aquele card, `51` quando o PR estiver no ar e os portões verdes. Mover tudo em
+aquele card, `51` quando o merge estiver feito e os portões verdes. Mover tudo em
 lote no fim apaga a informação que o quadro existe para dar.
 
 ## Consultas úteis
@@ -95,10 +96,10 @@ project = DMK AND fixVersion = "<v>" AND status = 10073
 # Redesenvolvimento FORA da versão escolhida: só para reportar, não para fazer
 project = DMK AND status = 10073 AND (fixVersion != "<v>" OR fixVersion IS EMPTY)
 
-# Aprovados (10076 = Concluído); depois filtre pelo PR ainda aberto
+# Aprovados (10076 = Concluído)
 project = DMK AND fixVersion = "<v>" AND status = 10076 ORDER BY key ASC
 
-# Esperando o Douglas testar                        (10075 = Teste Manual)
+# Esperando o Douglas testar na develop             (10075 = Teste Manual)
 project = DMK AND fixVersion = "<v>" AND status = 10075 ORDER BY key ASC
 ```
 
@@ -184,24 +185,27 @@ uma pessoa que vai **testar**, não revisar código: o que ela precisa é saber 
 que mudou, por que, e o que exatamente olhar ou ouvir.
 
 ```markdown
-✅ _Entregue: pronto para teste_        ← ou: 🔁 _Redesenvolvimento: pronto para novo teste_
+✅ _Entregue e mergeado na develop: pronto para teste_
+   ← ou: 🔁 _Redesenvolvimento: corrigido na develop, pronto para novo teste_
 
-_PR:_ <url>
+_PR:_ <url> (mergeado)
+_Commit na develop:_ <sha curto do merge>
 
 <O que foi feito e POR QUE foi feito assim. Nas decisões que tiveram alternativa,
 diga qual você descartou e o motivo: é o que evita a mesma discussão no próximo
 card. Num redesenvolvimento, comece pelo que estava errado e por que a tentativa
 anterior não pegou.>
 
-_Como testar:_ <o caminho na interface ou o comando da CLI, com o projeto ou o
-arquivo de exemplo (em output/, quando houver) e os casos de borda que
-provavelmente quebram. Inclua o caso "não mexeu no que já estava certo" quando o
-ajuste tocou código compartilhado. Se precisar de `git checkout <branch>` ou de
-`pip install -e .` (dependência nova), diga.>
+_Como testar:_ <sempre na `develop` atualizada (`git checkout develop && git pull`).
+O caminho na interface ou o comando da CLI, com o projeto ou o arquivo de exemplo
+(em output/, quando houver) e os casos de borda que provavelmente quebram. Inclua
+o caso "não mexeu no que já estava certo" quando o ajuste tocou código
+compartilhado. Se precisar de `pip install -e .` (dependência nova), diga.>
 
 _Validação técnica_
 
-* <portões: ruff check · ruff format --check · pytest N passados>
+* <portões: ruff check · ruff format --check · pytest N passados, e em que árvore
+  rodaram (no branch já com a `develop` dentro; ou na ponta da `develop`)>
 * <o que foi medido ou reproduzido, com número quando houver: QA do render,
   duração, RMS, transcrição conferida>
 ```
