@@ -24,7 +24,7 @@ mecânicas (template, render, QA, legendas) com um modelo local do Ollama.
    parâmetro que falta. Sem template que sirva, inspecione as fontes (`probe_media`, nunca chute duração)
    e escreva a spec com `save_project` (referência completa em `dmaker://guide`).
 4. **Validar**: `validate_project` (duração final, avisos de limite e de marca).
-5. **Preview**: `render_project(preview=true)`. A interface abre sozinha para o usuário acompanhar.
+5. **Preview**: `render_project(preview=true)`.
 6. **Conferir com `qa_report`**: checagens automáticas (zona segura, ritmo, contraste, legendas, e com
    `output=true` a saída renderizada). Só chame `contact_sheet`/`frames` (gastam tokens de imagem) se o
    relatório apontar algo ou o usuário pedir para olhar.

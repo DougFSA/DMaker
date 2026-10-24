@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import threading
-import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from .. import config
+from ..media.downloads import Downloader, RemoteFile, download_file, ensure_file
 from .library import VoiceProfile
 from .synth import Speech, VoiceRequest
 
@@ -34,67 +32,22 @@ PHONEMIZER_LANGUAGES = {
 }
 
 
-@dataclass(frozen=True)
-class RemoteFile:
-    name: str
-    size: int
-    sha256: str
+def _release_file(name: str, size: int, sha256: str) -> RemoteFile:
+    return RemoteFile(name, f"{RELEASE_URL}/{name}", size, sha256)
 
 
 # Versão fixada (release `model-files-v1.0`): tamanho e SHA-256 conferidos a cada download.
-VOICES_FILE = RemoteFile(
+VOICES_FILE = _release_file(
     "voices-v1.0.bin", 28214398, "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
 )
 MODEL_FILES = {
-    "fp32": RemoteFile(
+    "fp32": _release_file(
         "kokoro-v1.0.onnx", 325532387, "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
     ),
-    "int8": RemoteFile(
+    "int8": _release_file(
         "kokoro-v1.0.int8.onnx", 92361271, "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb"
     ),
 }
-
-Downloader = Callable[[str, Path], None]
-
-
-def download_file(url: str, destination: Path) -> None:
-    """Baixa `url` para `destination` (sem checagem; quem chama confere tamanho e hash)."""
-    with urllib.request.urlopen(url, timeout=60) as response, destination.open("wb") as out:
-        while chunk := response.read(1 << 20):
-            out.write(chunk)
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _is_intact(path: Path, expected: RemoteFile) -> bool:
-    """Tamanho primeiro (barato); o hash só quando o tamanho bate."""
-    return path.exists() and path.stat().st_size == expected.size and _sha256(path) == expected.sha256
-
-
-def ensure_file(directory: Path, expected: RemoteFile, downloader: Downloader = download_file) -> Path:
-    """Garante o arquivo íntegro em `directory`, baixando (para um .part, depois renomeado) se faltar."""
-    target = directory / expected.name
-    if _is_intact(target, expected):
-        return target
-    directory.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(target.suffix + ".part")
-    try:
-        downloader(f"{RELEASE_URL}/{expected.name}", partial)
-        if not _is_intact(partial, expected):
-            raise RuntimeError(
-                f"O download de {expected.name} veio corrompido (tamanho ou hash diferente do esperado). "
-                "Tente de novo."
-            )
-        partial.replace(target)
-    finally:
-        partial.unlink(missing_ok=True)
-    return target
 
 
 def _compute_threads() -> int:

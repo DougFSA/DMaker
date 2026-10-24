@@ -11,14 +11,9 @@ import numpy as np
 import pytest
 
 from dmaker import config
+from dmaker.media.downloads import RemoteFile, ensure_file
 from dmaker.media.wavio import read_wav, write_wav
-from dmaker.voice.openvoice_converter import (
-    CHECKPOINT,
-    CONFIG,
-    OpenVoiceConverter,
-    RemoteFile,
-    ensure_file,
-)
+from dmaker.voice.openvoice_converter import CHECKPOINT, CONFIG, OpenVoiceConverter
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchaudio")
@@ -161,6 +156,14 @@ def test_corrupted_download_is_refused_and_leaves_no_file(tmp_path: Path):
     with pytest.raises(RuntimeError, match="corrompido"):
         ensure_file(tmp_path / "m", expected, downloader)
     assert not list((tmp_path / "m").glob("arquivo*"))
+
+
+def test_the_converter_uses_the_shared_download_code():
+    from dmaker.media import downloads
+    from dmaker.voice import openvoice_converter
+
+    assert openvoice_converter.ensure_file is downloads.ensure_file
+    assert openvoice_converter.RemoteFile is downloads.RemoteFile
 
 
 def test_pinned_weights_point_to_a_fixed_revision_with_known_hashes():

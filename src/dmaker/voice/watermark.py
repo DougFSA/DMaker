@@ -200,6 +200,11 @@ class AudioSealWatermarker:
                 self._detector = self._load(DETECTOR_CARD, "load_detector")
             return self._detector
 
+    def preload(self) -> None:
+        """Carrega o gerador e o detector, o que baixa os pesos que faltarem (usado pelo gerenciador de modelos)."""
+        self._loaded_generator()
+        self._loaded_detector()
+
     # -- marcar --
 
     def _embed_chunk(self, generator: Any, chunk: Any, sample_rate: int, message: Any) -> Any:

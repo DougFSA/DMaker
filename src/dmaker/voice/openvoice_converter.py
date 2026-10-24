@@ -7,13 +7,10 @@ fonte e a duração não muda. O alvo é descrito por um embedding tirado de pou
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
-import urllib.request
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -21,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from .. import config
+from ..media.downloads import Downloader, RemoteFile, download_file, ensure_file
 from ..media.separation import ProgressCallback
 from ..media.wavio import read_wav, write_wav
 from .levels import speech_only
@@ -36,14 +34,6 @@ NOISE_SEED = 0  # o codificador sorteia ruído; com semente fixa a mesma entrada
 SPEECH_SECONDS_FOR_EMBEDDING = 20.0  # o embedding de timbre estabiliza com poucos segundos de fala
 
 
-@dataclass(frozen=True)
-class RemoteFile:
-    name: str
-    url: str
-    size: int
-    sha256: str
-
-
 CHECKPOINT = RemoteFile(
     "checkpoint.pth",
     f"{WEIGHTS_URL}/checkpoint.pth",
@@ -56,48 +46,6 @@ CONFIG = RemoteFile(
     838,
     "9dfff60350b8c63f2c664efd92a61b2516efb22671466960f0e5dfebd881fa47",
 )
-
-Downloader = Callable[[str, Path], None]
-
-
-def download_file(url: str, destination: Path) -> None:
-    """Baixa `url` para `destination` (sem checagem; quem chama confere tamanho e hash)."""
-    with urllib.request.urlopen(url, timeout=60) as response, destination.open("wb") as out:
-        while chunk := response.read(1 << 20):
-            out.write(chunk)
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _is_intact(path: Path, expected: RemoteFile) -> bool:
-    """Tamanho primeiro (barato); o hash só quando o tamanho bate."""
-    return path.is_file() and path.stat().st_size == expected.size and _sha256(path) == expected.sha256
-
-
-def ensure_file(directory: Path, expected: RemoteFile, downloader: Downloader = download_file) -> Path:
-    """Garante o arquivo íntegro em `directory`, baixando (para um .part, depois renomeado) se faltar."""
-    target = directory / expected.name
-    if _is_intact(target, expected):
-        return target
-    directory.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(target.suffix + ".part")
-    try:
-        downloader(expected.url, partial)
-        if not _is_intact(partial, expected):
-            raise RuntimeError(
-                f"O download de {expected.name} veio corrompido (tamanho ou hash diferente do esperado). "
-                "Tente de novo."
-            )
-        partial.replace(target)
-    finally:
-        partial.unlink(missing_ok=True)
-    return target
 
 
 def _to_namespace(value: Any) -> Any:
