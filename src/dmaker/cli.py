@@ -1547,6 +1547,17 @@ SPEAKER_HELP = (
 SPEAKERS_HELP = (
     "Quantas pessoas falam (força a separação de falantes; sem isso o áudio decide). Só no modo per_speaker."
 )
+FIT_HELP = (
+    "Quando a fala traduzida não cabe no tempo: voz (acelera a voz, o padrão), video (estica o vídeo "
+    "naquele trecho, até 1,3x) ou misto (acelera a voz até 1,15x e estica o vídeo no resto)."
+)
+
+
+def _check_fit(fit: str) -> None:
+    from .domain.dub import FIT_MODES
+
+    if fit not in FIT_MODES:
+        _fail(f"Modo de encaixe {fit!r} inválido; use {', '.join(FIT_MODES)}.")
 
 
 def _print_segments(project) -> None:
@@ -1571,11 +1582,20 @@ def _print_dub_result(result) -> None:
 
     console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
     console.print(f"  legenda: {result.srt_path}", markup=False, highlight=False, soft_wrap=True)
+    stretched = result.stretched
+    if stretched:
+        added = sum(r.added_seconds for r in stretched)
+        console.print(
+            f"  vídeo esticado em {len(stretched)} trecho(s), +{added:.1f} s: {result.output_seconds:.1f} s no total",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
     table = Table("fala", "início", "tradução", "fala (s)", "toca (s)", "situação", "cache")
     for r in result.report:
         table.add_row(
             r.id,
-            f"{r.start:.1f}",
+            f"{r.retimed_start if r.retimed_start is not None else r.start:.1f}",
             escape(r.text),
             f"{r.speech_seconds:.1f}",
             f"{r.played_seconds:.1f}",
@@ -1619,12 +1639,14 @@ def _prepare_dub(
     glossary: list[str] | None,
     brand: str | None,
     project_path: Path | None,
+    fit: str = "voz",
     num_speakers: int | None = None,
 ) -> tuple:
     from .pipeline.dubbing import default_project_path
 
     if speaker is not None and speaker not in SPEAKER_MODES:
         _fail(f"Modo de falante {speaker!r} inválido; use {' ou '.join(SPEAKER_MODES)}.")
+    _check_fit(fit)
     path = project_path or default_project_path(file, target)
     project = service.prepare(
         file,
@@ -1636,6 +1658,7 @@ def _prepare_dub(
         glossary=glossary or [],
         brand=brand,
         project_path=path,
+        fit_mode=fit,
         num_speakers=num_speakers,
     )
     return project, path
@@ -1661,6 +1684,7 @@ def dub_prepare(
         Path | None,
         typer.Option(help="Onde gravar o projeto (padrão: output/dublagem/<nome>.<idioma>.dub.json)."),
     ] = None,
+    fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Separa a voz, transcreve, parte em frases e traduz; grava o projeto `.dub.json` para você revisar.
@@ -1676,7 +1700,18 @@ def dub_prepare(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project, speakers
+            service,
+            file,
+            target,
+            source,
+            speaker,
+            voice,
+            keep_original,
+            glossary,
+            brand,
+            project,
+            fit,
+            speakers,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
@@ -1693,6 +1728,10 @@ def dub_render(
     ] = None,
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    fit: Annotated[
+        str | None,
+        typer.Option(help=f"{FIT_HELP} Vale só para esta geração; sem isso vale o `fit_mode` do projeto."),
+    ] = None,
     stems: Annotated[
         bool,
         typer.Option(help="Exporta também as trilhas separadas (voz dublada, fundo e voz original) em WAV."),
@@ -1711,8 +1750,12 @@ def dub_render(
 
     if zip_stems and not stems:
         raise typer.BadParameter("--zip só vale junto com --stems.", param_hint="--zip")
+    if fit is not None:
+        _check_fit(fit)
     try:
         dub = load_dub_project(project)
+        if fit is not None:
+            dub = dub.model_copy(update={"fit_mode": fit})
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         result = service.render(
             dub,
@@ -1802,6 +1845,7 @@ def dub_run(
     project: Annotated[Path | None, typer.Option(help="Onde gravar o projeto .dub.json.")] = None,
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Prepara e gera a dublagem de uma vez (é o que `dmaker dub ARQUIVO --to en` faz).
@@ -1814,7 +1858,18 @@ def dub_run(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project, speakers
+            service,
+            file,
+            target,
+            source,
+            speaker,
+            voice,
+            keep_original,
+            glossary,
+            brand,
+            project,
+            fit,
+            speakers,
         )
         _print_segments(dub)
         result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)

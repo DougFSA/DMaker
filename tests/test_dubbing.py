@@ -577,3 +577,212 @@ def test_inline_override_still_applies_when_dubbing_in_any_language(dub: DubHarn
 
     assert dub.synthesizer.requests[0].text == "Hello, today we talk about Dee Maker again."
     assert "[[" not in result.srt_path.read_text(encoding="utf-8")
+
+
+# ---------- quando a fala não cabe: esticar o vídeo ----------
+
+
+def text_taking(seconds: float, source_text: str = S1, source_seconds: float = 3.62) -> str:
+    """Uma tradução que, no ritmo do falante original, leva cerca de `seconds` (a fala sintética dura isso)."""
+    from dmaker.voice.dub_plan import natural_seconds
+
+    letters = 1
+    while natural_seconds(source_text, "a" * letters, source_seconds, "pt", "en") < seconds:
+        letters += 1
+    return "a" * letters
+
+
+def srt_starts(srt: str) -> list[float]:
+    import re
+
+    def seconds(stamp: str) -> float:
+        h, m, rest = stamp.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(rest.replace(",", "."))
+
+    return [seconds(m.group(1)) for m in re.finditer(r"(\d\d:\d\d:\d\d,\d\d\d) -->", srt)]
+
+
+def stretched_project(dub: DubHarness, mode: str, seconds: float = 5.5) -> DubProject:
+    """O projeto no `mode` com a primeira fala traduzida num texto que leva `seconds` e não cabe nos 4,8 s dela."""
+    project = dub.prepare(fit_mode=mode)
+    return project.edited("s1", text=text_taking(seconds))
+
+
+def test_the_default_fit_mode_is_the_voice_and_a_new_project_keeps_the_choice(dub: DubHarness):
+    assert dub.prepare().fit_mode == "voz"
+    chosen = dub.prepare(fit_mode="video")
+    assert chosen.fit_mode == "video"
+    assert load_dub_project(dub.project_path).fit_mode == "video"
+    assert project_summary(chosen, dub.project_path)["fit_mode"] == "video"
+
+
+def test_an_old_project_without_the_field_loads_as_voice_mode():
+    data = {"source": "a.mp4", "target_language": "en", "segments": []}
+    assert DubProject.model_validate(data).fit_mode == "voz"
+
+
+def test_video_mode_stretches_only_the_speech_that_did_not_fit_and_keeps_the_voice_natural(dub: DubHarness):
+    project = stretched_project(dub, "video")
+    result = dub.service.render(project, dub.out)
+    first, second, third = result.report
+    assert first.status == "stretched" and 1.0 < first.stretch <= 1.3 and not first.warns
+    assert first.tempo == 1.0 and first.played_seconds == pytest.approx(first.speech_seconds)
+    assert first.requested_seconds == pytest.approx(first.natural_seconds)  # o modelo fala no ritmo natural
+    assert (second.stretch, third.stretch) == (1.0, 1.0)  # as que couberam não esticam
+    assert result.stretched == [first] and result.warnings == []
+    assert result.fit_mode == "video"
+    assert "vídeo esticado" in first.message and f"{first.stretch:.2f}x" in first.message
+
+
+def test_video_mode_recodes_the_picture_and_the_output_lasts_the_plan_total(dub: DubHarness):
+    result = dub.service.render(stretched_project(dub, "video"), dub.out)
+    (command,) = dub.mix_commands()
+    args = command.args
+    assert args[args.index("-c:v") + 1] == "libx264"
+    added = result.report[0].added_seconds
+    assert added > 0.3
+    assert command.total == pytest.approx(40.0 + added, abs=1 / 30)
+    assert result.output_seconds == pytest.approx(command.total)
+    graph = dub.graph()
+    assert f"setpts=(PTS-STARTPTS)*{result.report[0].stretch:.6f}" in graph and "concat=n=3:v=1:a=0" in graph
+    assert "atempo=" in graph  # só o fundo acompanha o vídeo...
+    first_clip_chain = next(line for line in graph.split(";") if line.endswith("[dub0]"))
+    assert "atempo" not in first_clip_chain  # ...a voz dublada toca na velocidade dela
+
+
+def test_the_following_speeches_and_the_subtitles_move_by_what_the_picture_grew(dub: DubHarness):
+    project = stretched_project(dub, "video")
+    plain = dub.service.render(project.model_copy(update={"fit_mode": "voz"}), dub.out)
+    plain_starts = srt_starts(plain.srt_path.read_text(encoding="utf-8"))
+    result = dub.service.render(project, dub.out)
+    added = result.report[0].added_seconds
+    starts = srt_starts(result.srt_path.read_text(encoding="utf-8"))
+    assert starts[0] == pytest.approx(2.0)  # antes do esticado nada se move
+    assert starts[-2:] == pytest.approx([s + added for s in plain_starts[-2:]], abs=1 / 30 + 0.002)
+    assert [r.retimed_start for r in result.report[1:]] == pytest.approx(
+        [r.start + added for r in result.report[1:]], abs=1 / 30 + 0.002
+    )
+    graph = dub.graph()
+    for report in result.report[1:]:
+        assert f"adelay=delays={round(report.retimed_start * 1000)}:all=1" in graph
+
+
+def test_the_voice_mode_is_unchanged_it_squeezes_the_voice_and_never_touches_the_picture(dub: DubHarness):
+    result = dub.service.render(stretched_project(dub, "voz"), dub.out)
+    first = result.report[0]
+    assert first.stretch == 1.0 and first.status in ("squeezed", "advances") and first.tempo >= 1.0
+    assert result.stretched == [] and result.output_seconds == pytest.approx(40.0)
+    args = dub.mix_commands()[0].args
+    assert args[args.index("-c:v") + 1] == "copy"
+    assert "[vout]" not in dub.graph()
+
+
+def test_video_mode_with_every_speech_fitting_copies_the_picture_like_before(dub: DubHarness):
+    result = dub.service.render(dub.prepare(fit_mode="video"), dub.out)
+    assert result.stretched == [] and [r.status for r in result.report] == ["advances"] * 3
+    args = dub.mix_commands()[0].args
+    assert args[args.index("-c:v") + 1] == "copy" and "[vout]" not in dub.graph()
+    assert result.output_seconds == pytest.approx(40.0)
+
+
+def test_mixed_mode_accelerates_the_voice_up_to_the_cap_and_stretches_the_rest(dub: DubHarness):
+    result = dub.service.render(stretched_project(dub, "misto", seconds=6.6), dub.out)
+    first = result.report[0]
+    assert first.status == "stretched" and first.tempo == pytest.approx(1.15)
+    assert 1.0 < first.stretch <= 1.3 and first.message.startswith("acelerada 1.15x e vídeo esticado")
+    chain = next(line for line in dub.graph().split(";") if line.endswith("[dub0]"))
+    assert "atempo=1.1500" in chain
+
+
+def test_a_mild_excess_in_mixed_mode_is_solved_by_the_voice_alone(dub: DubHarness):
+    result = dub.service.render(stretched_project(dub, "misto", seconds=5.4), dub.out)
+    assert result.report[0].status == "squeezed" and result.report[0].stretch == 1.0
+    assert result.stretched == []
+
+
+def test_beyond_the_limit_the_picture_stops_at_one_point_three_and_the_report_warns(dub: DubHarness):
+    result = dub.service.render(stretched_project(dub, "video", seconds=9.0), dub.out)
+    first = result.report[0]
+    assert first.status == "overflow" and first.warns and first.stretch == 1.3
+    assert result.warnings and "Fala s1" in result.warnings[0] and "encurte a tradução" in result.warnings[0]
+    assert "atrim=duration=" in dub.graph() and "afade=t=out" in dub.graph()
+    assert result.stretched == [first]
+
+
+def test_switching_the_mode_does_not_synthesize_again_what_is_in_the_cache(dub: DubHarness):
+    project = dub.prepare()
+    dub.service.render(project, dub.out)
+    requests = len(dub.synthesizer.requests)
+    again = dub.service.render(project.model_copy(update={"fit_mode": "video"}), dub.out)
+    assert len(dub.synthesizer.requests) == requests  # fits e advances pedem a duração natural nos dois modos
+    assert again.regenerated == 0 and all(r.cached for r in again.report)
+
+
+def test_audio_without_picture_has_nothing_to_stretch_and_falls_back_to_the_voice_mode(tmp_path: Path):
+    audio = DubHarness(tmp_path)
+    audio.base.src.rename(tmp_path / "radio.wav")
+    audio.src = tmp_path / "radio.wav"
+    prober = lambda path: __import__("tests.test_speech_fix", fromlist=["video_info"]).video_info(  # noqa: E731
+        path, 40.0, has_video=False
+    )
+    audio.base.service.prober = audio.service.prober = prober
+    project = audio.service.prepare(
+        audio.src, "en", project_path=tmp_path / "radio.en.dub.json", fit_mode="video"
+    ).edited("s1", text=text_taking(5.5))
+    logged: list[str] = []
+    audio.service.log = logged.append
+    result = audio.service.render(project, tmp_path / "radio.en.m4a")
+    assert (
+        result.fit_mode == "voz" and result.stretched == [] and result.output_seconds == pytest.approx(40.0)
+    )
+    assert any("Sem vídeo para esticar" in line for line in logged)
+    assert "[vout]" not in audio.graph()
+
+
+def test_the_original_voice_stem_is_stretched_along_with_the_background(dub: DubHarness):
+    project = stretched_project(dub, "video").model_copy(update={"keep_original_db": -18.0})
+    dub.service.render(project, dub.out)
+    graph = dub.graph()
+    assert "[backgroundfull]asplit=" in graph and "[originalfull]asplit=" in graph
+    assert "volume=-18.0dB" in graph
+
+
+def test_the_result_dictionary_lists_the_stretched_speeches_and_the_final_length(dub: DubHarness):
+    from dmaker.pipeline.dubbing import report_dict, result_dict
+
+    result = dub.service.render(stretched_project(dub, "video"), dub.out)
+    summary = result_dict(result)
+    assert summary["fit_mode"] == "video" and summary["output_seconds"] > 40.0
+    assert [item["id"] for item in summary["stretched"]] == ["s1"]
+    assert summary["stretched"][0]["factor"] == pytest.approx(result.report[0].stretch, abs=1e-3)
+    assert summary["stretched"][0]["added_seconds"] > 0
+    row = report_dict(result.report[0])
+    assert row["video_stretch"] > 1.0 and row["retimed_start"] == pytest.approx(2.0)
+
+
+def test_stems_of_a_stretched_video_follow_the_new_timeline_like_the_dubbed_file(dub: DubHarness):
+    """As trilhas separadas somam de volta o arquivo dublado: com o vídeo esticado, o fundo, a voz original e as
+    falas acompanham a linha do tempo nova e a duração das trilhas é a do arquivo esticado."""
+    project = stretched_project(dub, "video")
+    result = dub.service.render(project, dub.out, stems=StemsOptions(out_dir=dub.out.parent / "trilhas"))
+
+    assert result.output_seconds > 40.0
+    assert result.stems is not None and result.stems.duration == pytest.approx(result.output_seconds)
+    (command,) = dub.labeled("trilhas")
+    assert command.total == pytest.approx(result.output_seconds)
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "[backgroundfull]asplit=" in graph and "[originalfull]asplit=" in graph
+    start_after_stretch = result.report[1].retimed_start
+    assert start_after_stretch is not None and start_after_stretch > result.report[1].start
+    assert (
+        f"adelay=delays={round(start_after_stretch * 1000)}:all=1" in graph
+    )  # a fala seguinte foi empurrada
+
+
+def test_stems_without_stretching_keep_the_original_timeline(dub: DubHarness):
+    result = dub.service.render(
+        dub.prepare(), dub.out, stems=StemsOptions(out_dir=dub.out.parent / "trilhas")
+    )
+    (command,) = dub.labeled("trilhas")
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "full]" not in graph and result.stems is not None and result.stems.duration == 40.0

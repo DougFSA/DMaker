@@ -12,15 +12,20 @@ from dmaker.voice.dub_plan import (
     MAX_MODEL_SQUEEZE,
     MAX_SEGMENT_SECONDS,
     MAX_TOTAL_SQUEEZE,
+    MAX_VIDEO_STRETCH,
     MIN_GAP_SECONDS,
+    TRUNCATION_TOLERANCE_SECONDS,
     Slot,
     natural_seconds,
     place_speech,
     plan_fit,
+    plan_video_fit,
+    plan_voice_fit,
     segment_words,
     slot_plan,
     subtitle_cues,
 )
+from dmaker.voice.speech_edit import MAX_TEMPO
 
 
 def spoken(text: str, start: float, per_word: float = 0.4, gap: float = 0.05) -> list[Word]:
@@ -182,6 +187,101 @@ def test_place_speech_truncates_what_even_the_tempo_cannot_fit():
     placement = place_speech(3.0, 2.0)
     assert placement.tempo == pytest.approx(1.15) and placement.truncated
     assert placement.played_seconds == pytest.approx(2.0)
+
+
+# ---------- desfecho no modo voz (o de sempre) ----------
+
+
+def test_voice_fit_never_touches_the_picture_and_keeps_the_known_verdicts():
+    slot = Slot(0, 0.0, 2.0, 0.5)
+    fits = plan_voice_fit(1.8, plan_fit(1.8, slot))
+    assert (fits.status, fits.tempo, fits.stretch, fits.max_seconds) == ("fits", 1.0, 1.0, None)
+    squeezed = plan_voice_fit(2.9, plan_fit(2.9, slot))
+    assert squeezed.status == "squeezed" and squeezed.tempo > 1.0 and squeezed.stretch == 1.0
+    assert squeezed.message.startswith("comprimida") or squeezed.message.startswith("acelerada")
+
+
+def test_voice_fit_cuts_and_warns_when_the_tempo_cannot_save_it():
+    slot = Slot(0, 0.0, 2.0, 0.0)
+    outcome = plan_voice_fit(4.0, plan_fit(4.0, slot))
+    assert outcome.status == "overflow" and outcome.warns and outcome.stretch == 1.0
+    assert outcome.max_seconds == pytest.approx(slot.capacity) and "encurte a tradução" in outcome.message
+
+
+# ---------- desfecho nos modos vídeo e misto ----------
+
+ROOMY = Slot(0, 10.0, 14.0, 1.0)  # 4 s de fala original e 1 s de pausa para avançar: capacidade de 5 s
+TIGHT = Slot(0, 10.0, 14.0, 0.0)
+
+
+@pytest.mark.parametrize("mode", ["video", "misto"])
+def test_a_speech_that_fits_is_never_stretched(mode):
+    inside = plan_video_fit(3.8, ROOMY, mode)
+    assert (inside.status, inside.stretch, inside.tempo, inside.max_seconds) == ("fits", 1.0, 1.0, None)
+    assert inside.played_seconds == pytest.approx(3.8)
+
+
+@pytest.mark.parametrize("mode", ["video", "misto"])
+def test_a_speech_that_advances_into_the_pause_is_not_stretched_either(mode):
+    advancing = plan_video_fit(4.8, ROOMY, mode)
+    assert advancing.status == "advances" and advancing.stretch == 1.0 and "0.8 s" in advancing.message
+
+
+def test_video_mode_keeps_the_voice_natural_and_stretches_only_what_the_pause_cannot_absorb():
+    outcome = plan_video_fit(6.0, ROOMY, "video")
+    # a voz toca 6 s: 1 s cabe na pausa seguinte, então a imagem de 4 s precisa durar 5 s
+    assert outcome.status == "stretched" and not outcome.warns
+    assert outcome.tempo == 1.0 and outcome.stretch == pytest.approx(5.0 / 4.0)
+    assert outcome.played_seconds == pytest.approx(6.0) and outcome.max_seconds is None
+    assert "1.25x" in outcome.message and "+1.0 s" in outcome.message
+
+
+def test_video_mode_without_room_stretches_to_the_whole_speech():
+    outcome = plan_video_fit(5.0, TIGHT, "video")
+    assert outcome.stretch == pytest.approx(1.25) and outcome.tempo == 1.0
+
+
+def test_video_mode_stretches_exactly_up_to_the_limit_and_warns_beyond_it():
+    at_limit = plan_video_fit(4.0 * MAX_VIDEO_STRETCH, TIGHT, "video")
+    assert at_limit.status == "stretched" and at_limit.stretch == pytest.approx(MAX_VIDEO_STRETCH)
+    beyond = plan_video_fit(4.0 * MAX_VIDEO_STRETCH + 1.0, TIGHT, "video")
+    assert beyond.status == "overflow" and beyond.warns and beyond.stretch == MAX_VIDEO_STRETCH
+    assert beyond.tempo == 1.0  # nem aí a voz acelera: o fim é cortado e o relatório avisa
+    assert beyond.max_seconds == pytest.approx(4.0 * MAX_VIDEO_STRETCH)
+    assert "encurte a tradução" in beyond.message and "1.30x" in beyond.message
+
+
+def test_a_negligible_excess_is_rounding_not_a_reason_to_stretch():
+    assert plan_video_fit(5.0 + TRUNCATION_TOLERANCE_SECONDS / 2, ROOMY, "video").stretch == 1.0
+
+
+def test_mixed_mode_speeds_up_the_voice_first_and_stretches_only_the_rest():
+    # 5,75 s numa capacidade de 5 s: 1,15x resolve, sem esticar nada
+    only_tempo = plan_video_fit(5.75, ROOMY, "misto")
+    assert only_tempo.status == "squeezed" and only_tempo.stretch == 1.0
+    assert only_tempo.tempo == pytest.approx(1.15)
+    # 6,8 s: a voz acelera ao teto (1,15x -> 5,91 s) e a imagem estica o que a pausa não absorve
+    outcome = plan_video_fit(6.8, ROOMY, "misto")
+    heard = 6.8 / MAX_TEMPO
+    assert outcome.status == "stretched" and outcome.tempo == pytest.approx(MAX_TEMPO)
+    assert outcome.played_seconds == pytest.approx(heard)
+    assert outcome.stretch == pytest.approx((heard - 1.0) / 4.0)
+    assert outcome.message.startswith("acelerada 1.15x e vídeo esticado")
+
+
+def test_mixed_mode_stretches_less_than_video_mode_for_the_same_speech():
+    assert plan_video_fit(7.0, ROOMY, "misto").stretch < plan_video_fit(7.0, ROOMY, "video").stretch
+
+
+def test_mixed_mode_cuts_beyond_the_limit_without_accelerating_more_than_the_tempo_cap():
+    outcome = plan_video_fit(12.0, ROOMY, "misto")
+    assert outcome.status == "overflow" and outcome.tempo == pytest.approx(MAX_TEMPO)
+    assert outcome.stretch == MAX_VIDEO_STRETCH
+    assert outcome.max_seconds == pytest.approx(4.0 * MAX_VIDEO_STRETCH + 1.0)
+
+
+def test_the_stretch_limit_is_one_point_three():
+    assert MAX_VIDEO_STRETCH == 1.3
 
 
 # ---------- legenda ----------

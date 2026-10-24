@@ -16,6 +16,12 @@ from pydantic import Field, field_validator, model_validator
 from .spec import Strict
 
 SpeakerMode = Literal["per_speaker", "per_segment", "single"]
+# O que fazer quando a fala traduzida não cabe no tempo da original:
+# voz: avança na pausa, comprime na síntese e acelera a voz (o vídeo nunca muda);
+# video: a voz fica na velocidade natural e o vídeo estica naquele trecho;
+# misto: a voz acelera até o limite do `atempo` e o vídeo estica no que ainda faltar.
+FitMode = Literal["voz", "video", "misto"]
+FIT_MODES: tuple[str, ...] = ("voz", "video", "misto")
 PROJECT_SUFFIX = ".dub.json"
 
 
@@ -86,6 +92,7 @@ class DubProject(Strict):
     speaker_mode: SpeakerMode = "per_segment"
     speakers: list[DubSpeaker] = Field(default_factory=list)  # preenchido pela diarização (modo per_speaker)
     voice: str | None = None  # voz da biblioteca no lugar do clone
+    fit_mode: FitMode = "voz"  # o padrão mantém o comportamento de sempre: a voz se ajusta, o vídeo não
     translator_model: str = ""
     glossary: list[str] = Field(
         default_factory=list

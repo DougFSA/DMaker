@@ -560,6 +560,136 @@ def test_dub_mix_places_each_speech_over_the_background_and_keeps_length_and_vid
     assert _segment_db(out, 4.2, 5.8) > -50  # e o fundo segue até o fim
 
 
+def _decoded_audio(path: Path, tmp_path: Path):
+    """O áudio do arquivo como amostras mono a 48 kHz, para medir quando algo começa."""
+    from dmaker.media import ffmpeg
+    from dmaker.media.wavio import read_wav
+
+    wav = tmp_path / f"{path.stem}.medida.wav"
+    ffmpeg.run(["-i", str(path), "-vn", "-ac", "1", "-ar", "48000", str(wav)], quiet=True)
+    return read_wav(wav)
+
+
+def _onset_seconds(samples, rate: int, after: float, threshold: float = 0.1) -> float:
+    """Primeiro instante depois de `after` em que o RMS de 5 ms passa de `threshold` (o hum de fundo fica abaixo)."""
+    import numpy as np
+
+    window = int(rate * 0.005)
+    for at in range(int(after * rate), len(samples) - window, window // 2):
+        if float(np.sqrt(np.mean(samples[at : at + window] ** 2))) > threshold:
+            return at / rate
+    raise AssertionError(f"nada acima de {threshold} depois de {after} s")
+
+
+def _flash_seconds(path: Path, tmp_path: Path, fps: float) -> tuple[float, float]:
+    """Início e fim (segundos) do clarão branco do vídeo, medidos quadro a quadro pela luminância média."""
+    from dmaker.media import ffmpeg
+
+    raw = tmp_path / f"{path.stem}.luma"
+    ffmpeg.run(
+        ["-i", str(path), "-vf", "scale=1:1,format=gray", "-f", "rawvideo", str(raw)],
+        quiet=True,
+    )
+    bright = [index for index, value in enumerate(raw.read_bytes()) if value > 128]
+    return bright[0] / fps, (bright[-1] + 1) / fps
+
+
+def test_dub_mix_stretches_one_stretch_of_the_video_and_keeps_audio_voice_and_picture_aligned(tmp_path):
+    """Vídeo de 8 s a 25 fps com um clarão branco em 5,0 s; o fundo tem um bipe de 1320 Hz no mesmo instante e a
+    fala marcada (880 Hz) entra em 6,5 s. O trecho de 2 a 6 s estica 1,25x: o arquivo passa a durar 9 s, o
+    clarão e o bipe caem juntos em 5,75 s com o tom intacto, e a fala, depois do trecho, começa em 7,5 s."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_command
+    from dmaker.media import ffmpeg
+    from dmaker.media.ffmpeg import SubprocessRunner
+    from dmaker.media.wavio import write_wav, write_wav_channels
+    from dmaker.voice.dub_retime import StretchWindow, plan_retime, retimed_span
+
+    fps = 25.0
+    source = tmp_path / "original.mp4"
+    ffmpeg.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:r=25,"
+            "drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='between(t,5,5.2)'",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=220:sample_rate=48000",
+            "-t",
+            "8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        quiet=True,
+    )
+    rate = 48000
+    t = np.arange(8 * rate) / rate
+    bed = (0.05 * np.sin(2 * np.pi * 110 * t)).astype(np.float32)
+    beep = (t >= 5.0) & (t < 5.2)
+    bed[beep] += (0.3 * np.sin(2 * np.pi * 1320 * t[beep])).astype(np.float32)
+    background = write_wav_channels(tmp_path / "fundo.wav", np.stack([bed, bed], axis=1), rate)
+    speech_t = np.arange(int(0.5 * 24000)) / 24000
+    speech = write_wav(
+        tmp_path / "fala.wav", (0.3 * np.sin(2 * np.pi * 880 * speech_t)).astype(np.float32), 24000
+    )
+
+    plan = plan_retime([StretchWindow(2.0, 6.0, 1.25)], probe(source).duration, fps=fps)
+    speech_start, _ = retimed_span(plan, 6.5, 0.5)
+    clips = [DubClip(speech, speech_start, gain_db=0.0)]
+    out = tmp_path / "esticado.mp4"
+    graph_file = tmp_path / "grafo.txt"
+    mix = dub_mix_command(
+        source, background, clips, out, graph_file, probe(source).duration, True, retime=plan, fps=fps
+    )
+    graph_file.write_text(mix.graph, encoding="utf-8")
+    SubprocessRunner(quiet=True).run(mix.command)
+
+    info = probe(out)
+    assert plan.total_seconds == pytest.approx(9.0)
+    assert abs(info.duration - plan.total_seconds) <= 1 / fps  # a soma do plano, com 1 quadro de tolerância
+    assert info.video_codec == "h264" and (info.width, info.height) == (320, 240)
+    assert info.has_audio and info.sample_rate == 48000
+
+    flash_on, flash_off = _flash_seconds(out, tmp_path, fps)
+    assert flash_on == pytest.approx(5.75, abs=1 / fps)  # 2 + (5 - 2) * 1,25
+    assert flash_off - flash_on == pytest.approx(0.25, abs=2 / fps)  # 0,2 s de clarão viram 0,25 s
+
+    samples, sample_rate = _decoded_audio(out, tmp_path)
+    beep_on = _onset_seconds(samples, sample_rate, after=4.0)
+    assert beep_on == pytest.approx(5.75, abs=0.04)  # o bipe acompanha o clarão
+    assert abs(beep_on - flash_on) <= 0.04 + 1 / fps
+    speech_on = _onset_seconds(samples, sample_rate, after=6.6)
+    assert speech_on == pytest.approx(7.5, abs=0.04)  # a fala marcada começa no tempo planejado
+
+    first = int(5.80 * sample_rate)
+    tone = samples[first : first + int(0.15 * sample_rate)]
+    spectrum = np.abs(np.fft.rfft(tone * np.hanning(len(tone))))
+    peak = np.fft.rfftfreq(len(tone), 1 / sample_rate)[int(np.argmax(spectrum))]
+    assert abs(peak - 1320) < 30  # o atempo estica sem mudar o tom
+
+
+def test_dub_mix_without_a_stretched_piece_still_copies_the_picture(tmp_path):
+    from dmaker.filtergraph.dub import dub_mix_command
+    from dmaker.voice.dub_retime import IDENTITY
+
+    mix = dub_mix_command(
+        tmp_path / "v.mp4", tmp_path / "f.wav", [], tmp_path / "o.mp4", tmp_path / "g.txt", 8.0, True,
+        retime=IDENTITY, fps=25.0,
+    )  # fmt: skip
+    assert mix.command.args[mix.command.args.index("-c:v") + 1] == "copy"
+
+
 def test_dub_stems_have_the_video_duration_and_sum_to_the_mix_before_the_finish(tmp_path):
     """Fundo curto (5,9 s) e voz original longa (6,1 s) saem em 6 s exatos; a fala B (cortada em 0,5 s) e a fala
     A tocam onde a mixagem as põe; voz dublada + fundo reproduzem a mixagem sem limitador, a menos do
@@ -621,3 +751,61 @@ def test_dub_stems_have_the_video_duration_and_sum_to_the_mix_before_the_finish(
     difference = summed - mix[: len(summed)]
     assert abs(len(mix) - len(summed)) <= 1
     assert float(np.abs(difference).max()) < 2e-4  # ~6 passos de 16 bits (-74 dB); o limitador não participa
+
+
+def test_dub_stems_of_a_stretched_video_follow_the_new_timeline_with_the_pitch_intact(tmp_path):
+    """Fundo de 8 s com um bipe de 1320 Hz em 5,0 s e o trecho de 2 a 6 s esticado 1,25x: as trilhas saem com 9 s
+    exatos, o bipe cai em 5,75 s (onde a imagem está) e continua em 1320 Hz; a mixagem sem limitador do arquivo
+    esticado e a soma da voz dublada com o fundo continuam iguais."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_graph
+    from dmaker.filtergraph.dub_stems import StemOutputs, dub_stems_command
+    from dmaker.media.ffmpeg import FFmpegCommand, SubprocessRunner
+    from dmaker.media.wavio import read_wav_channels, wav_duration, write_wav, write_wav_channels
+    from dmaker.voice.dub_retime import StretchWindow, plan_retime, retimed_span
+
+    rate = 48000
+    t = np.arange(8 * rate) / rate
+    bed = (0.05 * np.sin(2 * np.pi * 110 * t)).astype(np.float32)
+    beep = (t >= 5.0) & (t < 5.2)
+    bed[beep] += (0.3 * np.sin(2 * np.pi * 1320 * t[beep])).astype(np.float32)
+    background = write_wav_channels(tmp_path / "fundo-in.wav", np.stack([bed, bed], axis=1), rate)
+    original = write_wav_channels(tmp_path / "voz-in.wav", np.stack([bed, bed], axis=1), rate)
+    speech_t = np.arange(int(0.5 * 24000)) / 24000
+    speech = write_wav(
+        tmp_path / "fala.wav", (0.3 * np.sin(2 * np.pi * 880 * speech_t)).astype(np.float32), 24000
+    )
+    plan = plan_retime([StretchWindow(2.0, 6.0, 1.25)], 8.0, fps=25.0)
+    speech_start, _ = retimed_span(plan, 6.5, 0.5)
+    clips = [DubClip(speech, speech_start, gain_db=0.0)]
+    runner = SubprocessRunner(quiet=True)
+
+    outputs = StemOutputs(tmp_path / "voz-dublada.wav", tmp_path / "fundo.wav", tmp_path / "voz-original.wav")
+    built = dub_stems_command(background, original, clips, outputs, tmp_path / "trilhas.txt", 8.0, plan)
+    (tmp_path / "trilhas.txt").write_text(built.graph, encoding="utf-8")
+    runner.run(built.command)
+
+    for path in (outputs.voice_dubbed, outputs.background, outputs.voice_original):
+        assert wav_duration(path) == pytest.approx(9.0, abs=1 / rate)
+    background_out, _ = read_wav_channels(outputs.background)
+    mono = background_out[:, 0]
+    loud = np.flatnonzero(np.abs(mono) > 0.2)
+    assert loud[0] / rate == pytest.approx(5.75, abs=0.04)  # o bipe acompanha a imagem esticada
+    window = mono[int(5.80 * rate) : int(5.80 * rate) + int(0.15 * rate)]
+    spectrum = np.abs(np.fft.rfft(window * np.hanning(len(window))))
+    assert abs(np.fft.rfftfreq(len(window), 1 / rate)[int(np.argmax(spectrum))] - 1320) < 30
+
+    voice_dubbed, _ = read_wav_channels(outputs.voice_dubbed)
+    assert np.flatnonzero(np.abs(voice_dubbed[:, 0]) > 0.1)[0] / rate == pytest.approx(7.5, abs=0.04)
+
+    premix = tmp_path / "premix.wav"
+    graph = dub_mix_graph(clips, 1, 0, plan.total_seconds, retime=plan, limit_peaks=False)
+    (tmp_path / "premix.txt").write_text(graph, encoding="utf-8")
+    args = ["-i", str(background), "-i", str(speech)]
+    runner.run(
+        FFmpegCommand([*args, "-/filter_complex", str(tmp_path / "premix.txt"), "-map", "[out]", str(premix)])
+    )
+    mix, _ = read_wav_channels(premix)
+    summed = voice_dubbed + background_out
+    assert float(np.abs(summed - mix[: len(summed)]).max()) < 2e-4

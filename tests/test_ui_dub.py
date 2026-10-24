@@ -13,7 +13,7 @@ from dmaker.domain.dub import load_dub_project
 from dmaker.ui import server
 from dmaker.ui.voice_routes import VoiceServices, get_voice_services
 from dmaker.voice.lexicon_store import LexiconStore
-from tests.test_dubbing import S1, DubHarness
+from tests.test_dubbing import S1, DubHarness, text_taking
 
 
 @pytest.fixture
@@ -339,6 +339,44 @@ def test_a_zip_outside_the_dubbing_folder_is_not_served(client, tmp_path: Path):
 
 
 # ---------- arquivos ----------
+
+
+def test_prepare_keeps_the_fit_mode_and_the_summary_shows_it(client, dub: DubHarness):
+    result = prepared(client, dub, fit_mode="video")
+    assert result["fit_mode"] == "video"
+    assert load_dub_project(Path(result["project"])).fit_mode == "video"
+    assert client.get("/api/dub/project", params={"path": result["project"]}).json()["fit_mode"] == "video"
+    assert prepared(client, dub)["fit_mode"] == "voz"  # sem escolher, o comportamento de sempre
+    bad = client.post(
+        "/api/dub/prepare",
+        json={"path": str(dub.src), "target_language": "en", "fit_mode": "esticar"},
+    )
+    assert bad.status_code == 422
+
+
+def test_update_saves_the_fit_mode_and_keeps_it_when_the_client_does_not_send_it(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    body = {"project": project, "segments": []}
+    saved = client.put("/api/dub/project", json={**body, "fit_mode": "misto"})
+    assert saved.status_code == 200 and saved.json()["fit_mode"] == "misto"
+    assert load_dub_project(Path(project)).fit_mode == "misto"
+    assert client.put("/api/dub/project", json=body).json()["fit_mode"] == "misto"  # cliente antigo
+    assert client.put("/api/dub/project", json={**body, "fit_mode": "x"}).status_code == 422
+
+
+def test_render_in_video_mode_returns_the_stretched_speeches_and_the_final_length(client, dub: DubHarness):
+    project = prepared(client, dub, fit_mode="video")["project"]
+    client.put(
+        "/api/dub/project", json={"project": project, "segments": [{"id": "s1", "text": text_taking(5.5)}]}
+    )
+    job = finished(client.post("/api/dub/render", json={"project": project}).json()["job_id"])
+    assert job.status == "done", job.error
+    result = job.result
+    assert result["fit_mode"] == "video" and result["output_seconds"] > 40.0 and result["warnings"] == []
+    assert [item["id"] for item in result["stretched"]] == ["s1"]
+    first = result["report"][0]
+    assert first["status"] == "stretched" and first["video_stretch"] > 1.0 and first["tempo"] == 1.0
+    assert result["report"][1]["video_stretch"] == 1.0
 
 
 def test_file_route_only_serves_srt_and_projects_from_the_dubbing_folder(

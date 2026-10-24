@@ -65,3 +65,26 @@ def test_command_writes_three_pcm_wavs_in_one_pass_with_the_graph_in_a_file():
 def test_without_dubbed_clips_there_is_no_voice_track_to_export():
     with pytest.raises(ValueError, match="Sem falas dubladas"):
         dub_stems_command(Path("bg.wav"), Path("vo.wav"), [], OUTPUTS, Path("g.txt"), 30.0)
+
+
+def test_a_stretched_video_retimes_background_and_original_voice_and_fixes_the_new_duration():
+    from dmaker.voice.dub_retime import StretchWindow, plan_retime
+
+    plan = plan_retime([StretchWindow(10.0, 14.0, 1.25)], 30.0, fps=25.0)  # 30 s viram 31 s
+    graph = dub_stems_graph(CLIPS, plan.total_seconds, plan)
+    lines = graph.split(";")
+    assert any("[backgroundfull]asplit=3" in line for line in lines)
+    assert any("[originalfull]asplit=3" in line for line in lines)
+    assert graph.count("atempo=0.800000") == 2  # fundo e voz original; a fala dublada já vem na posição nova
+    assert graph.count("apad=whole_len=1488000,atrim=end_sample=1488000") == 3  # 31 s a 48 kHz
+    assert dub_stems_graph(CLIPS, 30.0, None) == dub_stems_graph(CLIPS, 30.0)
+
+
+def test_the_command_takes_the_duration_of_the_retime_plan():
+    from dmaker.voice.dub_retime import IDENTITY, StretchWindow, plan_retime
+
+    plan = plan_retime([StretchWindow(10.0, 14.0, 1.25)], 30.0, fps=25.0)
+    built = dub_stems_command(Path("bg.wav"), Path("vo.wav"), CLIPS, OUTPUTS, Path("g.txt"), 30.0, plan)
+    assert built.command.total == pytest.approx(31.0) and "whole_len=1488000" in built.graph
+    same = dub_stems_command(Path("bg.wav"), Path("vo.wav"), CLIPS, OUTPUTS, Path("g.txt"), 30.0, IDENTITY)
+    assert same.command.total == 30.0 and "full]" not in same.graph

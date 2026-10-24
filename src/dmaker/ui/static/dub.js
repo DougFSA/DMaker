@@ -16,7 +16,8 @@
  * window.DMakerDub:
  *   init()      chamado por app.js ao terminar de carregar o estado
  *   onShow()    chamado por app.js quando a aba Voz aparece (atualiza arquivos do projeto, vozes e projetos salvos)
- *   pure        parseGlossary, parseKeepDb, parseSpeakerCount, segmentEdits, describeResult, describeStems, statusLabel, segmentRowsHtml
+ *   pure        parseGlossary, parseKeepDb, parseSpeakerCount, segmentEdits, describeResult, describeStretch, describeStems,
+ *               statusLabel, segmentRowsHtml
  */
 (function () {
   const UPLOAD_VALUE = "upload";
@@ -24,6 +25,7 @@
     fits: "cabe",
     advances: "avança na pausa",
     squeezed: "comprimida",
+    stretched: "vídeo esticado",
     overflow: "não coube",
     empty: "sem tradução",
   };
@@ -88,7 +90,16 @@
     const made = result.regenerated;
     const seconds = Object.values(result.timings || {}).reduce((sum, value) => sum + value, 0);
     const reused = total - made;
-    return `${made} fala(s) sintetizada(s) agora e ${reused} reaproveitada(s) do cache, em ${seconds.toFixed(0)} s.`;
+    const base = `${made} fala(s) sintetizada(s) agora e ${reused} reaproveitada(s) do cache, em ${seconds.toFixed(0)} s.`;
+    return base + describeStretch(result.stretched, result.output_seconds);
+  }
+
+  /** Frase sobre o vídeo esticado (vazia quando nada foi esticado): quantos trechos, quantos segundos a mais e a duração final. */
+  function describeStretch(stretched, outputSeconds) {
+    if (!stretched || !stretched.length) return "";
+    const added = stretched.reduce((sum, item) => sum + item.added_seconds, 0);
+    const total = outputSeconds ? ` O vídeo final tem ${outputSeconds.toFixed(1)} s.` : "";
+    return ` Vídeo esticado em ${stretched.length} trecho(s), ${added.toFixed(1)} s a mais.${total}`;
   }
 
   function escapeHtml(value) {
@@ -238,6 +249,7 @@
     el("dub-project-summary").textContent = `${project.segments.length} fala(s), ${project.source_language} para ${project.target_language}.${model}${people} Corrija o que precisar; as traduções travadas não mudam ao traduzir de novo.`;
     el("dub-keep").value = project.keep_original_db === null || project.keep_original_db === undefined ? "" : project.keep_original_db;
     el("dub-speaker").value = project.speaker_mode;
+    el("dub-fit").value = project.fit_mode || "voz";
     updateSpeakerFields();
     el("dub-voice").value = project.voice || "";
     el("dub-project-block").hidden = false;
@@ -259,6 +271,7 @@
       segments: segmentEdits(collectRows()),
       keep_original_db: parseKeepDb(el("dub-keep").value),
       speaker_mode: el("dub-speaker").value,
+      fit_mode: el("dub-fit").value,
       voice: el("dub-voice").value || null,
     };
     const saved = await api.put("/api/dub/project", body);
@@ -274,6 +287,7 @@
       source_language: el("dub-from").value,
       target_language: el("dub-to").value,
       speaker_mode: el("dub-speaker").value,
+      fit_mode: el("dub-fit").value,
       num_speakers: el("dub-speaker").value === "per_speaker" ? parseSpeakerCount(el("dub-speaker-count").value) : null,
       voice: el("dub-voice").value || null,
       keep_original_db: parseKeepDb(el("dub-keep").value),
@@ -365,7 +379,8 @@
       const row = el("dub-segments").querySelector(`.dub-row[data-id="${item.id}"]`);
       if (!row) return;
       const status = row.querySelector(".dub-status");
-      status.textContent = `${statusLabel(item.status)}${item.cached ? "" : " · nova"}`;
+      const stretch = item.video_stretch > 1 ? ` ${item.video_stretch.toFixed(2)}x` : "";
+      status.textContent = `${statusLabel(item.status)}${stretch}${item.cached ? "" : " · nova"}`;
       status.title = item.message;
       status.classList.toggle("dub-status-warn", item.status === "overflow");
     });
@@ -506,6 +521,7 @@
       parseSpeakerCount,
       segmentEdits,
       describeResult,
+      describeStretch,
       describeStems,
       statusLabel,
       segmentRowsHtml,
