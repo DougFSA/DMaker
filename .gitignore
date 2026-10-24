@@ -34,3 +34,9 @@ assets/voices/
 
 # projetos de vídeo (mídia pesada e dados de clientes ficam só na máquina)
 projects/
+
+# interface Vue: dependências e artefato de build (npm run build gera src/dmaker/ui/dist)
+frontend/node_modules/
+src/dmaker/ui/dist/
+# o componente "projects" do front não é a pasta de projetos de vídeo
+!frontend/src/components/projects/

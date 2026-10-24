@@ -40,7 +40,7 @@ dmaker-mcp = "dmaker.mcp_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dmaker = ["py.typed", "ui/static/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md"]
+dmaker = ["py.typed", "ui/static/*", "ui/dist/*", "ui/dist/assets/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

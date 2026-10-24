@@ -236,6 +236,9 @@ da `main` e funciona. Vai para o `dmaker-apurador`, numerado:
    `dmaker ui`, o `dmaker mcp` nem render dele**: no Windows, um `dmaker.exe` em
    uso impede o pip de substituí-lo. Se der erro de arquivo em uso, pare e peça
    que ele feche, em vez de matar o processo.
+   **Interface nova (Vue):** o `src/dmaker/ui/dist/` não vai para o git, então o
+   release **roda o build do front** antes do smoke: `cd frontend; npm ci; npm run build`.
+   Sem o `dist`, `dmaker ui` continua servindo a interface clássica em `/`.
 2. Smoke: `dmaker --help`, `dmaker presets` e `dmaker doctor` (saída de exit
    code 0, e `doctor` sem item vermelho novo). `dmaker --version` deve mostrar a
    versão do pacote.

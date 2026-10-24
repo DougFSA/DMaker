@@ -36,6 +36,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Added
 
+- **DMK-20** (fase 1): interface nova em Vue com visual próprio, telas de Projetos e Saídas e jobs ao vivo; a interface atual continua em /classica
 - **DMK-5**: trocar a voz de uma gravação inteira por uma voz da biblioteca,
   mantendo ritmo, entonação e o fundo (`dmaker voice convert`, ferramenta MCP
   `convert_voice` e seção "Trocar voz" na aba Voz).
@@ -63,6 +64,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ### Pré-requisitos na máquina
 
+- **DMK-20**: para ver a interface nova, Node.js instalado e `cd frontend; npm ci; npm run build` (gera `src/dmaker/ui/dist/`); sem o build, `dmaker ui` segue com a interface atual em `/`
 - **DMK-5**: os pesos do conversor de timbre OpenVoice V2 (MIT, 131 MB) baixam
   sozinhos para `cache/models/openvoice` na primeira troca de voz, com versão e
   SHA-256 fixados. Nenhum pacote novo do pip: o conversor usa o `torch` e o
