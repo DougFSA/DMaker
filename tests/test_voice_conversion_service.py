@@ -18,6 +18,7 @@ from dmaker.pipeline.voice_conversion import (
 )
 from dmaker.voice.library import VoiceNotFoundError
 from tests.test_speech_fix import Harness, video_info
+from tests.test_voice_watermark import FakeWatermarker
 
 MODEL_RATE = 22050
 
@@ -42,9 +43,17 @@ class FakeConverter:
 
 
 class ServiceHarness(Harness):
-    def __init__(self, tmp_path: Path, duration: float = 40.0, has_video: bool = True, factor: float = 1.0):
+    def __init__(
+        self,
+        tmp_path: Path,
+        duration: float = 40.0,
+        has_video: bool = True,
+        factor: float = 1.0,
+        watermarker: FakeWatermarker | None = None,
+    ):
         super().__init__(tmp_path, duration=duration, has_video=has_video)
         self.converter = FakeConverter(factor)
+        self.watermarker = watermarker
         self.conversion = VoiceConversionService(
             self.converter,
             self.isolation,
@@ -52,14 +61,17 @@ class ServiceHarness(Harness):
             self.synthesizer,
             self.runner,
             prober=lambda path: video_info(path, duration, has_video),
+            watermarker=watermarker,
         )
         self.voice_seconds: float | None = None  # duração da fala convertida entregue ao ffmpeg
+        self.voice_offset: float | None = None  # nível médio da fala convertida entregue ao ffmpeg
 
     def _on_run(self, command) -> None:
         super()._on_run(command)
         if command.label == "troca de voz":
             voice_file = Path(command.args[len(command.args) - 1 - command.args[::-1].index("-i") + 1])
             self.voice_seconds = wav_duration(voice_file)
+            self.voice_offset = float(np.mean(read_wav(voice_file)[0]))
 
     def swap_command(self) -> list[str]:
         """O único comando ffmpeg do serviço (a separação é falsa e não usa o runner)."""
@@ -232,3 +244,45 @@ def test_missing_file_unknown_voice_and_silent_media_fail_before_any_work(
     with pytest.raises(ValueError, match="não tem áudio"):
         harness.conversion.convert(harness.request())
     assert harness.isolation.calls == [] and harness.converter.calls == []
+
+
+# ---------- marca d'água (DMK-7) na fala convertida ----------
+
+
+def test_converted_voice_gets_the_same_watermark_as_the_narration(tmp_path: Path, monkeypatch):
+    """A fala convertida é voz gerada por IA: o marcador injetado a recebe inteira, antes de ir ao ffmpeg."""
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
+    marker = FakeWatermarker()
+    marked = ServiceHarness(tmp_path / "media", watermarker=marker)
+    marked.conversion.convert(marked.request())
+
+    assert len(marker.embedded) == 1  # uma passada sobre o stem convertido inteiro, não por bloco
+    assert marker.embedded[0] == pytest.approx(40.0 * MODEL_RATE, abs=MODEL_RATE)
+    assert marked.voice_offset == pytest.approx(
+        FakeWatermarker.OFFSET, abs=0.01
+    )  # o que o ffmpeg recebeu é a fala marcada
+
+
+def test_without_a_watermarker_the_conversion_follows_the_narration_switch(tmp_path: Path, monkeypatch):
+    """Sem marcador injetado vale o padrão da narração; a suíte roda com DMAKER_WATERMARK=0, então não marca."""
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
+    plain = ServiceHarness(tmp_path / "media")
+    assert plain.conversion.watermarker.identity == ""  # NullWatermarker: DMAKER_WATERMARK=0
+    plain.conversion.convert(plain.request())
+    assert plain.voice_offset == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_production_service_hands_the_watermarker_to_the_conversion(tmp_path: Path):
+    from dmaker.pipeline.voice_conversion import default_voice_conversion_service
+
+    marker = FakeWatermarker()
+    harness = Harness(tmp_path / "media")
+    service = default_voice_conversion_service(
+        harness.runner,
+        library=harness.library,
+        isolation=harness.isolation,
+        synthesizer=harness.synthesizer,
+        converter=FakeConverter(),
+        watermarker=marker,
+    )
+    assert service.watermarker is marker

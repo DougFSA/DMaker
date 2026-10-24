@@ -62,6 +62,14 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   ao mesmo tempo. Os dados passam a morar em `DMAKER_DATA_DIR` (padrão: a raiz), e um gancho de auditoria
   reprova qualquer teste que escreva em `cache/`, `output/`, `projects/`, `assets/voices/` ou no léxico real.
 
+### Chore
+
+- **DMK-5, DMK-7, DMK-17**: ligações entre os cards da v1 depois de juntos: a troca de voz passa a levar a
+  marca d'água (mesmo `DMAKER_WATERMARK=0`), o Kokoro e o OpenVoice usam o download com hash de
+  `media/downloads.py`, o gerenciador de modelos conhece AudioSeal, separação de falantes e OpenVoice (não
+  aparecem mais como sobra), as trilhas separadas da dublagem seguem o vídeo esticado e `.claude/worktrees/`
+  sai do git.
+
 ### Pré-requisitos na máquina
 
 - **DMK-20**: para ver a interface nova, Node.js instalado e `cd frontend; npm ci; npm run build` (gera `src/dmaker/ui/dist/`); sem o build, `dmaker ui` segue com a interface atual em `/`

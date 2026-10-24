@@ -24,11 +24,35 @@ def resolve_fetcher(dotted: str) -> Fetcher:
 
 
 def fetch_kokoro(models_dir: Path, variant: str) -> None:
-    from ..voice.kokoro import MODEL_FILES, VOICES_FILE, ensure_file
+    from ..media.downloads import ensure_file
+    from ..voice.kokoro import MODEL_FILES, VOICES_FILE
 
     folder = models_dir / "kokoro"
     ensure_file(folder, MODEL_FILES[variant])
     ensure_file(folder, VOICES_FILE)
+
+
+def fetch_audioseal(models_dir: Path, variant: str) -> None:
+    """Os pesos da marca d'água (gerador e detector), pelo mesmo caminho que a primeira marca usaria."""
+    from ..voice.watermark import AudioSealWatermarker
+
+    AudioSealWatermarker(models_dir=models_dir).preload()
+
+
+def fetch_diarization(models_dir: Path, variant: str) -> None:
+    """Os dois arquivos que a separação de falantes usa, conferidos por tamanho e SHA-256."""
+    from ..media.diarization import ensure_models
+
+    ensure_models(models_dir / "diarization")
+
+
+def fetch_openvoice(models_dir: Path, variant: str) -> None:
+    from ..media.downloads import ensure_file
+    from ..voice.openvoice_converter import CHECKPOINT, CONFIG
+
+    folder = models_dir / "openvoice"
+    ensure_file(folder, CONFIG)
+    ensure_file(folder, CHECKPOINT)
 
 
 def fetch_omnivoice(models_dir: Path, variant: str) -> None:

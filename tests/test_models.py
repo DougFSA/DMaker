@@ -128,6 +128,58 @@ def test_registry_paths_match_the_folders_the_engines_really_use():
         assert spec.paths == (matting.model_path(name, models).relative_to(models).as_posix(),)
 
 
+def test_registry_has_the_weights_of_the_voice_cards_and_they_match_their_engines(tmp_path):
+    """AudioSeal, separação de falantes e OpenVoice baixam para `cache/models`; sem entrada aqui apareceriam como sobra."""
+    from dmaker.media import diarization
+    from dmaker.voice import openvoice_converter
+    from dmaker.voice.watermark import _model_cache
+
+    models = config.MODELS_DIR
+    assert {"audioseal", "diarization-sherpa", "openvoice-v2"} <= {spec.id for spec in REGISTRY}
+
+    with _model_cache(tmp_path):  # a pasta que a marca d'água usa para os pesos
+        assert find_model("audioseal").paths == (next(tmp_path.iterdir()).name,)
+
+    folder = diarization.SherpaDiarizer().models_dir.relative_to(models).as_posix()
+    used = (diarization.SEGMENTATION_MODEL, diarization.EMBEDDING_MODEL)  # só os dois arquivos em uso
+    spec = find_model("diarization-sherpa")
+    assert spec.paths == tuple(f"{folder}/{remote.name}" for remote in used)
+    assert spec.expected_size == sum(remote.size for remote in used)
+
+    folder = openvoice_converter.OpenVoiceConverter().models_dir.relative_to(models).as_posix()
+    weights = (openvoice_converter.CHECKPOINT, openvoice_converter.CONFIG)
+    spec = find_model("openvoice-v2")
+    assert set(spec.paths) == {f"{folder}/{remote.name}" for remote in weights}
+    assert spec.expected_size == sum(remote.size for remote in weights)
+
+
+def test_the_fetchers_of_the_voice_cards_ask_each_engine_for_its_own_files(tmp_path, monkeypatch):
+    from dmaker.media import diarization
+    from dmaker.pipeline import model_fetchers
+    from dmaker.voice import openvoice_converter
+    from dmaker.voice.watermark import AudioSealWatermarker
+
+    asked: list[tuple] = []
+    monkeypatch.setattr(
+        AudioSealWatermarker, "preload", lambda self: asked.append(("audioseal", self.models_dir))
+    )
+    monkeypatch.setattr(diarization, "ensure_models", lambda folder: asked.append(("diarization", folder)))
+    monkeypatch.setattr(
+        "dmaker.media.downloads.ensure_file", lambda folder, remote, *_: asked.append((remote.name, folder))
+    )
+
+    model_fetchers.fetch_audioseal(tmp_path, "")
+    model_fetchers.fetch_diarization(tmp_path, "")
+    model_fetchers.fetch_openvoice(tmp_path, "")
+
+    assert asked == [
+        ("audioseal", tmp_path),
+        ("diarization", tmp_path / "diarization"),
+        (openvoice_converter.CONFIG.name, tmp_path / "openvoice"),
+        (openvoice_converter.CHECKPOINT.name, tmp_path / "openvoice"),
+    ]
+
+
 def test_whisper_entries_match_the_cache_folder_faster_whisper_creates():
     _MODELS = pytest.importorskip("faster_whisper.utils")._MODELS
 

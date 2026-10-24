@@ -35,6 +35,7 @@ from ..voice.conversion import (
 from ..voice.levels import active_rms, gain_to_match_db
 from ..voice.library import VoiceLibrary, VoiceProfile
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
+from ..voice.watermark import Watermarker, default_watermarker
 from .isolation import IsolationService
 
 OUTPUT_SUBDIR = "troca-de-voz"
@@ -116,7 +117,11 @@ class VoiceConversionService:
         runner: FFmpegRunner,
         prober: Callable[[Path], MediaInfo] = probe,
         log: Callable[[str], None] | None = None,
+        watermarker: Watermarker | None = None,
     ) -> None:
+        """`watermarker` marca a fala convertida, como a narração marca a sintetizada; sem ele vale o padrão
+        (AudioSeal, ligada, a menos que `DMAKER_WATERMARK=0`)."""
+        self.watermarker = watermarker if watermarker is not None else default_watermarker()
         self.converter = converter
         self.isolation = isolation
         self.library = library
@@ -213,6 +218,8 @@ class VoiceConversionService:
                     stems.vocals, reference, work, stage_progress(report, "conversão")
                 )
             with timed(timings, "montagem"):
+                # a voz convertida é voz gerada por IA: a marca entra antes de somar ao fundo e sobrevive ao AAC
+                converted = self.watermarker.embed(converted, rate)
                 original, original_rate = read_wav(stems.vocals)
                 gain_db = gain_to_match_db(active_rms(converted, rate), active_rms(original, original_rate))
                 duration = len(original) / original_rate
@@ -261,6 +268,7 @@ def default_voice_conversion_service(
     synthesizer: SpeechSynthesizer | None = None,
     converter: VoiceConverter | None = None,
     prober: Callable[[Path], MediaInfo] = probe,
+    watermarker: Watermarker | None = None,
 ) -> VoiceConversionService:
     """Serviço de produção: Demucs, OpenVoice V2 e o roteador de vozes; o que vier por parâmetro (testes) vale."""
     from .isolation import default_isolation_service
@@ -274,6 +282,7 @@ def default_voice_conversion_service(
         runner,
         prober=prober,
         log=log,
+        watermarker=watermarker,
     )
 
 
