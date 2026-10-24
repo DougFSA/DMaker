@@ -558,3 +558,66 @@ def test_dub_mix_places_each_speech_over_the_background_and_keeps_length_and_vid
     assert _segment_db(out, 3.55, 3.95) > _segment_db(out, 3.0, 3.4) + 10  # fala B começa em 3,5 s
     assert _segment_db(out, 4.2, 5.8) < -20  # B foi cortada em 0,5 s: depois dela, só o fundo
     assert _segment_db(out, 4.2, 5.8) > -50  # e o fundo segue até o fim
+
+
+def test_dub_stems_have_the_video_duration_and_sum_to_the_mix_before_the_finish(tmp_path):
+    """Fundo curto (5,9 s) e voz original longa (6,1 s) saem em 6 s exatos; a fala B (cortada em 0,5 s) e a fala
+    A tocam onde a mixagem as põe; voz dublada + fundo reproduzem a mixagem sem limitador, a menos do
+    arredondamento de 16 bits."""
+    import numpy as np
+
+    from dmaker.filtergraph.dub import DubClip, dub_mix_graph
+    from dmaker.filtergraph.dub_stems import StemOutputs, dub_stems_command
+    from dmaker.media.ffmpeg import FFmpegCommand, SubprocessRunner
+    from dmaker.media.wavio import read_wav_channels, wav_duration, write_wav, write_wav_channels
+
+    def tone(seconds: float, rate: int, hertz: int, level: float) -> np.ndarray:
+        t = np.arange(round(seconds * rate)) / rate
+        return (level * np.sin(2 * np.pi * hertz * t)).astype(np.float32)
+
+    hum = tone(5.9, 44100, 110, 0.05)
+    background = write_wav_channels(tmp_path / "fundo-in.wav", np.stack([hum, hum], axis=1), 44100)
+    voice = tone(6.1, 44100, 220, 0.2)
+    original = write_wav_channels(tmp_path / "voz-in.wav", np.stack([voice, voice], axis=1), 44100)
+    first = write_wav(tmp_path / "a.wav", tone(2.0, 24000, 880, 0.3), 24000)
+    second = write_wav(tmp_path / "b.wav", tone(2.0, 24000, 1320, 0.3), 24000)
+    clips = [
+        DubClip(first, 1.0, gain_db=-3.0),
+        DubClip(second, 3.5, gain_db=2.0, tempo=1.25, max_seconds=0.5),
+    ]
+    duration = 6.0
+    runner = SubprocessRunner(quiet=True)
+
+    outputs = StemOutputs(tmp_path / "voz-dublada.wav", tmp_path / "fundo.wav", tmp_path / "voz-original.wav")
+    built = dub_stems_command(background, original, clips, outputs, tmp_path / "trilhas.txt", duration)
+    (tmp_path / "trilhas.txt").write_text(built.graph, encoding="utf-8")
+    runner.run(built.command)
+
+    premix = tmp_path / "premix.wav"
+    (tmp_path / "premix.txt").write_text(
+        dub_mix_graph(clips, 1, 0, duration, limit_peaks=False), encoding="utf-8"
+    )
+    args = ["-i", str(background), *[a for c in clips for a in ("-i", str(c.path))]]
+    runner.run(
+        FFmpegCommand([*args, "-/filter_complex", str(tmp_path / "premix.txt"), "-map", "[out]", str(premix)])
+    )
+
+    for path in (outputs.voice_dubbed, outputs.background, outputs.voice_original):
+        info = probe(path)
+        assert info.sample_rate == 48000 and info.channels == 2
+        assert wav_duration(path) == duration  # a duração do vídeo, ao quadro de áudio
+    voice_dubbed, _ = read_wav_channels(outputs.voice_dubbed)
+    rate = 48000
+    assert np.abs(voice_dubbed[: int(0.95 * rate)]).max() == 0  # alinhada no zero: nada antes da fala A
+    assert np.abs(voice_dubbed[int(1.1 * rate) : int(2.9 * rate)]).max() > 0.1  # fala A na posição pedida
+    assert np.abs(voice_dubbed[int(4.1 * rate) :]).max() == 0  # B foi cortada em 0,5 s; depois, silêncio
+    background_out, _ = read_wav_channels(outputs.background)
+    assert np.abs(background_out[int(5.95 * rate) :]).max() == 0  # o fundo curto foi completado com silêncio
+    original_out, _ = read_wav_channels(outputs.voice_original)
+    assert abs(float(np.abs(original_out).max()) - 0.2) < 0.01  # a voz original sai sem atenuar
+
+    mix, _ = read_wav_channels(premix)
+    summed = voice_dubbed + background_out
+    difference = summed - mix[: len(summed)]
+    assert abs(len(mix) - len(summed)) <= 1
+    assert float(np.abs(difference).max()) < 2e-4  # ~6 passos de 16 bits (-74 dB); o limitador não participa

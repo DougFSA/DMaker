@@ -19,12 +19,13 @@ import os
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .. import config
 from ..domain.dub import PROJECT_SUFFIX, DubProject, DubSegment, DubSpeaker, SpeakerMode, save_dub_project
 from ..filtergraph.dub import DubClip, dub_mix_command
+from ..filtergraph.dub_stems import dub_stems_command
 from ..filtergraph.speech_edit import corrected_suffix
 from ..media.diarization import SpeakerDiarizer, SpeakerTurn, speaking_seconds
 from ..media.ffmpeg import FFmpegRunner
@@ -51,6 +52,7 @@ from ..voice.reference import ReferenceSpan, choose_speaker_reference
 from ..voice.script import normalize_for_speech
 from ..voice.speakers import assign_speakers, label_words, speaker_names
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
+from .dub_stems import DubStems, StemsOptions, stem_outputs, zip_stems
 from .isolation import IsolationService
 from .narration import NarrationService
 from .speech_fix import ProgressReport, SpeechFixService, VocalsWindow
@@ -91,6 +93,7 @@ class DubResult:
     srt_path: Path
     report: list[SegmentReport]
     timings: dict[str, float] = field(default_factory=dict)  # segundos de cada etapa
+    stems: DubStems | None = None  # as trilhas separadas, quando o render as exportou junto
 
     @property
     def warnings(self) -> list[str]:
@@ -108,6 +111,20 @@ def default_project_path(src: Path, target: str) -> Path:
 
 def default_output_path(src: Path, target: str, suffix: str) -> Path:
     return config.OUTPUT_DIR / OUTPUT_SUBDIR / f"{src.stem}.{target}{suffix}"
+
+
+def default_stems_dir(src: Path, target: str) -> Path:
+    """Pasta das trilhas separadas, ao lado da dublagem; lê a pasta de saída do config na hora."""
+    return config.OUTPUT_DIR / OUTPUT_SUBDIR / f"{src.stem}.{target}.trilhas"
+
+
+@dataclass(frozen=True)
+class _Synthesis:
+    """O que a geração produz antes de montar: os stems, as falas prontas e o relatório de cada uma."""
+
+    stems: Stems
+    clips: list[DubClip]
+    reports: list[SegmentReport]
 
 
 def glossary_terms(lexicon_terms: Sequence[str], extra: Sequence[str]) -> list[str]:
@@ -457,9 +474,56 @@ class DubbingService:
         out: Path | None = None,
         on_progress: ProgressReport | None = None,
         steps: int | None = None,
+        stems: StemsOptions | None = None,
     ) -> DubResult:
-        """Sintetiza as traduções, monta a dublagem no arquivo original e grava o vídeo e a legenda."""
+        """Sintetiza as traduções, monta a dublagem no arquivo original e grava o vídeo e a legenda.
+
+        Com `stems`, exporta também as trilhas separadas, reaproveitando as falas já sintetizadas.
+        """
         report = on_progress or (lambda _label, _fraction: None)
+        src, info = self._checked_source(project)
+        out = out or default_output_path(
+            src, project.target_language, corrected_suffix(src.suffix, info.has_video)
+        )
+        if out.resolve() == src.resolve():
+            raise ValueError("A saída não pode ser o próprio arquivo original.")
+        timings: dict[str, float] = {}
+        synthesis = self._synthesize(project, src, info, steps, report, timings)
+
+        report("Montando a dublagem", 0.95)
+        with self._stage(timings, "Montagem"):
+            self._mix(project, src, info, synthesis.stems, synthesis.clips, out)
+        exported = None
+        if stems is not None:
+            with self._stage(timings, "Trilhas separadas"):
+                exported = self._write_stems(project, src, info, synthesis, stems)
+        srt_path = self._write_srt(out, project, synthesis.reports)
+        report("Dublagem pronta", 1.0)
+        return DubResult(out, srt_path, synthesis.reports, timings, exported)
+
+    def export_stems(
+        self,
+        project: DubProject,
+        options: StemsOptions | None = None,
+        on_progress: ProgressReport | None = None,
+        steps: int | None = None,
+    ) -> DubStems:
+        """Grava as trilhas separadas (voz dublada, fundo e voz original) para remixar em outro editor.
+
+        As falas passam pelo mesmo caminho do render: as já sintetizadas vêm do cache e só o que falta é gerado.
+        """
+        report = on_progress or (lambda _label, _fraction: None)
+        src, info = self._checked_source(project)
+        timings: dict[str, float] = {}
+        synthesis = self._synthesize(project, src, info, steps, report, timings)
+        report("Gravando as trilhas", 0.95)
+        with self._stage(timings, "Trilhas separadas"):
+            stems = self._write_stems(project, src, info, synthesis, options or StemsOptions())
+        report("Trilhas prontas", 1.0)
+        return stems
+
+    def _checked_source(self, project: DubProject) -> tuple[Path, MediaInfo]:
+        """O arquivo de origem e suas medidas, depois de conferir que há o que dublar."""
         src = Path(project.source)
         if not src.exists():
             raise FileNotFoundError(f"Arquivo de origem não encontrado: {src}")
@@ -467,14 +531,18 @@ class DubbingService:
             raise ValueError(
                 "Nenhuma fala está traduzida. Prepare o projeto de novo ou escreva as traduções."
             )
-        info = self.prober(src)
-        out = out or default_output_path(
-            src, project.target_language, corrected_suffix(src.suffix, info.has_video)
-        )
-        if out.resolve() == src.resolve():
-            raise ValueError("A saída não pode ser o próprio arquivo original.")
-        timings: dict[str, float] = {}
+        return src, self.prober(src)
 
+    def _synthesize(
+        self,
+        project: DubProject,
+        src: Path,
+        info: MediaInfo,
+        steps: int | None,
+        report: ProgressReport,
+        timings: dict[str, float],
+    ) -> _Synthesis:
+        """Separa voz e fundo e sintetiza cada fala (com cache): é o que o vídeo e as trilhas têm em comum."""
         report("Separando a voz do fundo", 0.0)
         with self._stage(timings, "Separação de voz e fundo"):
             stems = self.isolation.isolate(src)
@@ -503,13 +571,31 @@ class DubbingService:
                 reports.append(entry[0])
                 if entry[1] is not None:
                     clips.append(entry[1])
+        return _Synthesis(stems, clips, reports)
 
-        report("Montando a dublagem", 0.95)
-        with self._stage(timings, "Montagem"):
-            self._mix(project, src, info, stems, clips, out)
-        srt_path = self._write_srt(out, project, reports)
-        report("Dublagem pronta", 1.0)
-        return DubResult(out, srt_path, reports, timings)
+    def _write_stems(
+        self, project: DubProject, src: Path, info: MediaInfo, synthesis: _Synthesis, options: StemsOptions
+    ) -> DubStems:
+        """Roda o ffmpeg das três trilhas na pasta pedida e, se pedido, junta tudo num .zip."""
+        folder = options.out_dir or default_stems_dir(src, project.target_language)
+        folder.mkdir(parents=True, exist_ok=True)
+        outputs = stem_outputs(folder)
+        graph_file = self.cache_dir / "dub" / f"{folder.name}.graph.txt"
+        built = dub_stems_command(
+            synthesis.stems.background,
+            synthesis.stems.vocals,
+            synthesis.clips,
+            outputs,
+            graph_file,
+            info.duration,
+        )
+        graph_file.parent.mkdir(parents=True, exist_ok=True)
+        graph_file.write_text(built.graph, encoding="utf-8")
+        self.runner.run(built.command)
+        stems = DubStems(folder, outputs, info.duration, project.keep_original_db)
+        if options.make_zip:
+            stems = replace(stems, zip_path=zip_stems(stems))
+        return stems
 
     def _synthesize_segment(
         self,

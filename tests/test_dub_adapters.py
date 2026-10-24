@@ -96,6 +96,38 @@ def test_cli_render_prints_the_report_the_srt_and_the_timings(wired: DubHarness,
     assert {r.steps for r in wired.synthesizer.requests} == {8}
 
 
+def test_cli_stems_exports_the_tracks_and_zips_them(wired: DubHarness, tmp_path: Path):
+    wired.prepare()
+    folder = tmp_path / "trilhas"
+    result = cli.invoke(
+        app, ["dub", "stems", str(wired.project_path), "--out-dir", str(folder), "--zip", "--draft"]
+    )
+    assert result.exit_code == 0, result.output
+    for name in ("voz-dublada.wav", "fundo.wav", "voz-original.wav", "trilhas.zip"):
+        assert name in result.output
+    assert (tmp_path / "trilhas.zip").exists() and {r.steps for r in wired.synthesizer.requests} == {8}
+    assert "duração de cada uma: 40.000 s" in result.output and "dB" not in result.output
+
+
+def test_cli_stems_goes_to_the_default_folder_and_tells_the_original_voice_level(wired: DubHarness):
+    wired.prepare(keep_original_db=-18.0)
+    result = cli.invoke(app, ["dub", "stems", str(wired.project_path)])
+    assert result.exit_code == 0, result.output
+    assert (config.OUTPUT_DIR / "dublagem" / "entrevista.en.trilhas" / "fundo.wav").exists()
+    assert "voz original a -18 dB" in result.output
+
+
+def test_cli_render_with_stems_exports_them_and_zip_needs_stems(wired: DubHarness, tmp_path: Path):
+    wired.prepare()
+    out = tmp_path / "dublado.mp4"
+    base = ["dub", "render", str(wired.project_path), "--out", str(out)]
+    assert cli.invoke(app, [*base, "--zip"]).exit_code != 0
+    result = cli.invoke(app, [*base, "--stems", "--zip"])
+    assert result.exit_code == 0, result.output
+    assert "Trilhas:" in result.output and "voz-dublada.wav" in result.output and ".zip" in result.output
+    assert len(wired.synthesizer.requests) == 3
+
+
 def test_cli_render_warns_about_speech_that_did_not_fit(wired: DubHarness):
     project = wired.prepare().edited("s1", text=" ".join(["muito longo para caber no tempo"] * 8))
     save_dub_project(project, wired.project_path)
@@ -209,6 +241,20 @@ def test_dub_render_runs_as_a_job_and_only_the_edited_segment_is_regenerated(
     assert second["result"]["regenerated"] == 1
 
 
+def test_dub_stems_runs_as_a_job_and_lists_the_files(wired: DubHarness, tmp_path: Path):
+    wired.prepare()
+    folder = tmp_path / "mcp-trilhas"
+    status = finished(mcp_server.dub_stems(str(wired.project_path), out_dir=str(folder), make_zip=True))
+    assert status["status"] == "done", status.get("error")
+    result = status["result"]
+    assert result["folder"] == str(folder) and result["zip"] == str(tmp_path / "mcp-trilhas.zip")
+    assert Path(result["voice_dubbed"]).name == "voz-dublada.wav" and Path(result["background"]).exists()
+    assert result["duration"] == 40.0 and result["original_voice_db"] is None
+    assert (
+        finished(mcp_server.dub_stems(str(wired.project_path), out_dir=str(folder)))["result"]["zip"] is None
+    )
+
+
 def test_dub_render_draft_uses_eight_steps(wired: DubHarness):
     wired.prepare()
     finished(mcp_server.dub_render(str(wired.project_path), out=str(wired.out), draft=True))
@@ -250,7 +296,14 @@ def test_dub_job_failure_carries_the_translation_message(wired: DubHarness):
 
 def test_dub_tools_are_listed():
     names = {tool.name for tool in asyncio.run(mcp_server.server.list_tools())}
-    assert {"dub_prepare", "dub_render", "dub_get", "dub_update_segment", "dub_retranslate"} <= names
+    assert {
+        "dub_prepare",
+        "dub_render",
+        "dub_stems",
+        "dub_get",
+        "dub_update_segment",
+        "dub_retranslate",
+    } <= names
 
 
 # ---------- falantes (diarização) ----------

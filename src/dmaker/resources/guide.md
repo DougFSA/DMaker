@@ -390,6 +390,11 @@ com a revisão no meio, e o roteiro vive num projeto editável `<nome>.<idioma>.
    posições originais (+ voz original atenuada) sobre o vídeo, copiado sem recodificar. Grava o vídeo
    (`output/dublagem/<nome>.<idioma>.<ext>`) e a legenda `.srt` no idioma alvo. `dmaker dub ARQUIVO --to en` faz
    os dois passos de uma vez.
+4. **Trilhas separadas** (`dub_stems`, ou `dmaker dub stems PROJETO.dub.json [--zip]`, ou `dub render --stems`),
+   para refazer a mixagem em outro editor: `voz-dublada.wav` (só as falas dubladas nas posições do vídeo),
+   `fundo.wav` e `voz-original.wav` (isolada, sem atenuar), em `output/dublagem/<nome>.<idioma>.trilhas`. WAV
+   16 bits, 48 kHz, estéreo, com a duração exata do vídeo e alinhados no zero, sem loudnorm nem limitador;
+   somadas a voz dublada e o fundo reproduzem a mixagem do vídeo antes do acabamento. As falas vêm do cache.
 
 Encaixe de duração (por fala): a duração natural da tradução é estimada pelo ritmo do falante original e pelas
 letras de cada idioma. Se cabe, a fala dura isso; se passa, avança na pausa seguinte (até 1,2 s, deixando 0,15 s
@@ -403,7 +408,7 @@ então corrigir uma tradução e gerar de novo sintetiza só ela (`regenerated` 
 por segundo de fala sintetizada, mais a separação (3x a 6x a duração, uma vez) e a tradução (minutos com o
 `gpt-oss:20b`). `draft=true` usa 8 passos. Na interface, aba Voz, seção "Dublar": escolher o arquivo, idiomas,
 preparar, editar a tabela de falas (tempo, falante, original, tradução, travar), gerar com progresso "fala i de
-n", comparar original e dublado, baixar vídeo e legenda e "Usar no projeto". Fora do escopo: sincronia labial.
+n", comparar original e dublado, baixar vídeo, legenda e as trilhas separadas ("Baixar trilhas") e "Usar no projeto". Fora do escopo: sincronia labial.
 
 ### Narração no projeto
 

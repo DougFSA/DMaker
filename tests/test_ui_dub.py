@@ -274,6 +274,70 @@ def test_render_validates_before_starting_a_job(client, dub: DubHarness, tmp_pat
     assert len(server.jobs.list()) == before
 
 
+# ---------- trilhas separadas ----------
+
+
+def test_stems_job_zips_the_tracks_and_the_zip_downloads_from_the_dubbing_folder(client, dub: DubHarness):
+    import io
+    import zipfile
+
+    project = prepared(client, dub)["project"]
+    response = client.post("/api/dub/stems", json={"project": project})
+    assert response.status_code == 200, response.text
+    job = finished(response.json()["job_id"])
+    assert job.status == "done", job.error
+    result = job.result
+    assert Path(result["folder"]) == dub_folder() / "entrevista.en.trilhas"
+    assert (
+        result["files"] == ["voz-dublada.wav", "fundo.wav", "voz-original.wav"] and result["duration"] == 40.0
+    )
+    download = client.get(result["zip_url"])
+    assert download.status_code == 200 and "attachment" in download.headers["content-disposition"]
+    assert "entrevista.en.trilhas.zip" in download.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        assert archive.namelist() == result["files"]
+    assert len(dub.synthesizer.requests) == 3
+
+
+def test_stems_after_a_render_synthesize_nothing_new(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    finished(client.post("/api/dub/render", json={"project": project}).json()["job_id"])
+    finished(client.post("/api/dub/stems", json={"project": project}).json()["job_id"])
+    assert len(dub.synthesizer.requests) == 3
+
+
+def test_stems_draft_uses_eight_steps_like_the_render(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    finished(client.post("/api/dub/stems", json={"project": project, "draft": True}).json()["job_id"])
+    assert {r.steps for r in dub.synthesizer.requests} == {8}
+
+
+def test_stems_validate_before_starting_a_job(client, dub: DubHarness, tmp_path: Path):
+    path = Path(prepared(client, dub)["project"])
+    before = len(server.jobs.list())
+    assert client.post("/api/dub/stems", json={"project": str(tmp_path / "x.dub.json")}).status_code == 400
+    project = load_dub_project(path)
+    gone = project.model_copy(update={"source": str(tmp_path / "sumiu.mp4")})
+    path.write_text(gone.model_dump_json(), encoding="utf-8")
+    assert client.post("/api/dub/stems", json={"project": str(path)}).status_code == 404
+    blank = project.model_copy(
+        update={"segments": [s.model_copy(update={"text": ""}) for s in project.segments]}
+    )
+    path.write_text(blank.model_dump_json(), encoding="utf-8")
+    assert client.post("/api/dub/stems", json={"project": str(path)}).status_code == 400
+    assert len(server.jobs.list()) == before
+
+
+def test_a_zip_outside_the_dubbing_folder_is_not_served(client, tmp_path: Path):
+    dub_folder().mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "output" / "fora.zip"
+    outside.write_bytes(b"PK")
+    assert client.get("/api/dub/file", params={"path": str(outside)}).status_code == 404
+    inside = dub_folder() / "dentro.zip"
+    inside.write_bytes(b"PK")
+    assert client.get("/api/dub/file", params={"path": str(inside)}).status_code == 200
+
+
 # ---------- arquivos ----------
 
 

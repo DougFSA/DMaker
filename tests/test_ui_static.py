@@ -625,6 +625,7 @@ def test_dub_js_uses_the_dub_api_with_jobs_upload_and_project_ops():
         "/api/dub/projects",
         "/api/dub/retranslate",
         "/api/dub/render",
+        "/api/dub/stems",
         "DMakerVoice.followJob",
         "collectMediaEntries",
         "DMakerSpeech.pure.replaceSourceOps",
@@ -698,6 +699,14 @@ def test_dub_edits_and_result_summary():
         "sem tradução",
         "x",
     ]
+
+
+@requires_node
+def test_dub_stems_summary_names_the_files_and_the_original_voice_level():
+    plain = _run_dub_pure("pure.describeStems({files:['a.wav','b.wav'],duration:40,original_voice_db:null})")
+    assert plain == "Trilhas prontas (a.wav, b.wav), cada uma com 40.00 s."
+    kept = _run_dub_pure("pure.describeStems({files:['a.wav'],duration:12.5,original_voice_db:-18})")
+    assert "a voz original a -18 dB" in kept and "sem atenuar" in kept
 
 
 @requires_node

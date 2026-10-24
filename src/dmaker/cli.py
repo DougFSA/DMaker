@@ -1591,6 +1591,23 @@ def _print_dub_result(result) -> None:
     )
 
 
+def _print_stems(stems) -> None:
+    console.print(f"[green]Trilhas:[/green] {stems.folder}", highlight=False, soft_wrap=True)
+    for path in stems.files:
+        console.print(f"  {path.name}", markup=False, highlight=False, soft_wrap=True)
+    console.print(
+        f"  duração de cada uma: {stems.duration:.3f} s (a do vídeo), começando no zero", markup=False
+    )
+    if stems.zip_path:
+        console.print(f"  zip: {stems.zip_path}", markup=False, highlight=False, soft_wrap=True)
+    if stems.original_voice_db is not None:
+        console.print(
+            f"  o vídeo dublado usa a voz original a {stems.original_voice_db:g} dB; a trilha sai sem atenuar",
+            markup=False,
+            soft_wrap=True,
+        )
+
+
 def _prepare_dub(
     service,
     file: Path,
@@ -1676,6 +1693,11 @@ def dub_render(
     ] = None,
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    stems: Annotated[
+        bool,
+        typer.Option(help="Exporta também as trilhas separadas (voz dublada, fundo e voz original) em WAV."),
+    ] = False,
+    zip_stems: Annotated[bool, typer.Option("--zip", help="Com --stems, junta as trilhas num .zip.")] = False,
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Gera a dublagem: sintetiza as traduções com a voz de cada falante e monta com o fundo original.
@@ -1683,16 +1705,63 @@ def dub_render(
     Só as falas novas ou editadas são sintetizadas; o resto sai do cache. Grava o vídeo e a legenda (.srt)."""
     from .domain.dub import load_dub_project
     from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dub_stems import StemsOptions
+    from .pipeline.dubbing import default_dubbing_service
+    from .voice.synth import DRAFT_STEPS
+
+    if zip_stems and not stems:
+        raise typer.BadParameter("--zip só vale junto com --stems.", param_hint="--zip")
+    try:
+        dub = load_dub_project(project)
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        result = service.render(
+            dub,
+            out,
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+            stems=StemsOptions(make_zip=zip_stems) if stems else None,
+        )
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_dub_result(result)
+    if result.stems:
+        _print_stems(result.stems)
+
+
+@dub_app.command("stems")
+def dub_stems(
+    project: Annotated[Path, typer.Argument(help="Projeto .dub.json (de `dmaker dub prepare`).")],
+    out_dir: Annotated[
+        Path | None,
+        typer.Option(help="Pasta das trilhas (padrão: output/dublagem/<nome>.<idioma>.trilhas)."),
+    ] = None,
+    zip_stems: Annotated[
+        bool, typer.Option("--zip", help="Junta as três trilhas num .zip ao lado da pasta.")
+    ] = False,
+    steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Exporta as trilhas separadas da dublagem (voz dublada, fundo e voz original) para remixar em outro editor.
+
+    Três WAV (48 kHz, estéreo) com a duração exata do vídeo, alinhados no zero e sem acabamento (sem loudnorm
+    nem limitador). Usa as falas já sintetizadas do cache; só sintetiza o que ainda não existe."""
+    from .domain.dub import load_dub_project
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dub_stems import StemsOptions
     from .pipeline.dubbing import default_dubbing_service
     from .voice.synth import DRAFT_STEPS
 
     try:
         dub = load_dub_project(project)
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
-        result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)
+        stems = service.export_stems(
+            dub,
+            StemsOptions(out_dir, zip_stems),
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+        )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
-    _print_dub_result(result)
+    _print_stems(stems)
 
 
 @dub_app.command("retranslate")
