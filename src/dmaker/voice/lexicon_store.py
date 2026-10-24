@@ -16,7 +16,7 @@ import json
 import re
 from pathlib import Path
 
-from ..config import ASSETS_DIR
+from .. import config
 from .pronunciation import DEFAULT_LANGUAGE, Lexicon, language_code
 
 LEXICON_FILE = "pronunciation.json"
@@ -38,7 +38,7 @@ def _parse(data: object, filename: str) -> dict[str, Lexicon]:
 
 class LexiconStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or ASSETS_DIR
+        self.root = root or config.LEXICON_DIR
 
     def _brand_dir(self, brand: str) -> Path:
         if not _BRAND_NAME.match(brand):

@@ -84,3 +84,13 @@ def narration_concat_command(
     graph = narration_concat_graph([pause for _, pause in parts], sample_rate, master)
     args += ["-filter_complex", graph, "-map", "[out]", *encoder_args(out), str(out)]
     return FFmpegCommand(args, label="narração", total=total)
+
+
+def detection_audio_command(source: Path, out: Path, sample_rate: int) -> FFmpegCommand:
+    """Extrai a faixa de áudio de `source` (WAV, MP3, M4A, MP4...) como WAV mono PCM 16 bits em `sample_rate`.
+
+    É a entrada da verificação da marca d'água: o detector trabalha em mono e numa taxa só, e o
+    ffmpeg decodifica qualquer contêiner que o resto do DMaker aceita.
+    """
+    args = ["-i", str(source), "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", str(out)]
+    return FFmpegCommand(args, label="áudio para verificação")

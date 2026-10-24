@@ -1,162 +1,123 @@
 ---
 name: dmaker-merge-develop
-description: Mergeia na branch develop do DMaker os PRs dos chamados de uma versão que o Douglas já aprovou e moveu para a coluna Concluído do Jira (projeto DMK) e cujo PR ainda está aberto, respeitando a ordem das PRs empilhadas e sem quebrar PR filho. Use sempre que ele pedir para mergear os aprovados do DMaker, "mergear os aprovados", "fazer o merge dos aprovados", "subir para a develop", "os que estão concluídos", "mergear o que eu aprovei" ou qualquer variação de juntar na develop o que passou no teste manual. Não mexe na main nem cria tag: para lançar a versão, use dmaker-producao.
+description: SKILL DE EXCEÇÃO, fora do fluxo normal. Mergeia na develop do DMaker PRs de chamados (projeto DMK) que ficaram abertos por algum motivo, por exemplo os entregues antes de 23/10/2026, quando o PR ainda esperava o teste manual, ou um PR que o executor não conseguiu mergear. No fluxo atual o executor já mergeia o PR na entrega, então NÃO use esta skill para chamados novos nem para correções. Use só quando o Douglas pedir explicitamente para mergear PRs que ficaram abertos ("mergeia os PRs abertos do DMaker", "sobrou PR aberto", "limpa os PRs antigos"). Respeita a ordem das PRs empilhadas e não quebra PR filho. Não mexe na main nem cria tag: para lançar a versão, use dmaker-producao.
 ---
 
-# Merge na develop: DMaker
+# Merge de PRs que ficaram abertos: DMaker (exceção)
 
-Entra na `develop` o que o Douglas aprovou, e só isso. A coluna **`Concluído`** é
-o aval dele, mas ela guarda dois estados (ver `_comum/jira.md`):
+**Esta skill não faz parte do fluxo normal.** Desde 23/10/2026 o executor abre o PR
+e **já o mergeia** ao entregar o card (`_comum/git.md`), então a `develop` recebe o
+código na entrega, o Douglas testa nela, e `Concluído` significa só "testado e
+aprovado". Não existe mais a fila "aprovado, aguardando merge" que esta skill
+atendia.
 
-1. **Aprovado, PR ainda aberto:** é o que esta skill mergeia.
-2. **Já na `develop` ou na `main`:** o PR já não está aberto; não há o que fazer.
+Ela sobrevive para o que sobrar do fluxo antigo ou de um acidente:
 
-O que distingue os dois é o **estado do PR**, não o Jira. Nada entra sem estar em
-`Concluído`.
+- PRs entregues **antes** da mudança de fluxo, ainda abertos, com o card em
+  `Teste Manual` ou `Concluído`, possivelmente empilhados em outros branches.
+- Um PR que o executor abriu mas não conseguiu mergear (conflito não resolvido,
+  portão vermelho na mistura) e que foi destravado depois.
+
+**Decisão registrada (23/10/2026):** em vez de apagar a skill, ela foi mantida
+com este escopo estreito, porque os PRs empilhados do fluxo antigo existem e
+mergeá-los na ordem certa (retarget do filho antes do pai) é um procedimento fácil
+de errar e caro de refazer. Quando não restar nenhum PR antigo aberto, esta skill
+pode ser removida.
 
 Leia junto:
 
 - `.claude/skills/_comum/delegacao.md`: **como dividir o trabalho com os subagentes**
-- `.claude/skills/_comum/jira.md`: colunas, consultas, o significado duplo de Concluído
-- `.claude/skills/_comum/git.md`: convenções, **regras de merge de PR empilhada**
+- `.claude/skills/_comum/jira.md`: colunas e consultas
+- `.claude/skills/_comum/git.md`: convenções, merge na entrega, trava de merge
 - `.claude/skills/_comum/qualidade.md`: portões
 
 ## Divisão do trabalho
 
-O merge é irreversível na prática, então a linha aqui é mais conservadora que nas
-outras skills: **o mapa e a decisão são seus, e o comando de merge também.**
+O merge é irreversível na prática, então a linha aqui é conservadora: **o mapa e
+a decisão são seus, e o comando de merge também.**
 
 | Você (Opus) | Subagente Sonnet |
 | --- | --- |
-| Perguntar a versão, apresentar o mapa, relatório | - |
-| Montar a cadeia e decidir mergeável × preso | - |
+| Montar a cadeia e decidir mergeável × preso; relatório | - |
 | **Executar os merges** (`gh pr edit` / `gh pr merge`) | - |
-| - | Levantar cards, PRs, bases e estado dos PRs (`dmaker-apurador`) |
+| - | Levantar PRs abertos, bases, cards e estados (`dmaker-apurador`) |
 | - | Rodar os portões na `develop` depois da leva (`dmaker-apurador`) |
 | - | Consertar a `develop` se a leva quebrar (`dmaker-executor`) |
 
-Os merges ficam com você não por desconfiança do Sonnet, mas porque são poucos
-comandos de saída curta: delegá-los economizaria quase nada e colocaria a decisão
-de "retargetar antes ou depois" a um passo de distância de quem desenhou a cadeia.
+## 1. Levante os PRs abertos
 
-## 1. Pergunte a versão e levante os aprovados
+Nada de perguntar versão: o critério é o estado do PR, não a versão. Mande o
+`dmaker-apurador`, numerado: (1) todos os PRs abertos
+(`gh pr list --state open --json number,headRefName,baseRefName,title --limit 60`);
+(2) o card de cada um e o status dele no Jira; (3) o último comentário de entrega
+do card (para ver se traz `ruff` e `pytest` verdes com contagem); (4) se o
+`mergeable` é `CONFLICTING`.
 
-```
-project = DMK AND fixVersion = "<versão>" AND status = 10076 ORDER BY key ASC
-```
+**Mostre a lista ao Douglas e peça a confirmação do que mergear.** A coluna do
+Jira não decide mais o merge: ele pode querer mergear um PR em `Teste Manual`
+justamente para testá-lo na `develop`. A decisão é dele, caso a caso.
 
-(`10076` = Concluído.) Essa lista mistura aprovados esperando merge com cards já
-mergeados em levas anteriores. O próximo passo separa um do outro.
+## 2. Monte a cadeia
 
-## 2. Monte o mapa antes de mergear qualquer coisa
-
-Este é o passo que evita estrago. O `dmaker-apurador` traz a matéria-prima:
-peça, numerado: (1) os cards da versão em `Concluído`; (2) o PR **aberto** de cada
-um, com `headRefName` e `baseRefName`; (3) para os que não têm PR aberto, se o
-card já está na `develop` (`git log --oneline origin/develop | grep -i DMK-XXX`);
-(4) o estado do PR de cada um (aberto, mergeado, fechado sem merge), porque um PR
-**fechado sem merge** é anomalia que você precisa ver.
-
-```bash
-gh pr list --state open --json number,headRefName,baseRefName,title --limit 60
-gh pr list --state open --search "DMK-XXX" --json number,headRefName,baseRefName
-```
-
-**A cadeia você desenha.** Com os dados na mão, responda três perguntas por card:
-
-- **Tem PR aberto?** Card em `Concluído` sem PR aberto já foi mergeado numa leva
-  anterior (ou antes do fluxo de develop existir): confirme com
-  `git log --oneline origin/develop | grep -i DMK-XXX` e tire da fila em vez de
-  procurar o que não existe. Se não está na `develop` **nem** tem PR aberto, não
-  deixe passar: reporte como anomalia.
-- **Qual é a base do PR?** Se for `develop`, é independente e entra a qualquer
-  momento. Se for outro branch, ele está empilhado.
-- **A cadeia de bases até a `develop` está TODA aprovada?** Um PR empilhado
-  arrasta consigo tudo que está abaixo dele. Se um único elo da cadeia não estiver
-  em `Concluído`, esse PR **não pode ser mergeado**: mergeá-lo colocaria na
-  `develop` código que o Douglas ainda não aprovou, ou pior, que ele reprovou.
-
-Desenhe a cadeia (`develop ← A ← B ← C`) e classifique cada card em
-**mergeável agora** ou **preso atrás de <card>**. Mostre isso ao Douglas antes de
-começar: é a informação que ele usa para decidir o que testar primeiro.
-
-Como o padrão do fluxo é cada card sair da `develop`, a maioria será "base
-`develop`, mergeável agora". Se aparecer pilha longa, algo fugiu da regra de
-`_comum/git.md`: diga isso no relatório.
+Para cada PR da lista confirmada, a base é `develop` (independente, entra a
+qualquer momento) ou outro branch (empilhado). Um PR empilhado arrasta tudo que
+está abaixo dele: se um elo da cadeia não estiver na lista confirmada, esse PR
+**não pode ser mergeado**. Desenhe a cadeia (`develop ← A ← B ← C`), classifique
+cada card em **mergeável agora** ou **preso atrás de <card>**, e mostre ao Douglas
+antes de começar.
 
 ## 3. Mergeie, de baixo para cima
 
 Para cada PR mergeável, do mais próximo da `develop` para o mais distante:
 
 1. **Confira o PR**: `gh pr view <n> --json mergeable,mergeStateStatus,baseRefName`.
-   Não há CI para consultar (`gh pr checks` vem vazio), então o PR não carrega
-   prova de portão. Se o card é de risco e o comentário de entrega não traz
-   `ruff` e `pytest` verdes com contagem, pare e pergunte antes de mergear.
    `mergeable = CONFLICTING` não merge: resolva o conflito no branch (mantendo os
-   dois lados) e só então siga.
-2. **Retarget do filho ANTES do merge do pai**, se houver filho:
+   dois lados) e só então siga. Se o card é de risco e o comentário de entrega não
+   traz `ruff` e `pytest` verdes com contagem, pare e pergunte.
+2. **Traga a `develop` para o branch e rode os portões** se veio código novo
+   (`_comum/git.md` → "Antes de mergear"), e use a trava de merge.
+3. **Retarget do filho ANTES do merge do pai**, se houver filho:
    ```bash
    gh pr edit <filho> --base develop
    gh pr merge <pai> --merge
    ```
-   Nunca use `--delete-branch` num PR que serve de base. O GitHub **fecha** o PR
+   **Sem `--delete-branch` num PR que serve de base.** O GitHub **fecha** o PR
    filho quando a base some, e `gh pr reopen` falha: já custou um PR refeito do
-   zero no MedlyCare (`_comum/git.md`).
-3. **Merge commit (`--merge`), nunca squash.** O histórico da `develop` é de merge
-   commits; com squash, cada PR de cima passa a ver o diff do de baixo como
-   estranho e conflita.
-4. Registre no card uma linha de rastro:
-   `🔀 Mergeado na develop: <sha do merge> (PR #N)`.
-   A skill de produção usa isso para cruzar "aprovado" com "realmente na develop".
+   zero no MedlyCare. Apague o branch do pai só depois de o filho estar na `develop`.
+4. **Merge commit (`--merge`), nunca squash.**
+5. Registre no card uma linha de rastro, porque a auditoria de produção cruza o
+   card com a `develop` por ela: `🔀 Mergeado na develop: <sha do merge> (PR #N)`.
 
-**Não mova o card de coluna.** `Concluído` já é onde ele deve ficar.
+**Não mova o card de coluna.** Quem mexe nas colunas é a entrega (`51`) e o
+Douglas (`61`); esta skill não decide aprovação.
 
-O `CHANGELOG.md` é o arquivo que mais conflita entre PRs independentes (todos
-acrescentam linha no mesmo bloco `[Não lançado]`). Se aparecer conflito só nele,
-mantenha as linhas dos dois lados e continue.
+O `CHANGELOG.md` é o arquivo que mais conflita entre PRs independentes. Se
+aparecer conflito só nele, mantenha as linhas dos dois lados e continue.
 
 ## 4. Verifique a develop depois da leva
 
 Merges podem entrar limpos e ainda assim quebrar: dois cards que passaram nos
-portões isolados podem se contradizer quando juntos. E como não há CI, esta é a
-primeira vez que a soma dos cards é testada.
+portões isolados podem se contradizer juntos, e sem CI esta é a primeira vez que a
+soma é testada. Mande o `dmaker-apurador` (autorizando `checkout` e `pull`):
 
-Isto é levantamento, e é onde está o volume desta skill: mande para o
-`dmaker-apurador` (autorizando o `checkout` e o `pull`, que ele não faz por
-padrão), pedindo três coisas:
+1. `git fetch origin && git checkout develop && git pull`.
+2. Os três portões (`_comum/qualidade.md`), em primeiro plano e com
+   `timeout: 600000`. Verde é uma linha por portão; vermelho são as linhas do erro.
+3. A conferência de que nenhum conflito comeu trabalho:
+   `git log --oneline <sha-antes-da-leva>..develop | grep -oE 'DMK-[0-9]+' | sort -u`
+   contra a lista dos cards mergeados, e a coerência do `MEZZ_VERSION` em
+   `pipeline/segments.py`.
 
-1. Atualizar a `develop`:
-   ```bash
-   git fetch origin && git checkout develop && git pull
-   ```
-2. Rodar os portões (`_comum/qualidade.md`), os três, em primeiro plano e com
-   `timeout: 600000`: `ruff check src tests`, `ruff format --check src tests`,
-   `pytest -q`. Verde é uma linha por portão; vermelho são as linhas do erro, não
-   o log.
-3. Conferir se algum conflito de merge comeu trabalho:
-   ```bash
-   git log --oneline <sha-antes-da-leva>..develop | grep -oE 'DMK-[0-9]+' | sort -u
-   ```
-   Mande a lista dos cards que você mergeou e peça a diferença entre as duas:
-   todos têm que estar aí. Peça também que confira se `MEZZ_VERSION` em
-   `pipeline/segments.py` está coerente com os cards da leva que mudaram a receita
-   do mezanino.
-
-Se quebrar, **conserte na hora**: despache um `dmaker-executor` com o erro e a
-causa provável (briefing dizendo que é um conserto de integração na `develop`,
-caso do `dmaker-redesenvolvimento-develop`), e não feche a leva antes de a
-`develop` estar verde. Uma `develop` quebrada trava todo mundo e é o pior lugar
-para descobrir isso amanhã.
+Se quebrar, **conserte na hora**: despache um `dmaker-executor` (branch
+`fix/...`, PR e merge imediato, como qualquer correção) e não feche a leva antes
+de a `develop` estar verde.
 
 ## 5. Relatório
 
 Em PT-BR:
 
 - **Entrou:** card + PR + uma linha do que é.
-- **Ficou de fora e por quê**, separando "preso atrás do card X, que está em
-  redesenvolvimento" de "PR com conflito" de "sem PR, já estava na develop" de
-  anomalia (sem PR e fora da `develop`). Card aprovado que não entrou é a
-  informação mais importante do relatório.
+- **Ficou de fora e por quê:** preso atrás de outro, com conflito, ou fora da
+  lista confirmada.
 - **Estado dos portões** na `develop` depois da leva.
-- Se ficou tudo dentro, diga que a versão está pronta para o release e ofereça a
-  skill `dmaker-producao`, sem executá-la por conta própria.
+- Se isso zerou os PRs antigos, diga que a skill pode ser removida.

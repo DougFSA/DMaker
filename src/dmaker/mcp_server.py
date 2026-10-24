@@ -244,6 +244,7 @@ def edit_project(name: str, op: dict) -> dict:
     description=(
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
+        "NAR narrações (duração real quando já sintetizadas, senão estimada), "
         "MUS música, CC legendas), com o intervalo de cada item já calculado."
     )
 )
@@ -251,10 +252,12 @@ def timeline_view(name: str) -> dict:
     from .pipeline.layout import project_layout
     from .pipeline.projects import load_project
     from .pipeline.timeline_view import build_timeline_view
+    from .pipeline.voiceover import view_narration_durations
 
     project = load_project(name)
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = view_narration_durations(project)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @server.tool(
@@ -472,7 +475,7 @@ def export_project(
 
 
 @server.tool(
-    description="Situação de um render em segundo plano (running | done | error) e o resultado quando pronto."
+    description="Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto."
 )
 def job_status(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -796,6 +799,57 @@ def clean_cache() -> dict:
     return {"removed": n}
 
 
+# ---------- modelos de IA ----------
+
+
+def _model_download_work(job: Job, model_id: str) -> dict:
+    from .pipeline.models_service import job_progress_reporter, shared_service
+
+    service = shared_service()
+    report = job_progress_reporter(job, service.spec(model_id).name)
+    return service.download(model_id, report).to_dict()
+
+
+@server.tool(
+    description=(
+        "Gerencia os modelos de IA em cache/models (OmniVoice, Kokoro, Demucs, Whisper, recorte de pessoa). "
+        "action=list: estado de cada modelo (baixado, parcial ou ausente), tamanho real em disco, licença, "
+        "para que serve e quais funções dependem dele, mais as sobras (arquivos que nenhum modelo usa), o total "
+        "ocupado e o espaço livre. action=download com model_id: baixa em segundo plano e confere o arquivo "
+        "(devolve job_id, consulte com job_status; os de ~3 GB levam minutos). action=remove com model_id e "
+        "action=prune (apaga as sobras) EXIGEM confirm=true: sem ele nada é apagado e o erro traz o aviso de "
+        "quais funções deixam de funcionar. O disco costuma estar cheio: confira o espaço livre antes de baixar."
+    )
+)
+def models(
+    action: Literal["list", "download", "remove", "prune"] = "list",
+    model_id: str | None = None,
+    confirm: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.models_service import ConfirmationRequired, shared_service
+
+    service = shared_service()
+    if action == "list":
+        return service.inventory().to_dict()
+    if action == "prune":
+        try:
+            return {"removed": service.prune(confirm=confirm).to_dict()}
+        except ConfirmationRequired as exc:
+            raise ValueError(f"{exc} Repita a chamada com confirm=true.") from exc
+    if not model_id:
+        raise ValueError(f"A ação {action} precisa de model_id (use action=list para ver os ids).")
+    if action == "remove":
+        try:
+            return {"removed": service.remove(model_id, confirm=confirm).to_dict()}
+        except ConfirmationRequired as exc:
+            raise ValueError(f"{exc} Repita a chamada com confirm=true.") from exc
+    spec = service.spec(model_id)
+    job = jobs.start(f"baixar modelo ({spec.name})", lambda job: _model_download_work(job, model_id))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
 # ---------- voz e narração ----------
 
 
@@ -946,6 +1000,90 @@ def synthesize_speech(
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+def _voice_queue_service():
+    from .pipeline.voice_queue_service import VoiceQueueService
+
+    return VoiceQueueService(library=_voice_library())
+
+
+@server.tool(
+    description=(
+        "Põe uma narração longa (audiobook, manual narrado, vários roteiros) na fila de narrações, que roda "
+        "um item por vez e retoma de onde parou se o processo cair. Informe text (capítulos marcados com "
+        "'# Título' ou 'Capítulo N' viram arquivos separados) ou file_path (.txt, .md ou .docx; títulos viram "
+        "capítulos). Cada item gera output/narracoes/<título>/NN-<capítulo>.wav, o <título>-completo.wav "
+        "com 1,5 s entre capítulos e o .srt do completo. voice = id da voz; draft=true usa 8 passos no "
+        "OmniVoice (rascunho); format = wav | mp3. A ferramenta só enfileira: quem executa é o `dmaker ui` "
+        "aberto ou o comando `dmaker voice queue run`. Acompanhe com voice_queue_list."
+    )
+)
+def voice_queue_add(
+    text: str | None = None,
+    file_path: str | None = None,
+    voice: str | None = None,
+    title: str | None = None,
+    draft: bool = False,
+    format: Literal["wav", "mp3"] = "wav",
+    language: str | None = None,
+    speed: float = 1.0,
+    brand: str | None = None,
+) -> dict:
+    from .pipeline.voice_queue import STATE_LABELS, QueueOptions
+
+    if bool(text) == bool(file_path):
+        raise ValueError("Informe text ou file_path, um dos dois.")
+    options = QueueOptions(
+        voice=voice, language=language, speed=speed, brand=brand, draft=draft, audio_format=format
+    )
+    service = _voice_queue_service()
+    item = (
+        service.add_text(text, options, title) if text else service.add_path(Path(file_path), options, title)
+    )
+    return {
+        "id": item.id,
+        "title": item.title,
+        "chapters": item.chapters_total,
+        "output_dir": item.output_dir,
+        "state": STATE_LABELS[item.state],
+        "runs_with": "dmaker ui aberto ou dmaker voice queue run",
+    }
+
+
+@server.tool(
+    description=(
+        "Lista a fila de narrações: estado de cada item (Pendente, Rodando, Pausado, Cancelado, Concluído, "
+        "Falhou), capítulo e fala em andamento, porcentagem, tempo estimado restante (medido nesta máquina) "
+        "e os arquivos prontos. eta_label no topo é o tempo para esvaziar a fila."
+    )
+)
+def voice_queue_list() -> dict:
+    view = _voice_queue_service().view()
+    for item in view["items"]:
+        item["files"] = [f["name"] for f in item["files"]]
+    return view
+
+
+@server.tool(
+    description=(
+        "Confere se um áudio ou vídeo (wav, mp3, m4a, mp4...) carrega a marca d'água inaudível de voz "
+        "gerada por IA que o DMaker põe em toda fala sintetizada (sobrevive à exportação em AAC). Devolve "
+        "detected, probability (0 a 1) e verdict em português. Roda na hora (alguns segundos, mais o "
+        "carregamento do modelo na primeira vez). A marca está ligada por padrão e DMAKER_WATERMARK=0 a "
+        "desliga; a verificação funciona sempre."
+    )
+)
+def verify_watermark(path: str) -> dict:
+    from .pipeline.voices import verify_watermark as _verify
+    from .pipeline.voices import watermark_verdict
+
+    result = _verify(Path(path))
+    return {
+        "detected": result.detected,
+        "probability": result.probability,
+        "verdict": watermark_verdict(result),
+    }
 
 
 @server.tool(
@@ -1206,6 +1344,60 @@ def fix_speech(
     return {**job.snapshot(), "result": job.result}
 
 
+# ---------- troca de voz ----------
+
+
+def _convert_voice_work(job: Job, request: Any) -> dict:
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.voice_conversion import default_voice_conversion_service
+
+    service = default_voice_conversion_service(
+        SubprocessRunner(sink=job.sink()), job.log, library=_voice_library(), synthesizer=_voice_synthesizer()
+    )
+    result = service.convert(request, _stage_progress(job))
+    return {
+        "output": str(result.path),
+        "voice": result.voice,
+        "seconds": round(result.seconds, 2),
+        "blocks": result.blocks,
+        "gain_db": round(result.gain_db, 2),
+        "engine": result.engine,
+        "timings": result.timings,
+    }
+
+
+@server.tool(
+    description=(
+        "Troca a voz de uma gravação inteira pela de uma voz da biblioteca (clonada ou desenhada), mantendo "
+        "as palavras, o ritmo, as pausas, a entonação e o fundo (música, ambiente). Diferente de dub (traduz e "
+        "fala de novo) e de fix_speech (troca um trecho): aqui só o timbre muda. voice é o id da voz "
+        "(list_voices). start/end (segundos no arquivo) convertem só um trecho; sem eles, o arquivo todo. A "
+        "saída vai para output/troca-de-voz/<nome>.<voz>-<id>.<ext> (out troca); vídeo inteiro mantém a "
+        "imagem sem recodificar. Roda em segundo plano e é lento na CPU (~1,5 a 2 s por segundo de fala, mais a "
+        "separação de voz, ~3x a 6x a duração, em cache): devolve job_id, consulte com job_status."
+    )
+)
+def convert_voice(
+    path: str,
+    voice: str,
+    start: float | None = None,
+    end: float | None = None,
+    out: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.voice_conversion import ConversionRequest
+
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
+    request = ConversionRequest(
+        src=Path(path), voice=voice, start=start, end=end, out=Path(out) if out else None
+    )
+    job = jobs.start(f"trocar voz ({Path(path).name})", lambda job: _convert_voice_work(job, request))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
 # ---------- dublagem ----------
 
 
@@ -1237,10 +1429,15 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
         "Dublagem, passo 1: transcreve a fala de um vídeo ou áudio, parte em frases e traduz para "
         "target_language com o Ollama local (modelo em DMAKER_TRANSLATE_MODEL), e grava o projeto editável "
         "`.dub.json` (padrão output/dublagem/<nome>.<idioma>.dub.json). Revise as traduções com dub_get e "
-        "corrija com dub_update_segment antes de dub_render. speaker_mode: per_segment (clona a voz de quem fala "
-        "em cada frase; serve a vários falantes) ou single (um clone para o arquivo). voice usa uma voz da "
+        "corrija com dub_update_segment antes de dub_render. speaker_mode: per_speaker (o padrão: separa quem "
+        "fala e usa um clone por pessoa, a partir dos melhores trechos dela; com um falante só vale como single), "
+        "per_segment (clona a voz em volta de cada frase) ou single (um clone para o arquivo). num_speakers "
+        "força a quantidade de pessoas na diarização (só no modo per_speaker). voice usa uma voz da "
         "biblioteca no lugar do clone. keep_original_db (ex.: -18) mantém a voz original por baixo. glossary: "
-        "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). Lento na CPU (separação de "
+        "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). fit_mode decide o que fazer "
+        "quando a fala traduzida não cabe no tempo da original: voz (padrão: avança na pausa e acelera a voz até "
+        "~1,44x), video (a voz fica natural e o vídeo estica até 1,3x naquele trecho) ou misto (a voz acelera "
+        "até 1,15x e o vídeo estica no resto). Lento na CPU (separação de "
         "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
     )
 )
@@ -1248,13 +1445,15 @@ def dub_prepare(
     path: str,
     target_language: str,
     source_language: str = "pt",
-    speaker_mode: Literal["per_segment", "single"] = "per_segment",
+    speaker_mode: Literal["per_speaker", "per_segment", "single"] | None = None,
     voice: str | None = None,
     keep_original_db: float | None = None,
     glossary: list[str] | None = None,
     brand: str | None = None,
     project: str | None = None,
+    fit_mode: Literal["voz", "video", "misto"] = "voz",
     wait_seconds: float = 0,
+    num_speakers: int | None = None,
 ) -> dict:
     from .pipeline.dubbing import default_project_path
 
@@ -1268,10 +1467,12 @@ def dub_prepare(
     options = {
         "source": source_language,
         "speaker_mode": speaker_mode,
+        "num_speakers": num_speakers,
         "voice": voice,
         "keep_original_db": keep_original_db,
         "glossary": glossary or [],
         "brand": brand,
+        "fit_mode": fit_mode,
     }
     job = jobs.start(
         f"dublagem: preparar ({Path(path).name})",
@@ -1281,19 +1482,20 @@ def dub_prepare(
     return {**job.snapshot(), "result": job.result}
 
 
-def _dub_render_work(job: Job, project_path: str, out: str | None, steps: int | None) -> dict:
+def _dub_render_work(
+    job: Job, project_path: str, out: str | None, steps: int | None, fit_mode: str | None = None
+) -> dict:
     from .domain.dub import load_dub_project
-    from .pipeline.dubbing import report_dict
+    from .pipeline.dubbing import report_dict, result_dict
 
-    result = _dubbing_service(job).render(
-        load_dub_project(Path(project_path)), Path(out) if out else None, _stage_progress(job), steps
-    )
+    project = load_dub_project(Path(project_path))
+    if fit_mode:  # vale só para esta geração; o arquivo do projeto não muda
+        project = project.model_copy(update={"fit_mode": fit_mode})
+    result = _dubbing_service(job).render(project, Path(out) if out else None, _stage_progress(job), steps)
     return {
         "output": str(result.path),
         "srt": str(result.srt_path),
-        "warnings": result.warnings,
-        "regenerated": result.regenerated,
-        "timings": {name: round(seconds, 1) for name, seconds in result.timings.items()},
+        **result_dict(result),
         "segments": [report_dict(r) for r in result.report],
     }
 
@@ -1306,12 +1508,71 @@ def _dub_render_work(job: Job, project_path: str, out: str | None, steps: int | 
         "sintetizada fica em cache: depois de editar uma tradução, rode de novo e só ela é refeita. O resultado "
         "traz warnings (falas que não couberam: encurte a tradução) e o relatório de cada fala. draft usa 8 "
         "passos (metade do tempo). Lento na CPU (~20 s por segundo de fala): devolve job_id, consulte com "
-        "job_status."
+        "job_status. fit_mode (voz, video ou misto) troca, só nesta geração, o que fazer com a fala que não "
+        "cabe: video e misto esticam o vídeo (até 1,3x) naquele trecho em vez de acelerar a voz, e o resultado "
+        "traz output_seconds e a lista stretched (fala, fator e segundos a mais)."
     )
 )
 def dub_render(
     project: str,
     out: str | None = None,
+    draft: bool = False,
+    steps: int | None = None,
+    fit_mode: Literal["voz", "video", "misto"] | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from .domain.dub import load_dub_project
+    from .voice.synth import DRAFT_STEPS
+
+    load_dub_project(Path(project))  # falha já na chamada se o projeto não existe ou está inválido
+    job = jobs.start(
+        f"dublagem: gerar ({Path(project).name})",
+        lambda job: _dub_render_work(
+            job, project, out, DRAFT_STEPS if draft and steps is None else steps, fit_mode
+        ),
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+def _dub_stems_work(
+    job: Job, project_path: str, out_dir: str | None, make_zip: bool, steps: int | None
+) -> dict:
+    from .domain.dub import load_dub_project
+    from .pipeline.dub_stems import StemsOptions
+
+    stems = _dubbing_service(job).export_stems(
+        load_dub_project(Path(project_path)),
+        StemsOptions(Path(out_dir) if out_dir else None, make_zip),
+        _stage_progress(job),
+        steps,
+    )
+    return {
+        "folder": str(stems.folder),
+        "voice_dubbed": str(stems.outputs.voice_dubbed),
+        "background": str(stems.outputs.background),
+        "voice_original": str(stems.outputs.voice_original),
+        "zip": str(stems.zip_path) if stems.zip_path else None,
+        "duration": round(stems.duration, 3),
+        "original_voice_db": stems.original_voice_db,
+    }
+
+
+@server.tool(
+    description=(
+        "Dublagem: exporta as trilhas separadas de um projeto `.dub.json` para remixar em outro editor "
+        "(Premiere, DaVinci, CapCut): voz-dublada.wav (só as falas dubladas, posicionadas no tempo), fundo.wav "
+        "(música e ruído) e voz-original.wav (a voz original isolada, sem atenuar). WAV 48 kHz estéreo, com a "
+        "duração exata do vídeo e alinhados no zero, sem loudnorm nem limitador. Grava em "
+        "output/dublagem/<nome>.<idioma>.trilhas (out_dir troca); make_zip=true junta as três num .zip ao lado. Usa as "
+        "falas já sintetizadas do cache (só sintetiza o que falta). O resultado traz original_voice_db: o quanto o "
+        "vídeo dublado atenua a voz original (null: ela não toca). Devolve job_id, consulte com job_status."
+    )
+)
+def dub_stems(
+    project: str,
+    out_dir: str | None = None,
+    make_zip: bool = False,
     draft: bool = False,
     steps: int | None = None,
     wait_seconds: float = 0,
@@ -1321,8 +1582,10 @@ def dub_render(
 
     load_dub_project(Path(project))  # falha já na chamada se o projeto não existe ou está inválido
     job = jobs.start(
-        f"dublagem: gerar ({Path(project).name})",
-        lambda job: _dub_render_work(job, project, out, DRAFT_STEPS if draft and steps is None else steps),
+        f"dublagem: trilhas ({Path(project).name})",
+        lambda job: _dub_stems_work(
+            job, project, out_dir, make_zip, DRAFT_STEPS if draft and steps is None else steps
+        ),
     )
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
@@ -1340,20 +1603,31 @@ def dub_get(project: str) -> dict:
 @server.tool(
     description=(
         "Corrige uma fala de um projeto de dublagem: text troca a tradução (a pronúncia pode usar "
-        "[[termo|pronúncia]]); locked=true impede que dub_retranslate a sobrescreva. Grava o .dub.json. "
-        "Depois rode dub_render: só a fala editada é sintetizada de novo."
+        "[[termo|pronúncia]]); locked=true impede que dub_retranslate a sobrescreva; speaker troca quem fala "
+        '(um dos falantes do projeto, ex.: "Falante 2"; veja dub_get) e a fala passa a usar a voz dele. Grava o '
+        ".dub.json. Depois rode dub_render: só a fala editada é sintetizada de novo."
     )
 )
 def dub_update_segment(
-    project: str, segment_id: str, text: str | None = None, locked: bool | None = None
+    project: str,
+    segment_id: str,
+    text: str | None = None,
+    locked: bool | None = None,
+    speaker: str | None = None,
 ) -> dict:
     from .domain.dub import load_dub_project, save_dub_project
 
     path = Path(project)
-    updated = load_dub_project(path).edited(segment_id, text, locked)
+    updated = load_dub_project(path).edited(segment_id, text, locked, speaker)
     save_dub_project(updated, path)
     segment = updated.segment(segment_id)
-    return {"project": str(path), "id": segment.id, "text": segment.text, "locked": segment.locked}
+    return {
+        "project": str(path),
+        "id": segment.id,
+        "text": segment.text,
+        "locked": segment.locked,
+        "speaker": segment.speaker,
+    }
 
 
 def _dub_retranslate_work(job: Job, project_path: str) -> dict:

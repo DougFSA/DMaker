@@ -37,10 +37,46 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 ### Added
 
 - **DMK-20** (fase 1): interface nova em Vue com visual próprio, telas de Projetos e Saídas e jobs ao vivo; a interface atual continua em /classica
+- **DMK-5**: trocar a voz de uma gravação inteira por uma voz da biblioteca,
+  mantendo ritmo, entonação e o fundo (`dmaker voice convert`, ferramenta MCP
+  `convert_voice` e seção "Trocar voz" na aba Voz).
+- **DMK-4**: dublagem com uma voz clonada por pessoa, separando quem fala (diarização local).
+  O novo modo `per_speaker` (padrão da dublagem) descobre quem fala em cada trecho, monta um
+  clone por falante a partir do melhor trecho de 3 a 15 s só com a fala dele e dubla cada fala
+  com a voz do falante certo; com uma pessoa só vale como `single`. O falante de cada fala
+  aparece no `.dub.json`, na tabela da seção Dublar (coluna editável) e em `dub_get`; trocar
+  o falante (`dub_update_segment`, `speaker`) refaz só aquela fala. CLI: `dmaker dub prepare
+  --speakers N` força o número de pessoas. `per_segment` e `single` seguem como estavam.
+- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
+- **DMK-6**: fila de narrações que roda em segundo plano e retoma de onde parou, com importação de roteiro em txt, md ou docx por capítulos
+- **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
+- **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início
+- **DMK-18**: exportar as trilhas separadas da dublagem (voz dublada, fundo e voz original) para mixar em outro editor
+- **DMK-19**: dublagem pode esticar o vídeo nos trechos em que a fala traduzida não cabe, em vez de acelerar ou cortar a voz (modos voz, vídeo e misto)
+- **DMK-17**: gerenciador de modelos (ver tamanho, licença e uso de cada modelo, baixar, apagar e limpar sobras) na CLI, no MCP e na interface
+
+### Fixed
+
+- **DMK-8**: testes de voz e áudio isolados em pasta temporária (diretórios de dados fixados na
+  importação dos módulos e lidos do `cache/` e `output/` reais), suíte estável com síntese real rodando
+  ao mesmo tempo. Os dados passam a morar em `DMAKER_DATA_DIR` (padrão: a raiz), e um gancho de auditoria
+  reprova qualquer teste que escreva em `cache/`, `output/`, `projects/`, `assets/voices/` ou no léxico real.
 
 ### Pré-requisitos na máquina
 
 - **DMK-20**: para ver a interface nova, Node.js instalado e `cd frontend; npm ci; npm run build` (gera `src/dmaker/ui/dist/`); sem o build, `dmaker ui` segue com a interface atual em `/`
+- **DMK-5**: os pesos do conversor de timbre OpenVoice V2 (MIT, 131 MB) baixam
+  sozinhos para `cache/models/openvoice` na primeira troca de voz, com versão e
+  SHA-256 fixados. Nenhum pacote novo do pip: o conversor usa o `torch` e o
+  `torchaudio` que já precisam estar instalados para a voz (o código de
+  inferência está em `src/dmaker/voice/third_party/openvoice`).
+- **DMK-4**: `.venv\Scripts\pip install -e .[voice]` instala o `sherpa-onnx` (diarização na
+  CPU, sem token nem conta). Na primeira dublagem no modo `per_speaker`, os modelos baixam para
+  `cache/models/diarization` (cerca de 34 MB, versão e SHA-256 fixados): segmentação
+  pyannote-segmentation-3.0 em ONNX (licença MIT) e embeddings CAM++ do 3D-Speaker (Apache-2.0),
+  das releases oficiais do k2-fsa. Sem o `sherpa-onnx`, ou com `DMAKER_DIARIZATION=off`, o padrão
+  volta a ser `per_segment`.
+- **DMK-7**: pacote `audioseal` no extra `voice` (`.venv\Scripts\pip install -e .[voice]`); os pesos (~90 MB) são baixados na primeira marca ou verificação, para `cache/models/audioseal`.
 
 ---
 

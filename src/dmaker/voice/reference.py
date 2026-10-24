@@ -137,6 +137,35 @@ def choose_reference_near(
     return _best_span(_runs(words, None), anchor if anchor is not None else 0.0, score)
 
 
+def _speaker_runs(words: list[Word], owners: list[str | None], speaker: str) -> list[list[Word]]:
+    """Blocos de fala contínua só de `speaker`: a fala de outro (ou sobreposta) no meio parte o bloco."""
+    runs: list[list[Word]] = [[]]
+    for word, owner in zip(words, owners, strict=True):
+        if owner != speaker:
+            runs.append([])
+        elif runs[-1] and word.start - runs[-1][-1].end > MAX_GAP_SECONDS:
+            runs.append([word])
+        else:
+            runs[-1].append(word)
+    return [run for run in runs if run]
+
+
+def choose_speaker_reference(
+    words: list[Word], owners: list[str | None], speaker: str
+) -> ReferenceSpan | None:
+    """O melhor trecho de 3 a 15 s da fala de `speaker`, com palavras só dele (`owners[i]` é o dono de `words[i]`).
+
+    É a referência do clone da pessoa para o arquivo todo, então vale o trecho com mais fala (até o teto de
+    15 s, que o modelo alinha), e o de maior confiança do Whisper desempata: uma voz estável pede amostra
+    longa e limpa. Sem 3 s contínuos dele, devolve None (a pessoa só interjeita).
+    """
+
+    def score(duration: float, confidence: float, distance: float) -> tuple[float, ...]:
+        return (-round(duration * 2) / 2, -confidence, distance)
+
+    return _best_span(_speaker_runs(words, owners, speaker), 0.0, score)
+
+
 def _best_span(
     runs: list[list[Word]],
     anchor: float,
