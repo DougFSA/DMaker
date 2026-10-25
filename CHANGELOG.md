@@ -47,7 +47,7 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   aparece no `.dub.json`, na tabela da seção Dublar (coluna editável) e em `dub_get`; trocar
   o falante (`dub_update_segment`, `speaker`) refaz só aquela fala. CLI: `dmaker dub prepare
   --speakers N` força o número de pessoas. `per_segment` e `single` seguem como estavam.
-- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
+- **DMK-7**: marca d'água inaudível (AudioSeal) em toda fala sintetizada, ligada por padrão, e `dmaker voice verify` para conferir (também a ferramenta MCP `verify_watermark`). A marca é a última coisa feita na voz: resiste ao acabamento broadcast da narração, à dublagem com ajuste de andamento, à mixagem com música de fundo e ao AAC do vídeo final. Desliga com `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`.
 - **DMK-6**: fila de narrações que roda em segundo plano e retoma de onde parou, com importação de roteiro em txt, md ou docx por capítulos
 - **DMK-16**: prévia ao vivo da narração, tocando cada frase assim que fica pronta, com parar sem perder o que já saiu
 - **DMK-3**: trilha NAR na linha do tempo da interface, com a duração real das falas já sintetizadas e arrastar para mudar o início

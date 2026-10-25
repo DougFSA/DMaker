@@ -1,4 +1,4 @@
-"""Grafo e comando ffmpeg da dublagem: posições, volume, aceleração, corte, voz original e saída."""
+"""Grafo e comando ffmpeg da dublagem: posições, volume, corte, voz original e saída (sem aceleração: ela é por fala)."""
 
 from __future__ import annotations
 
@@ -8,18 +8,18 @@ import pytest
 
 from dmaker.filtergraph.dub import (
     DubClip,
-    _atempo_chain,
     audio_retime_lines,
     dub_clip_lines,
     dub_mix_command,
     dub_mix_graph,
     video_retime_lines,
 )
+from dmaker.filtergraph.voice import atempo_filters
 from dmaker.voice.dub_retime import IDENTITY, StretchWindow, plan_retime
 
 CLIPS = [
     DubClip(Path("a.wav"), start=1.0, gain_db=2.5),
-    DubClip(Path("b.wav"), start=4.25, gain_db=-1.0, tempo=1.1, max_seconds=2.0),
+    DubClip(Path("b.wav"), start=4.25, gain_db=-1.0, max_seconds=2.0),
 ]
 
 
@@ -32,20 +32,24 @@ def graph(**options) -> str:
 
 
 def test_each_clip_is_delayed_to_its_position_in_milliseconds_on_all_channels():
+    """Em ms, na grade de 20 ms do detector da marca d'água: 4,25 s vira 4,24 s (erro de 10 ms, inaudível)."""
     text = graph()
     assert "[2:a]volume=2.50dB" in text and "adelay=delays=1000:all=1[dub0]" in text
-    assert "[3:a]atempo=1.1000,volume=-1.00dB" in text and "adelay=delays=4250:all=1[dub1]" in text
+    assert "[3:a]volume=-1.00dB" in text and "adelay=delays=4240:all=1[dub1]" in text
 
 
-def test_a_clip_with_no_speedup_and_room_has_no_atempo_and_no_cut():
+def test_no_clip_is_sped_up_in_the_mix_because_the_speed_is_set_before_the_watermark():
+    assert "atempo" not in graph()
+
+
+def test_a_clip_with_room_has_no_cut():
     first_chain = graph().split(";")[1]
-    assert "atempo" not in first_chain and "atrim" not in first_chain and "afade" not in first_chain
+    assert "atrim" not in first_chain and "afade" not in first_chain
 
 
 def test_a_clip_that_did_not_fit_is_cut_with_a_short_fade_out():
     second_chain = graph().split(";")[2]
     assert "atrim=duration=2.000,afade=t=out:st=1.920:d=0.08" in second_chain
-    assert second_chain.index("atempo") < second_chain.index("atrim")  # primeiro acelera, depois corta
 
 
 def test_everything_is_stereo_48k_so_amix_accepts_the_inputs():
@@ -58,7 +62,9 @@ def test_everything_is_stereo_48k_so_amix_accepts_the_inputs():
 def test_the_mix_sums_without_normalizing_limits_and_fixes_the_duration():
     mix = graph().split(";")[-1]
     assert mix.startswith("[background][dub0][dub1]amix=inputs=3:duration=first:normalize=0,")
-    assert "alimiter=limit=0.891:level=disabled" in mix
+    assert (
+        "alimiter=limit=0.891:level=disabled:latency=1" in mix
+    )  # compensa a antecipação: não desloca a marca
     assert mix.endswith("apad=whole_dur=30.000,atrim=duration=30.000,asetpts=PTS-STARTPTS[out]")
 
 
@@ -164,10 +170,10 @@ def test_the_audio_follows_each_piece_slowing_down_by_the_inverse_of_the_factor_
 
 
 def test_atempo_is_chained_when_the_speed_leaves_the_range_one_instance_accepts():
-    assert _atempo_chain(0.8) == ["atempo=0.800000"]
-    assert _atempo_chain(0.5) == ["atempo=0.500000"]
-    assert _atempo_chain(0.2) == ["atempo=0.5", "atempo=0.5", "atempo=0.800000"]  # 0,5 * 0,5 * 0,8 = 0,2
-    assert _atempo_chain(3.0) == ["atempo=2.0", "atempo=1.500000"]
+    assert atempo_filters(0.8) == ["atempo=0.800000"]
+    assert atempo_filters(0.5) == ["atempo=0.500000"]
+    assert atempo_filters(0.2) == ["atempo=0.5", "atempo=0.5", "atempo=0.800000"]  # 0,5 * 0,5 * 0,8 = 0,2
+    assert atempo_filters(3.0) == ["atempo=2.0", "atempo=1.500000"]
 
 
 def test_the_mix_graph_retimes_background_and_original_voice_but_not_the_dubbed_clips():
@@ -187,7 +193,7 @@ def test_the_mix_graph_retimes_background_and_original_voice_but_not_the_dubbed_
     assert "[backgroundfull]asplit=3" in text and "concat=n=3:v=0:a=1[background]" in text
     assert "[2:a]volume=-18.0dB,aresample=48000" in text and "[originalfull]asplit=3" in text
     assert "concat=n=3:v=0:a=1[original]" in text
-    assert "adelay=delays=16250:all=1[dub1]" in text  # a fala já vem na linha do tempo nova
+    assert "adelay=delays=16240:all=1[dub1]" in text  # a fala já vem na linha do tempo nova
     assert text.count("atempo=0.800000") == 2  # fundo e voz original; a fala dublada fica na velocidade dela
     assert "[background][original][dub0][dub1]amix=inputs=4" in text
     assert text.endswith("apad=whole_dur=31.000,atrim=duration=31.000,asetpts=PTS-STARTPTS[out]")
@@ -256,5 +262,5 @@ def test_without_the_limiter_the_mix_is_the_pre_finish_sum_of_the_stems():
 def test_clip_lines_are_shared_by_the_mix_and_the_stems_with_labels_in_order():
     lines, labels = dub_clip_lines(CLIPS, first_clip_input=5)
     assert labels == ["[dub0]", "[dub1]"]
-    assert lines[0].startswith("[5:a]volume=2.50dB") and lines[1].startswith("[6:a]atempo=1.1000")
+    assert lines[0].startswith("[5:a]volume=2.50dB") and lines[1].startswith("[6:a]volume=-1.00dB")
     assert all(line in graph(first_clip_input=5).split(";") for line in lines)

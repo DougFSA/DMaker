@@ -713,7 +713,7 @@ def test_dub_stems_have_the_video_duration_and_sum_to_the_mix_before_the_finish(
     second = write_wav(tmp_path / "b.wav", tone(2.0, 24000, 1320, 0.3), 24000)
     clips = [
         DubClip(first, 1.0, gain_db=-3.0),
-        DubClip(second, 3.5, gain_db=2.0, tempo=1.25, max_seconds=0.5),
+        DubClip(second, 3.5, gain_db=2.0, max_seconds=0.5),
     ]
     duration = 6.0
     runner = SubprocessRunner(quiet=True)

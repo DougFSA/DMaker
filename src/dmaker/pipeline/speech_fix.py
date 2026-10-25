@@ -22,6 +22,7 @@ from ..filtergraph.speech_edit import (
     speaker_reference_command,
     speech_splice_command,
 )
+from ..filtergraph.voice import SpeechFinish
 from ..media.ffmpeg import FFmpegRunner
 from ..media.probe import MediaInfo, probe
 from ..media.wavio import read_wav
@@ -420,9 +421,9 @@ class SpeechFixService:
         stages.begin("Preparando a voz do falante", 0.45, 0.5)
         voice = self._voice(request, words, stems.vocals, vocals, (group_start, group_end))
         stages.begin("Sintetizando a fala nova (na CPU leva alguns minutos)", 0.5, 0.95)
-        speech_path, speech = self._synthesize(request, context, voice, plan)
+        speech_request, speech = self._synthesize(request, context, voice, plan)
         stages.begin("Emendando no arquivo", 0.95, 1.0)
-        out = self._splice(request, info, stems.background, vocals, plan, speech_path, speech)
+        out = self._splice(request, info, stems.background, vocals, plan, speech_request, speech)
         return FixResult(
             path=out,
             region_start=plan.region_start,
@@ -454,8 +455,11 @@ class SpeechFixService:
 
     def _synthesize(
         self, request: FixRequest, context: str, voice: VoiceProfile, plan: SplicePlan
-    ) -> tuple[Path, SpeechAudio]:
-        """Sintetiza o texto do grupo (com a pronúncia da marca) na duração do plano."""
+    ) -> tuple[VoiceRequest, SpeechAudio]:
+        """Sintetiza o texto do grupo (com a pronúncia da marca) na duração do plano; a fala sai CRUA.
+
+        Ela ainda pode precisar de `atempo` para caber, e a marca d'água não sobrevive a isso: a marca só
+        entra em `_splice`, depois de decidido o andamento."""
         lexicon = self.narrator.lexicons(request.brand or voice.brand, request.language)
         voice_request = VoiceRequest(
             text=normalize_for_speech(spoken_text(context, lexicon), request.language),
@@ -465,9 +469,9 @@ class SpeechFixService:
             seed=request.seed,
             duration=round(plan.target_duration, 3),
         )
-        path, _ = self.narrator.speak(voice_request)
+        path, _ = self.narrator.speak_dry(voice_request)
         samples, rate = read_wav(path)
-        return path, SpeechAudio(samples, rate)
+        return voice_request, SpeechAudio(samples, rate)
 
     def _splice(
         self,
@@ -476,7 +480,7 @@ class SpeechFixService:
         background: Path,
         vocals: VocalsWindow,
         plan: SplicePlan,
-        speech_path: Path,
+        speech_request: VoiceRequest,
         speech: SpeechAudio,
     ) -> Path:
         """Iguala o volume da fala nova ao do falante e emenda no original."""
@@ -484,6 +488,8 @@ class SpeechFixService:
             active_rms(speech.samples, speech.rate), vocals.level_around(plan.region_start, plan.region_end)
         )
         tempo = fit_tempo(speech.seconds, plan.usable_end - plan.speech_start)
+        # o `atempo` é aplicado à fala antes da marca d'água; a emenda recebe a fala já na velocidade final
+        speech_path, _ = self.narrator.speak(speech_request, SpeechFinish(tempo=tempo))
         out = request.out or default_output_path(
             request.src, corrected_suffix(request.src.suffix, info.has_video)
         )
@@ -499,7 +505,6 @@ class SpeechFixService:
                 plan,
                 background_offset=vocals.start,
                 gain_db=gain,
-                tempo=tempo,
                 sample_rate=info.sample_rate or 48000,
                 layout="mono" if info.channels == 1 else "stereo",
                 has_video=info.has_video,

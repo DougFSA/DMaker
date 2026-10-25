@@ -11,7 +11,7 @@ from mcp.client.stdio import StdioServerParameters, get_default_environment, std
 
 from dmaker import config
 
-from .conftest import requires_ffmpeg
+from .conftest import fake_ffmpeg_output, requires_ffmpeg
 
 
 async def _session(fn):
@@ -394,7 +394,7 @@ def test_synthesize_speech_runs_as_a_job(monkeypatch, tmp_path):
     library.save_design("Locutora", "female")
     fake = _FakeSynthesizer()
     out = tmp_path / "narracao.wav"
-    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: library)
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
     monkeypatch.setattr("dmaker.pipeline.voices.SubprocessRunner", lambda quiet=True: runner)
@@ -483,7 +483,7 @@ def test_synthesize_speech_uses_the_pronunciation_of_the_brand(monkeypatch, tmp_
     store.add("MedlyCare", "Médli Quér", brand="medlycare")
     fake = _FakeSynthesizer()
     out = tmp_path / "narracao.wav"
-    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
     monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)
@@ -534,7 +534,7 @@ def test_synthesize_speech_in_english_does_not_use_the_portuguese_pronunciation(
     store.add("DMaker", "Di Mêiker")
     fake = _FakeSynthesizer()
     out = tmp_path / "narracao.wav"
-    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"audio"))
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
     monkeypatch.setattr(mcp_server, "_lexicon_store", lambda: store)
     monkeypatch.setattr(mcp_server, "_voice_library", lambda: VoiceLibrary(tmp_path / "voices"))
     monkeypatch.setattr(mcp_server, "_voice_synthesizer", lambda: fake)

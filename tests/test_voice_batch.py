@@ -18,6 +18,8 @@ from dmaker.voice.manuscript import Chapter
 from dmaker.voice.synth import DRAFT_STEPS
 from tests.test_narration import FakeSynthesizer
 
+from .conftest import concat_commands, fake_ffmpeg_output, finish_commands
+
 # frases com mais de 20 caracteres: cada uma vira uma fala (as curtas se juntam à seguinte)
 CHAPTERS = [
     Chapter("A origem", "Primeira frase do primeiro capítulo. Segunda frase do primeiro capítulo."),
@@ -34,7 +36,7 @@ class Harness:
         monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
         self.queue = VoiceQueue(tmp_path / "cache" / "voice_queue.json")
         self.synthesizer = synthesizer or FakeSynthesizer()
-        self.runner = RecordingRunner(on_run=lambda command: Path(command.args[-1]).write_bytes(b"audio"))
+        self.runner = RecordingRunner(on_run=fake_ffmpeg_output)
         self.service = NarrationService(self.synthesizer, self.runner, tmp_path / "voice-cache")
         self.clock_now = 0.0
         self.narrator = BatchNarrator(
@@ -74,22 +76,21 @@ def test_three_chapters_produce_three_files_plus_the_complete_audio_and_its_srt(
     ]
     assert all((folder / name).exists() for name in output.files[:4])
     # três capítulos montados + o completo: tudo passa pelo runner, nada de ffmpeg direto
-    assert len(harness.runner.commands) == 4
+    assert len(concat_commands(harness.runner)) == 4
 
 
 def test_the_complete_audio_joins_the_chapters_in_order_with_a_pause_between_them_only(harness):
     item = harness.enqueue()
     harness.narrator.process(item)
 
-    complete = harness.runner.commands[-1]
+    complete = concat_commands(harness.runner)[-1]
     inputs = [Path(complete[index + 1]).name for index, arg in enumerate(complete) if arg == "-i"]
     assert inputs == ["01-a-origem.wav", "02-o-meio.wav", "03-o-fim.wav"]
     graph = complete[complete.index("-filter_complex") + 1]
     assert graph.count("apad=pad_dur=1.500") == 2  # depois do 1 e do 2; o último não ganha silêncio
     assert "acompressor" not in graph  # o acabamento broadcast já foi aplicado em cada capítulo
-    assert (
-        "acompressor" in harness.runner.commands[0][harness.runner.commands[0].index("-filter_complex") + 1]
-    )
+    finishes = finish_commands(harness.runner)  # cada fala dos capítulos ganhou o acabamento, antes da marca
+    assert finishes and all("acompressor" in command[command.index("-af") + 1] for command in finishes)
 
 
 def test_complete_srt_shifts_each_chapter_by_the_previous_durations_and_the_gap(harness):
@@ -120,7 +121,7 @@ def test_a_single_chapter_script_makes_only_the_complete_file_with_its_srt(harne
     output = harness.narrator.process(item)
 
     assert output.files == ["meu-livro-completo.wav", "meu-livro-completo.srt"]
-    assert len(harness.runner.commands) == 1
+    assert len(concat_commands(harness.runner)) == 1
 
 
 def test_mp3_format_and_draft_steps_reach_the_files_and_the_synthesizer(harness):

@@ -21,6 +21,7 @@ from dmaker.pipeline.dubbing import (
 from dmaker.text.captions import Word
 from dmaker.text.translate import Line
 from dmaker.voice.pronunciation import Lexicon
+from dmaker.voice.watermark import delay_on_detector_grid
 from tests.test_speech_fix import Harness
 
 
@@ -664,7 +665,7 @@ def test_the_following_speeches_and_the_subtitles_move_by_what_the_picture_grew(
     )
     graph = dub.graph()
     for report in result.report[1:]:
-        assert f"adelay=delays={round(report.retimed_start * 1000)}:all=1" in graph
+        assert f"adelay=delays={delay_on_detector_grid(report.retimed_start)}:all=1" in graph
 
 
 def test_the_voice_mode_is_unchanged_it_squeezes_the_voice_and_never_touches_the_picture(dub: DubHarness):
@@ -691,7 +692,9 @@ def test_mixed_mode_accelerates_the_voice_up_to_the_cap_and_stretches_the_rest(d
     assert first.status == "stretched" and first.tempo == pytest.approx(1.15)
     assert 1.0 < first.stretch <= 1.3 and first.message.startswith("acelerada 1.15x e vídeo esticado")
     chain = next(line for line in dub.graph().split(";") if line.endswith("[dub0]"))
-    assert "atempo=1.1500" in chain
+    assert "atempo" not in chain  # a aceleração é da fala, feita antes da marca d'água
+    (speed_up,) = dub.labeled("acabamento da fala")
+    assert speed_up.args[speed_up.args.index("-af") + 1] == "atempo=1.150000"
 
 
 def test_a_mild_excess_in_mixed_mode_is_solved_by_the_voice_alone(dub: DubHarness):
@@ -775,7 +778,7 @@ def test_stems_of_a_stretched_video_follow_the_new_timeline_like_the_dubbed_file
     start_after_stretch = result.report[1].retimed_start
     assert start_after_stretch is not None and start_after_stretch > result.report[1].start
     assert (
-        f"adelay=delays={round(start_after_stretch * 1000)}:all=1" in graph
+        f"adelay=delays={delay_on_detector_grid(start_after_stretch)}:all=1" in graph
     )  # a fala seguinte foi empurrada
 
 

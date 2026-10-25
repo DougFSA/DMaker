@@ -14,6 +14,8 @@ from dmaker.voice.pronunciation import Lexicon
 from dmaker.voice.script import Utterance
 from dmaker.voice.synth import Speech, VoiceRequest
 
+from .conftest import concat_commands, fake_ffmpeg_output, finish_commands
+
 SAMPLE_RATE = 24000
 
 
@@ -35,10 +37,7 @@ class FakeSynthesizer:
 def _service(tmp_path, synthesizer=None, runner=None, log=None):
     synthesizer = synthesizer or FakeSynthesizer()
 
-    def on_run(command):
-        Path(command.args[-1]).write_bytes(b"audio")
-
-    runner = runner or RecordingRunner(on_run=on_run)
+    runner = runner or RecordingRunner(on_run=fake_ffmpeg_output)
     return NarrationService(synthesizer, runner, tmp_path / "cache", log), synthesizer, runner
 
 
@@ -79,12 +78,13 @@ def test_render_concatenates_cached_files_in_order(tmp_path):
     out = tmp_path / "narracao.mp3"
     service.render(TEXT, out, voice=None)
 
-    command = runner.commands[0]
+    [command] = concat_commands(runner)
     inputs = [command[i + 1] for i, arg in enumerate(command) if arg == "-i"]
     assert len(inputs) == 3 and all(Path(p).parent == tmp_path / "cache" for p in inputs)
     graph = command[command.index("-filter_complex") + 1]
     assert "apad=pad_dur=0.350[p0]" in graph and "apad=pad_dur=0.700[p1]" in graph
-    assert "concat=n=3:v=0:a=1[joined]" in graph and graph.endswith("[out]")
+    assert "concat=n=3:v=0:a=1[out]" in graph and graph.endswith("[out]")
+    assert "acompressor" not in graph  # a montagem é seca: o acabamento é de cada fala
     assert command[command.index("-c:a") + 1] == "libmp3lame" and command[-1] == str(out)
 
 
@@ -94,7 +94,8 @@ def test_second_render_does_not_call_the_synthesizer(tmp_path):
     calls = len(synthesizer.requests)
     again = service.render(TEXT, tmp_path / "b.wav", voice=None)
     assert calls == 3 and len(synthesizer.requests) == 3
-    assert len(runner.commands) == 2 and again.duration > 0
+    assert len(concat_commands(runner)) == 2 and again.duration > 0
+    assert len(finish_commands(runner)) == 3  # o acabamento de cada fala também fica no cache
 
 
 def test_repeated_sentence_is_synthesized_once(tmp_path):
@@ -163,12 +164,9 @@ def test_empty_text_is_rejected(tmp_path):
 
 
 def _lexicon_service(tmp_path, lexicons):
-    def on_run(command):
-        Path(command.args[-1]).write_bytes(b"audio")
-
     synthesizer = FakeSynthesizer()
     service = NarrationService(
-        synthesizer, RecordingRunner(on_run=on_run), tmp_path / "cache", lexicons=lexicons
+        synthesizer, RecordingRunner(on_run=fake_ffmpeg_output), tmp_path / "cache", lexicons=lexicons
     )
     return service, synthesizer
 
@@ -353,7 +351,7 @@ def test_should_stop_cancels_between_utterances_keeping_the_ready_ones_in_the_ca
             should_stop=lambda: len(ready) >= 2,
         )
     assert (stop.value.ready, stop.value.total) == (2, 3)
-    assert len(synthesizer.requests) == 2 and runner.commands == []  # nem o arquivo final foi montado
+    assert len(synthesizer.requests) == 2 and concat_commands(runner) == []  # nem o arquivo final foi montado
     assert not (tmp_path / "a.wav").exists()
 
     service.render(TEXT, tmp_path / "b.wav", voice=None)  # gerar de novo só sintetiza o que faltava

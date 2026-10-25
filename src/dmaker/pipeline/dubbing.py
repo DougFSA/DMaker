@@ -37,6 +37,7 @@ from ..domain.dub import (
 from ..filtergraph.dub import DubClip, dub_mix_command
 from ..filtergraph.dub_stems import dub_stems_command
 from ..filtergraph.speech_edit import corrected_suffix
+from ..filtergraph.voice import SpeechFinish
 from ..media.diarization import SpeakerDiarizer, SpeakerTurn, speaking_seconds
 from ..media.ffmpeg import FFmpegRunner
 from ..media.probe import MediaInfo, probe
@@ -741,15 +742,18 @@ class DubbingService:
             duration=round(requested, 3),
         )
         cached = self.narrator.is_cached(request)
-        path, speech_seconds = self.narrator.speak(request)
-        samples, rate = read_wav(path)
+        dry_path, speech_seconds = self.narrator.speak_dry(request)
+        samples, rate = read_wav(dry_path)
         gain = gain_to_match_db(active_rms(samples, rate), vocals.level_within(segment.start, segment.end))
         outcome = (
             plan_voice_fit(speech_seconds, fit)
             if fit_mode == "voz"
             else plan_video_fit(speech_seconds, slot, fit_mode)
         )
-        clip = DubClip(path, segment.start, gain, outcome.tempo, outcome.max_seconds)
+        # só agora se sabe o andamento: a fala é acelerada aqui, fala a fala, e SÓ DEPOIS marcada (a marca
+        # d'água não sobrevive a `atempo` aplicado à fala já marcada, como fazia a montagem)
+        path, _ = self.narrator.speak(request, SpeechFinish(tempo=outcome.tempo))
+        clip = DubClip(path, segment.start, gain, outcome.max_seconds)
         entry = SegmentReport(
             id=segment.id,
             start=segment.start,

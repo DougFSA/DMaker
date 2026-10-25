@@ -16,7 +16,7 @@ def test_graph_sums_background_and_converted_voice_without_halving_them():
         "[2:a]volume=-2.50dB,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]" in graph
     )
     assert "amix=inputs=2:duration=first:normalize=0" in graph  # sem normalize=0 cada um sairia pela metade
-    assert "alimiter=limit=0.891" in graph
+    assert "alimiter=limit=0.891" in graph and "latency=1" in graph
     assert "apad=whole_dur=30.000,atrim=duration=30.000" in graph and graph.endswith("[out]")
 
 
