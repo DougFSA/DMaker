@@ -13,30 +13,35 @@ from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
 from ..voice.dub_retime import RetimePlan, VideoPiece
+from ..voice.watermark import delay_on_detector_grid
 from .speech_edit import FASTSTART_CONTAINERS, VIDEO_AUDIO_ARGS
-from .voice import encoder_args
+from .voice import atempo_filters, encoder_args
 
 MIX_SAMPLE_RATE = 48000  # mesma taxa do resto do pipeline (ver filtergraph/audio.py)
 FADE_OUT_SECONDS = 0.08  # o corte de uma fala que não coube cai num fade curto, sem estalo
 # Limitador a -1 dBFS (0,891 linear), o mesmo da narração: fundo e fala somados podem passar de 0 dBFS, e o
 # `level=disabled` impede que ele renormalize o volume sozinho.
-LIMITER = "alimiter=limit=0.891:level=disabled"
+# `latency=1` compensa os 5 ms de antecipação do limitador: sem isso a fala marcada sai deslocada da grade de
+# 20 ms do detector e a marca d'água some (ver `voice/watermark.py`).
+LIMITER = "alimiter=limit=0.891:level=disabled:latency=1"
 
 # Só quando algum trecho do vídeo é esticado a imagem precisa ser recodificada (senão continua `-c:v copy`).
 # x264 em CRF 18 é visualmente transparente sobre uma fonte que já passou por compressão, `medium` dá a
 # qualidade do preset `high` do resto do DMaker sem o custo do `slow`, e `yuv420p` toca em qualquer aparelho.
 STRETCHED_VIDEO_ARGS = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"]
-ATEMPO_MIN, ATEMPO_MAX = 0.5, 2.0  # a faixa que o filtro `atempo` aceita em cada instância
 
 
 @dataclass(frozen=True)
 class DubClip:
-    """Uma fala dublada já sintetizada e onde ela entra no arquivo."""
+    """Uma fala dublada já sintetizada e onde ela entra no arquivo.
+
+    O arquivo já vem na velocidade final: a aceleração (`atempo`) é feita fala a fala antes da marca d'água
+    (`SpeechFinish`), porque a marca não sobrevive a mudar o andamento depois de gravada.
+    """
 
     path: Path
     start: float  # segundos no arquivo
     gain_db: float = 0.0  # iguala o volume da fala ao da voz original
-    tempo: float = 1.0  # aceleração sem mudar o tom, quando a fala passou do espaço
     max_seconds: float | None = None  # corta (com fade) o que passar disso: a fala não cabia
 
 
@@ -52,31 +57,16 @@ def stereo_48k() -> str:
 
 
 def _clip_chain(clip: DubClip) -> str:
-    """Cadeia de uma fala: acelera se preciso, ajusta o volume, corta com fade se não coube e atrasa até a posição."""
-    chain: list[str] = []
-    if abs(clip.tempo - 1.0) > 1e-4:
-        chain.append(f"atempo={clip.tempo:.4f}")
-    chain.append(f"volume={clip.gain_db:.2f}dB")
+    """Cadeia de uma fala: ajusta o volume, corta com fade se não coube e atrasa até a posição."""
+    chain = [f"volume={clip.gain_db:.2f}dB"]
     if clip.max_seconds is not None:
         fade_start = max(0.0, clip.max_seconds - FADE_OUT_SECONDS)
         chain.append(f"atrim=duration={clip.max_seconds:.3f}")
         chain.append(f"afade=t=out:st={fade_start:.3f}:d={FADE_OUT_SECONDS}")
     chain.append(stereo_48k())
-    chain.append(f"adelay=delays={max(0, round(clip.start * 1000))}:all=1")  # em ms; all=1: todos os canais
+    # em ms, na grade de 20 ms do detector da marca d'água; all=1: todos os canais
+    chain.append(f"adelay=delays={delay_on_detector_grid(clip.start)}:all=1")
     return ",".join(chain)
-
-
-def _atempo_chain(speed: float) -> list[str]:
-    """`atempo` em quantas instâncias forem preciso: cada uma só aceita de 0,5 a 2,0 (mudar a velocidade sem o tom)."""
-    filters: list[str] = []
-    while speed > ATEMPO_MAX:
-        filters.append(f"atempo={ATEMPO_MAX}")
-        speed /= ATEMPO_MAX
-    while speed < ATEMPO_MIN:
-        filters.append(f"atempo={ATEMPO_MIN}")
-        speed /= ATEMPO_MIN
-    filters.append(f"atempo={speed:.6f}")
-    return filters
 
 
 def _frame_rate(fps: float) -> str:
@@ -118,7 +108,7 @@ def _audio_piece_chain(piece: VideoPiece) -> str:
     """
     chain = [f"atrim=start={piece.start:.6f}:end={piece.end:.6f}", "asetpts=PTS-STARTPTS"]
     if piece.stretched:
-        chain += _atempo_chain(1.0 / piece.factor)
+        chain += atempo_filters(1.0 / piece.factor)
         chain += [f"apad=whole_dur={piece.output_seconds:.6f}", f"atrim=duration={piece.output_seconds:.6f}"]
     return ",".join(chain)
 

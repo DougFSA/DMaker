@@ -218,7 +218,8 @@ class VoiceConversionService:
                     stems.vocals, reference, work, stage_progress(report, "conversão")
                 )
             with timed(timings, "montagem"):
-                # a voz convertida é voz gerada por IA: a marca entra antes de somar ao fundo e sobrevive ao AAC
+                # a voz convertida é voz gerada por IA: a marca entra antes de somar ao fundo e depois dela só há
+                # ganho, mixagem (com o limitador de picos) e AAC, que ela aguenta; nada muda andamento ou dinâmica
                 converted = self.watermarker.embed(converted, rate)
                 original, original_rate = read_wav(stems.vocals)
                 gain_db = gain_to_match_db(active_rms(converted, rate), active_rms(original, original_rate))

@@ -23,7 +23,7 @@ from dmaker.voice.lexicon_store import LexiconStore
 from dmaker.voice.library import VoiceLibrary
 from dmaker.voice.synth import Speech, VoiceRequest
 
-from .conftest import requires_ffmpeg
+from .conftest import fake_ffmpeg_output, requires_ffmpeg
 
 PROJECT = "ui-teste"
 SPEC = {
@@ -366,9 +366,7 @@ class FakeSynthesizer:
         return Speech(samples, 24000)
 
 
-def _write_last_argument(command) -> None:
-    """Simula o ffmpeg criando o arquivo de saída, que é sempre o último argumento."""
-    Path(command.args[-1]).write_bytes(b"audio")
+_write_last_argument = fake_ffmpeg_output  # simula o ffmpeg criando o arquivo de saída (o último argumento)
 
 
 @pytest.fixture

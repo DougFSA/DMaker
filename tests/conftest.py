@@ -92,6 +92,27 @@ def ffmpeg_available() -> bool:
 requires_ffmpeg = pytest.mark.skipif(not ffmpeg_available(), reason="ffmpeg não instalado (dmaker setup)")
 
 
+def concat_commands(runner) -> list[list[str]]:
+    """Os comandos de montagem (com `-filter_complex`) que o runner gravado recebeu."""
+    return [command for command in runner.commands if "-filter_complex" in command]
+
+
+def finish_commands(runner) -> list[list[str]]:
+    """Os comandos de acabamento de fala (um por fala, com `-af`) que o runner gravado recebeu."""
+    return [command for command in runner.commands if "-af" in command]
+
+
+def fake_ffmpeg_output(command) -> None:
+    """Efeito de um ffmpeg falso na narração: o acabamento da fala copia a entrada (um WAV de verdade, que a
+    marca d'água precisa ler); qualquer outro comando só cria o arquivo de saída (o último argumento)."""
+    out = Path(command.args[-1])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if command.label == "acabamento da fala":
+        shutil.copyfile(command.args[command.args.index("-i") + 1], out)
+    else:
+        out.write_bytes(b"audio")
+
+
 @pytest.fixture(scope="session")
 def synthetic_media(tmp_path_factory) -> dict[str, Path]:
     """Dois clipes de teste (padrão de cores + tom), uma imagem, uma música e um SRT."""

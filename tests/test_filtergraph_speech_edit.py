@@ -40,13 +40,13 @@ def test_graph_patch_is_background_of_the_region_plus_the_new_speech(plan):
     assert f"atrim=duration={region:.3f}" in graph
 
 
-def test_graph_applies_gain_delay_and_tempo_to_the_new_speech_only(plan):
-    graph = speech_splice_graph(plan, 0.0, gain_db=-3.5, tempo=1.1)
+def test_graph_applies_gain_and_delay_to_the_new_speech_but_never_changes_its_speed(plan):
+    """O `atempo` é feito antes da marca d'água, na fala; a emenda recebe a fala já na velocidade final."""
+    graph = speech_splice_graph(plan, 0.0, gain_db=-3.5)
     speech_line = next(line for line in graph_lines(graph) if line.startswith("[2:a]"))
-    assert "atempo=1.1000" in speech_line and "volume=-3.50dB" in speech_line
+    assert "volume=-3.50dB" in speech_line and "atempo" not in graph
     delay_ms = round((plan.speech_start - plan.region_start) * 1000)
     assert f"adelay=delays={delay_ms}:all=1" in speech_line
-    assert "atempo" not in speech_splice_graph(plan, 0.0)
     assert "volume=0.00dB" in speech_splice_graph(plan, 0.0)
 
 

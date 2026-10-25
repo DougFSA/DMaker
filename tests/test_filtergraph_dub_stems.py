@@ -11,7 +11,7 @@ from dmaker.filtergraph.dub_stems import StemOutputs, dub_stems_command, dub_ste
 
 CLIPS = [
     DubClip(Path("a.wav"), start=1.0, gain_db=2.5),
-    DubClip(Path("b.wav"), start=4.25, gain_db=-1.0, tempo=1.1, max_seconds=2.0),
+    DubClip(Path("b.wav"), start=4.25, gain_db=-1.0, max_seconds=2.0),
 ]
 OUTPUTS = StemOutputs(Path("t/voz-dublada.wav"), Path("t/fundo.wav"), Path("t/voz-original.wav"))
 

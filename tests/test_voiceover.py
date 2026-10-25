@@ -30,6 +30,8 @@ from dmaker.voice.lexicon_store import LexiconStore
 from dmaker.voice.library import VoiceLibrary, VoiceNotFoundError
 from dmaker.voice.synth import Speech, VoiceRequest
 
+from .conftest import fake_ffmpeg_output
+
 SAMPLE_RATE = 24000
 
 
@@ -76,7 +78,7 @@ def _context(project: Project, tmp_path: Path, runner: RecordingRunner, **option
 
 
 def _runner() -> RecordingRunner:
-    return RecordingRunner(on_run=lambda command: Path(command.args[-1]).write_bytes(b"audio"))
+    return RecordingRunner(on_run=fake_ffmpeg_output)
 
 
 # ---------- funções puras ----------

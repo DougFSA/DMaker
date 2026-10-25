@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
 
 OUTPUT_SAMPLE_RATE = 48000  # mesma taxa do resto do pipeline (ver filtergraph/audio.py)
+ATEMPO_MIN, ATEMPO_MAX = 0.5, 2.0  # a faixa que o filtro `atempo` aceita em cada instância
 
 # Codec por extensão. MP3 com -q:a 2 (~190 kb/s VBR) e AAC a 192 kb/s são transparentes para voz.
 _CODEC_ARGS = {
@@ -42,11 +44,74 @@ BROADCAST_MASTER_FILTERS = (
 )
 
 
-def narration_concat_graph(
-    pauses: list[float], sample_rate: int = OUTPUT_SAMPLE_RATE, master: bool = True
-) -> str:
-    """Um ramo por fala (reamostra e, se houver pausa, acrescenta silêncio ao fim), a concatenação e,
-    com `master`, o acabamento broadcast."""
+def atempo_filters(speed: float) -> list[str]:
+    """`atempo` em quantas instâncias forem preciso: cada uma só aceita de 0,5 a 2,0 (mudar a velocidade sem o tom)."""
+    filters: list[str] = []
+    while speed > ATEMPO_MAX:
+        filters.append(f"atempo={ATEMPO_MAX}")
+        speed /= ATEMPO_MAX
+    while speed < ATEMPO_MIN:
+        filters.append(f"atempo={ATEMPO_MIN}")
+        speed /= ATEMPO_MIN
+    filters.append(f"atempo={speed:.6f}")
+    return filters
+
+
+@dataclass(frozen=True)
+class SpeechFinish:
+    """O que muda andamento ou dinâmica de UMA fala sintetizada, e por isso roda antes da marca d'água.
+
+    A marca (AudioSeal) não sobrevive a compressor nem a `atempo`; ganho, mixagem, loudnorm e codificação
+    ela aguenta. Então o acabamento broadcast e a aceleração da dublagem são aplicados fala a fala, aqui,
+    e só depois a fala é marcada (invariante descrito em `voice/watermark.py`).
+    """
+
+    broadcast: bool = False  # acabamento broadcast do VoiceStudio (compressores, EQ e limitador)
+    tempo: float = 1.0  # fator de andamento sem mudar o tom; 1.0 = velocidade natural
+
+    @property
+    def retimed(self) -> bool:
+        return abs(self.tempo - 1.0) > 1e-4
+
+    @property
+    def is_plain(self) -> bool:
+        """A fala fica como saiu do modelo: não há o que passar pelo ffmpeg."""
+        return not self.broadcast and not self.retimed
+
+    @property
+    def cache_tag(self) -> str:
+        """Entra na chave do cache: a mesma fala com acabamentos diferentes são arquivos diferentes."""
+        if self.is_plain:
+            return ""
+        return f"acabamento:broadcast={int(self.broadcast)}:tempo={self.tempo:.4f}"
+
+
+def speech_finish_filters(finish: SpeechFinish) -> list[str]:
+    """Filtros do acabamento: primeiro o andamento e depois a dinâmica, que é o que fecha a fala."""
+    filters: list[str] = []
+    if finish.retimed:
+        filters += atempo_filters(finish.tempo)
+    if finish.broadcast:
+        filters += BROADCAST_MASTER_FILTERS
+    return filters
+
+
+def speech_finish_command(source: Path, out: Path, finish: SpeechFinish) -> FFmpegCommand:
+    """Passa a fala `source` pelo acabamento e grava `out` em WAV mono de 16 bits, na mesma taxa.
+
+    A taxa fica a da fala (sem reamostrar) e o formato é o de 16 bits, os que o resto do núcleo de voz lê
+    e grava: a marca d'água lê este arquivo logo em seguida.
+    """
+    chain = ",".join(speech_finish_filters(finish)) or "anull"
+    args = ["-i", str(source), "-af", chain, "-ac", "1", "-c:a", "pcm_s16le", str(out)]
+    return FFmpegCommand(args, label="acabamento da fala")
+
+
+def narration_concat_graph(pauses: list[float], sample_rate: int = OUTPUT_SAMPLE_RATE) -> str:
+    """Um ramo por fala (reamostra e, se houver pausa, acrescenta silêncio ao fim) e a concatenação.
+
+    Sem acabamento aqui: a dinâmica da voz já foi decidida em cada fala, antes da marca d'água.
+    """
     if not pauses:
         raise ValueError("A narração precisa de pelo menos uma fala.")
     lines: list[str] = []
@@ -60,9 +125,7 @@ def narration_concat_graph(
         lines.append(f"[{index}:a]{','.join(chain)}[p{index}]")
     labels = "".join(f"[p{index}]" for index in range(len(pauses)))
     # concat com v=0:a=1 emenda os ramos em sequência numa única faixa de áudio.
-    lines.append(f"{labels}concat=n={len(pauses)}:v=0:a=1[{'joined' if master else 'out'}]")
-    if master:
-        lines.append(f"[joined]{','.join(BROADCAST_MASTER_FILTERS)}[out]")
+    lines.append(f"{labels}concat=n={len(pauses)}:v=0:a=1[out]")
     return ";".join(lines)
 
 
@@ -71,17 +134,16 @@ def narration_concat_command(
     out: Path,
     sample_rate: int = OUTPUT_SAMPLE_RATE,
     total: float | None = None,
-    master: bool = True,
 ) -> FFmpegCommand:
     """Concatena as falas (arquivo, pausa depois) numa narração mono; o formato sai da extensão de `out`.
 
-    Com `master` (padrão) aplica o acabamento broadcast do VoiceStudio; sem ele, a voz sai crua do modelo.
-    O loudness final continua sendo ajustado na mixagem do projeto.
+    A montagem é seca: o acabamento broadcast é de cada fala (`SpeechFinish`), aplicado antes da marca
+    d'água. O loudness final continua sendo ajustado na mixagem do projeto.
     """
     args: list[str] = []
     for path, _ in parts:
         args += ["-i", str(path)]
-    graph = narration_concat_graph([pause for _, pause in parts], sample_rate, master)
+    graph = narration_concat_graph([pause for _, pause in parts], sample_rate)
     args += ["-filter_complex", graph, "-map", "[out]", *encoder_args(out), str(out)]
     return FFmpegCommand(args, label="narração", total=total)
 

@@ -3,6 +3,19 @@
 O contrato é o protocolo `Watermarker`: `embed` devolve a fala com a marca e `detect` diz se um áudio a
 carrega. O pipeline só conhece o protocolo; a AudioSeal (Meta, MIT, código e pesos), o torch e o download
 dos pesos ficam dentro do `AudioSealWatermarker` e só carregam na primeira marca ou verificação.
+
+Invariante: **a marca é a última transformação das amostras da voz sintética.** O que muda andamento ou
+dinâmica (acabamento broadcast, `atempo` da dublagem e da correção de fala) roda ANTES dela, fala a fala
+(`filtergraph.voice.SpeechFinish`); depois dela só pode vir ganho, mixagem, loudnorm e codificação, que foram
+medidos e a marca aguenta. Compressor e mudança de andamento a apagam em qualquer ganho (medido: marcada
+crua 0.32 a 0.72; depois do acabamento broadcast 0.00 a 0.15; com `atempo` 1.15 ou 0.90, 0.02 a 0.07).
+Quem marca duas vezes a mesma fala, ou transforma a fala depois de marcá-la, quebra a verificação.
+
+Há um segundo requisito: o detector enxerga a fala numa grade de 20 ms (320 amostras a 16 kHz) e a marca
+some se a fala sai dessa grade (medido: deslocar a mesma fala 7 amostras a 16 kHz leva a detecção de 1.0 a
+0.19, 100 amostras a 0.02). Por isso quem posiciona a fala marcada num arquivo maior (`adelay` da narração e da
+dublagem) usa `delay_on_detector_grid`, e o limitador da mixagem compensa o atraso da própria antecipação
+(`latency=1`). Buscar o melhor alinhamento na verificação foi descartado: um tom puro passa a ser acusado.
 """
 
 from __future__ import annotations
@@ -34,18 +47,20 @@ MODEL_RATE = 16000  # taxa em que a AudioSeal foi treinada; as outras taxas pass
 # A memória de ativação da rede cresce com o tamanho da entrada; blocos de 30 s mantêm cada passada em
 # dezenas de MB. A mensagem se repete ao longo do áudio, então marcar e detectar por bloco é equivalente.
 CHUNK_SECONDS = 30
-# Ganho da marca (alpha da AudioSeal). Com 1.0 a marca fica em -25 dB da energia da fala, audível em
-# trechos calmos; 0.45 a deixa abaixo de -30 dB em todas as falas medidas (Kokoro, 1 a 16 s) e ainda
-# sobrevive ao AAC 192k. Abaixo de 0.3 a detecção cai a zero.
-EMBED_STRENGTH = 0.45
-# Probabilidade = fração dos quadros do áudio em que a rede vê a marca. Com o ganho acima, uma fala marcada
-# e exportada em AAC 192k fica entre 0.3 e 1.0; fala sem marca, ruído, tom e música ficam abaixo de 0.01.
-# O limiar fica nesse vão, longe dos dois lados.
+# Ganho da marca (alpha da AudioSeal). Com 0.7 a marca fica em -28 dB da energia da fala (1.0, o padrão da
+# AudioSeal, -25 dB; 0.45, -32 dB) e sobrevive ao que acontece depois dela: direto 0.99 a 1.00, volume -6 dB
+# 0.95 a 1.00, +6 dB 0.66 a 0.91, fundo rosa a -12 dB 0.35 a 0.45, fundo + loudnorm -14 + AAC 192k 0.36 a 0.58
+# (frases de 1.3 s a 5.6 s, Kokoro). Com 0.45 só baixar 6 dB já derrubava a frase longa de 0.61 para 0.05 a
+# 0.26 e o fundo a -12 dB zerava; com 1.0 tudo acima fica em 0.47 ou mais, ao custo de 3 dB de marca.
+EMBED_STRENGTH = 0.7
+# Probabilidade = fração dos quadros do áudio em que a rede vê a marca. Fala sem marca nas mesmas cadeias
+# (ganho, fundo, loudnorm, AAC) fica em no máximo 0.06, e ruído, tom e música abaixo de 0.01; uma fala marcada
+# que passou pelas mesmas cadeias fica em 0.35 ou mais. O limiar fica nesse vão, longe dos dois lados.
 DETECTION_THRESHOLD = 0.2
 # Mensagem de 16 bits gravada na marca: "DM" em ASCII (0x44 0x4D). Serve de assinatura do DMaker.
 MESSAGE_BITS = (0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1)
 # Entra na chave do cache de falas: mudou a mensagem ou o ganho, incremente o número final.
-EMBED_IDENTITY = "audioseal-16bits:dm1"
+EMBED_IDENTITY = "audioseal-16bits:dm2"
 
 GENERATOR_CARD = "audioseal_wm_16bits"
 DETECTOR_CARD = "audioseal_detector_16bits"
@@ -72,6 +87,14 @@ class Watermarker(Protocol):
 
 
 # ---------- contas puras ----------
+
+DETECTOR_GRID_MS = 20  # passo da rede de detecção: 320 amostras a 16 kHz
+
+
+def delay_on_detector_grid(seconds: float) -> int:
+    """Atraso em ms, arredondado ao múltiplo de 20 mais próximo (erro de até 10 ms, inaudível), para a fala
+    marcada entrar no arquivo alinhada à grade do detector; ver o invariante no topo do módulo."""
+    return max(0, round(seconds * 1000 / DETECTOR_GRID_MS) * DETECTOR_GRID_MS)
 
 
 def watermark_enabled(environ: Mapping[str, str] | None = None) -> bool:

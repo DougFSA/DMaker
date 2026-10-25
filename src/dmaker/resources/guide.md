@@ -248,7 +248,8 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
   fala). Linha em branco é pausa de parágrafo, `[pausa 1.2]` fixa uma pausa em segundos, R$, % e números
   são lidos por extenso. Saída `.wav`, `.mp3` ou `.m4a` (48 kHz, mono). `speed` vai de 0.5 a 2 no Kokoro.
 - Marca d'água: toda fala sintetizada (narração, projeto, correção de fala, dublagem, troca de voz) sai com uma marca
-  inaudível de voz gerada por IA (AudioSeal, sobrevive ao AAC do vídeo). Ligada por padrão; desligue com
+  inaudível de voz gerada por IA (AudioSeal; é a última coisa feita na voz e sobrevive ao acabamento, ao ajuste de
+  andamento da dublagem, à mixagem e ao AAC do vídeo). Ligada por padrão; desligue com
   `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`. `verify_watermark(path)` ou
   `dmaker voice verify ARQUIVO` (wav, mp3, m4a, mp4) devolve probabilidade e veredito. A marca entra na
   chave do cache de falas; áudio que o DMaker não sintetizou (vídeo do cliente, música) nunca é marcado.

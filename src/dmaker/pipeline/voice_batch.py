@@ -209,8 +209,9 @@ class BatchNarrator:
             (path, CHAPTER_GAP_SECONDS if index < last else 0.0) for index, (path, _) in enumerate(results)
         ]
         complete = output_dir / complete_filename(item.title, suffix)
-        # master=False: cada capítulo já saiu com o acabamento broadcast, e aplicá-lo de novo achataria a voz
-        self.runner.run(narration_concat_command(parts, complete, total=total, master=False))
+        # a montagem é seca: cada capítulo já saiu com o acabamento broadcast e a marca d'água, e mexer na
+        # dinâmica deles agora apagaria a marca (e achataria a voz)
+        self.runner.run(narration_concat_command(parts, complete, total=total))
         srt = complete.with_suffix(".srt")
         srt.write_text(to_srt([Cue(start, end, text) for start, end, text in merged]), encoding="utf-8")
         return ItemOutput([*(path.name for path, _ in results), complete.name, srt.name], total)

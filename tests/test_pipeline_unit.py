@@ -4,6 +4,7 @@ o cache, o ASS gerado e o tratamento de silêncio."""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,9 @@ def fake_prober(path: Path) -> MediaInfo:
 def touch_output(command: FFmpegCommand) -> None:
     """Simula o ffmpeg criando o arquivo de saída (último argumento)."""
     out = Path(command.args[-1])
+    if command.label == "acabamento da fala":  # o acabamento devolve a própria fala (um WAV que se pode ler)
+        shutil.copyfile(command.args[command.args.index("-i") + 1], out)
+        return
     if out.suffix in (".mov", ".mp4", ".wav", ".jpg"):
         if command.cwd and not out.is_absolute():
             out = command.cwd / out

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -138,7 +139,9 @@ class Harness:
     def _on_run(self, command: FFmpegCommand) -> None:
         out = Path(command.args[-1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        if out.suffix == ".wav":
+        if command.label == "acabamento da fala":  # o acabamento devolve a própria fala, que a marca lê
+            shutil.copyfile(command.args[command.args.index("-i") + 1], out)
+        elif out.suffix == ".wav":
             write_wav(out, np.zeros(1600, dtype=np.float32), 16000)
         else:
             out.write_bytes(b"corrigido")

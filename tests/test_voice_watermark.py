@@ -23,8 +23,11 @@ from dmaker.voice.watermark import (
     WatermarkResult,
     chunk_bounds,
     default_watermarker,
+    delay_on_detector_grid,
     watermark_enabled,
 )
+
+from .conftest import fake_ffmpeg_output
 
 SAMPLE_RATE = 24000
 
@@ -238,7 +241,7 @@ def test_speak_turns_the_watermark_off_with_the_flag(monkeypatch, tmp_path):
         return NullWatermarker()
 
     monkeypatch.setattr(voices, "default_watermarker", fake_default)
-    runner = RecordingRunner(on_run=lambda command: Path(command.args[-1]).write_bytes(b"audio"))
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
     monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
 
     for flag in (True, False):
@@ -347,3 +350,29 @@ def test_mcp_verify_watermark_returns_the_verdict(monkeypatch, tmp_path):
 
     assert answer["detected"] is False and answer["probability"] == 0.0
     assert "não encontrada" in answer["verdict"]
+
+
+# ---------- grade do detector ----------
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [(0.0, 0), (0.5, 500), (1.234, 1240), (2.7, 2700), (4.25, 4240), (4.26, 4260), (-0.3, 0)],
+)
+def test_delays_land_on_the_detector_grid(seconds, expected):
+    """O detector só enxerga a fala alinhada à grade de 20 ms: o atraso é arredondado a ela (até 10 ms)."""
+    assert delay_on_detector_grid(seconds) == expected
+
+
+def test_narration_and_dubbing_delays_use_the_detector_grid():
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+
+    from dmaker.filtergraph.audio import narration_streams
+    from dmaker.filtergraph.common import Inputs
+    from dmaker.filtergraph.dub import DubClip, dub_clip_lines
+
+    lines: list[str] = []
+    narration_streams(lines, Inputs(), [SimpleNamespace(path=_Path("n.wav"), start=1.234, volume=1.0)])
+    assert "adelay=1240:all=1" in lines[0]
+    assert "adelay=delays=1240:all=1" in dub_clip_lines([DubClip(_Path("a.wav"), start=1.234)], 0)[0][0]
