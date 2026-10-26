@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
 from .dub import MIX_SAMPLE_RATE
+from .provenance import inherited_provenance_args
 from .speech_edit import FASTSTART_CONTAINERS, VIDEO_AUDIO_ARGS
 from .voice import encoder_args
 
@@ -54,6 +55,7 @@ def voice_swap_command(
     gain_db: float = 0.0,
     has_video: bool = False,
     cut_start: float | None = None,
+    provenance: str = "",
 ) -> FFmpegCommand:
     """Grava `out` com o fundo mais a fala convertida; com vídeo, mantém a imagem do original.
 
@@ -81,4 +83,5 @@ def voice_swap_command(
             ]  # o índice no começo deixa o arquivo tocar antes de baixar inteiro
     else:
         args += ["-map", "[out]", *encoder_args(out)]
+    args += inherited_provenance_args(provenance)
     return FFmpegCommand([*args, str(out)], label="troca de voz", total=duration)

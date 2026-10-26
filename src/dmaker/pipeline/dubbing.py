@@ -548,7 +548,16 @@ class DubbingService:
 
         report("Montando a dublagem", 0.95)
         with self._stage(timings, "Montagem"):
-            self._mix(project, src, info, synthesis.stems, synthesis.clips, out, synthesis.retime)
+            self._mix(
+                project,
+                src,
+                info,
+                synthesis.stems,
+                synthesis.clips,
+                out,
+                synthesis.retime,
+                self._provenance(synthesis),
+            )
         exported = None
         if stems is not None:
             with self._stage(timings, "Trilhas separadas"):
@@ -674,6 +683,7 @@ class DubbingService:
             graph_file,
             info.duration,
             retime,
+            provenance=self._provenance(synthesis),
         )
         graph_file.parent.mkdir(parents=True, exist_ok=True)
         graph_file.write_text(built.graph, encoding="utf-8")
@@ -682,6 +692,15 @@ class DubbingService:
         if options.make_zip:
             stems = replace(stems, zip_path=zip_stems(stems))
         return stems
+
+    def _provenance(self, synthesis: _Synthesis) -> str:
+        """Etiqueta de procedência do arquivo dublado: onde cada fala dublada toca na linha do tempo final."""
+        spans = [
+            (entry.retimed_start, entry.retimed_start + entry.played_seconds)
+            for entry in synthesis.reports
+            if entry.status != "empty" and entry.retimed_start is not None
+        ]
+        return self.narrator.provenance(spans)
 
     def _effective_fit_mode(self, project: DubProject, info: MediaInfo) -> FitMode:
         """O modo que vale: sem imagem (ou sem taxa de quadros) não há o que esticar, e a voz se ajusta como antes."""
@@ -800,6 +819,7 @@ class DubbingService:
         clips: list[DubClip],
         out: Path,
         retime: RetimePlan,
+        provenance: str = "",
     ) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         graph_file = self.cache_dir / "dub" / f"{out.stem}.graph.txt"
@@ -815,6 +835,7 @@ class DubbingService:
             original_voice_db=project.keep_original_db if project.keep_original_db is not None else -18.0,
             retime=retime,
             fps=info.fps,
+            provenance=provenance,
         )
         graph_file.parent.mkdir(parents=True, exist_ok=True)
         graph_file.write_text(mix.graph, encoding="utf-8")

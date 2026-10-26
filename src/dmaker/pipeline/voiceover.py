@@ -76,6 +76,11 @@ def narration_label(narration: Narration, limit: int = 40) -> str:
     return label if len(label) <= limit else label[: limit - 1].rstrip() + "…"
 
 
+def voice_spans(voiceovers: Sequence[PreparedVoiceover]) -> list[tuple[float, float]]:
+    """Onde a voz sintetizada toca na saída final, para a etiqueta de procedência (narração sem volume não toca)."""
+    return [(item.start, item.end) for item in voiceovers if item.volume > 0]
+
+
 def overrun_warnings(voiceovers: Sequence[PreparedVoiceover], total: float) -> list[str]:
     """Avisos das narrações que passam do fim do vídeo (o áudio excedente é cortado)."""
     return [

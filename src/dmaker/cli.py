@@ -949,13 +949,14 @@ def voice_say(
         bool,
         typer.Option(
             "--watermark/--no-watermark",
-            help="Marca d'água inaudível de voz gerada por IA (ligada por padrão; DMAKER_WATERMARK=0 também desliga).",
+            help="Marca d'água inaudível e etiqueta de procedência no arquivo (ligadas por padrão; "
+            "--no-watermark ou DMAKER_WATERMARK=0 desligam as duas).",
         ),
     ] = True,
 ) -> None:
     """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível
-    (confira com `dmaker voice verify`)."""
+    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo
+    com uma etiqueta de procedência (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak
@@ -992,17 +993,27 @@ def voice_say(
 @voice_app.command("verify")
 def voice_verify(
     file: Annotated[Path, typer.Argument(help="Áudio ou vídeo a conferir: .wav, .mp3, .m4a, .mp4...")],
+    audio: Annotated[
+        bool,
+        typer.Option(
+            "--audio",
+            help="Analisa também o áudio quando há etiqueta (demora cerca de meio segundo por segundo).",
+        ),
+    ] = False,
 ) -> None:
-    """Confere se o áudio carrega a marca d'água de voz gerada por IA do DMaker (sobrevive ao AAC do vídeo)."""
+    """Confere se o arquivo tem voz gerada por IA do DMaker: lê a etiqueta de procedência e, sem ela, analisa a
+    marca d'água do áudio. Responde em três níveis: encontrada, indício (inconclusivo) ou não encontrada."""
     from .pipeline.voices import verify_watermark, watermark_verdict
 
     try:
-        result = verify_watermark(file)
+        result = verify_watermark(file, check_audio=audio)
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
-    style = "green" if result.detected else "yellow"
+    style = {"found": "green", "indication": "yellow", "absent": "white"}[result.verdict]
     console.print(f"[{style}]{watermark_verdict(result)}[/{style}]")
-    console.print(f"  probabilidade: {result.probability:.3f}")
+    if result.origin == "audio" or result.audio_verdict is not None:
+        bits = f", assinatura {result.matched_bits} de 16 bits" if result.matched_bits is not None else ""
+        console.print(f"  probabilidade: {result.probability:.3f}{bits}")
 
 
 @voice_app.command("clone")

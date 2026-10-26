@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,9 +15,10 @@ from ..text.captions import Cue, to_srt
 from ..voice.library import VoiceProfile
 from ..voice.postprocess import POSTPROCESS_VERSION, finish_speech
 from ..voice.pronunciation import Lexicon, spoken_text, written_text
+from ..voice.provenance import provenance_text
 from ..voice.script import Utterance, normalize_for_speech, parse_script
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
-from ..voice.watermark import Watermarker, default_watermarker
+from ..voice.watermark import Span, Watermarker, default_watermarker
 
 PLAIN = SpeechFinish()  # a fala como saiu do modelo, sem acabamento
 
@@ -90,6 +91,13 @@ class NarrationService:
         self.runner = runner
         self.cache_dir = cache_dir or config.VOICE_CACHE_DIR
         self.log = log or (lambda _message: None)
+
+    def provenance(self, spans: Iterable[Span] | None = None, total: float | None = None) -> str:
+        """Texto da etiqueta de procedência para o arquivo que leva a voz sintetizada; vazio com a marca desligada.
+
+        `spans=None` declara o arquivo inteiro; com trechos, só onde a voz gerada toca.
+        """
+        return provenance_text(spans, total) if self.watermarker.provenance else ""
 
     def _synthesis_parts(self, request: VoiceRequest) -> list[str]:
         """Tudo que muda o som da fala crua; o que não muda reaproveita o arquivo."""
@@ -295,7 +303,7 @@ class NarrationService:
         cues, total = cue_timeline(spans)
         out.parent.mkdir(parents=True, exist_ok=True)
         self.log("Montando a narração")
-        self.runner.run(narration_concat_command(parts, out, total=total))
+        self.runner.run(narration_concat_command(parts, out, total=total, provenance=self.provenance()))
         srt_path = self._write_srt(out, cues) if write_srt else None
         return NarrationResult(out, total, cues, srt_path)
 

@@ -16,6 +16,7 @@ from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.overlays import image_overlay_graph
 from ..filtergraph.pip import video_overlay_graph
+from ..filtergraph.provenance import inherited_provenance_args
 from ..filtergraph.timeline import timeline_graph
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_encoder
 from .context import RenderContext
@@ -119,6 +120,7 @@ def build_assembly(
     normalize: bool,
     out_path: Path,
     voiceovers: Sequence[PreparedVoiceover] = (),
+    provenance: str = "",
 ) -> Assembly:
     """Comando final. O grafo vai em arquivo (graph.txt) e o ASS é referenciado por caminho relativo
     ao diretório do job, o que evita a escapada de `C:` nos filtros."""
@@ -178,5 +180,6 @@ def build_assembly(
     quality = "draft" if o.preview else p.output.quality
     encoder = "x264" if o.preview else resolve_encoder(p.output.encoder, hardware_encoder())
     args = inputs.args + filter_complex_file_args("graph.txt") + ["-map", "[vout]", "-map", aout]
-    args += encode_args(ctx.preset, quality, encoder, ctx.fps) + ["-shortest", str(out_path)]
+    args += encode_args(ctx.preset, quality, encoder, ctx.fps) + inherited_provenance_args(provenance)
+    args += ["-shortest", str(out_path)]
     return Assembly(FFmpegCommand(args, label="montagem final", total=total, cwd=ctx.job_dir), lines)

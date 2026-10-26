@@ -12,19 +12,25 @@ from typer.testing import CliRunner
 from dmaker.cli import app
 from dmaker.filtergraph.voice import detection_audio_command
 from dmaker.media.ffmpeg import RecordingRunner
-from dmaker.media.wavio import read_wav, write_wav
+from dmaker.media.wavio import read_wav
 from dmaker.pipeline import voices
 from dmaker.pipeline.narration import NarrationService
 from dmaker.voice import watermark
 from dmaker.voice.synth import Speech, VoiceRequest
 from dmaker.voice.watermark import (
+    DETECTION_THRESHOLD,
+    MESSAGE_BITS,
     AudioSealWatermarker,
     NullWatermarker,
     WatermarkResult,
+    choose_verdict,
     chunk_bounds,
     default_watermarker,
     delay_on_detector_grid,
+    matching_bits,
+    phase_offsets,
     watermark_enabled,
+    weighted_message,
 )
 
 from .conftest import fake_ffmpeg_output
@@ -36,11 +42,12 @@ class FakeWatermarker:
     """Soma um deslocamento fixo às amostras (para ver que a marca foi gravada) e conta as chamadas."""
 
     identity = "fake-marca:1"
+    provenance = True
     OFFSET = 0.05
 
     def __init__(self, detected: bool = True):
         self.embedded: list[int] = []
-        self.verdict = WatermarkResult(0.9 if detected else 0.0, detected)
+        self.verdict = WatermarkResult(0.9 if detected else 0.0, "found" if detected else "absent", 16)
         self.detected_rates: list[int] = []
 
     def embed(self, samples: np.ndarray, sample_rate: int) -> np.ndarray:
@@ -91,8 +98,8 @@ def test_null_watermarker_changes_nothing_and_never_detects():
     samples = np.ones(10, dtype=np.float32)
     null = NullWatermarker()
     assert null.embed(samples, SAMPLE_RATE) is samples
-    assert null.detect(samples, SAMPLE_RATE) == WatermarkResult(0.0, False)
-    assert null.identity == ""
+    assert null.detect(samples, SAMPLE_RATE) == WatermarkResult(0.0, "absent")
+    assert null.identity == "" and null.provenance is False
 
 
 # ---------- escolha do marcador ----------
@@ -105,6 +112,15 @@ def test_default_watermarker_is_audioseal_when_on_and_installed():
 def test_default_watermarker_is_null_when_turned_off_by_argument_or_variable():
     assert isinstance(default_watermarker(enabled=False, environ={}, installed=True), NullWatermarker)
     assert isinstance(default_watermarker(environ={"DMAKER_WATERMARK": "0"}, installed=True), NullWatermarker)
+
+
+def test_the_provenance_label_follows_the_same_switch_as_the_mark():
+    """Ligada: marca e etiqueta. Desligada pelo argumento ou pela variável: nenhuma das duas.
+    Sem a biblioteca a voz continua gerada, então a etiqueta fica e só a marca no áudio falta."""
+    assert default_watermarker(environ={}, installed=True).provenance is True
+    assert default_watermarker(enabled=False, environ={}, installed=True).provenance is False
+    assert default_watermarker(environ={"DMAKER_WATERMARK": "0"}, installed=True).provenance is False
+    assert default_watermarker(environ={}, installed=False).provenance is True
 
 
 def test_default_watermarker_warns_once_in_portuguese_when_the_library_is_missing(monkeypatch, caplog):
@@ -135,14 +151,36 @@ class _AddConstantGenerator:
         return audio + 0.01
 
 
-class _FixedDetector:
-    def __init__(self, probabilities: list[float]):
-        self.probabilities = iter(probabilities)
+class _ScriptedDetector:
+    """Rede falsa: `plan(bloco)` diz que fração dos quadros do bloco é vista como marcada e quais bits ela carrega.
 
-    def detect_watermark(self, audio, sample_rate):
+    Os quadros não marcados votam o bit contrário e com mais força, para provar que a mensagem só conta os marcados.
+    """
+
+    normalizer = None
+
+    def __init__(self, plan):
+        self.plan = plan
+        self.blocks: list[int] = []  # primeira amostra de cada bloco visto (acompanha o alinhamento)
+
+    def detector(self, block):
         import torch
 
-        return torch.tensor([next(self.probabilities)]), torch.zeros(1, 16)
+        self.blocks.append(int(block[0, 0, 0].item()))
+        frames = max(1, block.shape[-1] // 320)
+        fraction, bits = self.plan(block)
+        marked_frames = round(fraction * frames)
+        output = torch.zeros(1, 2 + len(MESSAGE_BITS), frames)
+        output[0, 1, :marked_frames] = 5.0
+        output[0, 0, marked_frames:] = 5.0
+        for index, bit in enumerate(bits):
+            output[0, 2 + index, :marked_frames] = 3.0 if bit else -3.0
+            output[0, 2 + index, marked_frames:] = -9.0 if bit else 9.0
+        return output
+
+
+SIGNATURE = MESSAGE_BITS
+NOT_THE_SIGNATURE = tuple(1 - bit for bit in MESSAGE_BITS)
 
 
 def _loaded(generator=None, detector=None, **options) -> AudioSealWatermarker:
@@ -168,16 +206,139 @@ def test_audioseal_embed_of_nothing_returns_nothing_without_loading_the_model():
     assert len(AudioSealWatermarker().embed(np.zeros(0, dtype=np.float32), SAMPLE_RATE)) == 0
 
 
-def test_audioseal_detect_takes_the_best_block_and_applies_the_threshold(needs_torch):
-    two_blocks = np.zeros(
-        int(60.5 * 16000), dtype=np.float32
-    )  # 60,5 s: dois blocos, a cauda de 0,5 s é incorporada
-    marker = _loaded(detector=_FixedDetector([0.05, 0.7]))
-    result = marker.detect(two_blocks, 16000)
-    assert result == WatermarkResult(0.7, True)
+def _ramp(seconds: float) -> np.ndarray:
+    """Áudio em que a amostra i vale i: o primeiro valor de um bloco diz quantas amostras foram cortadas."""
+    return np.arange(int(seconds * 16000), dtype=np.float32)
 
-    quiet = _loaded(detector=_FixedDetector([0.01]))
-    assert quiet.detect(np.zeros(16000, dtype=np.float32), 16000) == WatermarkResult(0.01, False)
+
+def test_audioseal_detect_finds_the_signature_and_takes_the_best_block(needs_torch):
+    two_blocks = _ramp(60.5)  # 60,5 s: dois blocos, a cauda de 0,5 s é incorporada
+    marker = _loaded(
+        detector=_ScriptedDetector(lambda block: (0.5 if block[0, 0, 0] == 0 else 0.1, SIGNATURE))
+    )
+
+    result = marker.detect(two_blocks, 16000)
+
+    assert result.verdict == "found" and result.detected and result.matched_bits == 16
+    assert result.probability == 0.5
+
+
+def test_audioseal_detect_returns_an_indication_when_the_signature_does_not_match(needs_torch):
+    """É o caso de música e tons: a rede reage (fração alta) mas a mensagem é outra."""
+    marker = _loaded(detector=_ScriptedDetector(lambda block: (0.8, NOT_THE_SIGNATURE)))
+    result = marker.detect(_ramp(1.0), 16000)
+    assert result.verdict == "indication" and not result.detected
+    assert result.matched_bits == 0 and result.probability > DETECTION_THRESHOLD
+
+
+def test_audioseal_detect_reports_absent_below_the_threshold(needs_torch):
+    marker = _loaded(detector=_ScriptedDetector(lambda block: (0.0, SIGNATURE)))
+    result = marker.detect(_ramp(1.0), 16000)
+    assert result.verdict == "absent" and result.probability == 0.0 and result.matched_bits is None
+
+
+def test_audioseal_detect_counts_only_the_frames_the_network_marked_for_the_bits(needs_torch):
+    """Os quadros não marcados votam o bit contrário com mais força: a média de todos erraria a assinatura."""
+    marker = _loaded(detector=_ScriptedDetector(lambda block: (0.4, SIGNATURE)))
+    result = marker.detect(_ramp(1.0), 16000)  # 50 quadros, 20 marcados
+    assert result.verdict == "found" and result.matched_bits == 16
+
+
+def test_audioseal_detect_stops_at_the_first_alignment_when_it_already_finds_the_mark(needs_torch):
+    detector = _ScriptedDetector(lambda block: (0.6, SIGNATURE))
+    _loaded(detector=detector).detect(_ramp(1.0), 16000)
+    assert detector.blocks == [0]
+
+
+def test_audioseal_detect_searches_the_other_alignments_and_keeps_the_best(needs_torch):
+    """Só o alinhamento com 120 amostras cortadas (o quarto) enxerga a marca: a busca o acha e decodifica nele."""
+    detector = _ScriptedDetector(
+        lambda block: (0.6, SIGNATURE) if block[0, 0, 0] == 120 else (0.0, NOT_THE_SIGNATURE)
+    )
+    result = _loaded(detector=detector).detect(_ramp(1.0), 16000)
+    assert detector.blocks == [0, 40, 80, 120, 160, 200, 240, 280]
+    assert result.verdict == "found" and result.matched_bits == 16
+
+
+def test_audioseal_detect_keeps_the_alignment_with_the_highest_fraction_not_the_best_bits(needs_torch):
+    """Escolher pela assinatura multiplicaria o acaso por 8; o alinhamento vem da fração e os bits só são lidos nele."""
+
+    def plan(block):
+        skip = int(block[0, 0, 0])
+        table = {0: (0.24, NOT_THE_SIGNATURE), 80: (0.6, NOT_THE_SIGNATURE), 120: (0.3, SIGNATURE)}
+        return table.get(skip, (0.0, SIGNATURE))
+
+    result = _loaded(detector=_ScriptedDetector(plan)).detect(_ramp(1.0), 16000)
+    assert (
+        result.verdict == "indication"
+        and result.matched_bits == 0
+        and result.probability == pytest.approx(0.6, abs=0.02)
+    )
+
+
+def test_audioseal_detect_ignores_a_shifted_alignment_that_only_reacts_a_little(needs_torch):
+    """Em fala humana a fração oscila entre alinhamentos; o maior de 8 não pode virar "indício" por sorte."""
+
+    def plan(block):
+        skip = int(block[0, 0, 0])
+        return (0.05, NOT_THE_SIGNATURE) if skip == 0 else (0.3, NOT_THE_SIGNATURE)
+
+    result = _loaded(detector=_ScriptedDetector(plan)).detect(_ramp(1.0), 16000)
+    assert result.verdict == "absent" and result.probability == pytest.approx(0.05, abs=0.02)
+
+
+def test_audioseal_detect_of_nothing_is_absent_without_loading_the_model():
+    assert AudioSealWatermarker().detect(np.zeros(0, dtype=np.float32), 16000).verdict == "absent"
+
+
+# ---------- contas puras do veredito ----------
+
+
+def test_matching_bits_counts_the_bits_equal_to_the_dm_signature():
+    assert matching_bits(SIGNATURE) == 16
+    assert matching_bits(NOT_THE_SIGNATURE) == 0
+    assert matching_bits((*SIGNATURE[:14], 1 - SIGNATURE[14], 1 - SIGNATURE[15])) == 14
+
+
+@pytest.mark.parametrize(
+    ("fraction", "bits", "expected"),
+    [
+        (0.0, 16, "absent"),
+        (0.19, 16, "absent"),  # abaixo do limiar nem a assinatura vale: o detector não viu marca
+        (0.2, 16, "found"),
+        (0.9, 15, "found"),
+        (0.9, 14, "indication"),  # tom e acordes sem marca: fração alta, bits por acaso
+        (0.97, 8, "indication"),
+        (0.5, None, "indication"),
+        (0.1, None, "absent"),
+    ],
+)
+def test_choose_verdict_has_three_levels(fraction, bits, expected):
+    assert choose_verdict(fraction, bits) == expected
+
+
+def test_choose_verdict_accepts_a_looser_signature_requirement():
+    assert choose_verdict(0.9, 14, min_bits=14) == "found"
+
+
+def test_weighted_message_reads_only_the_marked_frames():
+    logits = np.array([[2.0, 2.0, -9.0, -9.0], [-2.0, -2.0, 9.0, 9.0]])  # dois bits, quatro quadros
+    marked = np.array([True, True, False, False])
+    assert weighted_message(logits, marked) == (1, 0)
+    assert weighted_message(logits, np.ones(4, dtype=bool)) == (0, 1)  # a média de todos inverteria os dois
+    assert weighted_message(logits, np.zeros(4, dtype=bool)) == ()
+
+
+def test_phase_offsets_start_at_the_audio_as_it_came_and_step_by_2_5_ms():
+    offsets = phase_offsets()
+    assert offsets == [0, 40, 80, 120, 160, 200, 240, 280]
+    assert all(offset / 16000 * 1000 == index * 2.5 for index, offset in enumerate(offsets))
+
+
+def test_the_result_counts_as_detected_only_when_found():
+    assert WatermarkResult(0.9, "found").detected
+    assert not WatermarkResult(0.9, "indication").detected
+    assert not WatermarkResult(0.0, "absent").detected
 
 
 # ---------- narração ----------
@@ -264,60 +425,7 @@ def test_detection_audio_command_extracts_mono_pcm_at_the_detector_rate():
     assert args[args.index("-c:a") + 1] == "pcm_s16le" and args[-1] == "audio.wav"
 
 
-def _extracting_runner(samples: np.ndarray, rate: int = 16000) -> RecordingRunner:
-    return RecordingRunner(on_run=lambda command: write_wav(Path(command.args[-1]), samples, rate))
-
-
-@pytest.mark.parametrize("detected", [True, False])
-def test_verify_extracts_the_audio_and_returns_the_verdict(tmp_path, detected):
-    source = tmp_path / "video.mp4"
-    source.write_bytes(b"mp4")
-    marker = FakeWatermarker(detected=detected)
-    runner = _extracting_runner(np.full(16000, 0.1, dtype=np.float32))
-
-    result = voices.verify_watermark(source, runner=runner, watermarker=marker)
-
-    assert result.detected is detected
-    assert str(source) in runner.commands[0]
-    assert marker.detected_rates == [16000]
-
-
-def test_verify_fails_clearly_when_the_file_or_the_library_is_missing(monkeypatch, tmp_path):
-    with pytest.raises(FileNotFoundError, match="não encontrado"):
-        voices.verify_watermark(tmp_path / "nada.wav", watermarker=FakeWatermarker())
-
-    source = tmp_path / "voz.wav"
-    source.write_bytes(b"wav")
-    monkeypatch.setattr(voices, "audioseal_installed", lambda: False)
-    with pytest.raises(RuntimeError, match="audioseal não está instalada"):
-        voices.verify_watermark(source, runner=RecordingRunner())
-
-
-def test_verdict_text_is_in_portuguese_without_dashes():
-    found = voices.watermark_verdict(WatermarkResult(0.83, True))
-    absent = voices.watermark_verdict(WatermarkResult(0.0, False))
-    assert "encontrada" in found and "83%" in found
-    assert "não encontrada" in absent
-    assert "—" not in found + absent
-
-
 # ---------- CLI ----------
-
-
-def test_voice_verify_prints_probability_and_verdict(monkeypatch, tmp_path):
-    source = tmp_path / "voz.wav"
-    source.write_bytes(b"wav")
-    monkeypatch.setattr(voices, "verify_watermark", lambda path: WatermarkResult(0.8123, True))
-
-    result = CliRunner().invoke(app, ["voice", "verify", str(source)])
-
-    assert result.exit_code == 0, result.output
-    assert "Marca d'água encontrada" in result.output and "0.812" in result.output
-
-
-def test_voice_verify_reports_errors_with_exit_code_1(tmp_path):
-    result = CliRunner().invoke(app, ["voice", "verify", str(tmp_path / "fantasma.wav")])
-    assert result.exit_code == 1 and "não encontrado" in result.output
 
 
 def test_say_forwards_no_watermark(monkeypatch, tmp_path):
@@ -336,20 +444,6 @@ def test_say_forwards_no_watermark(monkeypatch, tmp_path):
     assert cli.invoke(app, ["voice", "say", "Oi."]).exit_code == 0
     assert cli.invoke(app, ["voice", "say", "Oi.", "--no-watermark"]).exit_code == 0
     assert received == [True, False]
-
-
-# ---------- MCP ----------
-
-
-def test_mcp_verify_watermark_returns_the_verdict(monkeypatch, tmp_path):
-    import dmaker.mcp_server as mcp_server
-
-    monkeypatch.setattr(voices, "verify_watermark", lambda path: WatermarkResult(0.0, False))
-
-    answer = mcp_server.verify_watermark(str(tmp_path / "x.wav"))
-
-    assert answer["detected"] is False and answer["probability"] == 0.0
-    assert "não encontrada" in answer["verdict"]
 
 
 # ---------- grade do detector ----------

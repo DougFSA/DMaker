@@ -15,15 +15,18 @@ from pathlib import Path
 from .. import config
 from ..filtergraph.voice import detection_audio_command
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
+from ..media.probe import probe
 from ..media.wavio import read_wav
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from ..voice.design import VoiceDesign, parse_instruct
 from ..voice.kokoro import KokoroSynthesizer
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary, VoiceProfile
+from ..voice.provenance import describe_spans, parse_provenance
 from ..voice.router import RoutingSynthesizer
 from ..voice.synth import OmniVoiceSynthesizer, SpeechSynthesizer
 from ..voice.watermark import (
+    MESSAGE_BITS,
     MODEL_RATE,
     AudioSealWatermarker,
     Watermarker,
@@ -31,6 +34,7 @@ from ..voice.watermark import (
     audioseal_installed,
     default_watermarker,
 )
+from .context import Prober
 from .narration import DEFAULT_STEPS, NarrationResult, NarrationService, UtteranceListener
 
 PREVIEW_TEXTS = {
@@ -200,18 +204,10 @@ def preview_voice(
     )
 
 
-def verify_watermark(
-    path: Path,
-    runner: FFmpegRunner | None = None,
-    watermarker: Watermarker | None = None,
+def _analyze_audio(
+    path: Path, runner: FFmpegRunner | None, watermarker: Watermarker | None
 ) -> WatermarkResult:
-    """Diz se o áudio de `path` (wav, mp3, m4a, mp4...) carrega a marca d'água de voz gerada por IA.
-
-    O ffmpeg extrai a faixa em mono na taxa do detector; a verificação não obedece ao `DMAKER_WATERMARK`
-    (ele só desliga a marcação) e, sem a biblioteca, falha em vez de responder "sem marca".
-    """
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    """Extrai a faixa de áudio pelo ffmpeg e pede ao detector o veredito sobre ela."""
     if watermarker is None:
         if not audioseal_installed():
             raise RuntimeError(
@@ -225,9 +221,76 @@ def verify_watermark(
     return watermarker.detect(samples, sample_rate)
 
 
+def verify_watermark(
+    path: Path,
+    runner: FFmpegRunner | None = None,
+    watermarker: Watermarker | None = None,
+    prober: Prober = probe,
+    check_audio: bool = False,
+) -> WatermarkResult:
+    """Diz se `path` (wav, mp3, m4a, mp4...) carrega voz gerada por IA pelo DMaker, em três níveis.
+
+    Primeiro lê a etiqueta de procedência do contêiner (o que o DMaker grava junto da voz gerada): com ela o
+    veredito é "encontrada" e vale para qualquer duração, o que a marca no áudio não garante (ela não acha uma
+    frase curta dentro de um vídeo longo). Sem etiqueta, a análise do áudio decide: "encontrada" só quando a
+    assinatura bate, "indício" quando o detector reage sem a assinatura (música, tons) e "não encontrada".
+
+    Sem etiqueta a análise do áudio sempre roda. Com etiqueta ela só roda se `check_audio` pedir, como informação
+    adicional: leva cerca de meio segundo por segundo de áudio (8 alinhamentos) e a etiqueta já responde. A
+    verificação não obedece ao `DMAKER_WATERMARK` (ele só desliga a marcação) e, sem a biblioteca, falha em vez
+    de responder "sem marca" quando precisa do áudio.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    label = parse_provenance(prober(path).format_tags)
+    if label is None:
+        return _analyze_audio(path, runner, watermarker)
+    audio = _analyze_audio(path, runner, watermarker) if check_audio else None
+    return WatermarkResult(
+        probability=audio.probability if audio else 0.0,
+        verdict="found",
+        matched_bits=audio.matched_bits if audio else None,
+        origin="label",
+        spans=label.spans,
+        audio_verdict=audio.verdict if audio else None,
+    )
+
+
+VERDICT_LABELS = {"found": "encontrada", "indication": "indício, inconclusivo", "absent": "não encontrada"}
+
+
+def _audio_sentence(result: WatermarkResult) -> str:
+    percent = f"{result.probability * 100:.0f}%"
+    bits = f"{result.matched_bits or 0} de {len(MESSAGE_BITS)} bits"
+    if result.verdict == "found":
+        return (
+            f"Marca d'água encontrada ({percent} dos quadros, a assinatura do DMaker confere em {bits}): "
+            "este áudio foi gerado por IA pelo DMaker."
+        )
+    if result.verdict == "indication":
+        return (
+            f"Indício, inconclusivo ({percent} dos quadros, mas a assinatura do DMaker confere em apenas {bits}): "
+            "o detector reagiu, só que música e tons puros podem imitar a marca e só a assinatura a confirma. "
+            "Não dá para afirmar que o áudio foi gerado pelo DMaker."
+        )
+    return (
+        f"Marca d'água não encontrada ({percent} dos quadros): nada indica que o áudio tenha sido gerado pelo "
+        "DMaker. Se o arquivo foi recodificado fora do DMaker a etiqueta se perdeu, e uma fala curta dentro de "
+        "um vídeo longo pode não ser achada pelo áudio."
+    )
+
+
 def watermark_verdict(result: WatermarkResult) -> str:
     """Frase do veredito, a mesma na CLI e no MCP."""
-    percent = f"{result.probability * 100:.0f}%"
-    if result.detected:
-        return f"Marca d'água encontrada ({percent}): este áudio foi gerado por IA pelo DMaker."
-    return f"Marca d'água não encontrada ({percent}): nada indica que o áudio tenha sido gerado pelo DMaker."
+    if result.origin == "audio":
+        return _audio_sentence(result)
+    where = (
+        f"Trechos com voz gerada: {describe_spans(result.spans)}."
+        if result.spans
+        else "A voz gerada está no arquivo inteiro."
+    )
+    sentence = f"Etiqueta de procedência encontrada: este arquivo foi gravado pelo DMaker com voz gerada por IA. {where}"
+    if result.audio_verdict is not None:
+        audio = VERDICT_LABELS[result.audio_verdict]
+        sentence += f" Análise do áudio: {audio} ({result.probability * 100:.0f}% dos quadros)."
+    return sentence

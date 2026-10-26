@@ -31,6 +31,7 @@ class OrderedWatermarker:
     """Soma um deslocamento e anota cada marca na mesma lista em que o runner anota os comandos."""
 
     identity = "ordem:1"
+    provenance = False  # aqui só importa a ordem das transformações; a etiqueta tem os seus testes
     OFFSET = 0.05
 
     def __init__(self, events: list[str]):
@@ -43,7 +44,7 @@ class OrderedWatermarker:
         return (samples + self.OFFSET).astype(np.float32)
 
     def detect(self, samples: np.ndarray, sample_rate: int) -> WatermarkResult:
-        return WatermarkResult(0.0, False)
+        return WatermarkResult(0.0, "absent")
 
 
 class ToneSynthesizer:
