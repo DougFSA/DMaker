@@ -54,7 +54,7 @@ dele. Tom e regras completas de comunicação: skill `medlycare-marketing`.
 
 Voz local. OmniVoice (clones `clone_voice`, vozes por descrição `design_voice`): ~50 s por
 segundo de áudio (`draft=true`: metade). Para conferir o roteiro, Kokoro (`dora`, `alex`, `santa`; ~3 s/s).
-Toda fala leva marca d'água inaudível; confira: `verify_watermark`, `dmaker voice verify`.
+Toda fala leva marca inaudível e o arquivo, etiqueta de procedência; confira: `verify_watermark`, `dmaker voice verify`.
 MCP: `list_voices`, `synthesize_speech` (job: `job_status`). CLI: `dmaker voice say|clone|design|list|
 remove|preview`. Pronúncia ("DMaker" sai "DeMaker"): ferramenta `pronunciation` ou `dmaker voice lexicon
 add|list|remove [--brand --language]`; no texto, `[[termo|pronúncia]]`. Veja o guia.

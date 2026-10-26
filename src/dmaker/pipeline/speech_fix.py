@@ -32,6 +32,7 @@ from ..voice.levels import active_rms, gain_to_match_db, quietest_time
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import REFERENCE_FILE, VoiceLibrary, VoiceProfile
 from ..voice.pronunciation import spoken_text
+from ..voice.provenance import combine_spans, parse_provenance
 from ..voice.reference import ReferenceSpan, choose_reference_near, choose_reference_span
 from ..voice.script import normalize_for_speech
 from ..voice.speech_edit import (
@@ -509,9 +510,15 @@ class SpeechFixService:
                 layout="mono" if info.channels == 1 else "stereo",
                 has_video=info.has_video,
                 source_duration=info.duration,
+                provenance=self._provenance(info, plan, speech.seconds / tempo),
             )
         )
         return out
+
+    def _provenance(self, info: MediaInfo, plan: SplicePlan, played_seconds: float) -> str:
+        """Etiqueta de procedência do arquivo corrigido: a fala nova, somada ao que a etiqueta do original já declarava."""
+        spoken = (plan.speech_start, min(plan.speech_start + played_seconds, plan.region_end))
+        return self.narrator.provenance(combine_spans(parse_provenance(info.format_tags), [spoken]))
 
 
 def default_speech_fix_service(

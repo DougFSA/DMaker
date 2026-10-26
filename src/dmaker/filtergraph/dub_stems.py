@@ -13,6 +13,7 @@ from pathlib import Path
 from ..media.ffmpeg import FFmpegCommand
 from ..voice.dub_retime import RetimePlan
 from .dub import MIX_SAMPLE_RATE, DubClip, audio_retime_lines, dub_clip_lines, stereo_48k
+from .provenance import provenance_args
 
 # WAV PCM 16 bits: abre em qualquer editor (Premiere, DaVinci, CapCut) sem codec e sem perda sobre o que o
 # pipeline já guarda; estéreo porque a mixagem do vídeo é estéreo e a fala mono duplicada nos dois lados soma igual.
@@ -84,8 +85,11 @@ def dub_stems_command(
     graph_file: Path,
     duration: float,
     retime: RetimePlan | None = None,
+    provenance: str = "",
 ) -> DubStemsCommand:
-    """Grava as três trilhas WAV com a duração do vídeo (a esticada, se houver `retime`), todas começando no zero."""
+    """Grava as três trilhas WAV com a duração do vídeo (a esticada, se houver `retime`), todas começando no zero.
+
+    A etiqueta de procedência vai só na trilha da voz dublada: o fundo e a voz original não têm voz gerada."""
     if not clips:
         raise ValueError("Sem falas dubladas para exportar a trilha de voz.")
     if retime is not None and retime.is_identity:
@@ -96,12 +100,12 @@ def dub_stems_command(
     for path in [background, voice_original, *(clip.path for clip in clips)]:
         args += ["-i", str(path)]
     args += ["-/filter_complex", str(graph_file)]
-    for label, path in (
-        ("[voice]", outputs.voice_dubbed),
-        ("[background]", outputs.background),
-        ("[original]", outputs.voice_original),
+    for label, path, tag in (
+        ("[voice]", outputs.voice_dubbed, provenance_args(provenance)),
+        ("[background]", outputs.background, []),
+        ("[original]", outputs.voice_original, []),
     ):
-        args += ["-map", label, *STEM_CODEC_ARGS, str(path)]
+        args += ["-map", label, *STEM_CODEC_ARGS, *tag, str(path)]
     return DubStemsCommand(
         FFmpegCommand(args, label="trilhas", total=duration), dub_stems_graph(clips, duration, retime)
     )

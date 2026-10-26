@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
+from .provenance import provenance_args
 
 OUTPUT_SAMPLE_RATE = 48000  # mesma taxa do resto do pipeline (ver filtergraph/audio.py)
 ATEMPO_MIN, ATEMPO_MAX = 0.5, 2.0  # a faixa que o filtro `atempo` aceita em cada instância
@@ -134,8 +135,10 @@ def narration_concat_command(
     out: Path,
     sample_rate: int = OUTPUT_SAMPLE_RATE,
     total: float | None = None,
+    provenance: str = "",
 ) -> FFmpegCommand:
     """Concatena as falas (arquivo, pausa depois) numa narração mono; o formato sai da extensão de `out`.
+    `provenance` é o texto da etiqueta de procedência gravada no arquivo (vazio = sem etiqueta).
 
     A montagem é seca: o acabamento broadcast é de cada fala (`SpeechFinish`), aplicado antes da marca
     d'água. O loudness final continua sendo ajustado na mixagem do projeto.
@@ -144,7 +147,15 @@ def narration_concat_command(
     for path, _ in parts:
         args += ["-i", str(path)]
     graph = narration_concat_graph([pause for _, pause in parts], sample_rate)
-    args += ["-filter_complex", graph, "-map", "[out]", *encoder_args(out), str(out)]
+    args += [
+        "-filter_complex",
+        graph,
+        "-map",
+        "[out]",
+        *encoder_args(out),
+        *provenance_args(provenance),
+        str(out),
+    ]
     return FFmpegCommand(args, label="narração", total=total)
 
 

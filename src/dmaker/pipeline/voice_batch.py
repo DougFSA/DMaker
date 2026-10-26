@@ -211,7 +211,9 @@ class BatchNarrator:
         complete = output_dir / complete_filename(item.title, suffix)
         # a montagem é seca: cada capítulo já saiu com o acabamento broadcast e a marca d'água, e mexer na
         # dinâmica deles agora apagaria a marca (e achataria a voz)
-        self.runner.run(narration_concat_command(parts, complete, total=total))
+        self.runner.run(
+            narration_concat_command(parts, complete, total=total, provenance=self.service.provenance())
+        )
         srt = complete.with_suffix(".srt")
         srt.write_text(to_srt([Cue(start, end, text) for start, end, text in merged]), encoding="utf-8")
         return ItemOutput([*(path.name for path, _ in results), complete.name, srt.name], total)

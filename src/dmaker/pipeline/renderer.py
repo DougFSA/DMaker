@@ -26,7 +26,7 @@ from .segments import MezzanineBuilder
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
-from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings
+from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings, voice_spans
 
 
 class RenderPipeline:
@@ -175,7 +175,17 @@ class RenderPipeline:
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assembly = build_assembly(
-            ctx, prepared, transitions, total, layer, music_path, measured, normalize, out_path, voiceovers
+            ctx,
+            prepared,
+            transitions,
+            total,
+            layer,
+            music_path,
+            measured,
+            normalize,
+            out_path,
+            voiceovers,
+            provenance=self._provenance(ctx, voiceovers, total),
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -232,6 +242,17 @@ class RenderPipeline:
         if not path.exists():
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
         return path
+
+    @staticmethod
+    def _provenance(ctx: RenderContext, voiceovers, total: float) -> str:
+        """Etiqueta de procedência do vídeo: onde a narração sintetizada toca na saída final.
+
+        Vazia sem narração ou com a marca desligada; os trechos são os de cada narração (início e duração),
+        cortados no fim do vídeo, o que já é exato porque a narração entra inteira na mixagem.
+        """
+        if ctx.narrator is None or not voiceovers:
+            return ""
+        return ctx.narrator.provenance(voice_spans(voiceovers), total)
 
     def _loudness(
         self, ctx, prepared, transitions, music_path, total, voiceovers

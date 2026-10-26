@@ -1067,21 +1067,32 @@ def voice_queue_list() -> dict:
 
 @server.tool(
     description=(
-        "Confere se um áudio ou vídeo (wav, mp3, m4a, mp4...) carrega a marca d'água inaudível de voz "
-        "gerada por IA que o DMaker põe em toda fala sintetizada (sobrevive à exportação em AAC). Devolve "
-        "detected, probability (0 a 1) e verdict em português. Roda na hora (alguns segundos, mais o "
-        "carregamento do modelo na primeira vez). A marca está ligada por padrão e DMAKER_WATERMARK=0 a "
-        "desliga; a verificação funciona sempre."
+        "Confere se um áudio ou vídeo (wav, mp3, m4a, mp4...) tem voz gerada por IA pelo DMaker. Lê primeiro "
+        "a etiqueta de procedência que o DMaker grava nos arquivos com voz sintética (diz também os trechos); "
+        "sem etiqueta, analisa a marca d'água inaudível do áudio (cerca de meio segundo por segundo de áudio, "
+        "mais o carregamento do modelo na primeira vez). Devolve level (found = encontrada, indication = "
+        "indício, inconclusivo: música e tons puros podem imitar a marca e só a assinatura de 16 bits confirma; "
+        "absent = não encontrada), origin (label | audio), detected (só para found), probability (fração de "
+        "quadros do áudio, 0 a 1), matched_bits (de 16), spans (trechos da etiqueta, em segundos) e verdict "
+        "em português. check_audio=true analisa o áudio também quando há etiqueta (audio_level). A marca e a "
+        "etiqueta estão ligadas por padrão e DMAKER_WATERMARK=0 desliga as duas; a verificação funciona sempre. "
+        "Limite: um vídeo recodificado fora do DMaker perde a etiqueta, e uma fala curta num vídeo longo pode "
+        "não ser achada pelo áudio."
     )
 )
-def verify_watermark(path: str) -> dict:
+def verify_watermark(path: str, check_audio: bool = False) -> dict:
     from .pipeline.voices import verify_watermark as _verify
     from .pipeline.voices import watermark_verdict
 
-    result = _verify(Path(path))
+    result = _verify(Path(path), check_audio=check_audio)
     return {
+        "level": result.verdict,
+        "origin": result.origin,
         "detected": result.detected,
         "probability": result.probability,
+        "matched_bits": result.matched_bits,
+        "spans": [list(span) for span in result.spans],
+        "audio_level": result.audio_verdict,
         "verdict": watermark_verdict(result),
     }
 

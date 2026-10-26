@@ -34,6 +34,7 @@ from ..voice.conversion import (
 )
 from ..voice.levels import active_rms, gain_to_match_db
 from ..voice.library import VoiceLibrary, VoiceProfile
+from ..voice.provenance import provenance_text
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
 from ..voice.watermark import Watermarker, default_watermarker
 from .isolation import IsolationService
@@ -235,6 +236,8 @@ class VoiceConversionService:
                         gain_db,
                         has_video=info.has_video,
                         cut_start=_cut_start(request),
+                        # a voz convertida é a fala inteira do arquivo de saída, ao fundo só o que era original
+                        provenance=provenance_text(None) if self.watermarker.provenance else "",
                     )
                 )
         if report:

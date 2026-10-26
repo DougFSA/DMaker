@@ -14,6 +14,7 @@ from pathlib import Path
 from ..media.ffmpeg import FFmpegCommand
 from ..voice.dub_retime import RetimePlan, VideoPiece
 from ..voice.watermark import delay_on_detector_grid
+from .provenance import inherited_provenance_args
 from .speech_edit import FASTSTART_CONTAINERS, VIDEO_AUDIO_ARGS
 from .voice import atempo_filters, encoder_args
 
@@ -198,6 +199,7 @@ def dub_mix_command(
     original_voice_db: float = -18.0,
     retime: RetimePlan | None = None,
     fps: float = 0.0,
+    provenance: str = "",
 ) -> DubMix:
     """Grava `out` com o fundo, as falas dubladas e (se pedida) a voz original atenuada; com vídeo, copia a imagem.
 
@@ -246,4 +248,5 @@ def dub_mix_command(
             ]  # o índice no começo deixa o arquivo tocar antes de baixar inteiro
     else:
         args += ["-map", "[out]", *encoder_args(out)]
+    args += inherited_provenance_args(provenance)
     return DubMix(FFmpegCommand([*args, str(out)], label="dublagem", total=duration), graph)

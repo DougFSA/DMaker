@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
 from ..voice.speech_edit import SplicePlan
+from .provenance import provenance_args
 from .voice import encoder_args
 
 VIDEO_CONTAINERS = (".mp4", ".mov", ".mkv", ".m4v")
@@ -106,6 +107,7 @@ def speech_splice_command(
     layout: str = "stereo",
     has_video: bool = False,
     source_duration: float | None = None,
+    provenance: str = "",
 ) -> FFmpegCommand:
     """Grava `out` com o áudio de `source` trocado na região do plano; com vídeo, copia a imagem."""
     has_head = plan.region_start > 0.0
@@ -123,6 +125,7 @@ def speech_splice_command(
             ]  # o índice no começo deixa o arquivo tocar antes de baixar inteiro
     else:
         args += ["-map", "[out]", *encoder_args(out)]
+    args += provenance_args(provenance)
     return FFmpegCommand([*args, str(out)], label="correção de fala", total=source_duration)
 
 

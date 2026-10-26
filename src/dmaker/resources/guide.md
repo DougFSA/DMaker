@@ -250,9 +250,22 @@ instalado pelo `kokoro-onnx` como biblioteca à parte).
 - Marca d'água: toda fala sintetizada (narração, projeto, correção de fala, dublagem, troca de voz) sai com uma marca
   inaudível de voz gerada por IA (AudioSeal; é a última coisa feita na voz e sobrevive ao acabamento, ao ajuste de
   andamento da dublagem, à mixagem e ao AAC do vídeo). Ligada por padrão; desligue com
-  `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark`. `verify_watermark(path)` ou
-  `dmaker voice verify ARQUIVO` (wav, mp3, m4a, mp4) devolve probabilidade e veredito. A marca entra na
-  chave do cache de falas; áudio que o DMaker não sintetizou (vídeo do cliente, música) nunca é marcado.
+  `DMAKER_WATERMARK=0` ou `dmaker voice say --no-watermark` (a mesma chave desliga a etiqueta de baixo).
+  A marca entra na chave do cache de falas; áudio que o DMaker não sintetizou (vídeo do cliente, música)
+  nunca é marcado.
+- Etiqueta de procedência: todo arquivo que o DMaker grava com voz gerada (render com narração, `voice say`,
+  fila de narrações, dublagem e trilha da voz dublada, correção de fala, troca de voz) leva no contêiner o
+  comentário `DMaker: voz gerada por IA (v1); trechos=33.10-34.42,50.00-52.30` (trechos em segundos do arquivo
+  final; sem `trechos=`, a voz gerada é o arquivo inteiro). É o que acha uma narração curta dentro de um vídeo
+  longo, coisa que a marca no áudio não garante. Some se o arquivo for recodificado por um programa que
+  descarta os metadados (redes sociais).
+- Verificação: `verify_watermark(path, check_audio)` ou `dmaker voice verify ARQUIVO [--audio]` (wav, mp3, m4a,
+  mp4) lê a etiqueta primeiro (resposta imediata, com os trechos). Sem etiqueta, analisa a marca do áudio
+  (8 alinhamentos, cerca de 0,5 s por segundo de áudio) e responde em três níveis (`level`): `found`
+  (encontrada: o detector reagiu E a assinatura "DM" de 16 bits confere em 15 ou mais), `indication`
+  (indício, inconclusivo: o detector reagiu mas a assinatura não confere; é o que música e tons puros
+  provocam, e não prova nada) e `absent` (não encontrada). Só `found` conta como detecção. `check_audio`
+  analisa o áudio também quando há etiqueta.
 - Fila de narrações (roteiro longo, audiobook, vários roteiros de uma vez): `voice_queue_add(text | file_path,
   voice, title, draft, format, language, speed, brand)` enfileira e `voice_queue_list()` mostra estado,
   capítulo e fala em andamento, porcentagem e tempo estimado restante. A fila roda um item por vez, sozinha,
