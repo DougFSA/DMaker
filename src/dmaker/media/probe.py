@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fractions import Fraction
 from functools import lru_cache
@@ -31,6 +31,8 @@ class MediaInfo:
     channels: int | None = None
     size_bytes: int = 0
     creation_time: float | None = None  # início da gravação (epoch, segundos), se o arquivo informar
+    # tags do contêiner (comment, creation_time...), como o ffprobe as lê; fora da comparação e do hash porque é um dict
+    format_tags: dict[str, str] = field(default_factory=dict, compare=False)
 
     @property
     def aspect(self) -> float:
@@ -138,6 +140,7 @@ def _probe_cached(path_str: str, mtime_ns: int, size: int) -> MediaInfo:
         channels=int(a["channels"]) if a and a.get("channels") else None,
         size_bytes=size,
         creation_time=_creation_time(fmt),
+        format_tags={str(key): str(value) for key, value in (fmt.get("tags") or {}).items()},
     )
 
 

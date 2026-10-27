@@ -11,6 +11,8 @@ from dmaker.voice.library import VoiceLibrary
 from dmaker.voice.router import RoutingSynthesizer
 from dmaker.voice.synth import Speech, VoiceRequest
 
+from .conftest import fake_ffmpeg_output
+
 
 class FakeEngine:
     def __init__(self, engine_id: str):
@@ -79,7 +81,7 @@ def test_missing_engine_is_a_clear_error(setup):
 
 def test_narration_cache_does_not_mix_engines(setup, tmp_path):
     router, _, _, library = setup
-    service = NarrationService(router, RecordingRunner(), tmp_path / "cache")
+    service = NarrationService(router, RecordingRunner(on_run=fake_ffmpeg_output), tmp_path / "cache")
     base = {"text": "Uma frase.", "language": "pt"}
     dora = service.cache_key(VoiceRequest(**base, voice=library.get("dora")))
     design = service.cache_key(VoiceRequest(**base, voice=library.save_design("Grave", "male")))
@@ -90,7 +92,7 @@ def test_narration_cache_does_not_mix_engines(setup, tmp_path):
 def test_narration_without_voice_uses_the_default_voice(setup, tmp_path):
     router, kokoro, _, _ = setup
     out = tmp_path / "n.wav"
-    runner = RecordingRunner(on_run=lambda command: out.write_bytes(b"a"))
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
     service = NarrationService(router, runner, tmp_path / "cache")
     service.render("Uma frase.", out, voice=None)
     service.render("Uma frase.", tmp_path / "m.wav", voice=None)

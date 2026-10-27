@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from ..config import MODELS_DIR
+from .. import config
 from .cpu import compute_threads
 from .wavio import read_wav_channels, write_wav_channels
 
@@ -131,7 +131,7 @@ class DemucsSeparator:
         shifts: int = 1,
         overlap: float = 0.25,
         segment: float | None = None,
-        models_dir: Path = MODELS_DIR / "demucs",
+        models_dir: Path | None = None,
         threads: int | None = None,
         model_loader: Callable[[], Any] | None = None,
     ) -> None:
@@ -140,7 +140,7 @@ class DemucsSeparator:
         self.shifts = shifts
         self.overlap = overlap
         self.segment = segment
-        self.models_dir = models_dir
+        self.models_dir = models_dir or config.MODELS_DIR / "demucs"
         self.threads = threads
         self.model_id = f"demucs:{model}:shifts{shifts}:overlap{overlap:g}" + (
             f":segment{segment:g}" if segment else ""
@@ -166,6 +166,10 @@ class DemucsSeparator:
         with _hub_cache(self.models_dir):
             model = get_model(self.model)
         return model.eval()
+
+    def preload(self) -> None:
+        """Baixa os pesos, se faltarem, e deixa o modelo carregado (é o que o gerenciador de modelos usa)."""
+        self._loaded()
 
     def _loaded(self) -> Any:
         with self._load_lock:

@@ -143,7 +143,7 @@ desse ambiente virtual: o projeto só funciona com as dependências de `.venv`.
 | `cache/proxy/` | Proxies 540p para a prévia ao vivo na interface | Não |
 | `cache/waveform/` | Formas de onda calculadas para as faixas de áudio | Não |
 | `cache/jobs/<job>/` | Grafo do ffmpeg, ASS gerado, comandos, áudio de transcrição de cada render | Não |
-| `cache/models/` | Modelos baixados (Whisper, RVM) | Não |
+| `cache/models/` | Modelos baixados (OmniVoice, Kokoro, Demucs, Whisper, RVM); veja e gerencie com `dmaker models list` ou a aba Modelos | Não |
 | `projects/<nome>/` | `spec.json` de cada projeto, mais `captions.auto.json`/`.srt` e `sync.json` gerados | Sim (spec), gerados não |
 | `output/` | Vídeos renderizados (finais e preview) e thumbnails | Não |
 | `templates/*.json` | Specs de exemplo parametrizadas | Sim |
@@ -1061,6 +1061,7 @@ corrigir um nome que o tema ainda não conhece, em vez de mexer no `brand.json`.
 | "Extra inputs are not permitted" ao validar ou salvar | A spec tem um campo que o modelo não reconhece (nome errado ou digitado a mais): a validação da spec rejeita campos extras de propósito, para pegar erros de digitação cedo. Confira o nome do campo contra `dmaker://guide` ou `spec_schema`. |
 | Porta ocupada (8765 já em uso) | `dmaker ui --port 8770` (outra porta), ou defina `DMAKER_UI_URL` apontando para onde a interface já está rodando, para a CLI e o MCP a encontrarem em vez de tentar subir outra. |
 | Cache grande demais ou resultado preso em uma versão antiga de um trecho | `dmaker clean` (mezaninos, proxies, formas de onda); `dmaker clean --jobs` limpa também o histórico de jobs; `dmaker render --force` ignora o cache só naquele render. |
+| Disco cheio por causa dos modelos de IA | `dmaker models list` (ou a aba Modelos da interface) mostra cada modelo com o tamanho real, a licença e o que depende dele, e o que sobrou em `cache/models` sem uso. `dmaker models remove <id>` apaga um modelo (avisa antes quais funções deixam de funcionar), `dmaker models prune` apaga as sobras, `dmaker models download <id>` baixa de volta. Ambos perguntam antes; `--yes` pula a pergunta. |
 
 ---
 

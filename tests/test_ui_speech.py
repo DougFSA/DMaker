@@ -22,7 +22,7 @@ from tests.test_speech_fix import Harness
 def harness(tmp_path: Path, monkeypatch) -> Harness:
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr("dmaker.pipeline.narration.VOICE_CACHE_DIR", tmp_path / "voice-cache")
+    monkeypatch.setattr(config, "VOICE_CACHE_DIR", tmp_path / "voice-cache")
     return Harness(tmp_path / "media")
 
 

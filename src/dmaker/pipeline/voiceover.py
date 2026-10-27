@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import wave
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..domain.spec import Narration, Project
+from ..media.ffmpeg import SubprocessRunner
 from ..text.captions import Cue, Word
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary
+from ..voice.synth import SpeechSynthesizer
 from .context import RenderContext
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -20,6 +23,9 @@ if TYPE_CHECKING:  # pragma: no cover
 # (lint e vista da linha do tempo). A duração real vem do áudio sintetizado.
 CHARS_PER_SECOND = 14.0
 MIN_ESTIMATE_SECONDS = 0.5  # uma narração nunca vira um item de largura zero na linha do tempo
+
+# Falhas que só significam "não sei a duração real": roteiro ou voz sumidos, motor indisponível, wav ilegível.
+_UNKNOWN_DURATION_ERRORS = (OSError, ValueError, RuntimeError, EOFError, wave.Error)
 
 NarrationServiceFactory = Callable[[RenderContext], "NarrationService"]
 
@@ -68,6 +74,11 @@ def narration_label(narration: Narration, limit: int = 40) -> str:
     """Rótulo curto de uma narração para a linha do tempo: o início do texto ou o nome do roteiro."""
     label = (narration.text or narration.script or "").strip().replace("\n", " ")
     return label if len(label) <= limit else label[: limit - 1].rstrip() + "…"
+
+
+def voice_spans(voiceovers: Sequence[PreparedVoiceover]) -> list[tuple[float, float]]:
+    """Onde a voz sintetizada toca na saída final, para a etiqueta de procedência (narração sem volume não toca)."""
+    return [(item.start, item.end) for item in voiceovers if item.volume > 0]
 
 
 def overrun_warnings(voiceovers: Sequence[PreparedVoiceover], total: float) -> list[str]:
@@ -173,11 +184,7 @@ class VoiceoverPreparer:
             try:
                 text = narration_text(project, narration)
                 voice = self.library.get(narration.voice) if narration.voice else None
-            except (FileNotFoundError, ValueError):
-                durations.append(None)
-                continue
-            durations.append(
-                service.cached_duration(
+                duration = service.cached_duration(
                     text,
                     voice,
                     language=narration.language,
@@ -186,5 +193,31 @@ class VoiceoverPreparer:
                     seed=narration.seed,
                     brand=project.brand,
                 )
-            )
+            except _UNKNOWN_DURATION_ERRORS:
+                duration = None  # a vista da linha do tempo cai na estimativa em vez de não abrir
+            durations.append(duration)
         return durations
+
+
+def view_narration_durations(
+    project: Project,
+    library: VoiceLibrary | None = None,
+    synthesizer: SpeechSynthesizer | None = None,
+    lexicons: LexiconStore | None = None,
+) -> list[float | None]:
+    """Durações reais das narrações já em cache, para a linha do tempo, sem sintetizar nada.
+
+    O roteador de motores só carrega um modelo na primeira síntese; ler o cache usa só a identidade do
+    motor, então a vista abre instantânea mesmo com o OmniVoice ainda frio.
+    """
+    if not project.audio.narration:
+        return []
+    from .narration import NarrationService
+    from .voices import shared_synthesizer
+
+    service = NarrationService(
+        synthesizer or shared_synthesizer(),
+        SubprocessRunner(quiet=True),  # nunca é executado: ler o cache não chama o ffmpeg
+        lexicons=(lexicons or LexiconStore()).for_brand,
+    )
+    return VoiceoverPreparer(library).cached_durations(project, service)

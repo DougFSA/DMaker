@@ -14,10 +14,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, config
 from ..domain.brand import available_brands, load_theme
@@ -28,10 +30,16 @@ from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
 from .dub_routes import build_dub_router
+from .models_routes import build_models_router
+from .queue_routes import build_queue_router
+from .queue_routes import runtime as voice_queue_runtime
 from .speech_routes import build_speech_router
-from .voice_routes import build_voice_router
+from .voice_routes import Services, VoiceServices, build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
+CLASSIC_INDEX = STATIC_DIR / "index.html"
+# saída do `npm run build` em frontend/ (artefato de build: fora do git, dentro do pacote no release)
+DIST_DIR = Path(__file__).parent / "dist"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
@@ -49,10 +57,12 @@ SHUTDOWN_DELAY_S = 0.3
 
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
-layout_store = layout_files.LayoutStore(config.LAYOUTS_FILE)
+layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
 app.include_router(build_voice_router(jobs))
+app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
+app.include_router(build_models_router(jobs))
 
 
 # ---------- modelos de entrada ----------
@@ -473,8 +483,15 @@ def _project_from_body(name: str, spec: dict) -> Project:
     return project
 
 
+def _narration_durations(project: Project, services: VoiceServices) -> list[float | None]:
+    """Duração real das narrações já sintetizadas (cache), sem carregar modelo de voz."""
+    from ..pipeline.voiceover import view_narration_durations
+
+    return view_narration_durations(project, services.library, services.synthesizer, services.lexicons)
+
+
 @app.post("/api/projects/{name}/timeline")
-def project_timeline(name: str, req: TimelineRequest) -> dict:
+def project_timeline(name: str, req: TimelineRequest, services: Services) -> dict:
     from ..pipeline.layout import project_layout
     from ..pipeline.projects import load_project
     from ..pipeline.timeline_view import build_timeline_view
@@ -487,11 +504,12 @@ def project_timeline(name: str, req: TimelineRequest) -> dict:
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
     layout = project_layout(project)
-    return build_timeline_view(project, layout).to_dict()
+    durations = _narration_durations(project, services)
+    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
 
 
 @app.post("/api/projects/{name}/edit")
-def project_edit(name: str, req: EditRequest) -> dict:
+def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
     from ..pipeline.edits import apply_edit
     from ..pipeline.layout import project_layout
@@ -503,7 +521,8 @@ def project_edit(name: str, req: EditRequest) -> dict:
     except EditError as exc:
         raise _error(400, str(exc)) from exc
     layout = project_layout(new_project)
-    view = build_timeline_view(new_project, layout)
+    durations = _narration_durations(new_project, services)
+    view = build_timeline_view(new_project, layout, narration_durations=durations)
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
         "timeline": view.to_dict(),
@@ -604,6 +623,18 @@ def get_job(job_id: str) -> dict:
     return {**job.snapshot(), "result": job.result, "events": job.events[-200:]}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Pede para o job parar no próximo ponto seguro; só vale para os que se declaram cancelável."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise _error(404, "job desconhecido")
+    if not job.cancellable:
+        raise _error(409, "este tipo de trabalho não pode ser cancelado")
+    jobs.cancel(job_id)
+    return job.snapshot()
+
+
 @app.get("/api/jobs/{job_id}/events")
 def job_events(job_id: str) -> StreamingResponse:
     job = jobs.get(job_id)
@@ -665,11 +696,9 @@ def shutdown() -> dict:
 def _allowed_file(path: Path) -> bool:
     if not path.is_file():
         return False
-    try:
-        path.relative_to(config.ROOT)
+    if any(path.is_relative_to(base) for base in (config.ROOT, config.DATA_DIR)):
         return True
-    except ValueError:
-        return path.suffix.lower() in MEDIA_EXTS
+    return path.suffix.lower() in MEDIA_EXTS
 
 
 @app.get("/api/file")
@@ -890,15 +919,65 @@ def delete_layout(name: str) -> dict:
 
 
 # ---------- frontend ----------
+# A interface nova (Vue, pasta frontend/) é compilada para DIST_DIR e atende em "/" quando existir. A
+# anterior (HTML/JS puro em static/) continua inteira em "/classica" e volta a atender "/" se o build
+# não foi feito, para nunca haver um dia sem interface. O DIST_DIR é conferido a cada pedido, não na
+# importação: gerar o build com o servidor no ar já vale sem reiniciar.
+
+
+def _dist_index() -> Path | None:
+    index_file = DIST_DIR / "index.html"
+    return index_file if index_file.is_file() else None
+
+
+def _dist_file(relative: str) -> Path | None:
+    """Arquivo do build pedido pela URL, ou None se não existe ou tenta sair do DIST_DIR (../)."""
+    candidate = (DIST_DIR / relative).resolve()
+    try:
+        candidate.relative_to(DIST_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(_dist_index() or CLASSIC_INDEX)
+
+
+@app.get("/classica")
+def classic_index() -> FileResponse:
+    return FileResponse(CLASSIC_INDEX)
 
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _frontend_response(url_path: str) -> FileResponse | None:
+    """Arquivo do build (/assets/..., favicon) ou, para rota sem extensão, o index.html da interface nova
+    (o Vue Router resolve /projetos, /saidas etc. no navegador). None quando não é assunto do front."""
+    index_file = _dist_index()
+    path = url_path.lstrip("/")
+    if index_file is None or path.startswith(("api/", "static/")):
+        return None
+    built = _dist_file(path)
+    if built is not None:
+        return FileResponse(built)
+    if Path(path).suffix:  # arquivo inexistente (ex.: um .js antigo): 404 de verdade, não a página
+        return None
+    return FileResponse(index_file)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def frontend_fallback(request: Request, exc: StarletteHTTPException) -> Response:
+    """Só um GET sem rota vira a interface nova. Tratar o 404 aqui, em vez de registrar uma rota
+    "/{path}" que pega tudo, deixa o roteamento da API intacto (405 continua 405, 404 continua 404)."""
+    if exc.status_code == 404 and request.method in ("GET", "HEAD"):
+        response = _frontend_response(request.url.path)
+        if response is not None:
+            return response
+    return await http_exception_handler(request, exc)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
@@ -907,6 +986,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) 
     import uvicorn
 
     config.ensure_dirs()
+    voice_queue_runtime.start_worker()  # a fila de narrações roda sozinha enquanto a interface estiver aberta
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

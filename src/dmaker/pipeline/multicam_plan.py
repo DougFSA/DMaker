@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import CACHE_DIR
+from .. import config
 from ..domain.multicam import (
     Coverage,
     MulticamPlan,
@@ -37,7 +37,6 @@ from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 
 TRANSCRIPT_MODEL = "small"
 TRANSCRIPT_LANGUAGE = "pt"
-TRANSCRIPT_CACHE_DIR = CACHE_DIR / "transcripts"
 
 TranscriberFactory = Callable[[], Transcriber]
 
@@ -172,7 +171,7 @@ def plan_multicam(
     offset_finder: OffsetFinder | None = None,
     runner: FFmpegRunner | None = None,
     log: Callable[[str], None] | None = None,
-    cache_dir: Path = TRANSCRIPT_CACHE_DIR,
+    cache_dir: Path | None = None,
 ) -> PlanResult:
     """Planeja o corte de um bloco `multicam`: transcreve a câmera de áudio, reconhece as fases pela
     fala, gera os clipes alternando câmeras e salva o projeto com o bloco já expandido no lugar."""
@@ -198,12 +197,13 @@ def plan_multicam(
     transcriber = (transcriber_factory or _default_transcriber)()
     parts = _audio_parts(project, block)
     speech: list[Speech] = []
+    transcripts_dir = cache_dir or config.CACHE_DIR / "transcripts"
     for i, key in enumerate(parts, start=1):
         source = session[key]
         assert source.path is not None
         log(f"transcrevendo {block.audio} parte {i} de {len(parts)}...")
         cues = _cached_transcript(
-            source.path, transcriber, runner, TRANSCRIPT_LANGUAGE, TRANSCRIPT_MODEL, cache_dir
+            source.path, transcriber, runner, TRANSCRIPT_LANGUAGE, TRANSCRIPT_MODEL, transcripts_dir
         )
         speech.extend(speech_from_cues(cues, source.offset))
 

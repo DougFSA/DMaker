@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..domain.spec import AudioSettings, Music, MusicSpan
+from ..voice.watermark import delay_on_detector_grid
 from .common import Inputs
 
 
@@ -126,7 +127,8 @@ def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[Nar
             f"volume={narration.volume:.3f}",
         ]
         if narration.start > 0:
-            chain.append(f"adelay={int(round(narration.start * 1000))}:all=1")
+            # na grade de 20 ms do detector da marca d'água da voz (ver `voice/watermark.py`)
+            chain.append(f"adelay={delay_on_detector_grid(narration.start)}:all=1")
         label = f"[nar{index}]"
         lines.append(",".join(chain) + label)
         labels.append(label)

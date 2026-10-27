@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from ..config import MODELS_DIR
+from .. import config
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner
 from .captions import Cue, Word
 
@@ -60,12 +60,12 @@ class WhisperTranscriber:
         os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
         compute_type = self.compute_type or ("float16" if self.device == "cuda" else "int8")
         threads = max(1, min(os.cpu_count() or 4, 8))
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
         model = WhisperModel(
             self.model,
             device=self.device,
             compute_type=compute_type,
-            download_root=str(MODELS_DIR),
+            download_root=str(config.MODELS_DIR),
             cpu_threads=threads,
         )
         segments, info = model.transcribe(

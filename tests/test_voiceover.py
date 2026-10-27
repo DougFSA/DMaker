@@ -24,9 +24,13 @@ from dmaker.pipeline.voiceover import (
     narration_label,
     narration_text,
     overrun_warnings,
+    view_narration_durations,
 )
+from dmaker.voice.lexicon_store import LexiconStore
 from dmaker.voice.library import VoiceLibrary, VoiceNotFoundError
 from dmaker.voice.synth import Speech, VoiceRequest
+
+from .conftest import fake_ffmpeg_output
 
 SAMPLE_RATE = 24000
 
@@ -74,7 +78,7 @@ def _context(project: Project, tmp_path: Path, runner: RecordingRunner, **option
 
 
 def _runner() -> RecordingRunner:
-    return RecordingRunner(on_run=lambda command: Path(command.args[-1]).write_bytes(b"audio"))
+    return RecordingRunner(on_run=fake_ffmpeg_output)
 
 
 # ---------- funções puras ----------
@@ -249,6 +253,41 @@ def test_cached_durations_know_only_what_was_synthesized(tmp_path):
     service.render("Já sintetizada.", tmp_path / "out.wav", None)
     durations = VoiceoverPreparer(library).cached_durations(project, service)
     assert durations[0] == pytest.approx(len("Já sintetizada.") * 0.05) and durations[1:] == [None, None]
+
+
+def test_view_durations_read_the_cache_without_synthesizing(tmp_path, monkeypatch):
+    monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
+    synthesizer = FakeSynthesizer()
+    project = _project(tmp_path, [{"text": "Já sintetizada."}, {"text": "Ainda não."}])
+    NarrationService(synthesizer, _runner()).render("Já sintetizada.", tmp_path / "out.wav", None)
+    synthesized = len(synthesizer.requests)
+
+    durations = view_narration_durations(
+        project, VoiceLibrary(tmp_path / "voices"), synthesizer, LexiconStore(tmp_path / "assets")
+    )
+
+    assert durations[0] == pytest.approx(len("Já sintetizada.") * 0.05) and durations[1] is None
+    assert len(synthesizer.requests) == synthesized  # abrir a vista nunca sintetiza
+
+
+def test_view_durations_without_narration_do_not_touch_the_voice_engines(tmp_path, monkeypatch):
+    def forbidden():
+        raise AssertionError("o roteador de vozes não devia ser criado")
+
+    monkeypatch.setattr("dmaker.pipeline.voices.shared_synthesizer", forbidden)
+    assert view_narration_durations(_project(tmp_path, [])) == []
+
+
+def test_view_durations_fall_back_to_unknown_when_the_engine_is_unavailable(tmp_path, monkeypatch):
+    class BrokenEngine:
+        engine_id = "quebrado"
+
+        def cache_identity(self, request: VoiceRequest) -> str:
+            raise RuntimeError("O motor de voz 'omnivoice' não está disponível.")
+
+    monkeypatch.setattr("dmaker.config.VOICE_CACHE_DIR", tmp_path / "cache")
+    project = _project(tmp_path, [{"text": "Qualquer fala."}])
+    assert view_narration_durations(project, VoiceLibrary(tmp_path / "voices"), BrokenEngine()) == [None]
 
 
 # ---------- lint ----------

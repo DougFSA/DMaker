@@ -10,10 +10,11 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 from rich.console import Console
-from rich.table import Table
+from rich.table import Column, Table
 from typer.core import TyperGroup
 
 from . import __version__, config
+from .domain.models import format_size
 from .domain.presets import get_preset, list_presets
 
 app = typer.Typer(
@@ -944,9 +945,18 @@ def voice_say(
     brand: Annotated[
         str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale (padrão: a da voz).")
     ] = None,
+    watermark: Annotated[
+        bool,
+        typer.Option(
+            "--watermark/--no-watermark",
+            help="Marca d'água inaudível e etiqueta de procedência no arquivo (ligadas por padrão; "
+            "--no-watermark ou DMAKER_WATERMARK=0 desligam as duas).",
+        ),
+    ] = True,
 ) -> None:
     """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache."""
+    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo
+    com uma etiqueta de procedência (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak
@@ -972,11 +982,38 @@ def voice_say(
             log=_console_log,
             synthesizer=synthesizer,
             brand=brand,
+            watermark=watermark,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     _print_narration(result)
     console.print(f"  tempo de processamento: {time.perf_counter() - started:.1f}s")
+
+
+@voice_app.command("verify")
+def voice_verify(
+    file: Annotated[Path, typer.Argument(help="Áudio ou vídeo a conferir: .wav, .mp3, .m4a, .mp4...")],
+    audio: Annotated[
+        bool,
+        typer.Option(
+            "--audio",
+            help="Analisa também o áudio quando há etiqueta (demora cerca de meio segundo por segundo).",
+        ),
+    ] = False,
+) -> None:
+    """Confere se o arquivo tem voz gerada por IA do DMaker: lê a etiqueta de procedência e, sem ela, analisa a
+    marca d'água do áudio. Responde em três níveis: encontrada, indício (inconclusivo) ou não encontrada."""
+    from .pipeline.voices import verify_watermark, watermark_verdict
+
+    try:
+        result = verify_watermark(file, check_audio=audio)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    style = {"found": "green", "indication": "yellow", "absent": "white"}[result.verdict]
+    console.print(f"[{style}]{watermark_verdict(result)}[/{style}]")
+    if result.origin == "audio" or result.audio_verdict is not None:
+        bits = f", assinatura {result.matched_bits} de 16 bits" if result.matched_bits is not None else ""
+        console.print(f"  probabilidade: {result.probability:.3f}{bits}")
 
 
 @voice_app.command("clone")
@@ -1057,6 +1094,133 @@ def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) ->
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     console.print(f"[green]Voz removida:[/green] {voice_id}")
+
+
+queue_app = typer.Typer(
+    help="Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano e retoma de onde parou.",
+    no_args_is_help=True,
+)
+voice_app.add_typer(queue_app, name="queue")
+
+
+def _queue_service():
+    from .pipeline.voice_queue_service import VoiceQueueService
+
+    return VoiceQueueService()
+
+
+def _queue_describe(view: dict) -> str:
+    """Resumo de uma linha do andamento de um item: capítulo e fala em andamento, ou o desfecho."""
+    if view["state"] == "running" and view["chapter"]:
+        return f"capítulo {view['chapter']} de {view['chapters_total']}, fala {view['utterance']} de {view['utterances']}"
+    if view["state"] == "failed":
+        return (view["error"] or "").splitlines()[0] if view["error"] else ""
+    if view["state"] == "done":
+        return view["output_dir"]
+    return f"{view['chapters_total']} capítulo(s)"
+
+
+@queue_app.command("add")
+def queue_add(
+    text: Annotated[str | None, typer.Option(help="Texto a narrar (ou use --file).")] = None,
+    file: Annotated[
+        Path | None, typer.Option(help="Roteiro em .txt, .md ou .docx, um capítulo por título.")
+    ] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="Id da voz (dmaker voice list). Sem ela, a voz padrão.")
+    ] = None,
+    title: Annotated[str | None, typer.Option(help="Nome do item e da pasta em output/narracoes.")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    format: Annotated[str, typer.Option(help="Formato dos áudios: wav ou mp3.")] = "wav",
+    language: Annotated[str | None, typer.Option(help="Idioma (pt, en...). Padrão: o da voz.")] = None,
+    speed: Annotated[float, typer.Option(help="Velocidade da fala (1.0 normal).")] = 1.0,
+    brand: Annotated[str | None, typer.Option(help="Marca cujo dicionário de pronúncia vale.")] = None,
+) -> None:
+    """Põe um roteiro no fim da fila. Quem executa é o `dmaker ui` aberto ou o `dmaker voice queue run`."""
+    from .pipeline.voice_queue import QueueOptions
+
+    if bool(text) == bool(file):
+        _fail("Informe o texto (--text) ou o arquivo de roteiro (--file), um dos dois.")
+    try:
+        options = QueueOptions(
+            voice=voice, language=language, speed=speed, brand=brand, draft=draft, audio_format=format
+        )
+        service = _queue_service()
+        item = service.add_text(text, options, title) if text else service.add_path(file, options, title)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Na fila:[/green] {item.id}  {item.title}  ({item.chapters_total} capítulo(s))")
+    console.print(f"  saída: {item.output_dir}", markup=False, highlight=False)
+
+
+@queue_app.command("list")
+def queue_list() -> None:
+    """Mostra a fila: estado, andamento e tempo estimado de cada item."""
+    view = _queue_service().view()
+    if not view["items"]:
+        console.print("A fila está vazia. Use `dmaker voice queue add`.")
+        return
+    table = Table("id", "título", "estado", "andamento", "restante")
+    for item in view["items"]:
+        table.add_row(
+            item["id"],
+            item["title"],
+            item["state_label"],
+            _queue_describe(item),
+            item["eta_label"] or "-",
+        )
+    console.print(table)
+    if view["eta_label"]:
+        console.print(f"Tempo estimado para esvaziar a fila: {view['eta_label']}")
+
+
+def _queue_transition(item_id: str, action: str, success: str) -> None:
+    queue = _queue_service().queue
+    try:
+        getattr(queue, action)(item_id)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc.args[0]) if isinstance(exc, KeyError) else str(exc))
+    console.print(f"[green]{success}:[/green] {item_id}")
+
+
+@queue_app.command("cancel")
+def queue_cancel(
+    item_id: Annotated[str, typer.Argument(help="Id do item (dmaker voice queue list).")],
+) -> None:
+    """Cancela um item; o que estava em andamento para na próxima fala."""
+    _queue_transition(item_id, "cancel", "Cancelado")
+
+
+@queue_app.command("pause")
+def queue_pause(item_id: Annotated[str, typer.Argument(help="Id do item.")]) -> None:
+    """Pausa um item sem perder o que já foi narrado."""
+    _queue_transition(item_id, "pause", "Pausado")
+
+
+@queue_app.command("resume")
+def queue_resume(item_id: Annotated[str, typer.Argument(help="Id do item.")]) -> None:
+    """Devolve um item pausado à fila."""
+    _queue_transition(item_id, "resume", "Retomado")
+
+
+@queue_app.command("run")
+def queue_run() -> None:
+    """Executa a fila em primeiro plano, um item por vez, e volta quando ela esvazia. Ctrl+C interrompe e
+    o item em andamento retoma de onde parou na próxima execução."""
+    from .pipeline.voice_queue import VoiceQueue
+    from .pipeline.voice_queue_service import build_worker
+    from .pipeline.voice_worker import WorkerBusyError
+
+    queue = VoiceQueue()
+    worker = build_worker(queue, log=_console_log)
+    try:
+        processed = worker.run_pending()
+    except WorkerBusyError as exc:
+        _fail(str(exc))
+    except KeyboardInterrupt:
+        queue.requeue_interrupted()
+        _fail("Interrompido; o item em andamento volta para a fila e retoma na próxima execução.")
+    console.print(f"[green]Fila concluída:[/green] {processed} item(ns) executado(s)")
 
 
 @voice_app.command("preview")
@@ -1205,6 +1369,51 @@ def voice_fix(
     console.print(f"  voz: {result.voice}; tempo de processamento: {time.perf_counter() - started:.1f}s")
 
 
+@voice_app.command("convert")
+def voice_convert(
+    file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com a fala a converter.")],
+    voice: Annotated[
+        str, typer.Option(help="Voz da biblioteca que vai falar no lugar (clonada ou desenhada).")
+    ],
+    start: Annotated[float | None, typer.Option(help="Início do trecho (s no arquivo).")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do trecho (s no arquivo).")] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Arquivo de saída (padrão: output/troca-de-voz/<nome>.<voz>-<id>.<ext>)."),
+    ] = None,
+) -> None:
+    """Troca a voz de uma gravação pela de uma voz da biblioteca, mantendo ritmo, pausas, entonação e o fundo.
+
+    Diferente de `dub` (que traduz e fala de novo) e de `fix` (que troca um trecho): todas as palavras são as
+    da gravação, só o timbre muda. A voz e o fundo são separados antes (fica em cache) e só a voz é convertida.
+    Na CPU a conversão leva de 1,5 a 2 s por segundo de fala, além da separação."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.voice_conversion import ConversionRequest, default_voice_conversion_service
+
+    announced: list[str] = []
+
+    def report(stage: str, fraction: float) -> None:
+        if stage not in announced:
+            announced.append(stage)
+            console.print(f"[dim]{stage}...[/dim]")
+
+    try:
+        request = ConversionRequest(src=file, voice=voice, start=start, end=end, out=out)
+        service = default_voice_conversion_service(SubprocessRunner(quiet=True), _console_log)
+        result = service.convert(request, report)
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
+    console.print(
+        f"  voz: {result.voice}; {result.seconds:.1f}s em {result.blocks} bloco(s); "
+        f"volume ajustado em {result.gain_db:+.1f} dB",
+        markup=False,
+        highlight=False,
+    )
+    spent = ", ".join(f"{stage} {seconds:.1f}s" for stage, seconds in result.timings.items())
+    console.print(f"  tempo: {spent}", markup=False, highlight=False)
+
+
 lexicon_app = typer.Typer(
     help="Dicionário de pronúncia: como a voz fala cada termo (global ou por marca).", no_args_is_help=True
 )
@@ -1323,6 +1532,181 @@ def audio_isolate(
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
 
 
+# ---------- modelos ----------
+
+models_app = typer.Typer(
+    help="Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, apagar e limpar sobras.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
+
+STATE_LABELS = {"installed": "baixado", "partial": "parcial", "absent": "ausente"}
+STATE_STYLES = {"installed": "green", "partial": "yellow", "absent": "dim"}
+
+
+def _models_service():
+    from .pipeline.models_service import ModelService
+
+    return ModelService()
+
+
+def _models_fail(exc: Exception) -> None:
+    _fail(str(exc))
+
+
+def _ask_yes_no(question: str) -> bool:
+    """Pergunta em português (s/N); o `typer.confirm` só entende y/n. Sem resposta (stdin fechado), é não."""
+    try:
+        answer = console.input(f"{question} [s/N] ", markup=False)
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"s", "sim", "y", "yes"}
+
+
+def _confirm_removal(plan, assume_yes: bool) -> None:
+    """Mostra o que vai embora e pergunta; `--yes` pula a pergunta (para scripts), nunca o aviso."""
+    console.print(plan.warning(), highlight=False)
+    for path in plan.paths:
+        console.print(f"  {path}", markup=False, highlight=False)
+    if not assume_yes and not _ask_yes_no("Apagar?"):
+        console.print("Nada foi apagado.")
+        raise typer.Exit()
+
+
+@models_app.command("list")
+def models_list() -> None:
+    """Lista os modelos com estado, tamanho medido em disco, licença e para que servem, mais as sobras."""
+    from .pipeline.models_service import ModelError
+
+    try:
+        inventory = _models_service().inventory()
+    except ModelError as exc:
+        _models_fail(exc)
+    # id, estado e tamanho não quebram linha (o id é o que se digita em `download` e `remove`); o resto cede
+    table = Table(
+        Column("id", no_wrap=True),
+        "modelo",
+        Column("estado", no_wrap=True),
+        Column("no disco", no_wrap=True),
+        "licença",
+        "serve para",
+    )
+    for status in inventory.models:
+        spec = status.spec
+        size = (
+            format_size(status.size_bytes)
+            if status.state != "absent"
+            else f"(~{format_size(spec.expected_size)})"
+        )
+        table.add_row(
+            spec.id,
+            spec.name,
+            f"[{STATE_STYLES[status.state]}]{STATE_LABELS[status.state]}[/]",
+            size,
+            spec.license,
+            spec.purpose,
+        )
+    console.print(table)
+    if inventory.leftovers:
+        console.print(
+            f"[yellow]Sobras[/yellow] (nenhum modelo usa; `dmaker models prune` apaga, "
+            f"{format_size(inventory.leftover_bytes)}):"
+        )
+        for item in inventory.leftovers:
+            console.print(f"  {item.path}  {format_size(item.size_bytes)}", markup=False, highlight=False)
+    free = (
+        f" · livre no disco: {format_size(inventory.disk_free_bytes)}"
+        if inventory.disk_free_bytes is not None
+        else ""
+    )
+    console.print(
+        f"Total ocupado em {inventory.models_dir}: {format_size(inventory.total_bytes)}{free}",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+@models_app.command("download")
+def models_download(
+    model_id: Annotated[str, typer.Argument(help="Id do modelo (veja `dmaker models list`).")],
+) -> None:
+    """Baixa o modelo (se faltar) e confere que ficou inteiro. Os de ~3 GB levam minutos."""
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeRemainingColumn
+
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        name = service.spec(model_id).name
+        with Progress(
+            TextColumn("[cyan]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(name, total=None)
+
+            def on_progress(done: int, total: int) -> None:
+                progress.update(task, completed=done, total=total)
+
+            status = service.download(model_id, on_progress)
+    except ModelError as exc:
+        _models_fail(exc)
+    except Exception as exc:  # noqa: BLE001 - rede, disco e biblioteca de cada motor falham de jeitos próprios
+        _fail(f"Não consegui baixar {model_id}: {exc}")
+
+    console.print(
+        f"[green]Pronto:[/green] {status.spec.name} ({format_size(status.size_bytes)})", highlight=False
+    )
+
+
+@models_app.command("remove")
+def models_remove(
+    model_id: Annotated[str, typer.Argument(help="Id do modelo (veja `dmaker models list`).")],
+    yes: Annotated[bool, typer.Option("--yes", help="Apaga sem perguntar.")] = False,
+) -> None:
+    """Apaga o modelo do disco, dizendo antes quais funções dependem dele."""
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        plan = service.plan_removal(model_id)
+        if not plan.paths:
+            _fail(f"{service.spec(model_id).name} não está baixado; não há o que apagar.")
+        _confirm_removal(plan, yes)
+        service.remove(model_id, confirm=True)
+    except ModelError as exc:
+        _models_fail(exc)
+    console.print(
+        f"[green]Apagado:[/green] {plan.title}, {format_size(plan.freed_bytes)} liberados.", highlight=False
+    )
+
+
+@models_app.command("prune")
+def models_prune(
+    yes: Annotated[bool, typer.Option("--yes", help="Apaga sem perguntar.")] = False,
+) -> None:
+    """Apaga as sobras: pastas e arquivos em cache/models que nenhum modelo do DMaker usa."""
+    from .pipeline.models_service import ModelError
+
+    service = _models_service()
+    try:
+        plan = service.plan_prune()
+        if not plan.paths:
+            console.print("Não há sobras em cache/models.")
+            return
+        _confirm_removal(plan, yes)
+        service.prune(confirm=True, only=plan.paths)
+    except ModelError as exc:
+        _models_fail(exc)
+    console.print(
+        f"[green]Sobras apagadas:[/green] {format_size(plan.freed_bytes)} liberados.", highlight=False
+    )
+
+
 # ---------- dublagem ----------
 
 
@@ -1342,17 +1726,37 @@ dub_app = typer.Typer(
 )
 app.add_typer(dub_app, name="dub")
 
-SPEAKER_MODES = ("per_segment", "single")
+SPEAKER_MODES = ("per_speaker", "per_segment", "single")
+SPEAKER_HELP = (
+    "per_speaker (padrão: separa quem fala e usa uma voz clonada por pessoa), per_segment (clona a voz de "
+    "cada fala) ou single (um clone para o arquivo)."
+)
+SPEAKERS_HELP = (
+    "Quantas pessoas falam (força a separação de falantes; sem isso o áudio decide). Só no modo per_speaker."
+)
+FIT_HELP = (
+    "Quando a fala traduzida não cabe no tempo: voz (acelera a voz, o padrão), video (estica o vídeo "
+    "naquele trecho, até 1,3x) ou misto (acelera a voz até 1,15x e estica o vídeo no resto)."
+)
+
+
+def _check_fit(fit: str) -> None:
+    from .domain.dub import FIT_MODES
+
+    if fit not in FIT_MODES:
+        _fail(f"Modo de encaixe {fit!r} inválido; use {', '.join(FIT_MODES)}.")
 
 
 def _print_segments(project) -> None:
     from rich.markup import escape
 
-    table = Table("fala", "tempo", "original", "tradução", "trava")
+    with_speakers = len(project.speakers) > 1
+    table = Table("fala", "tempo", *(["falante"] if with_speakers else []), "original", "tradução", "trava")
     for s in project.segments:
         table.add_row(
             s.id,
             f"{s.start:.1f} a {s.end:.1f}",
+            *([escape(s.speaker or "")] if with_speakers else []),
             escape(s.source_text),
             escape(s.text),
             "sim" if s.locked else "",
@@ -1365,11 +1769,20 @@ def _print_dub_result(result) -> None:
 
     console.print(f"[green]Pronto:[/green] {result.path}", highlight=False, soft_wrap=True)
     console.print(f"  legenda: {result.srt_path}", markup=False, highlight=False, soft_wrap=True)
+    stretched = result.stretched
+    if stretched:
+        added = sum(r.added_seconds for r in stretched)
+        console.print(
+            f"  vídeo esticado em {len(stretched)} trecho(s), +{added:.1f} s: {result.output_seconds:.1f} s no total",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
     table = Table("fala", "início", "tradução", "fala (s)", "toca (s)", "situação", "cache")
     for r in result.report:
         table.add_row(
             r.id,
-            f"{r.start:.1f}",
+            f"{r.retimed_start if r.retimed_start is not None else r.start:.1f}",
             escape(r.text),
             f"{r.speech_seconds:.1f}",
             f"{r.played_seconds:.1f}",
@@ -1385,22 +1798,42 @@ def _print_dub_result(result) -> None:
     )
 
 
+def _print_stems(stems) -> None:
+    console.print(f"[green]Trilhas:[/green] {stems.folder}", highlight=False, soft_wrap=True)
+    for path in stems.files:
+        console.print(f"  {path.name}", markup=False, highlight=False, soft_wrap=True)
+    console.print(
+        f"  duração de cada uma: {stems.duration:.3f} s (a do vídeo), começando no zero", markup=False
+    )
+    if stems.zip_path:
+        console.print(f"  zip: {stems.zip_path}", markup=False, highlight=False, soft_wrap=True)
+    if stems.original_voice_db is not None:
+        console.print(
+            f"  o vídeo dublado usa a voz original a {stems.original_voice_db:g} dB; a trilha sai sem atenuar",
+            markup=False,
+            soft_wrap=True,
+        )
+
+
 def _prepare_dub(
     service,
     file: Path,
     target: str,
     source: str,
-    speaker: str,
+    speaker: str | None,
     voice: str | None,
     keep_original: float | None,
     glossary: list[str] | None,
     brand: str | None,
     project_path: Path | None,
+    fit: str = "voz",
+    num_speakers: int | None = None,
 ) -> tuple:
     from .pipeline.dubbing import default_project_path
 
-    if speaker not in SPEAKER_MODES:
+    if speaker is not None and speaker not in SPEAKER_MODES:
         _fail(f"Modo de falante {speaker!r} inválido; use {' ou '.join(SPEAKER_MODES)}.")
+    _check_fit(fit)
     path = project_path or default_project_path(file, target)
     project = service.prepare(
         file,
@@ -1412,6 +1845,8 @@ def _prepare_dub(
         glossary=glossary or [],
         brand=brand,
         project_path=path,
+        fit_mode=fit,
+        num_speakers=num_speakers,
     )
     return project, path
 
@@ -1421,9 +1856,8 @@ def dub_prepare(
     file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
     target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
     source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
-    speaker: Annotated[
-        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
-    ] = "per_segment",
+    speaker: Annotated[str | None, typer.Option(help=SPEAKER_HELP)] = None,
+    speakers: Annotated[int | None, typer.Option("--speakers", min=1, help=SPEAKERS_HELP)] = None,
     voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
     keep_original: Annotated[
         float | None,
@@ -1437,6 +1871,7 @@ def dub_prepare(
         Path | None,
         typer.Option(help="Onde gravar o projeto (padrão: output/dublagem/<nome>.<idioma>.dub.json)."),
     ] = None,
+    fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Separa a voz, transcreve, parte em frases e traduz; grava o projeto `.dub.json` para você revisar.
@@ -1452,7 +1887,18 @@ def dub_prepare(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+            service,
+            file,
+            target,
+            source,
+            speaker,
+            voice,
+            keep_original,
+            glossary,
+            brand,
+            project,
+            fit,
+            speakers,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
@@ -1469,6 +1915,15 @@ def dub_render(
     ] = None,
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    fit: Annotated[
+        str | None,
+        typer.Option(help=f"{FIT_HELP} Vale só para esta geração; sem isso vale o `fit_mode` do projeto."),
+    ] = None,
+    stems: Annotated[
+        bool,
+        typer.Option(help="Exporta também as trilhas separadas (voz dublada, fundo e voz original) em WAV."),
+    ] = False,
+    zip_stems: Annotated[bool, typer.Option("--zip", help="Com --stems, junta as trilhas num .zip.")] = False,
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Gera a dublagem: sintetiza as traduções com a voz de cada falante e monta com o fundo original.
@@ -1476,16 +1931,67 @@ def dub_render(
     Só as falas novas ou editadas são sintetizadas; o resto sai do cache. Grava o vídeo e a legenda (.srt)."""
     from .domain.dub import load_dub_project
     from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dub_stems import StemsOptions
+    from .pipeline.dubbing import default_dubbing_service
+    from .voice.synth import DRAFT_STEPS
+
+    if zip_stems and not stems:
+        raise typer.BadParameter("--zip só vale junto com --stems.", param_hint="--zip")
+    if fit is not None:
+        _check_fit(fit)
+    try:
+        dub = load_dub_project(project)
+        if fit is not None:
+            dub = dub.model_copy(update={"fit_mode": fit})
+        service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
+        result = service.render(
+            dub,
+            out,
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+            stems=StemsOptions(make_zip=zip_stems) if stems else None,
+        )
+    except VOICE_ERRORS as exc:
+        _voice_fail(exc)
+    _print_dub_result(result)
+    if result.stems:
+        _print_stems(result.stems)
+
+
+@dub_app.command("stems")
+def dub_stems(
+    project: Annotated[Path, typer.Argument(help="Projeto .dub.json (de `dmaker dub prepare`).")],
+    out_dir: Annotated[
+        Path | None,
+        typer.Option(help="Pasta das trilhas (padrão: output/dublagem/<nome>.<idioma>.trilhas)."),
+    ] = None,
+    zip_stems: Annotated[
+        bool, typer.Option("--zip", help="Junta as três trilhas num .zip ao lado da pasta.")
+    ] = False,
+    steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
+    draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
+) -> None:
+    """Exporta as trilhas separadas da dublagem (voz dublada, fundo e voz original) para remixar em outro editor.
+
+    Três WAV (48 kHz, estéreo) com a duração exata do vídeo, alinhados no zero e sem acabamento (sem loudnorm
+    nem limitador). Usa as falas já sintetizadas do cache; só sintetiza o que ainda não existe."""
+    from .domain.dub import load_dub_project
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.dub_stems import StemsOptions
     from .pipeline.dubbing import default_dubbing_service
     from .voice.synth import DRAFT_STEPS
 
     try:
         dub = load_dub_project(project)
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
-        result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)
+        stems = service.export_stems(
+            dub,
+            StemsOptions(out_dir, zip_stems),
+            steps=DRAFT_STEPS if draft and steps is None else steps,
+        )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
-    _print_dub_result(result)
+    _print_stems(stems)
 
 
 @dub_app.command("retranslate")
@@ -1512,9 +2018,8 @@ def dub_run(
     file: Annotated[Path, typer.Argument(help="Vídeo ou áudio com fala.")],
     target: Annotated[str, typer.Option("--to", help="Idioma alvo (en, es, fr, de, it, pt...).")],
     source: Annotated[str, typer.Option("--from", help="Idioma da fala original.")] = "pt",
-    speaker: Annotated[
-        str, typer.Option(help="per_segment (clona a voz de cada fala) ou single (um clone para o arquivo).")
-    ] = "per_segment",
+    speaker: Annotated[str | None, typer.Option(help=SPEAKER_HELP)] = None,
+    speakers: Annotated[int | None, typer.Option("--speakers", min=1, help=SPEAKERS_HELP)] = None,
     voice: Annotated[str | None, typer.Option(help="Voz da biblioteca no lugar da clonada.")] = None,
     keep_original: Annotated[
         float | None, typer.Option(help="Mantém a voz original por baixo, em dB (ex.: -18).")
@@ -1527,6 +2032,7 @@ def dub_run(
     project: Annotated[Path | None, typer.Option(help="Onde gravar o projeto .dub.json.")] = None,
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
+    fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Prepara e gera a dublagem de uma vez (é o que `dmaker dub ARQUIVO --to en` faz).
@@ -1539,7 +2045,18 @@ def dub_run(
     try:
         service = default_dubbing_service(SubprocessRunner(quiet=True), _console_log, device=device)
         dub, path = _prepare_dub(
-            service, file, target, source, speaker, voice, keep_original, glossary, brand, project
+            service,
+            file,
+            target,
+            source,
+            speaker,
+            voice,
+            keep_original,
+            glossary,
+            brand,
+            project,
+            fit,
+            speakers,
         )
         _print_segments(dub)
         result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)

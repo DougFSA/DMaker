@@ -1,18 +1,19 @@
 ---
 name: dmaker-rodada
-description: Desenvolve de ponta a ponta todos os chamados de uma versão do Jira do DMaker (projeto DMK) que ainda não começaram (colunas Backlog e Aguardando Atendimento), na ordem de prioridade, deixando cada um em Teste Manual com PR aberto para a develop e portões locais verdes. Use sempre que o Douglas pedir para tocar a rodada do DMaker, "toca a rodada", "toca a versão", "pegar os chamados que faltam", "desenvolver o que está pendente", "começar os cards da versão" ou qualquer variação de "toca o que sobrou no Jira do DMaker", mesmo que ele não diga a palavra "skill" nem cite números de card. É o ponto de entrada padrão para trabalho NOVO vindo do Jira; para o que voltou reprovado, use dmaker-redesenvolvimento; para pedido avulso sem chamado, dmaker-dev.
+description: Desenvolve de ponta a ponta todos os chamados de uma versão do Jira do DMaker (projeto DMK) que ainda não começaram (colunas Backlog e Aguardando Atendimento), na ordem de prioridade, deixando cada um mergeado na develop (PR aberto e mergeado na entrega), em Teste Manual e com portões locais verdes. Use sempre que o Douglas pedir para tocar a rodada do DMaker, "toca a rodada", "toca a versão", "pegar os chamados que faltam", "desenvolver o que está pendente", "começar os cards da versão" ou qualquer variação de "toca o que sobrou no Jira do DMaker", mesmo que ele não diga a palavra "skill" nem cite números de card. É o ponto de entrada padrão para trabalho NOVO vindo do Jira; para o que voltou reprovado, use dmaker-redesenvolvimento; para pedido avulso sem chamado, dmaker-dev.
 ---
 
 # Rodada de desenvolvimento: DMaker
 
 Puxa do Jira tudo que ainda não começou numa versão e entrega card por card, cada
-um com seu PR e seu comentário, até a fila zerar.
+um com seu PR **já mergeado na `develop`** e seu comentário, até a fila zerar. O
+Douglas testa sempre pela `develop`.
 
 Leia junto:
 
-- `.claude/skills/_comum/delegacao.md`: **como dividir o trabalho com os subagentes**
+- `.claude/skills/_comum/delegacao.md`: **como dividir o trabalho com os subagentes**, inclusive executores em paralelo
 - `.claude/skills/_comum/jira.md`: colunas, transições, consultas, comentário de entrega
-- `.claude/skills/_comum/git.md`: branch, commit, PR, quando (não) empilhar
+- `.claude/skills/_comum/git.md`: branch, commit, PR, merge na entrega, worktrees
 - `.claude/skills/_comum/qualidade.md`: portões locais (sem CI), verificação, CHANGELOG
 
 As três últimas são as regras que valem em cada card, mas quem as executa é o
@@ -73,19 +74,29 @@ você subestimou algum card.
 Duas coisas ajustam essa ordem:
 
 - **Dependência real de código vence a prioridade**, e quando vencer, avise, com
-  o motivo. Não invente dependência onde não há: por padrão cada card sai da
-  `develop` (ver `_comum/git.md`).
+  o motivo. O card de que o outro depende entra (e é mergeado) primeiro. Não
+  invente dependência onde não há: por padrão cada card sai da `develop` (ver
+  `_comum/git.md`).
 - **Cards que tocam o mesmo módulo**, quando estão na mesma faixa de prioridade,
-  ficam adjacentes na fila: o conflito é resolvido com o contexto fresco em vez
-  de voltar dias depois.
+  ficam adjacentes na fila e **em série**: o conflito é resolvido com o contexto
+  fresco em vez de voltar dias depois.
+
+**Paralelismo (opcional).** O Douglas autorizou executores ao mesmo tempo quando
+os cards são independentes e tocam coisas diferentes. Se a fila tiver pares
+assim, diga na apresentação quais rodam juntos: um executor na pasta principal e
+cada outro em worktree (`_comum/delegacao.md`). Na dúvida sobre independência, em
+série. O ganho é de tempo; o custo é conflito na `develop`, que a serialização do
+merge contém.
 
 Use a lista de tarefas (`TaskCreate`) com um item por card: a rodada é longa e o
 Douglas acompanha por ali.
 
 ## 3. Para cada card: você planeja, o executor entrega
 
-Um card por vez, e um `dmaker-executor` por card. Não acumule etapas de vários
-cards para o fim: PR aberto e card movido antes de começar o próximo.
+Um `dmaker-executor` por card. Em série, um card por vez; em paralelo, só os pares
+independentes que você anunciou, cada um no seu worktree. Não acumule etapas de
+vários cards para o fim: PR mergeado e card movido antes de começar o próximo da
+mesma pasta.
 
 **Antes de despachar**, faça a parte que é sua:
 
@@ -103,25 +114,27 @@ cards para o fim: PR aberto e card movido antes de começar o próximo.
    `CLAUDE.md` que pesam neste card. O critério de aceite é o comportamento
    observável, não "passar o lint".
 
-**Um executor por vez, sempre**, inclusive quando os cards não se tocam. Dois
-executores compartilham o mesmo repositório e trocam de branch um debaixo do
-outro; ver `_comum/delegacao.md` → "Nunca dois executores ao mesmo tempo".
+**Dois executores na mesma pasta, nunca**; ver `_comum/delegacao.md` → "Um
+executor por pasta; em paralelo, só em worktree".
 
 O executor faz o resto: implementa, portões verdes (ruff e pytest, sem CI),
 verificação de verdade quando a mudança é visível ou audível, CHANGELOG, commit,
-push, PR para a `develop` e a transição `51` para `Teste Manual` com o comentário
-de entrega.
+push, PR para a `develop`, **merge do PR** (com a `develop` trazida para o branch
+e os portões de novo se veio código novo), conferência da ponta da `develop`, e só
+então a transição `51` para `Teste Manual` com o comentário de entrega.
 
 **Ao receber o relatório**, confira contra o critério de aceite e leia a seção
-DESVIOS. Portão vermelho, entrega parcial ou desvio de estratégia: corrija o
-briefing e redespache; não termine o card no seu contexto.
+DESVIOS. Portão vermelho, entrega parcial, ponta da `develop` quebrada ou desvio
+de estratégia: corrija o briefing e redespache; não termine o card no seu
+contexto. O código já está na `develop`, então um card mal entregue contamina o
+próximo: conserte antes de seguir.
 
-**Sem CI, o portão do executor é o único.** Para card de risco (mexe em
-`pipeline/`, `filtergraph/`, `spec.py` ou na receita do mezanino), rode você mesmo
-um comando de conferência antes de dar por entregue: o `pytest` do arquivo
-tocado, ou o render de conferência que o briefing mandou. Um relatório "tudo
-verde" que você não cruzou com nada é a fonte da próxima rodada de
-redesenvolvimento.
+**Sem CI, o portão do executor é o único, e o PR já foi mergeado.** Para card de
+risco (mexe em `pipeline/`, `filtergraph/`, `spec.py` ou na receita do mezanino),
+rode você mesmo, na `develop` atualizada, um comando de conferência antes de dar
+por entregue: o `pytest` do arquivo tocado, ou o render de conferência que o
+briefing mandou. Um relatório "tudo verde" que você não cruzou com nada é a fonte
+da próxima rodada de redesenvolvimento.
 
 Se um card revelar uma bifurcação que só o Douglas decide (regra de negócio
 ambígua, comportamento de voz ou de render que depende de gosto), **registre a
@@ -132,12 +145,14 @@ Não pare a rodada inteira esperando resposta: o resto da fila não depende dela
 
 Ao final, em PT-BR:
 
-- O que entrou em `Teste Manual`, um card por linha, com o PR.
+- O que entrou em `Teste Manual` (mergeado na `develop`), um card por linha, com o PR.
+- O estado da ponta da `develop` ao final (portões na ponta).
 - O que **não** foi feito e por quê: bloqueio, pergunta em aberto, escopo que
   você decidiu não assumir. Isto é a parte mais importante do relatório: card
   silenciosamente pulado é o que quebra a confiança na rodada.
 - Perguntas pendentes, agrupadas, para ele responder de uma vez.
-- Se o Douglas for testar agora, ofereça a skill `dmaker-mapa-de-testes`.
+- Se o Douglas for testar agora, lembre que ele testa na `develop` atualizada
+  (`git checkout develop && git pull`) e ofereça a skill `dmaker-mapa-de-testes`.
 
 Não anuncie "tudo pronto" se algum portão ficou vermelho ou alguma etapa ficou
 pela metade. Diga o que ficou e o estado real.

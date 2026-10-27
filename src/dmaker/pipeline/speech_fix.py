@@ -22,6 +22,7 @@ from ..filtergraph.speech_edit import (
     speaker_reference_command,
     speech_splice_command,
 )
+from ..filtergraph.voice import SpeechFinish
 from ..media.ffmpeg import FFmpegRunner
 from ..media.probe import MediaInfo, probe
 from ..media.wavio import read_wav
@@ -31,6 +32,7 @@ from ..voice.levels import active_rms, gain_to_match_db, quietest_time
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import REFERENCE_FILE, VoiceLibrary, VoiceProfile
 from ..voice.pronunciation import spoken_text
+from ..voice.provenance import combine_spans, parse_provenance
 from ..voice.reference import ReferenceSpan, choose_reference_near, choose_reference_span
 from ..voice.script import normalize_for_speech
 from ..voice.speech_edit import (
@@ -331,9 +333,17 @@ class SpeechFixService:
         return self.voice_from_span(span, vocals_path, vocals, language)
 
     def voice_from_span(
-        self, span: ReferenceSpan, vocals_path: Path, vocals: VocalsWindow, language: str
+        self,
+        span: ReferenceSpan,
+        vocals_path: Path,
+        vocals: VocalsWindow,
+        language: str,
+        name: str = "Falante do arquivo",
     ) -> VoiceProfile:
-        """Recorta `span` do stem de voz (em cache por stem e trecho) e devolve o clone temporário dele."""
+        """Recorta `span` do stem de voz (em cache por stem e trecho) e devolve o clone temporário dele.
+
+        `name` é só o rótulo para quem lê (a dublagem por falante passa "Falante 1"); a identidade do som, e com
+        ela o cache das falas, vem do trecho recortado."""
         folder = self._reference_folder(vocals_path, span)
         reference = folder / REFERENCE_FILE
         text_file = folder / "reference.txt"
@@ -345,7 +355,7 @@ class SpeechFixService:
             text_file.write_text(span.text, encoding="utf-8")
         return VoiceProfile(
             id=f"falante-{folder.name[:8]}",
-            name="Falante do arquivo",
+            name=name,
             kind="clone",
             language=language,
             reference=REFERENCE_FILE,
@@ -412,9 +422,9 @@ class SpeechFixService:
         stages.begin("Preparando a voz do falante", 0.45, 0.5)
         voice = self._voice(request, words, stems.vocals, vocals, (group_start, group_end))
         stages.begin("Sintetizando a fala nova (na CPU leva alguns minutos)", 0.5, 0.95)
-        speech_path, speech = self._synthesize(request, context, voice, plan)
+        speech_request, speech = self._synthesize(request, context, voice, plan)
         stages.begin("Emendando no arquivo", 0.95, 1.0)
-        out = self._splice(request, info, stems.background, vocals, plan, speech_path, speech)
+        out = self._splice(request, info, stems.background, vocals, plan, speech_request, speech)
         return FixResult(
             path=out,
             region_start=plan.region_start,
@@ -446,8 +456,11 @@ class SpeechFixService:
 
     def _synthesize(
         self, request: FixRequest, context: str, voice: VoiceProfile, plan: SplicePlan
-    ) -> tuple[Path, SpeechAudio]:
-        """Sintetiza o texto do grupo (com a pronúncia da marca) na duração do plano."""
+    ) -> tuple[VoiceRequest, SpeechAudio]:
+        """Sintetiza o texto do grupo (com a pronúncia da marca) na duração do plano; a fala sai CRUA.
+
+        Ela ainda pode precisar de `atempo` para caber, e a marca d'água não sobrevive a isso: a marca só
+        entra em `_splice`, depois de decidido o andamento."""
         lexicon = self.narrator.lexicons(request.brand or voice.brand, request.language)
         voice_request = VoiceRequest(
             text=normalize_for_speech(spoken_text(context, lexicon), request.language),
@@ -457,9 +470,9 @@ class SpeechFixService:
             seed=request.seed,
             duration=round(plan.target_duration, 3),
         )
-        path, _ = self.narrator.speak(voice_request)
+        path, _ = self.narrator.speak_dry(voice_request)
         samples, rate = read_wav(path)
-        return path, SpeechAudio(samples, rate)
+        return voice_request, SpeechAudio(samples, rate)
 
     def _splice(
         self,
@@ -468,7 +481,7 @@ class SpeechFixService:
         background: Path,
         vocals: VocalsWindow,
         plan: SplicePlan,
-        speech_path: Path,
+        speech_request: VoiceRequest,
         speech: SpeechAudio,
     ) -> Path:
         """Iguala o volume da fala nova ao do falante e emenda no original."""
@@ -476,6 +489,8 @@ class SpeechFixService:
             active_rms(speech.samples, speech.rate), vocals.level_around(plan.region_start, plan.region_end)
         )
         tempo = fit_tempo(speech.seconds, plan.usable_end - plan.speech_start)
+        # o `atempo` é aplicado à fala antes da marca d'água; a emenda recebe a fala já na velocidade final
+        speech_path, _ = self.narrator.speak(speech_request, SpeechFinish(tempo=tempo))
         out = request.out or default_output_path(
             request.src, corrected_suffix(request.src.suffix, info.has_video)
         )
@@ -491,14 +506,19 @@ class SpeechFixService:
                 plan,
                 background_offset=vocals.start,
                 gain_db=gain,
-                tempo=tempo,
                 sample_rate=info.sample_rate or 48000,
                 layout="mono" if info.channels == 1 else "stereo",
                 has_video=info.has_video,
                 source_duration=info.duration,
+                provenance=self._provenance(info, plan, speech.seconds / tempo),
             )
         )
         return out
+
+    def _provenance(self, info: MediaInfo, plan: SplicePlan, played_seconds: float) -> str:
+        """Etiqueta de procedência do arquivo corrigido: a fala nova, somada ao que a etiqueta do original já declarava."""
+        spoken = (plan.speech_start, min(plan.speech_start + played_seconds, plan.region_end))
+        return self.narrator.provenance(combine_spans(parse_provenance(info.format_tags), [spoken]))
 
 
 def default_speech_fix_service(

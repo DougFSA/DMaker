@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ..config import JOBS_DIR, MEZ_DIR, OUTPUT_DIR, ensure_dirs
+from .. import config
+from ..config import ensure_dirs
 from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import Project
@@ -25,7 +26,7 @@ from .segments import MezzanineBuilder
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
-from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings
+from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings, voice_spans
 
 
 class RenderPipeline:
@@ -40,9 +41,9 @@ class RenderPipeline:
         prober: Prober = probe,
         transcriber_factory: TranscriberFactory = default_transcriber_factory,
         mezzanines: MezzanineBuilder | None = None,
-        cache_dir: Path = MEZ_DIR,
-        jobs_dir: Path = JOBS_DIR,
-        output_dir: Path = OUTPUT_DIR,
+        cache_dir: Path | None = None,
+        jobs_dir: Path | None = None,
+        output_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
         offset_finder: OffsetFinder | None = None,
         matter: Matter | None = None,
@@ -67,9 +68,9 @@ class RenderPipeline:
         self.sync = SyncResolver(
             offset_finder or ffmpeg_offset_finder(self.runner), self.log, prober=self.prober
         )
-        self.cache_dir = cache_dir
-        self.jobs_dir = jobs_dir
-        self.output_dir = output_dir
+        self.cache_dir = cache_dir or config.MEZ_DIR
+        self.jobs_dir = jobs_dir or config.JOBS_DIR
+        self.output_dir = output_dir or config.OUTPUT_DIR
 
     # ---------- preparação ----------
 
@@ -174,7 +175,17 @@ class RenderPipeline:
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assembly = build_assembly(
-            ctx, prepared, transitions, total, layer, music_path, measured, normalize, out_path, voiceovers
+            ctx,
+            prepared,
+            transitions,
+            total,
+            layer,
+            music_path,
+            measured,
+            normalize,
+            out_path,
+            voiceovers,
+            provenance=self._provenance(ctx, voiceovers, total),
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -231,6 +242,17 @@ class RenderPipeline:
         if not path.exists():
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
         return path
+
+    @staticmethod
+    def _provenance(ctx: RenderContext, voiceovers, total: float) -> str:
+        """Etiqueta de procedência do vídeo: onde a narração sintetizada toca na saída final.
+
+        Vazia sem narração ou com a marca desligada; os trechos são os de cada narração (início e duração),
+        cortados no fim do vídeo, o que já é exato porque a narração entra inteira na mixagem.
+        """
+        if ctx.narrator is None or not voiceovers:
+            return ""
+        return ctx.narrator.provenance(voice_spans(voiceovers), total)
 
     def _loudness(
         self, ctx, prepared, transitions, music_path, total, voiceovers

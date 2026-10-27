@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
 from ..voice.speech_edit import SplicePlan
+from .provenance import provenance_args
 from .voice import encoder_args
 
 VIDEO_CONTAINERS = (".mp4", ".mov", ".mkv", ".m4v")
@@ -45,14 +46,13 @@ def speech_splice_graph(
     plan: SplicePlan,
     background_offset: float,
     gain_db: float = 0.0,
-    tempo: float = 1.0,
     sample_rate: int = 48000,
     layout: str = "stereo",
     has_head: bool = True,
     has_tail: bool = True,
 ) -> str:
     """Grafo da emenda. Entradas: 0 = arquivo original, 1 = fundo isolado (começa em `background_offset`
-    no arquivo), 2 = fala nova.
+    no arquivo), 2 = fala nova, que já vem na velocidade final (o `atempo` é aplicado antes da marca d'água).
 
     O remendo (fundo + fala nova, com o ganho que iguala o volume do falante) tem o tamanho da região.
     Cada emenda cruza `plan.crossfade` segundos: o original sai na primeira ponta do remendo e volta na
@@ -62,8 +62,7 @@ def speech_splice_graph(
     crossfade = plan.crossfade
     region = plan.region_end - plan.region_start
     delay_ms = max(0, round((plan.speech_start - plan.region_start) * 1000))
-    speech_chain = [f"atempo={tempo:.4f}"] if abs(tempo - 1.0) > 1e-4 else []
-    speech_chain += [f"volume={gain_db:.2f}dB", norm, f"adelay=delays={delay_ms}:all=1"]
+    speech_chain = [f"volume={gain_db:.2f}dB", norm, f"adelay=delays={delay_ms}:all=1"]
     lines = [
         # fundo da região: o tempo no arquivo menos o início da janela isolada
         f"[1:a]atrim=start={plan.region_start - background_offset:.3f}:duration={region:.3f},"
@@ -104,17 +103,17 @@ def speech_splice_command(
     plan: SplicePlan,
     background_offset: float,
     gain_db: float = 0.0,
-    tempo: float = 1.0,
     sample_rate: int = 48000,
     layout: str = "stereo",
     has_video: bool = False,
     source_duration: float | None = None,
+    provenance: str = "",
 ) -> FFmpegCommand:
     """Grava `out` com o áudio de `source` trocado na região do plano; com vídeo, copia a imagem."""
     has_head = plan.region_start > 0.0
     has_tail = source_duration is None or plan.region_end < source_duration - 0.01
     graph = speech_splice_graph(
-        plan, background_offset, gain_db, tempo, sample_rate, layout, has_head=has_head, has_tail=has_tail
+        plan, background_offset, gain_db, sample_rate, layout, has_head=has_head, has_tail=has_tail
     )
     args = ["-i", str(source), "-i", str(background), "-i", str(speech), "-filter_complex", graph]
     if has_video:
@@ -126,6 +125,7 @@ def speech_splice_command(
             ]  # o índice no começo deixa o arquivo tocar antes de baixar inteiro
     else:
         args += ["-map", "[out]", *encoder_args(out)]
+    args += provenance_args(provenance)
     return FFmpegCommand([*args, str(out)], label="correção de fala", total=source_duration)
 
 
