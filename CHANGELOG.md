@@ -34,6 +34,8 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+## v1 — 2026-10-27
+
 ### Added
 
 - **DMK-20** (fase 1): interface nova em Vue com visual próprio, telas de Projetos e Saídas e jobs ao vivo; a interface atual continua em /classica
