@@ -136,6 +136,7 @@ Regras e valores:
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; senão usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, separa melhor cadeira/objeto que encosta na pessoa, mais lento na CPU) ou `mobilenetv3` (mais leve e rápido, bom para rascunho). O recorte fica em cache: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos podem falhar na borda.
 - **audio_mode** (só em `clip`): `original` (padrão), `voice` (só a voz, limpa de música e ruído) ou `background` (só o fundo, para dublar ou trocar a fala). Usa o isolamento vocal, lento na CPU; veja a seção "Isolamento vocal". Vale só para o áudio da própria câmera, não para `audio.tracks`.
+- **audio_fade** (só em `clip`, segundos, padrão 0): fade de áudio nas duas pontas do clipe, sem escurecer a imagem (ao contrário de `fade_in`/`fade_out`). Tira o estalo de um corte seco no meio da fala; o `autocut` usa 0,01.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
 - **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada.
 - **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`.
@@ -283,6 +284,38 @@ cue longa/curta, substituição pendente); `mode=full` devolve tudo, com tempo p
 precisar inspecionar de verdade. `fix_captions(name, {"errado": "certo"})` corrige o texto de todas as
 cues (o próximo render usa o corrigido); o cache de transcrição é reaproveitado enquanto as fontes não
 mudarem, `force=true` refaz tudo.
+
+## Cortar pausas, vícios e repetições de uma gravação falada (`autocut`)
+
+Para quem grava falando, use `autocut` no lugar de transcrever e montar os clipes um a um. Ele transcreve com o
+Whisper, mede a energia do áudio, decide os cortes e cria um projeto com os clipes já cortados da mesma
+gravação, mais a lista do que saiu (tempo e motivo) para conferir ANTES de renderizar. A spec não ganha modo
+de corte nenhum: são clipes comuns (`src`, `start`, `end`), cada um com `audio_fade: 0.01` (fade de áudio de
+10 ms nas duas pontas, sem escurecer a imagem).
+
+- MCP: `autocut(source, name, intensity, min_pause, breath, preset, brand, captions, language, model,
+  overwrite)` roda em segundo plano (`job_status`; a transcrição leva cerca de 1 min por minuto de gravação na
+  CPU, e cortar de novo a mesma gravação com outra intensidade reaproveita a transcrição). `list_cuts(name)`
+  devolve a lista e `undo_cut(name, cut_id)` devolve um corte ao projeto.
+- CLI: `dmaker autocut GRAVACAO --name X --intensity normal`, `dmaker cuts X`, `dmaker uncut X NUMERO`.
+  Interface: em Projetos, o botão "Cortar gravação"; dentro do projeto, o cartão "Cortes automáticos" com o
+  botão "Desfazer" em cada linha.
+- `intensity`: `suave` (só pausas), `normal` (pausas e vícios) ou `agressiva` (também falsos começos e frases
+  repetidas, ficando com a última tomada). `min_pause` (0,5 s) é a pausa acima da qual há corte; `breath`
+  (0,15 s) é o silêncio que sobra de cada lado de cada fala.
+- Vícios: "hã", "hum", "ééé" sempre; "né" só quando fecha a frase antes de uma pausa (colado nas vizinhas, no
+  meio da frase, é o "não é" e fica); "é" e "tipo" só quando isolados por pausa ou arrastados (colados na
+  frase são palavras). Cada item da lista traz `reason` (`silence`, `filler`, `repetition`) e as palavras tiradas.
+- Como corta: o tempo de cada palavra é ajustado à energia do áudio (o Whisper erra por dezenas de
+  milissegundos) e cada borda cai no vale de energia mais próximo, sem passar por dentro de uma palavra. Uma
+  pausa com fala que o Whisper não escutou não é cortada. A duração de cada clipe é um múltiplo do quadro (1/30
+  s), para as legendas não saírem do compasso ao longo do vídeo.
+- Legendas: o projeto aponta `captions.source` para `captions.cut.json`, com as palavras já transcritas nos
+  tempos da fala cortada (sem os vícios e as repetições). `undo_cut` refaz esse arquivo. Se você mexer na linha do
+  tempo depois (mover, dividir, inserir trechos), volte `captions.source` para `"auto"` para transcrever de novo.
+- Fluxo: `autocut` -> `list_cuts` -> `undo_cut` nos cortes que não quiser -> `render_project(preview=true)` ->
+  `qa_report`. Gravação com ruído de fundo forte ou muito baixa pode não ter pausas detectáveis: a resposta
+  traz o aviso "Nada passou do limite"; tente `intensity=agressiva` ou um `min_pause` menor.
 
 ## Voz e narração
 
@@ -597,6 +630,7 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 
 - Um vídeo só, corte e formato: `quick_edit(src, preset="reels", start=3, end=33, captions=true, hook="texto", cta="medlycare.com.br", brand="medlycare")`.
 - Só transcrever: `transcribe_media(path, language="pt", model="small")`.
+- Gravação falada com pausas e vícios: `autocut(source, name, intensity="normal")`, confira com `list_cuts`, devolva o que não quiser com `undo_cut` e renderize a prévia (nunca recorte clipe a clipe à mão).
 - Cartão avulso para ver o design: `render_card_preview(title, subtitle, brand="medlycare", preset="reels")`.
 - Limpar cache: `clean_cache()`.
 - Modelos de IA baixados (tamanho, licença, sobras): `models()` lista; `models("download", model_id)` baixa em

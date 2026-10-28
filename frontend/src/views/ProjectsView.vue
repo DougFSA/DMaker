@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { api, errorMessage, type ProjectListItem } from '@/api'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import AutoCutDialog from '@/components/projects/AutoCutDialog.vue'
 import NewProjectDialog from '@/components/projects/NewProjectDialog.vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -15,6 +16,7 @@ import SegmentedControl, { type SegmentOption } from '@/components/ui/SegmentedC
 import { formatRelative, formatTimestamp } from '@/lib/format'
 import { filterProjects } from '@/lib/projects'
 import { readStored, writeStored } from '@/lib/storage'
+import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -23,6 +25,7 @@ type Layout = 'cards' | 'table'
 const LAYOUT_KEY = 'dmaker.projectsLayout'
 
 const router = useRouter()
+const jobs = useJobsStore()
 const toasts = useToastsStore()
 const workspace = useWorkspaceStore()
 
@@ -37,6 +40,8 @@ const layoutOptions: SegmentOption<Layout>[] = [
 ]
 watch(layout, (next) => writeStored(LAYOUT_KEY, next))
 const creating = ref(false)
+const cutting = ref(false)
+let mounted = true
 
 // mais recentes primeiro; a cópia evita ordenar a lista original dentro de um computed
 const visible = computed(() =>
@@ -66,12 +71,40 @@ function onCreated(name: string): void {
   void router.push({ name: 'project', params: { name } })
 }
 
+function openProject(name: string): void {
+  workspace.openProject(name)
+  void router.push({ name: 'project', params: { name } })
+}
+
+/** O corte roda em segundo plano (a transcrição leva minutos): acompanha pelo job e abre o projeto ao fim.
+ * O aviso de job concluído ou com erro já vem do `useJobNotifications`, em qualquer tela. */
+function onCutStarted({ jobId, name }: { jobId: string; name: string }): void {
+  jobs.track(jobId, { project: name, description: `Cortar pausas e vícios: ${name}` })
+  toasts.push({
+    tone: 'info',
+    title: 'Corte iniciado',
+    description: 'A transcrição leva alguns minutos. O andamento aparece na barra superior.',
+  })
+  const stop = jobs.onJobEnd((job) => {
+    if (job.id !== jobId) return
+    stop()
+    if (job.status === 'done' && mounted) openProject(name)
+  })
+}
+
 onMounted(load)
+onBeforeUnmount(() => {
+  mounted = false
+})
 </script>
 
 <template>
   <div>
     <PageHeader title="Projetos" subtitle="Seus vídeos em andamento. Abra um projeto para validar, conferir a qualidade e renderizar.">
+      <AppButton @click="cutting = true">
+        <AppIcon name="sparkles" :size="18" />
+        Cortar gravação
+      </AppButton>
       <AppButton variant="primary" @click="creating = true">
         <AppIcon name="plus" :size="18" />
         Novo projeto
@@ -180,6 +213,7 @@ onMounted(load)
     </AppCard>
 
     <NewProjectDialog v-model:open="creating" @created="onCreated" />
+    <AutoCutDialog v-model:open="cutting" @started="onCutStarted" />
   </div>
 </template>
 

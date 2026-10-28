@@ -15,7 +15,7 @@ from pathlib import Path
 from ..domain.spec import ClipSegment, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
-from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, color_chain, fade_chains
+from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, color_chain, fade_chains
 from .encode import mezzanine_output_args
 from .reframe import reframe_graph
 
@@ -90,6 +90,7 @@ def clip_mezzanine(
     `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec."""
     reframe = reframe or seg.reframe
     post, afades = _post_chain(seg.color, seg.fade_in, seg.fade_out, duration)
+    afades += audio_edge_fades(seg.audio_fade, duration)
     inputs = Inputs()
     start = seg.start if in_point is None else in_point
     length = max(duration * seg.speed, 0.01)  # tempo de fonte que o trecho consome

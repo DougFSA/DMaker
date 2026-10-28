@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from dmaker.text.captions import (
     Cue,
     Word,
@@ -8,6 +10,7 @@ from dmaker.text.captions import (
     from_json,
     parse_srt,
     regroup,
+    remap_to_ranges,
     shift,
     suspicious_cues,
     to_json,
@@ -211,3 +214,35 @@ def test_captions_digest_empty():
     assert digest["total_cues"] == 0
     assert digest["avg_probability"] is None
     assert digest["first_cues"] == [] and digest["last_cues"] == []
+
+
+def test_remap_to_ranges_drops_the_cut_words_and_moves_the_rest_to_the_cut_timeline():
+    cue = Cue(
+        0,
+        10,
+        "oi é tudo bem",
+        [Word(0, 1, "oi", 0.9), Word(4, 4.5, "é", 0.5), Word(8, 9, "tudo", 1.0), Word(9, 10, "bem", 1.0)],
+    )
+    # ficam [0, 1,3] e [7,5, 10]: o "é" (4 a 4,5) foi cortado e o segundo trecho começa em 1,3
+    (mapped,) = remap_to_ranges([cue], [(0.0, 1.3), (7.5, 10.0)])
+    assert [w.text for w in mapped.words] == ["oi", "tudo", "bem"]
+    assert mapped.text == "oi tudo bem"
+    assert [w.start for w in mapped.words] == pytest.approx([0, 1.8, 2.8])
+    assert [w.end for w in mapped.words] == pytest.approx([1, 2.8, 3.8])
+    assert mapped.start == 0 and mapped.end == pytest.approx(3.8)
+    assert mapped.words[0].probability == 0.9
+
+
+def test_remap_to_ranges_judges_a_word_that_straddles_the_cut_by_its_middle():
+    cue = Cue(0, 5, "fica sai", [Word(0.6, 1.1, "fica"), Word(0.9, 1.6, "sai")])
+    (mapped,) = remap_to_ranges([cue], [(0.0, 1.0), (3.8, 5.0)])
+    assert [w.text for w in mapped.words] == ["fica"]
+    assert mapped.words[0].end == 1.0  # limitado ao fim do trecho mantido
+
+
+def test_remap_to_ranges_skips_a_cue_whose_words_were_all_cut_and_spreads_wordless_cues():
+    cues = [Cue(1, 2, "cortada", [Word(1, 2, "cortada")]), Cue(5, 6, "sem tempo por palavra", [])]
+    mapped = remap_to_ranges(cues, [(4.0, 7.0)])
+    assert len(mapped) == 1
+    assert mapped[0].text == "sem tempo por palavra"
+    assert 1.0 <= mapped[0].start < mapped[0].end <= 2.0

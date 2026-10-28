@@ -60,6 +60,51 @@ export interface ProjectDetail {
   spec: ProjectSpec
   captions_exists: boolean
   outputs: OutputFile[]
+  /** A lista do que o corte automático removeu; null em projeto que não nasceu dele. */
+  cuts: CutReport | null
+}
+
+export type CutIntensity = 'suave' | 'normal' | 'agressiva'
+
+/** Um trecho removido pelo corte automático (tempos na gravação original). */
+export interface CutItem {
+  id: number
+  start_s: number
+  end_s: number
+  duration_s: number
+  reason: 'silence' | 'filler' | 'repetition'
+  reason_label: string
+  /** As palavras tiradas; vazio numa pausa. */
+  text: string
+  undone: boolean
+}
+
+export interface CutReport {
+  source: string
+  intensity: CutIntensity
+  min_pause_s: number
+  breath_s: number
+  duration_before_s: number
+  duration_after_s: number
+  removed_s: number
+  removed_percent: number
+  /** Cortes ainda aplicados por motivo (silence, filler, repetition). */
+  counts: Record<string, number>
+  cuts: CutItem[]
+}
+
+export interface AutoCutRequest {
+  source: string
+  name: string
+  intensity?: CutIntensity
+  min_pause?: number
+  breath?: number
+  preset?: string
+  brand?: string | null
+  captions?: boolean
+  language?: string
+  model?: string
+  overwrite?: boolean
 }
 
 /** Só o que a tela lê da spec; a validação completa fica no backend. */

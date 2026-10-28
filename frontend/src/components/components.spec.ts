@@ -2,7 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
-import type { OutputFile, ProjectListItem, TemplateParam } from '@/api'
+import type { CutReport, OutputFile, ProjectListItem, TemplateParam } from '@/api'
 import { createAppRouter } from '@/router'
 import { useJobsStore } from '@/stores/jobs'
 import { useThemeStore } from '@/stores/theme'
@@ -10,11 +10,14 @@ import { useToastsStore } from '@/stores/toasts'
 import JobsMenu from './layout/JobsMenu.vue'
 import SidebarNav from './layout/SidebarNav.vue'
 import ThemeToggle from './layout/ThemeToggle.vue'
+import AutoCutDialog from './projects/AutoCutDialog.vue'
+import CutsCard from './projects/CutsCard.vue'
 import TemplateParamField from './projects/TemplateParamField.vue'
 import AppButton from './ui/AppButton.vue'
 import ProgressBar from './ui/ProgressBar.vue'
 import ToastHost from './ui/ToastHost.vue'
 import OutputsView from '@/views/OutputsView.vue'
+import ProjectDetailView from '@/views/ProjectDetailView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
 
 function stubApi(routes: Record<string, unknown>): void {
@@ -223,6 +226,100 @@ describe('ProjectsView', () => {
     const failed = await mountWithRouter(ProjectsView)
     await flushPromises()
     expect(failed.text()).toContain('Não foi possível carregar os projetos')
+  })
+})
+
+describe('cortes automáticos', () => {
+  const report: CutReport = {
+    source: 'D:/gravacao.mp4',
+    intensity: 'agressiva',
+    min_pause_s: 0.5,
+    breath_s: 0.15,
+    duration_before_s: 120,
+    duration_after_s: 84,
+    removed_s: 36,
+    removed_percent: 30,
+    counts: { silence: 1, filler: 1 },
+    cuts: [
+      { id: 1, start_s: 3.2, end_s: 5.4, duration_s: 2.2, reason: 'silence', reason_label: 'pausa', text: '', undone: false },
+      { id: 2, start_s: 12, end_s: 14.5, duration_s: 2.5, reason: 'filler', reason_label: 'vício de fala', text: 'é...', undone: false },
+      { id: 3, start_s: 20, end_s: 25, duration_s: 5, reason: 'repetition', reason_label: 'frase repetida', text: 'Hoje eu vou', undone: true },
+    ],
+  }
+
+  it('lista cada corte com tempo, motivo e palavras, e pede para desfazer pelo número', async () => {
+    const wrapper = mount(CutsCard, { props: { report } })
+    expect(wrapper.text()).toContain('2:00 para 1:24 (30% a menos)')
+    expect(wrapper.text()).toContain('1 pausa, 1 vício')
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]?.text()).toContain('00:03.2 a 00:05.4')
+    expect(rows[0]?.text()).toContain('(silêncio)')
+    expect(rows[1]?.text()).toContain('vício de fala')
+    expect(rows[1]?.text()).toContain('é...')
+
+    await rows[1]?.find('button').trigger('click')
+    expect(wrapper.emitted('undo')).toEqual([[2]])
+  })
+
+  it('um corte já desfeito não pode ser desfeito de novo, e nada clica enquanto um desfaz', async () => {
+    const wrapper = mount(CutsCard, { props: { report } })
+    const undone = wrapper.findAll('tbody tr')[2]?.find('button')
+    expect(undone?.text()).toBe('Desfeito')
+    expect(undone?.attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({ busyId: 1 })
+    const buttons = wrapper.findAll('tbody button')
+    expect(buttons.every((button) => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(buttons[0]?.attributes('aria-busy')).toBe('true')
+  })
+
+  it('avisa quando nada passou do limite', () => {
+    const wrapper = mount(CutsCard, { props: { report: { ...report, cuts: [], counts: {} } } })
+    expect(wrapper.text()).toContain('Nada passou do limite')
+    expect(wrapper.find('table').exists()).toBe(false)
+  })
+
+  it('o detalhe do projeto mostra a lista só quando o projeto nasceu do corte, e desfaz pela API', async () => {
+    const detail = { name: 'corte', spec_path: 'x', spec: { name: 'corte', timeline: [{ type: 'clip' }] }, captions_exists: false, outputs: [] }
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? 'GET'} ${url}`)
+        if (url === '/api/projects/corte/cuts/1/undo') return Promise.resolve(new Response(JSON.stringify(report)))
+        if (url === '/api/projects/corte') return Promise.resolve(new Response(JSON.stringify({ ...detail, cuts: report })))
+        if (url === '/api/projects/avulso') return Promise.resolve(new Response(JSON.stringify({ ...detail, name: 'avulso', cuts: null })))
+        return Promise.resolve(new Response('{}'))
+      }),
+    )
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/projetos/corte')
+    await router.isReady()
+    const wrapper = mount(ProjectDetailView, { props: { name: 'corte' }, global: { plugins: [router] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Cortes automáticos')
+
+    await wrapper.findAll('tbody tr')[0]?.find('button').trigger('click')
+    await flushPromises()
+    expect(calls).toContain('POST /api/projects/corte/cuts/1/undo')
+    expect(calls.filter((call) => call === 'GET /api/projects/corte')).toHaveLength(2) // abriu e recarregou
+
+    const plain = mount(ProjectDetailView, { props: { name: 'avulso' }, global: { plugins: [router] } })
+    await flushPromises()
+    expect(plain.text()).not.toContain('Cortes automáticos')
+  })
+
+  it('o diálogo pede a gravação e o nome, e manda o corte com a intensidade escolhida', async () => {
+    stubApi({ '/api/state': { presets: [{ id: 'instagram/reels', platform: 'Instagram', name: 'Reels' }], brands: [] }, '/api/templates': [] })
+    const wrapper = mount(AutoCutDialog, { props: { open: true }, attachTo: document.body })
+    await flushPromises()
+    const form = document.body.querySelector('#autocut-form') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(document.body.textContent).toContain('Escolha a gravação que será cortada.')
+    expect(wrapper.emitted('started')).toBeUndefined()
+    wrapper.unmount()
   })
 })
 

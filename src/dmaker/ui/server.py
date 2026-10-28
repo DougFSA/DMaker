@@ -29,6 +29,7 @@ from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
+from .autocut_routes import build_autocut_router
 from .dub_routes import build_dub_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
@@ -63,6 +64,7 @@ app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
 app.include_router(build_models_router(jobs))
+app.include_router(build_autocut_router(jobs))
 
 
 # ---------- modelos de entrada ----------
@@ -331,6 +333,17 @@ def create_project(req: NewProject) -> dict:
     }
 
 
+def _cut_report(folder: Path) -> dict | None:
+    """A lista de cortes do autocut, quando o projeto nasceu dele; uma lista ilegível não derruba a tela."""
+    from ..pipeline.autocut import load_cut_report
+
+    try:
+        report = load_cut_report(folder)
+    except ValueError:
+        return None
+    return report.to_dict() if report else None
+
+
 @app.get("/api/projects/{name}", response_model=None)
 def get_project(name: str) -> dict | JSONResponse:
     from ..pipeline.projects import load_project, project_path
@@ -358,6 +371,7 @@ def get_project(name: str) -> dict | JSONResponse:
         "spec": json.loads(project.model_dump_json(exclude_none=True)),
         "captions_exists": (folder / "captions.auto.json").exists(),
         "outputs": _project_outputs(name),
+        "cuts": _cut_report(folder),
     }
 
 

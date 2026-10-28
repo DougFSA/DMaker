@@ -22,7 +22,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-captions = ["faster-whisper>=1.0"]
+# av: o faster-whisper abre o áudio com `metadata_errors`, parâmetro que o PyAV 16 removeu (TypeError ao transcrever)
+captions = ["faster-whisper>=1.0", "av>=11,<16"]
 # torch vem à parte, versão CPU: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 # kokoro-onnx: motor rápido (vozes prontas); omnivoice: clones e vozes projetadas (lento na CPU);
 # demucs: isolamento vocal (voz x música e ruído; usa só get_model e apply_model, sem o I/O do pacote)

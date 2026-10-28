@@ -10,9 +10,12 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from .spec import Project
+from .spec import ClipSegment, Project, Segment
 
 MIN_SEGMENT_DURATION = 0.1  # segundos; nenhum trecho pode ficar mais curto que isso
+GAP_TOLERANCE = (
+    0.002  # s; os cortes são gravados em milissegundos, então 2 ms separam "o mesmo ponto" de outro
+)
 
 
 class EditError(ValueError):
@@ -167,6 +170,65 @@ def insert_segment(project: Project, index: int, segment: dict[str, Any]) -> Pro
         data["timeline"].insert(index, dict(segment))
 
     return _clone(project, mutate)
+
+
+def restore_gap(project: Project, start: float, end: float | None, origin: str | None = None) -> Project:
+    """Devolve ao projeto o trecho `start` a `end` (tempos do arquivo; `end=None` = até o fim) que ficou de
+    fora entre clipes: o clipe que acaba em `start` e o que começa em `end` viram um só. Se só um dos
+    dois existe (corte no começo ou no fim da gravação), ele cresce até cobrir o trecho. `origin` restringe
+    aos clipes dessa gravação (`src` ou `source`), para um projeto com várias não mexer na errada."""
+    timeline = project.timeline
+
+    def ends_at(segment: Segment) -> bool:
+        return (
+            isinstance(segment, ClipSegment)
+            and (origin is None or segment.origin == origin)
+            and segment.end is not None
+            and abs(segment.end - start) <= GAP_TOLERANCE
+        )
+
+    def starts_at(segment: Segment) -> bool:
+        return (
+            isinstance(segment, ClipSegment)
+            and (origin is None or segment.origin == origin)
+            and end is not None
+            and abs(segment.start - end) <= GAP_TOLERANCE
+        )
+
+    before = next((i for i, segment in enumerate(timeline) if ends_at(segment)), None)
+    after = next((i for i, segment in enumerate(timeline) if starts_at(segment)), None)
+    if before is None and after is None:
+        raise EditError(
+            "o trecho cortado não está mais ao lado de nenhum clipe (a linha do tempo foi mudada): "
+            "refaça o corte ou insira o trecho à mão"
+        )
+    if before is not None and after is not None and not _can_join(timeline, before, after):
+        raise EditError("os clipes de cada lado do corte não são mais vizinhos da mesma gravação")
+
+    def mutate(data: dict) -> None:
+        clips = data["timeline"]
+        if before is not None and after is not None:
+            clips[before]["end"] = clips[after]["end"]
+            clips[before]["fade_out"] = clips[after].get("fade_out", 0.0)
+            del clips[after]
+        elif before is not None:
+            clips[before]["end"] = end
+        else:
+            clips[after]["start"] = start
+
+    return _clone(project, mutate)
+
+
+def _can_join(timeline: list[Segment], before: int, after: int) -> bool:
+    first, second = timeline[before], timeline[after]
+    return (
+        after == before + 1
+        and isinstance(first, ClipSegment)
+        and isinstance(second, ClipSegment)
+        and first.origin == second.origin
+        and first.speed == second.speed
+        and first.audio_mode == second.audio_mode
+    )
 
 
 # ---------- sobreposições ----------

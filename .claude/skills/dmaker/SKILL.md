@@ -38,9 +38,9 @@ mecânicas (template, render, QA, legendas) com um modelo local do Ollama.
 
 O software não decide sozinho: os cortes, o ritmo, qual câmera aparece em cada momento (multicâmera) e
 quais tomadas usar são chamadas de edição. Peça os instantes ao usuário ou avalie com
-`contact_sheet`/`frames` nas fontes antes de montar a timeline. A exceção é o corte automático de
-cerimônia (bloco `multicam` + `plan_multicam`): dá um ritmo plausível por fase reconhecida na fala, e o
-ajuste fino (qual casal está de frente para qual câmera) é feito com `edit_project` a partir dos avisos.
+`contact_sheet`/`frames` nas fontes antes de montar a timeline. Exceções: gravação falada (`autocut`
+corta pausas, vícios e repetições; `list_cuts`, `undo_cut`; nunca à mão com o Whisper) e cerimônia (bloco
+`multicam` + `plan_multicam`: ritmo plausível por fase da fala; o ajuste fino é `edit_project`, pelos avisos).
 
 ## Regras da marca MedlyCare (`"brand": "medlycare"`)
 

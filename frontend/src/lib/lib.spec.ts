@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { OutputFile, ProjectListItem, QaReport, TemplateInfo } from '@/api'
+import type { CutReport, OutputFile, ProjectListItem, QaReport, TemplateInfo } from '@/api'
+import { cutsSummary, defaultCutName, formatCutTime, reasonCounts, reasonTone } from './cuts'
 import { baseName, formatClock, formatDuration, formatRelative, formatSizeMb } from './format'
 import { filterOutputs, renderResultsFromJob } from './outputs'
 import { buildTemplateParams, defaultParamValues, filterProjects, missingRequiredParams, parseList } from './projects'
@@ -129,6 +130,40 @@ describe('render parcial', () => {
     expect(segmentRange('5', '2').error).toBeTruthy()
     expect(segmentRange('1.5', '3').error).toBeTruthy()
     expect(segmentRange('-1', '3').error).toBeTruthy()
+  })
+})
+
+describe('cortes automáticos', () => {
+  const report = {
+    removed_percent: 27.4,
+    duration_before_s: 120,
+    duration_after_s: 87.1,
+    counts: { silence: 14, filler: 1, repetition: 0 },
+  } as unknown as CutReport
+
+  it('conta os cortes aplicados por motivo, no singular e no plural', () => {
+    expect(reasonCounts(report.counts)).toBe('14 pausas, 1 vício')
+    expect(reasonCounts({ repetition: 2 })).toBe('2 repetições')
+    expect(reasonCounts({})).toBe('')
+  })
+
+  it('resume o antes e o depois com a porcentagem', () => {
+    expect(cutsSummary(report)).toBe('2:00 para 1:27 (27% a menos)')
+  })
+
+  it('mostra o instante com décimos', () => {
+    expect(formatCutTime(83.44)).toBe('01:23.4')
+    expect(formatCutTime(5.04)).toBe('00:05.0')
+  })
+
+  it('sugere o nome do projeto pelo arquivo', () => {
+    expect(defaultCutName('D:/Vídeos/entrevista final.mp4')).toBe('entrevista final-corte')
+    expect(defaultCutName('C:\\gravacao.mov')).toBe('gravacao-corte')
+  })
+
+  it('dá um tom por motivo', () => {
+    expect(reasonTone('filler')).toBe('warning')
+    expect(reasonTone('silence')).toBe('neutral')
   })
 })
 

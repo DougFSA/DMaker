@@ -14,6 +14,7 @@ from dmaker.domain.edits import (
     move_segment,
     remove_overlay,
     remove_segment,
+    restore_gap,
     set_field,
     set_overlay_span,
     split_segment,
@@ -327,3 +328,73 @@ def test_edit_operations_registry_is_open_for_extension():
         "overlay_duplicate",
         "set_field",
     } <= EDIT_OPERATIONS.keys()
+
+
+# ---------- restore_gap: desfazer um corte automático ----------
+
+
+def cut_project(tmp_path: Path) -> Project:
+    """Gravação cortada em três clipes: [1, 3], [5, 8] e [10, até o fim]; os cortes são 3 a 5 e 8 a 10."""
+    clips = [
+        {"type": "clip", "src": "a.mp4", "start": 1.0, "end": 3.0, "audio_fade": 0.01},
+        {"type": "clip", "src": "a.mp4", "start": 5.0, "end": 8.0, "audio_fade": 0.01},
+        {"type": "clip", "src": "a.mp4", "start": 10.0, "audio_fade": 0.01},
+    ]
+    return make_project(tmp_path, clips)
+
+
+def test_restore_gap_joins_the_two_clips_around_the_cut(tmp_path):
+    restored = restore_gap(cut_project(tmp_path), 3.0, 5.0)
+    assert [(c.start, c.end) for c in restored.timeline] == [(1.0, 8.0), (10.0, None)]
+
+
+def test_restore_gap_can_undo_in_any_order(tmp_path):
+    project = cut_project(tmp_path)
+    after_second = restore_gap(restore_gap(project, 8.0, 10.0), 3.0, 5.0)
+    assert [(c.start, c.end) for c in after_second.timeline] == [(1.0, None)]
+
+
+def test_restore_gap_at_the_start_and_at_the_end_extends_the_edge_clip(tmp_path):
+    project = cut_project(tmp_path)
+    assert restore_gap(project, 0.0, 1.0).timeline[0].start == 0.0
+    tail = make_project(tmp_path, [{"type": "clip", "src": "a.mp4", "start": 1.0, "end": 3.0}])
+    assert restore_gap(tail, 3.0, None).timeline[0].end is None
+
+
+def test_restore_gap_keeps_the_fade_out_of_the_last_joined_clip(tmp_path):
+    clips = [
+        {"type": "clip", "src": "a.mp4", "start": 0.0, "end": 2.0},
+        {"type": "clip", "src": "a.mp4", "start": 4.0, "end": 6.0, "fade_out": 0.5},
+    ]
+    (joined,) = restore_gap(make_project(tmp_path, clips), 2.0, 4.0).timeline
+    assert joined.fade_out == 0.5 and joined.end == 6.0
+
+
+def test_restore_gap_does_not_mutate_the_original(tmp_path):
+    project = cut_project(tmp_path)
+    restore_gap(project, 3.0, 5.0)
+    assert len(project.timeline) == 3
+
+
+def test_restore_gap_refuses_when_the_neighbours_are_gone_or_changed(tmp_path):
+    project = cut_project(tmp_path)
+    with pytest.raises(EditError, match="não está mais"):
+        restore_gap(project, 20.0, 30.0)
+    separated = insert_segment(project, 1, {"type": "card", "title": "no meio", "duration": 1.0})
+    with pytest.raises(EditError, match="vizinhos"):
+        restore_gap(separated, 3.0, 5.0)
+    faster = set_field(project, "timeline.1.speed", 2.0)
+    with pytest.raises(EditError, match="vizinhos"):
+        restore_gap(faster, 3.0, 5.0)
+
+
+def test_restore_gap_only_touches_clips_of_the_given_recording(tmp_path):
+    two_recordings = [
+        {"type": "clip", "src": "b.mp4", "start": 0.0, "end": 3.0},
+        {"type": "clip", "src": "a.mp4", "start": 5.0, "end": 8.0},
+    ]
+    project = make_project(tmp_path, two_recordings)
+    with pytest.raises(EditError, match="vizinhos"):  # sem `origin`, os dois lados parecem o mesmo corte
+        restore_gap(project, 3.0, 5.0)
+    restored = restore_gap(project, 3.0, 5.0, origin="a.mp4")
+    assert [(c.start, c.end) for c in restored.timeline] == [(0.0, 3.0), (3.0, 8.0)]
