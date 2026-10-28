@@ -389,6 +389,129 @@ def undo_cut(name_or_path: str, cut_id: int) -> dict:
     return _undo_cut(name_or_path, cut_id).to_dict()
 
 
+# ---------- lote: vários vídeos de uma planilha ----------
+
+
+def _batch_service() -> Any:
+    from .pipeline.batch import BatchService
+
+    return BatchService()
+
+
+def _batch_job(name: str, rows: list[int] | None, force: bool, wait_seconds: float) -> dict:
+    """Roda (ou retoma) o lote num job: o andamento sai por `job_status` e pausar para depois do vídeo atual."""
+    from .pipeline.batch import run_in_job
+
+    service = _batch_service()
+    if service.active(name):
+        raise ValueError(f"O lote {name} já está rodando; acompanhe com batch_status.")
+    job = jobs.start(
+        f"lote {name}",
+        lambda job: run_in_job(service, name, job, rows, force),
+        meta={"kind": "batch", "batch": name, "cancellable": True},
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "batch": name, "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Confere uma planilha de lote contra um modelo (template) SEM renderizar nada: campo obrigatório "
+        "vazio, arquivo inexistente, número ou lista ilegível, texto que não cabe no espaço, travessão (regra "
+        "da marca). Cada problema vem com linha, coluna e motivo. A planilha é .csv (UTF-8, separador , ou ;), "
+        ".xlsx (precisa do extra `lote`) ou .json (lista de objetos), uma linha por vídeo; o nome de cada "
+        "coluna casa com o parâmetro do modelo sem diferenciar maiúscula, acento ou espaço; caminhos relativos "
+        "partem da pasta da planilha. name_column é a coluna cujo texto dá nome ao arquivo de cada vídeo."
+    )
+)
+def validate_batch(template: str, sheet: str, name_column: str | None = None) -> dict:
+    validation = _batch_service().validate(template, sheet, name_column)
+    return {**validation.to_dict(), "text": validation.to_text()}
+
+
+@server.tool(
+    description=(
+        "Gera vários vídeos de uma vez: um por linha da planilha, sobre o modelo. Valida tudo antes (como "
+        "validate_batch); se alguma linha tem problema, NÃO começa e devolve a validação, a não ser com "
+        "skip_invalid=true, que segue sem as linhas inválidas. Cria um projeto por linha (projects/<lote>-<nome>) "
+        "e renderiza em output/<lote>/<nome>.mp4 (preview=true gera prévias rápidas). Roda em segundo plano: "
+        "devolve job_id; acompanhe com job_status ou batch_status. O que já saiu não é refeito na retomada "
+        "(resume_batch). name é o nome do lote (padrão: o da planilha); replace=true refaz um lote de mesmo nome."
+    )
+)
+def run_batch(
+    template: str,
+    sheet: str,
+    name: str | None = None,
+    name_column: str | None = None,
+    skip_invalid: bool = False,
+    preview: bool = False,
+    preset: str | None = None,
+    replace: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.batch import BatchInvalidError
+
+    try:
+        batch = _batch_service().create(
+            template,
+            sheet,
+            name=name,
+            name_column=name_column,
+            preview=preview,
+            preset=preset,
+            skip_invalid=skip_invalid,
+            replace=replace,
+        )
+    except BatchInvalidError as exc:
+        return {
+            "started": False,
+            "reason": str(exc),
+            "validation": exc.validation.to_dict(),
+            "text": exc.validation.to_text(),
+        }
+    return {"started": True, **_batch_job(batch.name, None, False, wait_seconds)}
+
+
+@server.tool(
+    description=(
+        "Retoma um lote pausado, interrompido ou com falhas: renderiza o que falta, o que falhou e o projeto "
+        "que você corrigiu depois; o que já saiu com a mesma spec não é refeito. rows (números da tabela de "
+        "batch_status) limita a certos vídeos e force=true refaz também os prontos. Roda em segundo plano."
+    )
+)
+def resume_batch(
+    name: str, rows: list[int] | None = None, force: bool = False, wait_seconds: float = 0
+) -> dict:
+    return _batch_job(name, rows, force, wait_seconds)
+
+
+@server.tool(
+    description=(
+        "Pede a um lote em andamento que pare depois do vídeo que está renderizando; nada é perdido e "
+        "resume_batch continua de onde parou."
+    )
+)
+def pause_batch(name: str) -> dict:
+    _batch_service().pause(name)
+    return {"batch": name, "pause_requested": True}
+
+
+@server.tool(
+    description=(
+        "Relatório de um lote: para cada vídeo o estado (Pendente, Renderizando, Pronto, Falhou, Pulada), o "
+        "arquivo de saída, o tempo e o motivo da falha; mais o resumo e a pasta de saída. Sem name, lista todos "
+        "os lotes."
+    )
+)
+def batch_status(name: str | None = None) -> dict:
+    service = _batch_service()
+    if name:
+        report = service.report(name)
+        return {**report.to_dict(), "text": report.to_text()}
+    return {"batches": [{**report.to_dict(), "rows": len(report.rows)} for report in service.reports()]}
+
+
 @server.tool(description="Projetos existentes em projects/.")
 def list_projects() -> list[dict]:
     out = []

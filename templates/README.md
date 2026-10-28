@@ -122,6 +122,17 @@ derivados, e o JSON usa o resultado como qualquer outro parâmetro. Um `ValueErr
 `TemplateError` com o nome do template. Um template novo nessa situação registra a sua função, sem mexer no
 resto do motor. Hoje só o `explicativo` usa (`src/dmaker/domain/explainer.py`).
 
+## Em lote: um vídeo por linha de uma planilha
+
+Qualquer template serve de modelo para um lote (`dmaker batch run <template> <planilha>`, ferramenta MCP
+`run_batch`, tela "Lote" da interface): cada linha da planilha preenche os parâmetros e vira um projeto e um
+vídeo. O nome de cada coluna casa com o do parâmetro sem diferenciar maiúscula, acento, espaço, hífen ou
+sublinhado; a célula é convertida para o `type` do parâmetro (número com vírgula decimal, `bool` com sim ou
+não, `paths` e `list` separados por `|` ou vírgula, ou em JSON), e caminho relativo parte da pasta da
+planilha. Célula vazia usa o `default`; parâmetro obrigatório vazio é erro daquela linha. Para o lote dar certo,
+deixe os textos do template com folga (o QA aponta o que não cabe) e os caminhos fixos absolutos. Detalhes no
+`dmaker://guide`, seção "Lote".
+
 ## Erros
 
 Parâmetro obrigatório faltando, parâmetro de tipo errado, template ou placeholder desconhecido:

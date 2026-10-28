@@ -83,7 +83,17 @@ describe('SidebarNav', () => {
   it('lista as áreas na ordem e marca as futuras como em breve', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: false })
     const labels = wrapper.findAll('.nav__label').map((node) => node.text())
-    expect(labels).toEqual(['Projetos', 'Editor', 'Voz', 'Dublagem', 'Fila', 'Modelos', 'Saídas', 'Transições'])
+    expect(labels).toEqual([
+      'Projetos',
+      'Lote',
+      'Editor',
+      'Voz',
+      'Dublagem',
+      'Fila',
+      'Modelos',
+      'Saídas',
+      'Transições',
+    ])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
   })
@@ -91,7 +101,7 @@ describe('SidebarNav', () => {
   it('recolhida, esconde os rótulos mas mantém o texto para leitor de tela', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: true })
     expect(wrapper.find('.nav__label').exists()).toBe(false)
-    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(8)
+    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(9)
   })
 })
 
