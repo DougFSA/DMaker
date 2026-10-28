@@ -7,7 +7,9 @@ topo, removidas do resultado renderizado:
 - `"description"`: frase curta dizendo para que serve o template.
 - `"params"`: `{nome: {"description", "default" (opcional), "type" (opcional, inferido do default),
   "required" (opcional, inferido: obrigatório quando não há default), "example" (opcional: um valor
-  de exemplo, útil quando o parâmetro é uma lista de objetos)}}`. Tipos: text, path, paths
+  de exemplo, útil quando o parâmetro é uma lista de objetos), "duration_of" (opcional, num parâmetro
+  numérico: o nome de outro parâmetro, um arquivo de áudio ou vídeo cuja duração vale quando o pedido
+  omite este; quem cria o projeto a mede, o motor não toca o disco)}}`. Tipos: text, path, paths
   (lista de caminhos), dir (pasta: vira a lista dos arquivos de mídia dela, em ordem natural), number,
   bool, list.
 - `"prepare"` (opcional): nome de um preparador de parâmetros (`PARAM_PREPARERS`), uma função pura que
@@ -39,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config
+from .audiogram_template import prepare_audiogram
 from .explainer import prepare_explainer
 
 _VALID_TYPES = {"text", "path", "paths", "dir", "number", "bool", "list"}
@@ -92,6 +95,9 @@ class TemplateParam:
     type: str = "text"
     required: bool = False
     example: Any = None
+    # nome de outro parâmetro (um arquivo de mídia): omitido este, vale a duração desse arquivo, que quem cria
+    # o projeto mede com o probe (`pipeline.projects.project_from_template`); o motor de templates não toca disco
+    duration_of: str | None = None
 
 
 @dataclass
@@ -131,6 +137,7 @@ def _parse_param(name: str, raw: dict) -> TemplateParam:
         type=param_type,
         required=required,
         example=raw.get("example"),
+        duration_of=raw.get("duration_of"),
     )
 
 
@@ -192,7 +199,10 @@ _DROP = object()  # marca um objeto removido do resultado por "$if"
 # Preparadores de parâmetros por nome (chave `prepare` do template). Um template novo que precise de
 # conta ou validação que o JSON não faz registra a sua função aqui, sem tocar no resto do motor.
 ParamPreparer = Callable[[dict[str, Any]], dict[str, Any]]
-PARAM_PREPARERS: dict[str, ParamPreparer] = {"explicativo": prepare_explainer}
+PARAM_PREPARERS: dict[str, ParamPreparer] = {
+    "explicativo": prepare_explainer,
+    "audiograma": prepare_audiogram,
+}
 
 
 def _lookup(name: str, context: dict[str, Any]) -> Any:
@@ -302,6 +312,8 @@ def template_summary(template: Template) -> str:
     for name in sorted(template.params):
         p = template.params[name]
         status = "obrigatório" if p.required else f"padrão={p.default!r}"
+        if p.duration_of:  # quem cria o projeto mede o arquivo quando o pedido omite este parâmetro
+            status = f"padrão: a duração de {p.duration_of}"
         desc = f" - {p.description}" if p.description else ""
         lines.append(f"  {name} ({p.type}, {status}){desc}")
         if p.example is not None:

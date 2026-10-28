@@ -312,6 +312,8 @@ class ImageOverlay(Strict):
     end: float | None = Field(None, ge=0)
     fade: float = Field(0.3, ge=0)
     sound: SoundSpec | None = None  # som na entrada da imagem (em `start`)
+    # "circle" recorta a imagem num círculo (o maior quadrado central dela), como a foto no meio do audiograma
+    shape: Literal["rect", "circle"] = "rect"
 
     @model_validator(mode="after")
     def _place(self) -> ImageOverlay:
@@ -393,7 +395,58 @@ def parse_aspect(value: str) -> float:
     return ratio
 
 
-Overlay = Annotated[TextOverlay | ImageOverlay | ProgressBar | VideoOverlay, Field(discriminator="type")]
+class AudiogramOverlay(Strict):
+    """Audiograma: a forma de onda ou as barras de frequência do áudio, animadas no ritmo dele. Serve para
+    divulgar um trecho de podcast, entrevista ou áudio de WhatsApp, quando não há vídeo.
+
+    `style`: `wave` (linha de onda), `bars` (barras simétricas, as graves no meio) ou `circle` (barras em
+    volta de um círculo; `inner_radius` é onde elas começam, e é ali que cabe a foto). `follow` escolhe o
+    áudio que a animação acompanha: `voice` (clipes, narração e `audio.voiceover`, sem a música), `mix` (o
+    áudio final) ou `auto` (a voz, quando o projeto tem alguma; senão a mistura, como num visualizador de
+    música). Seguir a voz mantém a onda parada nas pausas da fala mesmo com trilha de fundo.
+
+    `color` é uma chave do tema ou um hex (sem ele, a cor de destaque da marca). O lugar vem de `region`,
+    de `x`/`y` (o centro, em fração do quadro) ou de `position`; `width` e `height` são frações do quadro
+    (sem `height`, a proporção própria do estilo). No círculo, o desenho cabe no menor lado da caixa."""
+
+    type: Literal["audiogram"] = "audiogram"
+    style: Literal["wave", "bars", "circle"] = "bars"
+    follow: Literal["auto", "voice", "mix"] = "auto"
+    color: str | None = None
+    position: (
+        Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] | None
+    ) = None
+    x: float | None = Field(None, ge=0, le=1)
+    y: float | None = Field(None, ge=0, le=1)
+    region: str | None = (
+        None  # nome em `regions`: o desenho ocupa a região (no lugar de position/x/y/width/height)
+    )
+    width: float = Field(0.8, gt=0, le=1)  # fração da largura do quadro
+    height: float | None = Field(None, gt=0, le=1)  # fração da altura do quadro; None = proporção do estilo
+    inner_radius: float = Field(
+        0.6, ge=0.1, le=0.95
+    )  # só no círculo: fração do raio externo onde as barras começam
+    margin: float = Field(40, ge=0)  # px na base 1080, a partir de `position`
+    safe_zone: bool = True  # False ignora a área coberta pela interface do app
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _place(self) -> AudiogramOverlay:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("audiograma: informe `x` e `y` juntos (o centro do desenho)")
+        if self.region and (self.x is not None or self.position is not None):
+            raise ValueError(
+                "audiograma com `region` não leva `position`, `x` nem `y`: a região já define o lugar"
+            )
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start no audiograma")
+        return self
+
+
+Overlay = Annotated[
+    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay, Field(discriminator="type")
+]
 
 
 # ---------- legendas ----------
@@ -520,10 +573,33 @@ class Narration(Strict):
         return self
 
 
+class VoiceoverClip(Strict):
+    """Arquivo de áudio gravado (corte de podcast, entrevista, áudio de WhatsApp) posto na linha do tempo como
+    voz do vídeo, sem precisar de um trecho de vídeo nem de uma fonte sincronizada. Entra no mesmo barramento
+    de voz da narração: a música abaixa sob ele, os efeitos sonoros se nivelam por ele e a legenda `auto` o
+    transcreve. `src` é relativo à spec; `start` é o instante do vídeo final em que o áudio começa;
+    `offset` e `end` aparam o arquivo (ponto de entrada e de saída, em segundos do próprio arquivo, `end`
+    None = até o fim dele)."""
+
+    src: str = Field(min_length=1)
+    start: float = Field(0.0, ge=0)
+    offset: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+    volume: float = Field(1.0, ge=0, le=4)
+
+    @model_validator(mode="after")
+    def _range(self) -> VoiceoverClip:
+        if self.end is not None and self.end <= self.offset:
+            raise ValueError(f"end ({self.end}) precisa ser maior que offset ({self.offset}) em {self.src}")
+        return self
+
+
 class AudioSettings(Strict):
     music: Music | None = None
     tracks: list[AudioTrack] = []
     narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
+    # arquivos de áudio gravados (podcast, WhatsApp) como voz do vídeo, no mesmo barramento da narração
+    voiceover: list[VoiceoverClip] = []
     # efeitos sonoros soltos (whoosh, pop...): entram na mixagem antes da normalização, sem abaixar a música
     # e abaixo da voz; os sons de entrada das sobreposições (`sound`) se juntam a estes
     sfx: list[SfxCue] = []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -18,6 +19,29 @@ class NarrationInput(Protocol):
     path: Path
     start: float
     volume: float
+
+
+class VoiceFileInput(Protocol):
+    """O que a mixagem precisa saber de um arquivo de áudio posto como voz (satisfeito por `PreparedVoiceFile`):
+    onde o trecho do arquivo começa (`offset`), quanto dele toca (`duration`) e em que instante do vídeo entra."""
+
+    path: Path
+    start: float
+    offset: float
+    duration: float
+    volume: float
+
+
+@dataclass
+class AudioTaps:
+    """Cópias do áudio que o audiograma lê, tiradas de pontos do barramento sem mexer na saída.
+
+    `wanted` diz de que ponto (`voice`: a voz, depois do ganho e das narrações e antes da música; `mix`: a
+    mistura inteira, antes da normalização) e `labels` volta preenchido com o rótulo de cada cópia. A cópia
+    nunca volta para a mixagem: o ramo que a recebe só alimenta o desenho."""
+
+    wanted: frozenset[str]
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 def resolve_span(
@@ -55,13 +79,17 @@ def audio_graph(
     music_duration: float | None = None,
     narrations: Sequence[NarrationInput] = (),
     sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[VoiceFileInput] = (),
+    taps: AudioTaps | None = None,
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
-    `narrations` entram no barramento de voz depois do ganho e do mudo dos clipes (narrar sobre clipes
-    mudos é o caso comum) e antes do ducking: a música abaixa sob elas e o loudnorm as conta.
+    `narrations` e `voice_files` (arquivos de áudio gravados) entram no barramento de voz depois do ganho e
+    do mudo dos clipes (narrar sobre clipes mudos é o caso comum) e antes do ducking: a música abaixa sob
+    eles e o loudnorm os conta.
     `sfx` (efeitos sonoros) somam-se por último, depois do ducking e antes do loudnorm: a música não abaixa
     por causa deles (o sidechain só enxerga a voz) e o loudnorm os conta. Sem `sfx` o grafo é o de sempre.
+    `taps` pede cópias do barramento para o audiograma (ver `AudioTaps`); sem ele o grafo é o de sempre.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -77,13 +105,14 @@ def audio_graph(
         lines.append(f"{a}volume={audio.voice_gain:.3f}[a_gain]")
         a = "[a_gain]"
 
-    spoken = narration_streams(lines, inputs, narrations)
+    spoken = narration_streams(lines, inputs, narrations) + voice_file_streams(lines, inputs, voice_files)
     if spoken:
         lines.append(
             f"{a}{''.join(spoken)}amix=inputs={1 + len(spoken)}:duration=first"
             ":dropout_transition=0:normalize=0[a_narrated]"
         )
         a = "[a_narrated]"
+    a = _tap(lines, taps, "voice", a)
 
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
@@ -108,6 +137,7 @@ def audio_graph(
             ":dropout_transition=0:normalize=0[a_fx]"
         )
         a = "[a_fx]"
+    a = _tap(lines, taps, "mix", a)
 
     if audio.normalize != "off" and include_norm:
         ln = f"loudnorm=I={audio.target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11"
@@ -122,6 +152,15 @@ def audio_graph(
         a = "[a_norm]"
     lines.append(f"{a}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]")
     return "[aout]"
+
+
+def _tap(lines: list[str], taps: AudioTaps | None, name: str, a: str) -> str:
+    """Se o audiograma pediu `name`, divide `a` em duas: a cópia fica em `taps.labels[name]` e o resto segue."""
+    if taps is None or name not in taps.wanted:
+        return a
+    lines.append(f"{a}asplit=2[a_{name}_main][a_{name}_tap]")
+    taps.labels[name] = f"[a_{name}_tap]"
+    return f"[a_{name}_main]"
 
 
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
@@ -144,6 +183,29 @@ def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[Nar
             # na grade de 20 ms do detector da marca d'água da voz (ver `voice/watermark.py`)
             chain.append(f"adelay={delay_on_detector_grid(narration.start)}:all=1")
         label = f"[nar{index}]"
+        lines.append(",".join(chain) + label)
+        labels.append(label)
+    return labels
+
+
+def voice_file_streams(lines: list[str], inputs: Inputs, files: Sequence[VoiceFileInput]) -> list[str]:
+    """Uma entrada por arquivo de áudio de voz: só o trecho `offset` + `duration` do arquivo, em 48 kHz estéreo
+    (como o resto da mixagem), com ganho e atrasado até o instante em que entra. O `asetpts` zera o tempo
+    do trecho aparado antes do atraso, senão o `adelay` somaria o `offset` ao instante de entrada."""
+    labels = []
+    for index, voice in enumerate(files):
+        if voice.volume <= 0 or voice.duration <= 0:
+            continue
+        chain = [
+            f"[{inputs.add(voice.path)}:a]atrim=start={voice.offset:.3f}:duration={voice.duration:.3f}",
+            "asetpts=PTS-STARTPTS",
+            "aresample=48000",
+            "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            f"volume={voice.volume:.3f}",
+        ]
+        if voice.start > 0:
+            chain.append(f"adelay={int(round(voice.start * 1000))}:all=1")
+        label = f"[vf{index}]"
         lines.append(",".join(chain) + label)
         labels.append(label)
     return labels

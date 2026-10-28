@@ -11,7 +11,8 @@ from pathlib import Path
 
 from ..config import FONTS_DIR
 from ..domain.spec import Transition
-from ..filtergraph.audio import audio_graph, loudnorm_measure_graph
+from ..filtergraph.audio import AudioTaps, audio_graph, loudnorm_measure_graph
+from ..filtergraph.audiogram import audiogram_graph
 from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.overlays import image_overlay_graph
@@ -23,6 +24,7 @@ from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_enc
 from .context import RenderContext
 from .segments import PreparedSegment
 from .textlayer import TextLayer
+from .voicefiles import PreparedVoiceFile
 from .voiceover import PreparedVoiceover
 
 SILENCE_LUFS = -60.0
@@ -61,6 +63,7 @@ def _audio_only_graph(
     video_overlays: Sequence[ResolvedVideoOverlay],
     include_music: bool = True,
     sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[PreparedVoiceFile] = (),
 ) -> tuple[Inputs, list[str], str]:
     """Entradas e linhas do grafo só de áudio (sem normalização), com a mesma mixagem da montagem final."""
     inputs = Inputs()
@@ -85,6 +88,7 @@ def _audio_only_graph(
         music_duration=_music_duration(ctx, music_path),
         narrations=voiceovers,
         sfx=sfx,
+        voice_files=voice_files,
     )
     return inputs, lines, aout
 
@@ -120,9 +124,18 @@ class LoudnessMeter:
         voiceovers: Sequence[PreparedVoiceover] = (),
         video_overlays: Sequence[ResolvedVideoOverlay] = (),
         sfx: Sequence[SfxInput] = (),
+        voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> LoudnessMeasure:
         inputs, lines, aout = _audio_only_graph(
-            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx=sfx
+            ctx,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            video_overlays,
+            sfx=sfx,
+            voice_files=voice_files,
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[ameas]", "-f", "null", "-"]
@@ -143,8 +156,9 @@ class VoiceLevel:
 
 
 class VoiceLevelMeter:
-    """Mede a voz sozinha (áudio dos clipes, PiP e narração; sem música nem efeitos) com o loudnorm em modo de
-    medição: é a régua que acerta o nível dos efeitos sonoros, definido em relação a ela."""
+    """Mede a voz sozinha (áudio dos clipes, PiP, narração e arquivos de `audio.voiceover`; sem música nem
+    efeitos) com o loudnorm em modo de medição: é a régua que acerta o nível dos efeitos sonoros, definido em
+    relação a ela."""
 
     def measure(
         self,
@@ -154,10 +168,19 @@ class VoiceLevelMeter:
         total: float,
         voiceovers: Sequence[PreparedVoiceover] = (),
         video_overlays: Sequence[ResolvedVideoOverlay] = (),
+        voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> VoiceLevel | None:
         """None quando não há voz (clipes mudos, só música) ou a medição não devolveu números."""
         inputs, lines, aout = _audio_only_graph(
-            ctx, prepared, transitions, None, total, voiceovers, video_overlays, include_music=False
+            ctx,
+            prepared,
+            transitions,
+            None,
+            total,
+            voiceovers,
+            video_overlays,
+            include_music=False,
+            voice_files=voice_files,
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs, "[vmeas]"))
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[vmeas]", "-f", "null", "-"]
@@ -189,9 +212,12 @@ def build_assembly(
     voiceovers: Sequence[PreparedVoiceover] = (),
     provenance: str = "",
     sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[PreparedVoiceFile] = (),
+    visual_gain_db: float = 0.0,
 ) -> Assembly:
     """Comando final. O grafo vai em arquivo (graph.txt) e o ASS é referenciado por caminho relativo
-    ao diretório do job, o que evita a escapada de `C:` nos filtros."""
+    ao diretório do job, o que evita a escapada de `C:` nos filtros. `visual_gain_db` é o ganho que a
+    normalização aplica à saída, repetido na cópia do áudio que os audiogramas leem."""
     p, o = ctx.project, ctx.options
     inputs = Inputs()
     for item in prepared:
@@ -230,14 +256,12 @@ def build_assembly(
         ctx.scale,
         ctx.preset.safe,
     )
-    if layer.has_text:
-        lines.append(
-            f"{cur_v}ass=filename={ffq('overlay.ass')}:fontsdir={ffq(_relpath(FONTS_DIR, ctx.job_dir))}[v_ass]"
-        )
-        cur_v = "[v_ass]"
-    lines.append(f"{cur_v}format=yuv420p[vout]")
+    # o áudio entra primeiro numa lista própria: o audiograma precisa das cópias que ele devolve, e as linhas
+    # do áudio seguem no fim do grafo, onde sempre estiveram
+    audio_lines: list[str] = []
+    taps = AudioTaps(frozenset(item.follow for item in layer.audiograms))
     aout = audio_graph(
-        lines,
+        audio_lines,
         inputs,
         graph.audio,
         p.audio,
@@ -249,7 +273,31 @@ def build_assembly(
         music_duration=_music_duration(ctx, music_path),
         narrations=voiceovers,
         sfx=sfx,
+        voice_files=voice_files,
+        taps=taps if layer.audiograms else None,
     )
+    if layer.audiograms:
+        cur_v = audiogram_graph(
+            lines,
+            inputs,
+            cur_v,
+            layer.audiograms,
+            taps,
+            visual_gain_db,
+            ctx.width,
+            ctx.height,
+            ctx.fps,
+            total,
+            ctx.scale,
+            ctx.preset.safe,
+        )
+    if layer.has_text:
+        lines.append(
+            f"{cur_v}ass=filename={ffq('overlay.ass')}:fontsdir={ffq(_relpath(FONTS_DIR, ctx.job_dir))}[v_ass]"
+        )
+        cur_v = "[v_ass]"
+    lines.append(f"{cur_v}format=yuv420p[vout]")
+    lines += audio_lines
 
     quality = "draft" if o.preview else p.output.quality
     encoder = "x264" if o.preview else resolve_encoder(p.output.encoder, hardware_encoder())

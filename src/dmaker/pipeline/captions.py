@@ -17,6 +17,7 @@ from ..text.transcribe import Transcriber, WhisperTranscriber
 from .context import RenderContext
 from .segments import PreparedSegment, cache_key
 from .sources import Source
+from .voicefiles import PreparedVoiceFile
 from .voiceover import PreparedVoiceover, narration_cues
 
 TranscriberFactory = Callable[[Captions], Transcriber]
@@ -46,6 +47,7 @@ class CaptionInputs:
     transitions: list[Transition | None]
     voiceovers: Sequence[PreparedVoiceover]
     vocabulary: list[str]
+    voice_files: Sequence[PreparedVoiceFile] = ()
 
 
 CueProducer = Callable[[CaptionInputs], tuple[list[Cue] | None, Path | None]]
@@ -69,6 +71,7 @@ class CaptionPipeline:
         prepared: list[PreparedSegment],
         transitions: list[Transition | None],
         voiceovers: Sequence[PreparedVoiceover] = (),
+        voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> CaptionResult | None:
         project, options = ctx.project, ctx.options
         captions = project.captions
@@ -84,7 +87,9 @@ class CaptionPipeline:
                 raise FileNotFoundError(f"captions.source não encontrado: {captions.source}")
             cues = load_captions(store)
         else:
-            cues, store = producer(CaptionInputs(ctx, sources, prepared, transitions, voiceovers, vocabulary))
+            cues, store = producer(
+                CaptionInputs(ctx, sources, prepared, transitions, voiceovers, vocabulary, voice_files)
+            )
             if cues is None:
                 return None
 
@@ -111,25 +116,48 @@ class CaptionPipeline:
     # ---------- transcrição automática com cache ----------
 
     def _from_transcription(self, inputs: CaptionInputs) -> tuple[list[Cue] | None, Path | None]:
-        if inputs.ctx.project.audio.mute_clips:
+        # clipes mudos não têm voz, mas um áudio de `audio.voiceover` continua falando por cima deles
+        if inputs.ctx.project.audio.mute_clips and not inputs.voice_files:
             return None, None
-        return self._auto(inputs.ctx, inputs.sources, inputs.prepared, inputs.transitions, inputs.vocabulary)
+        return self._auto(
+            inputs.ctx,
+            inputs.sources,
+            inputs.prepared,
+            inputs.transitions,
+            inputs.vocabulary,
+            inputs.voice_files,
+        )
 
-    def _audio_key(self, ctx: RenderContext, sources: list[Source], vocabulary: list[str]) -> str:
+    def _audio_key(
+        self,
+        ctx: RenderContext,
+        sources: list[Source],
+        vocabulary: list[str],
+        voice_files: Sequence[PreparedVoiceFile] = (),
+    ) -> str:
         captions = ctx.project.captions
         assert captions is not None
         parts = [
             (seg.model_dump(mode="json"), str(src.path), src.stat_key())
             for seg, src in zip(ctx.project.timeline, sources, strict=True)
         ]
-        return cache_key(
+        key_parts: list[object] = [
             CAPTIONS_CACHE_VERSION,
             parts,
             ctx.project.audio.voice_gain,
             captions.language,
             captions.model,
             vocabulary,
-        )
+        ]
+        if voice_files:  # só entra na chave quando há arquivos: sem eles a chave é a de sempre
+            key_parts.append(
+                [
+                    (str(item.path), item.path.stat().st_mtime_ns, item.path.stat().st_size)
+                    + (item.start, item.offset, item.duration, item.volume)
+                    for item in voice_files
+                ]
+            )
+        return cache_key(*key_parts)
 
     def _auto(
         self,
@@ -138,17 +166,18 @@ class CaptionPipeline:
         prepared: list[PreparedSegment],
         transitions: list[Transition | None],
         vocabulary: list[str],
+        voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> tuple[list[Cue] | None, Path | None]:
         captions = ctx.project.captions
         assert captions is not None
-        key = self._audio_key(ctx, sources, vocabulary)
+        key = self._audio_key(ctx, sources, vocabulary, voice_files)
         base = ctx.project.base_dir or ctx.job_dir
         store = base / "captions.auto.json"
         cached = self._load_cached(store, key) if not ctx.options.force else None
         if cached is not None:
             return cached, store
 
-        wav = self._voice_wav(ctx, prepared, transitions)
+        wav = self._voice_wav(ctx, prepared, transitions, voice_files)
         prompt = (", ".join(vocabulary) + ".") if vocabulary else None
         try:
             transcript = self.transcriber_factory(captions).transcribe(wav, captions.language, prompt)
@@ -176,9 +205,13 @@ class CaptionPipeline:
 
     @staticmethod
     def _voice_wav(
-        ctx: RenderContext, prepared: list[PreparedSegment], transitions: list[Transition | None]
+        ctx: RenderContext,
+        prepared: list[PreparedSegment],
+        transitions: list[Transition | None],
+        voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> Path:
-        """Só a voz da linha do tempo (sem música nem normalização), mono 16 kHz para o modelo."""
+        """Só a voz da linha do tempo (sem música nem normalização), mono 16 kHz para o modelo. Os arquivos
+        de `audio.voiceover` entram por cima, nos instantes em que tocam no vídeo."""
         inputs = Inputs()
         for item in prepared:
             inputs.add(item.mezzanine)
@@ -195,6 +228,7 @@ class CaptionPipeline:
             graph.total,
             include_music=False,
             include_norm=False,
+            voice_files=voice_files,
         )
         wav = ctx.job_dir / "voice.wav"
         args = inputs.args + [
