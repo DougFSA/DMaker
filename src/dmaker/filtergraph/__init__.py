@@ -5,7 +5,7 @@ from .common import Inputs, atempo_chain, color_chain, even, ffq
 from .encode import encode_args
 from .mezzanine import TrackSlice, clip_mezzanine, frames_mezzanine, still_mezzanine
 from .overlays import ResolvedImageOverlay, image_overlay_graph, overlay_position
-from .pip import ResolvedVideoOverlay, pip_position, video_overlay_graph
+from .pip import ResolvedVideoOverlay, pip_audio_graph, pip_position, video_overlay_graph
 from .proxy import PROXY_HEIGHT, proxy_command
 from .reframe import reframe_graph, resolve_reframe_mode
 from .timeline import TimelineGraph, timeline_graph
@@ -28,6 +28,7 @@ __all__ = [
     "image_overlay_graph",
     "loudnorm_measure_graph",
     "overlay_position",
+    "pip_audio_graph",
     "pip_position",
     "proxy_command",
     "reframe_graph",

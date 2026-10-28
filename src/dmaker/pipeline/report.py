@@ -18,6 +18,7 @@ from typing import Literal
 
 from ..domain.brand import Theme
 from ..domain.presets import Preset
+from ..domain.regions import resolve_region
 from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Project, TextOverlay
 from ..domain.timeline import tone_for
 from ..filtergraph.reframe import resolve_reframe_mode
@@ -223,6 +224,7 @@ def check_text_safe_zone(project: Project, layout: ProjectLayout) -> list[Findin
         if end <= ov.start:
             continue
         tone = tone_for(ov.start, end, layout.spans, tones)
+        ov = resolve_region(ov, project.regions, W, H)  # o texto de uma região é medido já no lugar dela
         cx, cy, bw, bh, widths, max_w, _st = _text_geometry(ov, layout.theme, canvas, tone)
         left, right = cx - bw / 2, cx + bw / 2
         top, bottom = cy - bh / 2, cy + bh / 2
@@ -397,6 +399,8 @@ def check_contrast(project: Project, layout: ProjectLayout) -> list[Finding]:
     for i, seg in enumerate(project.timeline):
         if not isinstance(seg, CardSegment):
             continue
+        if seg.flat and not seg.title.strip() and not seg.subtitle:
+            continue  # fundo de cor lisa sem texto: não há título para comparar com o fundo
         variant = seg.variant or theme.style.get("card_variant", "light")
         dark = variant == "dark"
         bg = (

@@ -171,7 +171,9 @@ class RenderPipeline:
         layer.doc.write(ctx.job_dir / "overlay.ass")
 
         music_path = self._music_path()
-        measured, normalize = self._loudness(ctx, prepared, transitions, music_path, total, voiceovers)
+        measured, normalize = self._loudness(
+            ctx, prepared, transitions, music_path, total, voiceovers, layer.video_overlays
+        )
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assembly = build_assembly(
@@ -255,14 +257,16 @@ class RenderPipeline:
         return ctx.narrator.provenance(voice_spans(voiceovers), total)
 
     def _loudness(
-        self, ctx, prepared, transitions, music_path, total, voiceovers
+        self, ctx, prepared, transitions, music_path, total, voiceovers, video_overlays=()
     ) -> tuple[dict | None, bool]:
         """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição
         alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só."""
         mode = ctx.project.audio.normalize
         if mode == "off" or ctx.options.dry_run:
             return None, mode != "off"
-        measure = self.loudness.measure(ctx, prepared, transitions, music_path, total, voiceovers)
+        measure = self.loudness.measure(
+            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays
+        )
         if measure.silent:
             ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")
             return None, False

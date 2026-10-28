@@ -105,3 +105,50 @@ def test_video_overlay_without_audio_or_frame():
     text = ";".join(lines)
     assert audio == [] and inputs.count == 3 and "tpad" not in text and "fade" not in text
     assert inputs.args[inputs.args.index("-ss") + 1] == "1.500"  # ponto de entrada no arquivo
+
+
+def test_pip_crop_keeps_the_center_by_default_and_slides_toward_the_focus():
+    from dmaker.filtergraph.pip import pip_crop
+
+    assert pip_crop(950, 690, (0.5, 0.5)) == "crop=950:690"  # o grafo de quem não pediu foco não muda
+    assert pip_crop(950, 690, (0.5, 0.3)) == "crop=950:690:(iw-ow)*0.5000:(ih-oh)*0.3000"
+
+
+def test_video_overlay_graph_crops_toward_the_focus():
+    lines: list[str] = []
+    inputs = Inputs()
+    inputs.add("timeline.mov")
+    pip = _pip(start=0, end=6.0, focus=(0.5, 0.25))
+    video_overlay_graph(lines, inputs, "[tv]", [pip], 1080, 1920, 30, 6.0, 1.0, SafeZone())
+    assert "crop=300:200:(iw-ow)*0.5000:(ih-oh)*0.2500,format=rgba[pipv0]" in ";".join(lines)
+    centered = _pip(start=0, end=6.0)
+    other: list[str] = []
+    video_overlay_graph(other, Inputs(), "[tv]", [centered], 1080, 1920, 30, 6.0, 1.0, SafeZone())
+    assert "crop=300:200,format=rgba" in ";".join(other)
+
+
+def test_pip_audio_graph_gives_the_loudness_pass_the_same_audio_branch_as_the_final_mix():
+    from dmaker.filtergraph import pip_audio_graph
+
+    pip = _pip(start=2.0, end=6.0, volume=0.5)
+    silent = ResolvedVideoOverlay(
+        VideoOverlay(src="mudo.mp4"),
+        Path("mudo.mp4"),
+        0.0,
+        0.0,
+        3.0,
+        300,
+        200,
+        Path("m.png"),
+        None,
+        0,
+        has_audio=False,
+    )
+    lines: list[str] = []
+    inputs = Inputs()
+    labels = pip_audio_graph(lines, inputs, [pip, silent])
+    assert labels == ["[pipaud0]"] and inputs.count == 1  # o sem áudio não gera entrada nem ramo
+    assert "adelay=2000:all=1" in lines[0] and "volume=0.500" in lines[0]
+    final: list[str] = []
+    video_overlay_graph(final, Inputs(), "[tv]", [pip], 1080, 1920, 30, 8.0, 1.0, SafeZone())
+    assert lines[0].split("]", 1)[1] == next(line for line in final if "[pipaud0]" in line).split("]", 1)[1]
