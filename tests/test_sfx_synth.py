@@ -123,6 +123,7 @@ def test_the_shipped_library_matches_the_registry_and_registers_every_origin():
     wavs = sorted(path.stem for path in directory.glob("*.wav"))
     assert wavs == sorted(library_names())
     licenses = (directory / LICENSES_FILE).read_text(encoding="utf-8")
+    assert licenses == licenses_text(), "o LICENSES envelheceu: rode `dmaker sfx build`"
     for name in library_names():
         line = next(line for line in licenses.splitlines() if line.startswith(f"{name}.wav:"))
         assert "Origem: sintetizado pelo DMaker" in line and "Licença: MIT" in line

@@ -972,7 +972,7 @@ def _decode_audio(path: Path, workdir: Path):
     return frames.astype(float)
 
 
-def _onset_seconds(signal, name: str, expected: float, search: float = 0.25) -> float:
+def _sfx_onset_seconds(signal, name: str, expected: float, search: float = 0.25) -> float:
     """Instante em que o arquivo da biblioteca `name` toca em `signal`, por correlação cruzada normalizada
     numa janela de ±`search` s em torno do esperado (resolução de uma amostra)."""
     import numpy as np
@@ -1026,7 +1026,7 @@ def test_a_whoosh_marked_at_12_40_plays_at_12_40_in_the_final_audio(speech_clip,
     )
     mono = _decode_audio(out, tmp_path).mean(axis=1)
     for name, at in (("whoosh", 12.4), ("impact", 5.1)):
-        assert abs(_onset_seconds(mono, name, at) - at) < 0.020, name
+        assert abs(_sfx_onset_seconds(mono, name, at) - at) < 0.020, name
 
 
 def test_effects_stay_below_the_voice_and_the_loudness_stays_on_target(
@@ -1091,8 +1091,8 @@ def test_entry_sounds_of_a_text_and_a_transition_play_in_the_render(tmp_path):
     out = _render(project, tmp_path / "entrada.mp4")
     audio = _decode_audio(out, tmp_path)
     mono = audio.mean(axis=1)
-    assert abs(_onset_seconds(mono, "pop", 1.5) - 1.5) < 0.020  # texto com `sound: true`: o pop padrão
-    assert abs(_onset_seconds(mono, "whip", 3.5) - 3.5) < 0.020  # a transição começa 0,5 s antes dos 4 s
+    assert abs(_sfx_onset_seconds(mono, "pop", 1.5) - 1.5) < 0.020  # texto com `sound: true`: o pop padrão
+    assert abs(_sfx_onset_seconds(mono, "whip", 3.5) - 3.5) < 0.020  # a transição começa 0,5 s antes dos 4 s
     assert 20 * np.log10(np.max(np.abs(audio))) == pytest.approx(
         -12.0, abs=1.0
     )  # +-1 dB: o AAC arredonda picos
