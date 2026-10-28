@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ..domain.spec import Transition
 from ..domain.timeline import effective_transition
 from .common import AUDIO_FMT_MIX
+from .transitions import TransitionRequest, build_transition
 
 
 @dataclass
@@ -23,9 +24,11 @@ def timeline_graph(
     transitions: list[Transition | None],
     fps: float,
     want_video: bool = True,
+    size: tuple[int, int] | None = None,
 ) -> TimelineGraph:
-    """Junta n mezaninos (entradas 0..n-1). Trechos separados por corte viram um `concat`;
-    entre blocos há `xfade` (vídeo) e `acrossfade` (áudio) com o mesmo deslocamento."""
+    """Junta n mezaninos (entradas 0..n-1). Trechos separados por corte viram um `concat`; entre blocos há a
+    transição de vídeo (registrada em `transitions`: xfade ou de movimento) e `acrossfade` (áudio) com o mesmo
+    deslocamento. `size` (largura, altura do quadro) só é exigido pelas transições de movimento."""
     assert n == len(durations) == len(transitions)
     lines: list[str] = []
     for i in range(n):
@@ -67,7 +70,18 @@ def timeline_graph(
         offset = cur_len - d
         if want_video:
             assert tr is not None
-            lines.append(f"{cur_v}{vl}xfade=transition={tr.type}:duration={d:.3f}:offset={offset:.3f}[xv{k}]")
+            request = TransitionRequest(
+                a=cur_v,
+                b=vl,
+                out=f"[xv{k}]",
+                tag=f"tx{k}",
+                duration=d,
+                offset=offset,
+                fps=fps,
+                curve=tr.curve,
+                size=size,
+            )
+            lines.extend(build_transition(tr.type, request))
             cur_v = f"[xv{k}]"
         lines.append(f"{cur_a}{al}acrossfade=d={d:.3f}:c1=tri:c2=tri[xa{k}]")
         cur_a = f"[xa{k}]"

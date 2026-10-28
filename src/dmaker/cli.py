@@ -173,6 +173,8 @@ def doctor(
             f"  libass: {'sim' if caps.libass else '[red]NÃO (texto e legendas não funcionam)[/red]'}"
         )
         needed = ["xfade", "acrossfade", "loudnorm", "sidechaincompress", "ass", "tile", "lut3d"]
+        # transições de movimento: zoom, desfoque, tira de quadros, luz gerada por expressão e comandos por quadro
+        needed += ["perspective", "gblur", "hstack", "vstack", "geq", "sendcmd", "gradients"]
         missing = [f for f in needed if not caps.has_filter(f)]
         console.print(
             f"  filtros: {'ok' if not missing else '[red]faltam: ' + ', '.join(missing) + '[/red]'}"
@@ -827,6 +829,66 @@ def card(
     out = out or config.OUTPUT_DIR / f"card_{p.id.replace('/', '-')}.png"
     save_card(img, out)
     console.print(f"[green]Cartão salvo:[/green] {out}")
+
+
+transitions_app = typer.Typer(
+    help="Transições entre trechos: a lista e a folha de contato (prévia) de cada uma.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(transitions_app, name="transitions")
+
+
+@transitions_app.command("list")
+def transitions_list(
+    kind: Annotated[str | None, typer.Option(help="movimento | xfade")] = None,
+) -> None:
+    """Lista as transições aceitas em `transition.type` e o que cada uma faz."""
+    from .domain.transitions import catalog
+
+    wanted = {"movimento": "motion", "xfade": "xfade", None: None}.get(kind)
+    if kind is not None and wanted is None:
+        _fail("Tipo desconhecido: use movimento ou xfade.")
+    table = Table(Column("nome", no_wrap=True), Column("tipo", no_wrap=True), "o que faz", title="Transições")
+    for info in catalog():
+        if wanted in (None, info.kind):
+            table.add_row(info.name, "movimento" if info.kind == "motion" else "xfade", info.summary)
+    console.print(table)
+    console.print("Curva de tempo (`transition.curve`): linear (padrão), ease ou spring.")
+
+
+@transitions_app.command("sheet")
+def transitions_sheet(
+    name: Annotated[str, typer.Argument(help="Nome da transição, ou `all` para todas.")],
+    curve: Annotated[str, typer.Option(help="linear | ease | spring | all")] = "linear",
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/transitions).")] = None,
+) -> None:
+    """Folha de contato da transição: os quadros da troca entre dois clipes sintéticos (PNG)."""
+    import shutil
+
+    from .domain.curves import CURVES
+    from .domain.transitions import all_transition_names, catalog
+    from .media.ffmpeg import FFmpegError, SubprocessRunner
+    from .pipeline.transition_preview import TransitionPreview
+
+    names = [info.name for info in catalog()] if name == "all" else [name]
+    unknown = [n for n in names if n not in all_transition_names()]
+    if unknown:
+        _fail(f"Transição desconhecida: {unknown[0]}. Veja `dmaker transitions list`.")
+    chosen = list(CURVES) if curve == "all" else [curve]
+    if any(c not in CURVES for c in chosen):
+        _fail(f"Curva desconhecida: {curve}. Use {', '.join(CURVES)} ou all.")
+    folder = out_dir or config.OUTPUT_DIR / "transitions"
+    folder.mkdir(parents=True, exist_ok=True)
+    preview = TransitionPreview(SubprocessRunner(quiet=True))
+    try:
+        for transition in names:
+            for chosen_curve in chosen:
+                target = folder / f"{transition}-{chosen_curve}.png"
+                shutil.copyfile(preview.sheet(transition, chosen_curve), target)
+                console.print(f"[green]Folha salva:[/green] {target}")
+    except FFmpegError as exc:
+        _fail(str(exc))
 
 
 @app.command()

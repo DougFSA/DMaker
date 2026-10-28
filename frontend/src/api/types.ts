@@ -245,6 +245,20 @@ export interface BrowseResponse {
   files: Array<{ path: string; name: string; size_mb: number }>
 }
 
+export type TransitionCurve = 'linear' | 'ease' | 'spring'
+
+/** Item de GET /api/transitions: `motion` são as de movimento do DMaker, `xfade` as do FFmpeg. */
+export interface TransitionInfo {
+  name: string
+  kind: 'motion' | 'xfade'
+  summary: string
+}
+
+export interface TransitionCatalog {
+  curves: TransitionCurve[]
+  transitions: TransitionInfo[]
+}
+
 /* ---------- lote: vários vídeos de uma planilha (src/dmaker/ui/batch_routes.py) ---------- */
 
 export type BatchIssueLevel = 'erro' | 'aviso'

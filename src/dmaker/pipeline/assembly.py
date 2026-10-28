@@ -197,7 +197,12 @@ def build_assembly(
     for item in prepared:
         inputs.add(item.mezzanine)
     graph = timeline_graph(
-        len(prepared), [x.duration for x in prepared], transitions, ctx.fps, want_video=True
+        len(prepared),
+        [x.duration for x in prepared],
+        transitions,
+        ctx.fps,
+        want_video=True,
+        size=(ctx.width, ctx.height),
     )
     lines = list(graph.lines)
     cur_v = graph.video or ""

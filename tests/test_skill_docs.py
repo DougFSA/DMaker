@@ -66,3 +66,22 @@ def test_manual_exists_is_dash_free_and_covers_all_sections():
     assert "—" not in text and "–" not in text
     for title in MANUAL_SECTION_TITLES:
         assert title in text
+
+
+def test_guide_documents_the_motion_transitions_the_curves_and_the_preview_commands():
+    from dmaker.domain.curves import CURVES
+    from dmaker.domain.transitions import MOTION_TRANSITIONS
+
+    text = GUIDE_PATH.read_text(encoding="utf-8")
+    for name in MOTION_TRANSITIONS:
+        assert f"`{name}`" in text, f"o guia não descreve a transição {name}"
+    for curve in CURVES:
+        assert f"`{curve}`" in text, f"o guia não descreve a curva {curve}"
+    assert "dmaker transitions sheet" in text and "dmaker transitions list" in text
+
+
+def test_manual_mentions_the_motion_transitions_and_the_curve():
+    from dmaker.domain.transitions import MOTION_TRANSITIONS
+
+    text = MANUAL_PATH.read_text(encoding="utf-8")
+    assert all(f"`{name}`" in text for name in MOTION_TRANSITIONS) and "`curve`" in text

@@ -131,7 +131,7 @@ aponta para a mesma região, sem conta de pixel. O modelo `explicativo` declara 
 
 Regras e valores:
 
-- **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior); tipos: `cut`, `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `smoothleft`, `circleopen`, `zoomin`, `fadeblack`, `fadewhite`, `pixelize`... (nomes do xfade). Transição consome tempo: duração final = soma dos trechos menos as transições (`validate_project` mostra).
+- **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior): `{"type": "whippan", "duration": 0.5, "curve": "spring"}`. Tipos: `cut`, as de movimento do DMaker (`crosszoom`, `whippan`, `blurslide`, `filmburn`, `lightleak`) e os 48 do xfade (`fade`, `fadeblack`, `wipeleft/right/up/down`, `slideleft/...`, `circleopen`, `zoomin`...); a lista completa, com o que cada uma faz, está na seção "Transições" abaixo. Transição consome tempo: duração final = soma dos trechos menos as transições (`validate_project` mostra).
 - **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`; `flat: true` deixa só a cor de `background`, sem decoração e sem exigir título).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; senão usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, separa melhor cadeira/objeto que encosta na pessoa, mais lento na CPU) ou `mobilenetv3` (mais leve e rápido, bom para rascunho). O recorte fica em cache: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos podem falhar na borda.
@@ -198,6 +198,28 @@ internet); `dmaker sfx list` mostra o que há e `dmaker sfx build` os gera de no
   biblioteca). Um nome que não é da biblioteca e não é um arquivo existente falha antes de gerar qualquer trecho.
 - `audio.sfx` marca tempos do vídeo final: o render parcial (`segments`) o ignora, e `validate_project` avisa de
   efeito marcado depois do fim do vídeo.
+
+### Transições
+
+`transition.type` aceita `cut` (corte seco, padrão quando não há `transition`), as de movimento e os 48 tipos do xfade. A troca dura `duration` segundos (0,3 a 0,6 costuma bastar; nunca passa de metade de cada trecho) e o áudio faz um fundido de entrada e saída durante ela.
+
+**Curva de tempo** (`transition.curve`, em qualquer tipo): `linear` (padrão: velocidade constante, tudo sai como sempre saiu), `ease` (parte e chega devagar, corre no meio) e `spring` (mola: corre logo no começo, passa um pouco do ponto final e assenta). Num wipe ou slide a cortina não anda além da borda, então a mola só acelera e assenta; nas de movimento ela passa do ponto de verdade (a imagem que entra recua e para). Exemplo: `"transition": {"type": "wipeleft", "duration": 0.5, "curve": "ease"}`.
+
+Para ver o que cada uma faz sem montar um projeto: `dmaker transitions list` (tabela com todas) e `dmaker transitions sheet <nome|all> [--curve linear|ease|spring|all]`, que gera a folha de contato (os quadros da troca entre dois clipes de teste) em `output/transitions`. Na interface nova, a tela **Transições** mostra a folha de cada uma, com seletor de curva.
+
+De movimento (feitas pelo DMaker; a troca é montada só sobre os quadros da janela, o resto do vídeo passa intacto):
+
+- `crosszoom`: zoom de passagem. A imagem amplia (até 1,6x) e desfoca, e a próxima entra do mesmo zoom e assenta no enquadramento.
+- `whippan`: chicote. O quadro corre para a esquerda com borrão de movimento proporcional à velocidade; a próxima imagem para no lugar. Com `spring`, passa um pouco do ponto e volta.
+- `blurslide`: desfoque deslizando. A próxima imagem sobe empurrando a anterior, com as duas desfocadas no meio da troca.
+- `filmburn`: queima de filme. Um clarão laranja e branco, que nasce pela esquerda, queima a imagem anterior e a próxima emerge dele.
+- `lightleak`: vazamento de luz. Uma faixa de luz rosa, laranja e quente cruza o quadro na diagonal e a troca acontece embaixo dela. A luz é gerada pelo próprio DMaker (sem arquivo de terceiros).
+
+Giro 3D e folha virando não existem como transição de ffmpeg; ficam para a composição em HTML.
+
+**Som na troca** (`transition.sound`): `true` toca um whoosh no começo da transição, um nome escolhe outro som (`"sound": "whip"` no `whippan`). Veja "Efeitos sonoros".
+
+Do xfade (nome em `type`): `fade` (dissolve suave, o recomendado; `dissolve` troca por grãos e costuma parecer pixelado), `fadeblack`, `fadewhite`, `fadegrays`, `wipeleft/right/up/down`, `wipetl/tr/bl/br`, `slideleft/right/up/down`, `smoothleft/right/up/down`, `coverleft/right/up/down`, `revealleft/right/up/down`, `circleopen`, `circleclose`, `circlecrop`, `rectcrop`, `radial`, `pixelize`, `distance`, `zoomin`, `squeezev`, `squeezeh`, `hlslice`, `hrslice`, `vuslice`, `vdslice`, `diagtl/tr/bl/br`, `hblur`. `dmaker transitions list --kind xfade` diz o que cada uma faz.
 
 ## Vídeos longos, multicâmera e áudio externo
 

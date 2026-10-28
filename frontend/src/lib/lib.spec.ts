@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import type { CutReport, OutputFile, ProjectListItem, QaReport, TemplateInfo } from '@/api'
+import type {
+  CutReport,
+  OutputFile,
+  ProjectListItem,
+  QaReport,
+  TemplateInfo,
+  TransitionInfo,
+} from '@/api'
 import { cutsSummary, defaultCutName, formatCutTime, reasonCounts, reasonTone } from './cuts'
 import { baseName, formatClock, formatDuration, formatRelative, formatSizeMb } from './format'
 import { filterOutputs, renderResultsFromJob } from './outputs'
 import { buildTemplateParams, defaultParamValues, filterProjects, missingRequiredParams, parseList } from './projects'
 import { findingTime, groupFindings, qaCounts, qaVerdict } from './qa'
 import { segmentRange } from './render'
+import { filterTransitions, specSnippet } from './transitions'
 
 describe('format', () => {
   it('formata relógio e duração', () => {
@@ -184,5 +192,28 @@ describe('saídas', () => {
     expect(renderResultsFromJob(result)).toHaveLength(1)
     expect(renderResultsFromJob([result, result])).toHaveLength(2)
     expect(renderResultsFromJob(null)).toEqual([])
+  })
+})
+
+
+describe('transições', () => {
+  const list: TransitionInfo[] = [
+    { name: 'whippan', kind: 'motion', summary: 'Chicote com borrão de movimento.' },
+    { name: 'wipeleft', kind: 'xfade', summary: 'Uma cortina corre para a esquerda.' },
+  ]
+
+  it('filtra por tipo e busca em nome e descrição sem diferenciar maiúsculas', () => {
+    expect(filterTransitions(list, '', 'all')).toHaveLength(2)
+    expect(filterTransitions(list, '', 'motion').map((t) => t.name)).toEqual(['whippan'])
+    expect(filterTransitions(list, 'CORTINA', 'all').map((t) => t.name)).toEqual(['wipeleft'])
+    expect(filterTransitions(list, 'whip', 'xfade')).toEqual([])
+    expect(filterTransitions(list, '  ', 'all')).toHaveLength(2)
+  })
+
+  it('monta o trecho de spec sem curva quando é a linear', () => {
+    expect(specSnippet('fade', 'linear')).toBe('"transition": { "type": "fade", "duration": 0.5 }')
+    expect(specSnippet('whippan', 'spring')).toBe(
+      '"transition": { "type": "whippan", "duration": 0.5, "curve": "spring" }',
+    )
   })
 })
