@@ -291,6 +291,13 @@ costuma bastar). `audio.tracks` são faixas externas (um gravador de mesa de som
 os cortes da timeline e se misturam ao áudio dos clipes. `audio.normalize: "two-pass"` (padrão) mede e
 ajusta o loudness para -14 LUFS em duas passadas, o alvo comum das redes sociais.
 
+**Efeitos sonoros.** `audio.sfx` põe um som curto (whoosh, pop, clique, riser, impacto) num instante do vídeo
+final: `{"sound": "whoosh", "at": 12.4}`. Os sons são sintetizados pelo próprio DMaker e ficam em `assets/sfx`
+(`dmaker sfx list` mostra a biblioteca; nada é baixado, então funciona sem internet), e um som seu entra
+pelo caminho do arquivo. Para não repetir tempos, o campo `sound` de um texto, imagem, vídeo ou transição toca
+um som na entrada dele (`"sound": true` usa o som padrão do tipo); sem o campo, nada toca. O efeito não abaixa a
+música e fica abaixo da voz, e a loudness final continua no alvo. Exemplos no `dmaker://guide`.
+
 ### 3.8 Fontes de sessão e multicâmera
 
 Para eventos com mais de uma câmera ou um gravador separado, `sources` declara cada fonte do mesmo
@@ -862,6 +869,7 @@ Python global). Use `dmaker <comando> --help` para ver as opções na hora, com 
 | `batch run <template> <planilha>` | Valida, cria um projeto por linha e renderiza tudo em `output/<lote>/`. Com linha inválida não começa, a não ser com `--skip-invalid`. Opções: `--lote`, `--name-column`, `--preview`, `--preset`, `--replace`. Ctrl+C interrompe sem perder o que já saiu. | `dmaker batch run stories-medlycare semana.csv --name-column titulo --lote semana` |
 | `batch resume <lote>` | Continua o lote: renderiza o que falta, o que falhou e o projeto que você corrigiu; o que já saiu e continua igual não é refeito. Opções: `--rows 2,4`, `--force`. | `dmaker batch resume semana` |
 | `batch pause <lote>` e `batch status [lote]` | Pede a um lote em andamento (em outra janela) que pare depois do vídeo atual; mostra o relatório de um lote (o que saiu, o que falhou e por quê) ou a lista de lotes. | `dmaker batch status semana` |
+| `sfx list` e `sfx build` | Lista os efeitos sonoros da biblioteca (`assets/sfx`, os nomes que a spec aceita em `audio.sfx` e em `sound`) ou os sintetiza de novo (`--out` escolhe outra pasta). | `dmaker sfx list` |
 | `validate <spec>` | Valida a spec, confere arquivos e mostra a duração final e avisos. | `dmaker validate projects\meu-reel\spec.json` |
 
 **Render**

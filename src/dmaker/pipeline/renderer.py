@@ -9,20 +9,23 @@ from .. import config
 from ..config import ensure_dirs
 from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
+from ..domain.sfx import plan_sfx
 from ..domain.spec import Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
 from ..domain.tracks import apply_track_state
+from ..filtergraph.sfx import voice_reference_db
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, build_assembly
+from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
 from .segments import MezzanineBuilder
+from .sfx import SfxTrack, level_tracks, resolve_files
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
@@ -64,6 +67,7 @@ class RenderPipeline:
         self.voiceover = VoiceoverPreparer(voice_library)
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
+        self.voice_level = VoiceLevelMeter()
         self.log = log or (lambda message: None)
         self.sync = SyncResolver(
             offset_finder or ffmpeg_offset_finder(self.runner), self.log, prober=self.prober
@@ -149,6 +153,9 @@ class RenderPipeline:
             )
         )
 
+        # um som que não existe falha agora, e não depois de minutos de mezaninos
+        resolve_files(p, plan_sfx(p, timeline_spans(durations, transitions)))
+
         prepared = self.mezzanines.prepare(ctx, sources)
         pending = sum(1 for item in prepared if item.command is not None)
         ctx.log(f"trechos: {len(prepared)} ({pending} a gerar, {len(prepared) - pending} em cache)")
@@ -171,8 +178,9 @@ class RenderPipeline:
         layer.doc.write(ctx.job_dir / "overlay.ass")
 
         music_path = self._music_path()
+        sfx = self._effects(ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays)
         measured, normalize = self._loudness(
-            ctx, prepared, transitions, music_path, total, voiceovers, layer.video_overlays
+            ctx, prepared, transitions, music_path, total, voiceovers, layer.video_overlays, sfx
         )
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,6 +196,7 @@ class RenderPipeline:
             out_path,
             voiceovers,
             provenance=self._provenance(ctx, voiceovers, total),
+            sfx=sfx,
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -228,7 +237,7 @@ class RenderPipeline:
                 "overlays": [],
                 "captions": None,
                 "audio": project.audio.model_copy(
-                    update={"narration": []}
+                    update={"narration": [], "sfx": []}
                 ),  # tempos absolutos não valem no recorte
             }
         )
@@ -256,8 +265,36 @@ class RenderPipeline:
             return ""
         return ctx.narrator.provenance(voice_spans(voiceovers), total)
 
+    def _effects(
+        self, ctx, prepared, transitions, spans, total, voiceovers, video_overlays=()
+    ) -> list[SfxTrack]:
+        """Efeitos sonoros do projeto (`audio.sfx` e os de entrada), com o nível acertado contra a voz.
+
+        A voz é medida sozinha (barato, só áudio) e só quando há efeitos; na simulação não se mede nada.
+        """
+        items = plan_sfx(ctx.project, spans)
+        if not items:
+            return []
+        resolved = resolve_files(ctx.project, items)
+        reference = None
+        if not ctx.options.dry_run:
+            voice = self.voice_level.measure(ctx, prepared, transitions, total, voiceovers, video_overlays)
+            if voice is not None:
+                audio = ctx.project.audio
+                target = None if audio.normalize == "off" else audio.target_lufs
+                reference = voice_reference_db(voice.loudness, voice.true_peak, target)
+        ctx.log(
+            f"efeitos sonoros: {len(items)}"
+            + (
+                f" (pico de referência da voz {reference:.1f} dBFS)"
+                if reference is not None
+                else " (sem voz medida)"
+            )
+        )
+        return level_tracks(resolved, reference)
+
     def _loudness(
-        self, ctx, prepared, transitions, music_path, total, voiceovers, video_overlays=()
+        self, ctx, prepared, transitions, music_path, total, voiceovers, video_overlays=(), sfx=()
     ) -> tuple[dict | None, bool]:
         """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição
         alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só."""
@@ -265,7 +302,7 @@ class RenderPipeline:
         if mode == "off" or ctx.options.dry_run:
             return None, mode != "off"
         measure = self.loudness.measure(
-            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays
+            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx
         )
         if measure.silent:
             ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")

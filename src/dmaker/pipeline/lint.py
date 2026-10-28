@@ -83,6 +83,7 @@ def lint(
     if captions and captions.enabled and captions.source == "auto" and project.audio.mute_clips:
         warnings.append("Legendas automáticas com audio.mute_clips: não há voz para transcrever.")
     warnings += _narration_warnings(project, total, known_voices)
+    warnings += _sfx_warnings(project, total)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:
@@ -112,6 +113,17 @@ def _silent_clip_reason(seg: ClipSegment, info: MediaInfo) -> str | None:
     if seg.mute or seg.volume <= 0:
         return "está mudo"
     return None if info.has_audio else "não tem áudio"
+
+
+def _sfx_warnings(project: Project, total: float) -> list[str]:
+    """Efeito sonoro marcado depois do fim do vídeo (a mixagem o corta) ou que nunca soaria (sem volume)."""
+    warnings = []
+    for i, cue in enumerate(project.audio.sfx):
+        if cue.at >= total:
+            warnings.append(f"audio.sfx[{i}]: toca em {cue.at:g}s, depois do fim do vídeo ({total:.1f}s).")
+        elif cue.volume <= 0:
+            warnings.append(f"audio.sfx[{i}]: volume 0, o efeito não toca.")
+    return warnings
 
 
 def _narration_warnings(project: Project, total: float, known_voices: Collection[str] | None) -> list[str]:
