@@ -6,6 +6,7 @@ from collections.abc import Collection, Sequence
 
 from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
+from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
 from ..domain.spec import AudiogramOverlay, ClipSegment, Project
 from ..domain.tracks import known_track_ids
@@ -34,6 +35,7 @@ def lint(
     arquivos é conferida, porque medir a duração exige o ffprobe."""
     warnings: list[str] = []
     segments = project.timeline
+    _check_look_names(project, theme)
     if preset.max_duration and total > preset.max_duration + 0.01:
         warnings.append(
             f"Duração final {total:.1f}s passa do limite de {preset.platform} {preset.name} ({preset.max_duration:.0f}s)."
@@ -104,6 +106,19 @@ def lint(
         if v1_state and v1_state.hidden:
             warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
     return warnings
+
+
+def _check_look_names(project: Project, theme: Theme) -> None:
+    """Look desconhecido (no projeto ou num trecho) não tem como renderizar: erro antes de gastar o render."""
+    asked = [("look", project.look)] + [
+        (f"timeline[{i}].look", seg.look) for i, seg in enumerate(project.timeline)
+    ]
+    for where, name in asked:
+        if name is not None and not is_no_look(name):
+            try:
+                resolve_look(name, theme.looks)
+            except UnknownLookError as exc:
+                raise ValueError(f"{where}: {exc}") from exc
 
 
 def _silent_clip_reason(seg: ClipSegment, info: MediaInfo) -> str | None:

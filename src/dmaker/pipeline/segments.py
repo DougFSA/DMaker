@@ -13,8 +13,9 @@ from typing import Protocol
 
 from PIL import Image
 
+from ..domain.looks import UnknownLookError, effective_look_name, resolve_look
 from ..domain.presets import SafeZone
-from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Segment
+from ..domain.spec import CardSegment, ClipSegment, ColorAdjust, ImageSegment, Segment
 from ..domain.timeline import segment_duration
 from ..filtergraph.mezzanine import (
     TrackSlice,
@@ -38,7 +39,7 @@ from .isolation import default_isolation_service, progress_logger
 from .sources import Source
 from .track_slices import track_slices
 
-MEZZ_VERSION = "m6"  # muda quando a receita do mezanino muda (invalida o cache)
+MEZZ_VERSION = "m7"  # muda quando a receita do mezanino muda (invalida o cache)
 
 
 def cache_key(*parts: object) -> str:
@@ -73,6 +74,22 @@ def _needs_render(out: Path, ctx: RenderContext) -> bool:
 
 def _label(index: int, ctx: RenderContext) -> str:
     return f"trecho {index + 1}/{len(ctx.project.timeline)}"
+
+
+def segment_look(index: int, segment: Segment, ctx: RenderContext) -> ColorAdjust | None:
+    """Cor e efeitos do look que vale no trecho (o do trecho, ou o do projeto), ou None se ele não leva nenhum."""
+    name = effective_look_name(segment.look, ctx.project.look, segment.color)
+    if name is None:
+        return None
+    try:
+        return resolve_look(name, ctx.theme.looks).color
+    except UnknownLookError as exc:
+        raise ValueError(f"timeline[{index}]: {exc}") from exc
+
+
+def _look_part(look: ColorAdjust | None) -> dict | None:
+    """O look entra na chave pelo conteúdo, não pelo nome: mudar um look da marca invalida os trechos dele."""
+    return look.model_dump(mode="json") if look is not None else None
 
 
 def _default_variant(ctx: RenderContext) -> str:
@@ -203,9 +220,11 @@ class ClipPreparer:
             else None
         )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        look = segment_look(index, segment, ctx)
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),  # inclui o audio_mode
+            _look_part(look),
             str(source.path),
             source.stat_key(),
             W,
@@ -250,6 +269,7 @@ class ClipPreparer:
             camera_audio=camera_audio.path if camera_audio else None,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
+            look=look,
             label=_label(index, ctx),
         )
         return PreparedSegment(
@@ -272,9 +292,11 @@ class ImagePreparer:
         W, H = ctx.width, ctx.height
         mode = resolve_reframe_mode(segment.reframe.mode, info.width, info.height, W, H, ctx.has_brand)
         theme_part = _theme_signature(ctx) if mode == "brand" else None
+        look = segment_look(index, segment, ctx)
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),
+            _look_part(look),
             str(source.path),
             source.stat_key(),
             W,
@@ -303,6 +325,8 @@ class ImagePreparer:
                 ctx.fps,
                 out,
                 _label(index, ctx),
+                look=look,
+                size=(W, H),
             )
         else:
             src_w, src_h = source_size_for(W, H, segment.motion_amount)
@@ -325,6 +349,7 @@ class ImagePreparer:
                 ctx.fps,
                 out,
                 _label(index, ctx),
+                look=look,
             )
         return PreparedSegment(
             index, segment, duration, out, tone, command if _needs_render(out, ctx) else None
@@ -348,8 +373,16 @@ class CardPreparer:
                 )
             bg_path = theme.resolve_asset(layout["background"])
             bg_mtime = bg_path.stat().st_mtime if bg_path.exists() else None
+        look = segment_look(index, segment, ctx)
         key = cache_key(
-            MEZZ_VERSION, segment.model_dump(mode="json"), W, H, ctx.fps, _theme_signature(ctx), bg_mtime
+            MEZZ_VERSION,
+            segment.model_dump(mode="json"),
+            _look_part(look),
+            W,
+            H,
+            ctx.fps,
+            _theme_signature(ctx),
+            bg_mtime,
         )
         out = ctx.cache_dir / f"{key}.mov"
         tone = segment.variant or _default_variant(ctx)
@@ -390,6 +423,8 @@ class CardPreparer:
                 ctx.fps,
                 out,
                 _label(index, ctx),
+                look=look,
+                size=(W, H),
             )
         else:
             src_w, src_h = source_size_for(W, H, segment.motion_amount)
@@ -411,6 +446,7 @@ class CardPreparer:
                 ctx.fps,
                 out,
                 _label(index, ctx),
+                look=look,
             )
         return PreparedSegment(
             index, segment, duration, out, tone, command if _needs_render(out, ctx) else None

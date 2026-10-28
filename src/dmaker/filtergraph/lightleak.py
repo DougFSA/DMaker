@@ -16,6 +16,10 @@ from .common import even
 from .expressions import lookup, number
 
 Rgb = tuple[int, int, int]
+# Intensidade ou posição do feixe: uma tabela com um valor por quadro, ou uma expressão do número do quadro `N`
+# (para quem dirige o feixe por uma fórmula, como o acabamento de um trecho comprido: uma tabela de 120 quadros
+# estoura o limite de tamanho da linha de comando do Windows).
+Track = Sequence[float] | str
 
 # O feixe é calculado em um quadro 16 vezes menor em cada lado: 1080x1920 vira 66x120, 8 mil pixels em vez de 2
 # milhões (a expressão do `geq` roda por pixel e por plano, e era o maior custo da troca: 26 ms por quadro com
@@ -45,15 +49,19 @@ def _channel(look: LeakLook, index: int, beam: str) -> str:
     return f"{edge}+({mid}-{edge})*min(1,2*{beam})+({core}-{mid})*max(0,2*{beam}-1)"
 
 
-def leak_expressions(look: LeakLook, intensity: Sequence[float], position: Sequence[float]) -> dict[str, str]:
+def _track(values: Track) -> str:
+    return values if isinstance(values, str) else lookup(values, "N", 4)
+
+
+def leak_expressions(look: LeakLook, intensity: Track, position: Track) -> dict[str, str]:
     """Expressões do `geq` (r, g, b, a) de um quadro do vazamento.
 
     `position` é onde o centro do feixe está (0 = borda esquerda, 1 = direita; fora disso o feixe está fora do
     quadro) e `intensity` (0 a 1) quanto da luz aparece, ambos por quadro. O feixe é uma gaussiana na
     coordenada inclinada `X/W + tilt * (Y/H - 0,5)`.
     """
-    centre = lookup(position, "N", 4)
-    strength = lookup(intensity, "N", 4)
+    centre = _track(position)
+    strength = _track(intensity)
     coordinate = f"(X/W+{number(look.tilt)}*(Y/H-0.5))"
     beam = f"exp(-pow(({coordinate}-({centre}))/{number(look.width)},2))"
     floor = number(look.floor)
@@ -71,17 +79,23 @@ def light_leak_source(
     size: tuple[int, int],
     fps: float,
     look: LeakLook,
-    intensity: Sequence[float],
-    position: Sequence[float],
+    intensity: Track,
+    position: Track,
+    frames: int | None = None,
 ) -> list[str]:
     """Linhas que geram o vazamento em `out` (yuva420p, tamanho `size`, um quadro por entrada das tabelas).
 
     Os timestamps são 0, 1/fps, 2/fps..., os mesmos que as janelas de transição usam, para o `overlay` emparelhar
-    cada quadro do vazamento com o seu quadro de vídeo.
+    cada quadro do vazamento com o seu quadro de vídeo. Com tabelas, `frames` é o tamanho delas; com expressões,
+    quem chama diz quantos quadros o fluxo tem.
     """
-    if len(intensity) != len(position):
+    tables = [track for track in (intensity, position) if not isinstance(track, str)]
+    if any(len(table) != len(tables[0]) for table in tables):
         raise ValueError("intensity e position precisam ter um valor por quadro")
-    frames = len(intensity)
+    if frames is None:
+        if not tables:
+            raise ValueError("com expressões, informe quantos quadros o vazamento tem")
+        frames = len(tables[0])
     width, height = size
     small_w, small_h = even(width / DOWNSCALE), even(height / DOWNSCALE)  # par: o yuv420p subamostra o croma
     expressions = ":".join(

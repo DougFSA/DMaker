@@ -57,6 +57,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { key: 'outputs', label: 'Saídas', to: '/saidas', icon: 'video', ready: true },
   { key: 'transitions', label: 'Transições', to: '/transicoes', icon: 'sparkles', ready: true },
+  { key: 'looks', label: 'Looks', to: '/looks', icon: 'grid', ready: true },
 ]
 
 /** Onde a interface anterior continua disponível enquanto a nova não cobre tudo. */

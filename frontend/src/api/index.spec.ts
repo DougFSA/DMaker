@@ -78,6 +78,18 @@ describe('cliente da API', () => {
     expect(api.transitions.sheetUrl('whippan', 'spring')).toBe('/api/transitions/whippan/sheet?curve=spring')
   })
 
+  it('pede o catálogo de looks e monta as URLs das folhas, com a marca só quando ela existe', async () => {
+    await api.looks.catalog()
+    expect(lastCall()).toMatchObject({ url: '/api/looks', method: 'GET' })
+    await api.looks.catalog('minha marca')
+    expect(lastCall().url).toBe('/api/looks?brand=minha%20marca')
+    expect(api.looks.sheetUrl('pb-contraste')).toBe('/api/looks/pb-contraste/sheet')
+    expect(api.looks.sheetUrl('cinema', 'default')).toBe('/api/looks/cinema/sheet')
+    expect(api.looks.sheetUrl('cinema', 'medlycare')).toBe('/api/looks/cinema/sheet?brand=medlycare')
+    expect(api.looks.overviewUrl()).toBe('/api/looks/sheet')
+    expect(api.looks.overviewUrl('medlycare')).toBe('/api/looks/sheet?brand=medlycare')
+  })
+
   it('navega pelo servidor com o caminho codificado', async () => {
     await api.files.browse('D:/Vídeos/casa')
     expect(lastCall().url).toBe(`/api/browse?path=${encodeURIComponent('D:/Vídeos/casa')}`)

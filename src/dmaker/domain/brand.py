@@ -43,6 +43,7 @@ DEFAULT_THEME = {
         "card_variant": "dark",
     },
     "card_layouts": {},
+    "looks": {},
 }
 
 
@@ -70,6 +71,7 @@ class Theme:
     style: dict = field(default_factory=dict)
     captions: dict = field(default_factory=dict)
     card_layouts: dict[str, dict] = field(default_factory=dict)
+    looks: dict[str, dict] = field(default_factory=dict)  # acabamentos visuais da marca (ver domain/looks.py)
     base_dir: Path | None = None  # pasta da marca, para resolver fundos, imagens e fontes de layout
     key: str = "default"
 
@@ -129,7 +131,7 @@ class Theme:
 
 def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
     merged = json.loads(json.dumps(DEFAULT_THEME))
-    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts"):
+    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts", "looks"):
         merged[section].update(data.get(section, {}))
     merged["name"] = data.get("name", merged["name"])
     logos = {}
@@ -157,6 +159,7 @@ def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
         style=merged["style"],
         captions=merged["captions"],
         card_layouts=merged["card_layouts"],
+        looks=merged["looks"],
         base_dir=base,
         key=key,
     )
@@ -186,7 +189,7 @@ def load_theme(name: str | None = None, overrides: dict | None = None) -> Theme:
                 )
             theme = _from_dict(json.loads(spec.read_text(encoding="utf-8")), folder, name)
     if overrides:
-        for section in ("colors", "fonts", "rules", "cta", "style", "captions"):
+        for section in ("colors", "fonts", "rules", "cta", "style", "captions", "looks"):
             if section in overrides:
                 getattr(theme, section).update(overrides[section])
         theme.colors = {k: normalize_hex(v) for k, v in theme.colors.items()}
