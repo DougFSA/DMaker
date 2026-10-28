@@ -38,6 +38,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 - **DMK-33**: legendas no estilo TikTok: novo modo `captions.style.mode: "rounded"`, em que cada linha ganha uma caixa de fundo do tamanho dela, de cantos arredondados, e as caixas de linhas de larguras diferentes se emendam com curvas suaves (desenho vetorial, nítido em qualquer resolução); o destaque da palavra ativa continua por cima da caixa. Os textos sobrepostos (gancho, título, CTA) ganham o mesmo desenho com `style.box_shape: "rounded"`. Raio e margem da caixa vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` do `brand.json`, padrão 28 px na base 1080). O modo `boxed` segue como era.
 
+### Fixed
+
+- **DMK-37**: o play da linha do tempo na interface clássica não tocava o som que vem da mesa e das faixas externas. A vista mandava cada faixa de `audio.tracks` como um item corrido de 0 ao fim, sem fatiar pelos cortes, e o player tocava só o primeiro item de cada trilha (a música com vários spans perdia as outras janelas), buscava tempo negativo quando o gravador entrava depois da câmera, abria sempre o primeiro arquivo de uma fonte em `parts` e ignorava volume de faixa, volume da música, `mute_clips` e o mudo da A1. Agora a vista fatia cada faixa por clipe com a mesma conta do render (`pipeline/track_slices.py`, usada também pelo mezanino: arquivo, ponto no arquivo, atraso e velocidade do clipe), aponta V1, A1 e faixas para a parte que grava cada instante, e o player toca em cada trilha só o item do instante, num `<audio>` por trilha, com o volume do item e os mudos aplicados; os proxies passam a cobrir todas as partes.
+
 ## v1 — 2026-10-27
 
 ### Added

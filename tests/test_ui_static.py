@@ -254,6 +254,125 @@ def test_player_and_media_js_prefer_resolved_path():
     assert "buildResolvedPathMap" in media_js and "item.path" in media_js
 
 
+def _run_player_pure(expression: str):
+    """Avalia `expression` com as funções puras de player.js carregadas num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(PLAYER))});"
+        "const pure = window.DMakerPlayer.pure;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _run_timeline_api(expression: str):
+    """Avalia `expression` com a API pública de timeline.js carregada num `window` falso."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(TIMELINE))});"
+        "const api = window.DMakerTimeline;"
+        f"console.log(JSON.stringify({expression}));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@requires_node
+def test_player_audio_track_plays_only_the_item_covering_the_instant():
+    items = "[{id:'a',start:0,end:10},{id:'b',start:15,end:20}]"
+    ids = _run_player_pure(
+        f"[0, 9.99, 10, 12, 15, 19.9, 20, -1].map((t) => (pure.itemAt({items}, t) || {{}}).id || null)"
+    )
+    assert ids == ["a", "a", None, None, "b", "b", None, None]  # entre itens e fora deles: nenhum
+    assert _run_player_pure("pure.itemAt([], 3)") is None
+
+
+@requires_node
+def test_player_file_time_uses_the_in_point_already_in_the_file_for_sliced_items():
+    # item fatiado: in_point já é tempo no arquivo e `extra.offset` zero, então o deslocamento da fonte não entra
+    sliced = "{in_point:23,start:10,source:'mesa',extra:{offset:0}}"
+    assert _run_player_pure(f"pure.fileTime({sliced}, 14, 1, () => 99)") == 27
+    # item antigo (A1, PiP): in_point em tempo de sessão, menos o deslocamento da fonte nomeada
+    legacy = "{in_point:30,start:10,source:'cam2',extra:{}}"
+    assert _run_player_pure(f"pure.fileTime({legacy}, 14, 1, () => 12.5)") == 21.5
+    assert _run_player_pure(f"pure.fileTime({sliced}, 14, 2, () => 0)") == 31  # clipe a 2x avança o dobro
+
+
+@requires_node
+def test_player_never_seeks_to_a_negative_time_or_past_the_end_of_the_file():
+    assert _run_player_pure("[-0.5, -30].map((t) => pure.playableTime(t, 60, false))") == [None, None]
+    assert _run_player_pure("pure.playableTime(12, 60, false)") == 12
+    assert _run_player_pure("pure.playableTime(60, 60, false)") is None  # passou do fim: pausa
+    assert _run_player_pure("pure.playableTime(75, 60, true)") == 15  # música em loop dá a volta
+    assert _run_player_pure("pure.playableTime(12, NaN, false)") == 12  # metadados ainda não chegaram
+
+
+@requires_node
+def test_player_clip_of_a_source_with_parts_plays_the_file_that_records_the_instant():
+    item = (
+        "{in_point:50,start:0,source:'cam1',extra:{pieces:["
+        "{start:0,end:10,in_point:50,path:'a.mp4'},{start:10,end:20,in_point:0,path:'b.mp4'}]}}"
+    )
+    assert _run_player_pure(f"pure.clipPlayback({item}, 4, 1, () => 0, 'a.mp4')") == {
+        "path": "a.mp4",
+        "fileTime": 54,
+    }
+    assert _run_player_pure(f"pure.clipPlayback({item}, 12, 1, () => 0, 'a.mp4')") == {
+        "path": "b.mp4",
+        "fileTime": 2,
+    }
+    plain = "{in_point:7,start:3,source:'cam1',extra:{}}"
+    assert _run_player_pure(f"pure.clipPlayback({plain}, 5, 1, () => 2, 'c.mp4')") == {
+        "path": "c.mp4",
+        "fileTime": 7,
+    }
+
+
+@requires_node
+def test_player_gain_is_item_volume_times_master_and_honors_every_mute():
+    item = "{muted:false,extra:{volume:0.5}}"
+    assert _run_player_pure(f"pure.audioGain({item}, false, 0.8)") == {"muted": False, "volume": 0.4}
+    assert _run_player_pure(f"pure.audioGain({item}, true, 1)") == {"muted": True, "volume": 0}  # trilha muda
+    assert _run_player_pure("pure.audioGain({muted:true,extra:{}}, false, 1)")["muted"] is True  # item mudo
+    assert _run_player_pure("pure.audioGain({muted:false,extra:{volume:0}}, false, 1)")["muted"] is True
+    assert (
+        _run_player_pure("pure.audioGain({muted:false,extra:{volume:3}}, false, 1)")["volume"] == 1
+    )  # teto do elemento
+    assert (
+        _run_player_pure("pure.audioGain({muted:false}, false, 0.6)")["volume"] == 0.6
+    )  # sem volume: só o geral
+
+
+@requires_node
+def test_timeline_waveform_of_a_sliced_track_item_reads_the_file_directly():
+    view = "{sources:{mesa:{offset:-3}}}"
+    track = "{id:'A2'}"
+    item = "{in_point:23,start:10,end:20,source:'mesa',path:'mesa.wav',extra:{offset:0,speed:1}}"
+    window = _run_timeline_api(f"api.waveformWindow({view}, {track}, {item}, null)")
+    assert (window["path"], window["start"], window["end"]) == ("mesa.wav", 10, 20)
+    ends = _run_timeline_api(
+        f"(() => {{ const w = api.waveformWindow({view}, {track}, {item}, null); return [w.fileTimeAt(10), w.fileTimeAt(15)]; }})()"
+    )
+    assert ends == [23, 28]  # o deslocamento -3 da fonte não é descontado de novo
+
+
+@requires_node
+def test_timeline_waveform_of_a_clip_across_parts_draws_one_canvas_per_file():
+    item = (
+        "{in_point:50,start:0,end:20,path:'a.mp4',source:'cam1',extra:{speed:1,pieces:["
+        "{start:0,end:10,in_point:50,path:'a.mp4'},{start:10,end:20,in_point:0,path:'b.mp4'}]}}"
+    )
+    assert _run_timeline_api(f"api.waveformCanvasesHtml({item})").count("<canvas") == 2
+    assert _run_timeline_api("api.waveformCanvasesHtml({extra:{}})").count("<canvas") == 1
+    second = _run_timeline_api(
+        f"(() => {{ const w = api.waveformWindow({{}}, {{id:'A1'}}, {item}, 1); return [w.path, w.start, w.end, w.fileTimeAt(12)]; }})()"
+    )
+    assert second == ["b.mp4", 10, 20, 2]
+
+
 def test_voice_file_exists_and_is_referenced_before_app_js():
     assert VOICE.is_file(), "voice.js não encontrado"
     html = INDEX.read_text(encoding="utf-8")

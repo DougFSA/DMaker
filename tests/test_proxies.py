@@ -123,6 +123,18 @@ def test_project_video_sources_dedupes_resolves_and_ignores_non_video(tmp_path):
     assert all(p.parent == tmp_path.resolve() for p in result)  # resolvidos pelo base_dir
 
 
+def test_project_video_sources_includes_every_part_of_a_source_with_parts(tmp_path):
+    """O trecho pode cair em qualquer parte e a prévia toca a que grava o instante: todas ganham proxy."""
+    project = _project(
+        tmp_path,
+        timeline=[{"type": "clip", "source": "cam1"}],
+        overlays=[{"type": "video", "source": "cam1"}],  # a mesma fonte no PiP: sem repetir as partes
+        sources={"cam1": {"parts": ["cam1_a.mp4", "cam1_b.mp4", "cam1_c.mp4"]}},
+    )
+    result = project_video_sources(project)
+    assert [p.name for p in result] == ["cam1_a.mp4", "cam1_b.mp4", "cam1_c.mp4"]
+
+
 # ---------- pipeline/proxies.py: ProxyBuilder ----------
 
 

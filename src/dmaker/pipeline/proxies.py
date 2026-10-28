@@ -41,18 +41,20 @@ def proxy_path(src: Path) -> Path:
     return config.PROXY_DIR / f"{digest}.mp4"
 
 
-def _origin_path(project: Project, src: str | None, source: str | None) -> str:
-    """Caminho (ainda relativo ao projeto) de um clipe ou PiP: `src` direto ou o de uma fonte nomeada.
-    Fonte com `parts` entra pelo primeiro arquivo (a prévia troca de parte não é feita aqui)."""
+def _origin_paths(project: Project, src: str | None, source: str | None) -> list[str]:
+    """Caminhos (ainda relativos ao projeto) de um clipe ou PiP: `src` direto ou todos os arquivos de
+    uma fonte nomeada. Fonte com `parts` entra por inteiro, porque o trecho pode cair em qualquer
+    parte e a prévia toca a que grava aquele instante."""
     if src:
-        return src
+        return [src]
     assert source is not None  # garantido pelo validador de ClipSegment/VideoOverlay (um dos dois)
-    return project.sources[source].files[0]
+    return project.sources[source].files
 
 
 def project_video_sources(project: Project) -> list[Path]:
     """Vídeos usados nos clipes e nas sobreposições de PiP da linha do tempo, resolvidos pelo
-    `base_dir` do projeto e sem repetir (cartões e imagens não entram)."""
+    `base_dir` do projeto e sem repetir (cartões e imagens não entram). Fonte com `parts` traz todas
+    as partes."""
     paths: list[Path] = []
     seen: set[Path] = set()
 
@@ -65,10 +67,12 @@ def project_video_sources(project: Project) -> list[Path]:
 
     for seg in project.timeline:
         if isinstance(seg, ClipSegment):
-            add(_origin_path(project, seg.src, seg.source))
+            for raw in _origin_paths(project, seg.src, seg.source):
+                add(raw)
     for overlay in project.overlays:
         if isinstance(overlay, VideoOverlay):
-            add(_origin_path(project, overlay.src, overlay.source))
+            for raw in _origin_paths(project, overlay.src, overlay.source):
+                add(raw)
     return paths
 
 
