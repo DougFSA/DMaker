@@ -249,7 +249,13 @@ A `timeline` é a lista, em ordem, do que aparece no vídeo. Três tipos:
 
 Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do trecho anterior: `cut`,
 `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `zoomin`, `circleopen` etc.,
-nomes do `xfade` do FFmpeg), reenquadramento (`reframe`, ver seção 7.3) e ajuste de cor.
+nomes do `xfade` do FFmpeg, mais as de movimento do DMaker: `crosszoom` (zoom de passagem), `whippan`
+(chicote com borrão), `blurslide` (desfoque deslizando), `filmburn` (queima de filme) e `lightleak`
+(vazamento de luz)), reenquadramento (`reframe`, ver seção 7.3) e ajuste de cor. A `transition` aceita
+ainda uma `curve` (`linear`, `ease` ou `spring`) que muda o ritmo da troca: a mola corre, passa um pouco
+do ponto e assenta. Para ver o que cada transição faz, rode `dmaker transitions list` e
+`dmaker transitions sheet <nome>` (folha de contato em `output/transitions`), ou abra a tela
+**Transições** da interface nova.
 
 ### 3.5 Sobreposições (overlays)
 

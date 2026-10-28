@@ -61,6 +61,12 @@ describe('cliente da API', () => {
     expect(lastCall()).toMatchObject({ url: '/api/jobs/finished', method: 'DELETE' })
   })
 
+  it('pede o catálogo de transições e monta a URL da folha de contato', async () => {
+    await api.transitions.catalog()
+    expect(lastCall()).toMatchObject({ url: '/api/transitions', method: 'GET' })
+    expect(api.transitions.sheetUrl('whippan', 'spring')).toBe('/api/transitions/whippan/sheet?curve=spring')
+  })
+
   it('navega pelo servidor com o caminho codificado', async () => {
     await api.files.browse('D:/Vídeos/casa')
     expect(lastCall().url).toBe(`/api/browse?path=${encodeURIComponent('D:/Vídeos/casa')}`)

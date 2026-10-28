@@ -199,3 +199,17 @@ export interface BrowseResponse {
   dirs: string[]
   files: Array<{ path: string; name: string; size_mb: number }>
 }
+
+export type TransitionCurve = 'linear' | 'ease' | 'spring'
+
+/** Item de GET /api/transitions: `motion` são as de movimento do DMaker, `xfade` as do FFmpeg. */
+export interface TransitionInfo {
+  name: string
+  kind: 'motion' | 'xfade'
+  summary: string
+}
+
+export interface TransitionCatalog {
+  curves: TransitionCurve[]
+  transitions: TransitionInfo[]
+}
