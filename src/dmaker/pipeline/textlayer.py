@@ -17,7 +17,7 @@ from ..domain.spec import (
     VideoOverlay,
     parse_aspect,
 )
-from ..domain.timeline import tone_for
+from ..domain.timeline import behind_person_intervals, tone_for
 from ..filtergraph.audiogram import ResolvedAudiogram
 from ..filtergraph.common import even
 from ..filtergraph.overlays import ResolvedImageOverlay
@@ -36,14 +36,24 @@ PIP_SHORT_TOLERANCE = 0.5  # s: o vídeo do PiP pode terminar um pouco antes do 
 
 @dataclass
 class TextLayer:
+    """`doc` é o ASS da frente (tudo que fica sobre a pessoa); `behind_doc` leva só os textos `behind-person`, que
+    a montagem desenha antes de pôr a pessoa recortada por cima. `behind_intervals` são os intervalos desses
+    textos já juntados: só neles o render paga o recorte."""
+
     doc: AssDoc
+    behind_doc: AssDoc
     image_overlays: list[ResolvedImageOverlay] = field(default_factory=list)
     video_overlays: list[ResolvedVideoOverlay] = field(default_factory=list)
     audiograms: list[ResolvedAudiogram] = field(default_factory=list)
+    behind_intervals: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def has_text(self) -> bool:
         return bool(self.doc.events)
+
+    @property
+    def has_behind_text(self) -> bool:
+        return bool(self.behind_doc.events)
 
 
 def resolve_overlay_image(project: Project, theme: Theme, src: str) -> Path:
@@ -185,14 +195,20 @@ def build_text_layer(
     """`has_voice` diz se o projeto tem voz (decide o áudio que um audiograma `auto` segue)."""
     project = ctx.project
     canvas = Canvas(ctx.width, ctx.height, ctx.preset.safe, ctx.theme, total)
-    layer = TextLayer(AssDoc(ctx.width, ctx.height, project.name))
+    layer = TextLayer(
+        AssDoc(ctx.width, ctx.height, project.name),
+        behind_doc=AssDoc(ctx.width, ctx.height, project.name),
+        behind_intervals=behind_person_intervals(project.overlays, total),
+    )
     text_index = 0
     for overlay in project.overlays:
         if isinstance(overlay, TextOverlay):
             overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             end = min(overlay.end if overlay.end is not None else total, total)
             tone = tone_for(overlay.start, end, spans, tones)
-            add_text_overlay(layer.doc, canvas, overlay, text_index, tone=tone)
+            # cada texto vai ao ASS da sua camada; o índice é um só, para os estilos não colidirem entre os dois
+            target = layer.behind_doc if overlay.layer == "behind-person" else layer.doc
+            add_text_overlay(target, canvas, overlay, text_index, tone=tone)
             text_index += 1
         elif isinstance(overlay, ProgressBar):
             add_progress_bar(layer.doc, canvas, overlay)

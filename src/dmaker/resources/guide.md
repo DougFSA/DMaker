@@ -139,7 +139,7 @@ Regras e valores:
 - **audio_fade** (só em `clip`, segundos, padrão 0): fade de áudio nas duas pontas do clipe, sem escurecer a imagem (ao contrário de `fade_in`/`fade_out`). Tira o estalo de um corte seco no meio da fala; o `autocut` usa 0,01.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette` (`true`, ou uma intensidade de 0 a 1), `lut` (.cube), `extra` (filtro ffmpeg cru) e os efeitos de acabamento `glow`, `aberration`, `light_leak` e `grain` (0 a 1 cada; ver "Looks e acabamento").
 - **look** (na raiz do projeto ou num trecho): nome de um acabamento pronto, como `"look": "cinema"`. Os nomes e a regra de qual vale em cada trecho estão em "Looks e acabamento" abaixo.
-- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada.
+- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada. `layer`: `front` (padrão, na frente de tudo) ou `behind-person` (o texto fica entre o fundo e a pessoa; ver "Texto atrás da pessoa" abaixo).
 - **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`, `shape` (`rect`, padrão, ou `circle`, que recorta o maior quadrado central da imagem num círculo, como a foto do audiograma).
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
 - **audiogram** (`type: "audiogram"`): a onda ou as barras do áudio, animadas no ritmo dele, para divulgar um corte de podcast, entrevista ou áudio de WhatsApp. `style` wave, bars ou circle; `follow` auto, voice ou mix; `color`, `position`/`x`/`y`/`region`, `width`/`height`, `inner_radius`, `start`/`end`. Ver a seção "Audiograma" abaixo.
@@ -242,6 +242,28 @@ Um **look** é um acabamento visual pronto, com nome: ajuste de cor mais os efei
 - **Custo**: o grão é o que pesa no arquivo, porque o x264 gasta bits nele, e gasta uns 3 a 4 MB a cada 10 s em 1080x1920 qualquer que seja a cena. Em porcentagem isso depende do vídeo: numa cena de muito detalhe (uns 9 Mbps, 11,8 MB por 10 s) o arquivo final cresceu 17% com `grain` 0.25 e 21% com 0.35 (o look `cinema` inteiro chega a 37%, perto do teto de 12 Mbps do Reels, que segura o resto); numa cena de pouco detalhe (4 MB por 10 s) cresceu 81% com 0.25; numa cena parada e limpa, de uns 0,3 MB, passa dos 4 MB. Para um vídeo curto que precisa ficar leve, `grain` baixo ou `"look": "frio"` ou `"quente"`, que não têm grão. Cada efeito soma também de 1 a 5 s de CPU por 10 s de vídeo (o vazamento de luz é o mais caro), e o trecho pronto fica em cache enquanto a spec não mudar.
 
 Para ver cada look sem montar um projeto: `dmaker looks list` (tabela com os looks e os efeitos de cada um; `--brand` soma os da marca) e `dmaker looks sheet <nome|all>`, que gera a folha de contato (a mesma cena de teste sem acabamento e com o look, lado a lado) em `output/looks`. Na interface nova, a tela **Looks** mostra a folha de cada um, com o trecho de spec pronto para copiar.
+
+### Texto atrás da pessoa (efeito de profundidade)
+
+Para o título grande que fica atrás de quem fala e na frente da parede, como se estivesse no cenário (muito usado em Reels), ponha `"layer": "behind-person"` no texto. O padrão é `"front"`, na frente de tudo. O DMaker recorta a pessoa com a mesma rede neural do `matte` (RVM, sem modelo novo nem chroma key) e a põe por cima do texto, só do `start` ao `end` dele.
+
+```json
+{
+  "timeline": [{"type": "clip", "src": "gravacao.mp4", "start": 0, "end": 12}],
+  "overlays": [
+    {"type": "text", "text": "CINCO CAMADAS", "role": "title", "layer": "behind-person",
+     "start": 0, "end": 3, "position": "center", "animation": "fade",
+     "style": {"size": 190, "color": "#FFFFFF", "outline": 0}}
+  ]
+}
+```
+
+- **Ordem das camadas**, de baixo para cima: o vídeo, os textos `behind-person`, a pessoa recortada e só então imagens, picture-in-picture, audiogramas, textos `front` e legendas. As legendas ficam sempre na frente.
+- **Onde o recorte vale**: sobre o que o vídeo final mostra (enquadramento, velocidade, look e transições já aplicados), só nos quadros do intervalo do texto. O resto do vídeo sai idêntico ao render sem o efeito. Textos `behind-person` que se sobrepõem no tempo dividem um recorte só.
+- **Custo**: roda na CPU, perto de 0,5 s por quadro em 1080x1920 com o `resnet50` (num teste, 3 s de efeito somaram uns 50 s ao render e 6 s uns 105 s, contando 12 quadros de aquecimento do modelo por intervalo). O recorte fica em cache por conteúdo: um segundo render sem mudança não recorta de novo (4 s contra os 3,8 s do render sem o efeito), e mudar só a frase, a cor ou a posição do texto também reaproveita o recorte. Mudar o intervalo, o trecho, o enquadramento, o look ou o modelo recorta de novo.
+- **Rascunho**: no `--preview` o recorte usa o modelo `mobilenetv3` (2,5x mais rápido; 15 MB que baixam na primeira vez); o render final usa o `resnet50`, com a borda melhor em cabelo e mãos. O modelo entra na chave do cache, então rascunho e render final não se misturam.
+- **Avisos**: `dmaker validate` e `dmaker qa` avisam, em `overlays[N].layer`, quando o intervalo só cobre cartão ou foto: não há pessoa a recortar e o render gastaria o recorte à toa.
+- **Limites**: funciona melhor com a pessoa de frente e a câmera parada, como o `matte`; movimento muito rápido pode errar a borda. A borda vem do primeiro plano que o modelo prevê (sem a cor da parede nos fios de cabelo) e o corpo usa o pixel do próprio vídeo.
 
 ## Vídeos longos, multicâmera e áudio externo
 
@@ -849,7 +871,8 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 ## Depuração
 
 - `dmaker render ... --dry-run` mostra os comandos ffmpeg. Grafos em `cache/jobs/<nome>/graph.pretty.txt`,
-  o ASS (textos/legendas) em `overlay.ass`, comandos em `cmd.txt`.
+  o ASS (textos/legendas) em `overlay.ass` (e o dos textos atrás da pessoa em `overlay_behind.ass`), comandos
+  em `cmd.txt`.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status(job_id)`/`list_jobs()` acompanham um render em segundo plano, local ou na interface.
 - Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade e leva uns 2 min).

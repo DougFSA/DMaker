@@ -280,6 +280,24 @@ Ficam por cima da timeline principal, com seu próprio intervalo de tempo (`star
   `circle`, este em volta da foto), para divulgar um corte de podcast ou um áudio de WhatsApp sem vídeo; ver
   a seção "Audiograma" do `dmaker://guide` e o template `audiograma`.
 
+**Texto atrás da pessoa.** Um texto com `"layer": "behind-person"` (o padrão é `"front"`) fica entre a parede e
+quem fala, como se estivesse no cenário, o efeito de profundidade dos Reels em que o título grande passa atrás
+da cabeça e dos ombros. O DMaker recorta a pessoa com a mesma rede neural do `matte` (sem modelo novo) e a põe
+por cima do texto, só do `start` ao `end` dele; o resto do vídeo não é tocado. A ordem das camadas é: o
+vídeo, o texto, a pessoa, e por cima imagens, picture-in-picture, audiogramas, textos `front` e legendas.
+
+```json
+{"type": "text", "text": "CINCO CAMADAS", "role": "title", "layer": "behind-person",
+ "start": 0, "end": 3, "position": "center", "style": {"size": 190, "color": "#FFFFFF", "outline": 0}}
+```
+
+O recorte roda na CPU (perto de 0,5 s por quadro em 1080x1920: 3 s de efeito somam uns 50 s ao render) e fica em
+cache: um segundo render sem mudança não recorta de novo, e trocar só a frase ou a cor do texto também
+reaproveita o recorte. No `--preview` ele usa o modelo `mobilenetv3`, 2,5x mais rápido (15 MB, que baixam na
+primeira vez); o render final usa o `resnet50`, que acerta melhor o cabelo e as mãos. `dmaker validate` avisa
+quando o intervalo só cobre cartão ou foto, onde não há pessoa a recortar. Funciona melhor com a pessoa de
+frente e a câmera parada. Mais detalhes na seção "Texto atrás da pessoa" do `dmaker://guide`.
+
 ### 3.6 Legendas automáticas
 
 `captions.source: "auto"` transcreve a fala com Whisper (local, sem enviar nada para fora da máquina) e
@@ -1026,7 +1044,8 @@ Dica dois;Agenda online para o paciente;imagens/dica2.png
 
 - `dmaker render ... --dry-run` mostra os comandos ffmpeg sem rodar.
 - Grafo de filtros em `cache/jobs/<job>/graph.pretty.txt`, o texto e as legendas em ASS em
-  `overlay.ass`, os comandos completos em `cmd.txt` (todos dentro da pasta do job usado no render).
+  `overlay.ass` (os textos atrás da pessoa, em `overlay_behind.ass`), os comandos completos em `cmd.txt`
+  (todos dentro da pasta do job usado no render).
 - Um erro do ffmpeg chega com as últimas linhas do `stderr` e o comando completo.
 - `dmaker qa` roda as checagens sem renderizar de novo; com `--output`, confere também um vídeo já
   renderizado (duração, resolução, quadros pretos, silêncio, loudness).

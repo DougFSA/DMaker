@@ -26,6 +26,7 @@ from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
+from .person_layer import PersonLayerBuilder
 from .segments import MezzanineBuilder
 from .sfx import SfxTrack, level_tracks, resolve_files
 from .sources import expand_parts, resolve_session, resolve_sources
@@ -47,6 +48,7 @@ class RenderPipeline:
         prober: Prober = probe,
         transcriber_factory: TranscriberFactory = default_transcriber_factory,
         mezzanines: MezzanineBuilder | None = None,
+        person_layers: PersonLayerBuilder | None = None,
         cache_dir: Path | None = None,
         jobs_dir: Path | None = None,
         output_dir: Path | None = None,
@@ -65,6 +67,7 @@ class RenderPipeline:
         self.prober = prober
         self.matter = matter or RvmMatter()
         self.mezzanines = mezzanines or MezzanineBuilder()
+        self.person_layers = person_layers or PersonLayerBuilder()
         self.narrator = narrator
         self.isolator = isolator
         self.voiceover = VoiceoverPreparer(voice_library)
@@ -184,6 +187,8 @@ class RenderPipeline:
             ctx, total, spans, tones, captions.cues if captions else None, guides, has_voice
         )
         layer.doc.write(ctx.job_dir / "overlay.ass")
+        if layer.has_behind_text:
+            layer.behind_doc.write(ctx.job_dir / "overlay_behind.ass")
 
         music_path = self._music_path()
         sfx = self._effects(
@@ -202,6 +207,7 @@ class RenderPipeline:
         )
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        people = self._person_layers(ctx, prepared, transitions, layer.behind_intervals)
         assembly = build_assembly(
             ctx,
             prepared,
@@ -217,6 +223,7 @@ class RenderPipeline:
             sfx=sfx,
             voice_files=voice_files,
             visual_gain_db=visual_gain,
+            person_layers=[item.layer for item in people],
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -238,6 +245,18 @@ class RenderPipeline:
             job_dir=ctx.job_dir,
             size_bytes=out_path.stat().st_size if out_path.exists() and not o.dry_run else 0,
         )
+
+    def _person_layers(self, ctx, prepared, transitions, intervals):
+        """Recorta a pessoa só nos intervalos de texto `behind-person` (a camada que passa por cima do texto)."""
+        people = self.person_layers.prepare(ctx, prepared, transitions, intervals)
+        if people:
+            pending = sum(1 for item in people if item.commands)
+            ctx.log(
+                f"pessoa atrás do texto: {len(people)} intervalo(s) ({pending} a recortar, "
+                f"{len(people) - pending} em cache), modelo {self.person_layers.model_for(ctx)}"
+            )
+            self.person_layers.build(ctx, people)
+        return people
 
     @staticmethod
     def _sliced(project: Project, options: RenderOptions, ctx: RenderContext) -> Project:

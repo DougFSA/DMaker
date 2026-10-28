@@ -25,6 +25,12 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# Camada de uma sobreposição na pilha de profundidade: "front" fica na frente de tudo; "behind-person" fica entre o
+# fundo e a pessoa recortada (título que parece estar no cenário). É um Literal, e não um booleano, porque outras
+# sobreposições (a composição em HTML) vão usar o mesmo campo e podem ganhar camadas novas.
+OverlayLayer = Literal["front", "behind-person"]
+
+
 # ---------- efeitos sonoros ----------
 
 
@@ -302,6 +308,8 @@ class TextOverlay(Strict):
     animation: Literal["none", "fade", "pop", "slide-up", "typewriter"] | None = None
     style: TextStyle = TextStyle()
     sound: SoundSpec | None = None  # som na entrada do texto (em `start`)
+    # "behind-person": o texto vai entre o fundo e a pessoa, que o recorte (RVM) põe por cima só no intervalo dele
+    layer: OverlayLayer = "front"
 
     @model_validator(mode="after")
     def _region_or_position(self) -> TextOverlay:
