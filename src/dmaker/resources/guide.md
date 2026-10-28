@@ -143,9 +143,61 @@ Regras e valores:
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
 - **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y` ou `region` (o quadro ocupa uma região nomeada); `width` (fração da largura, 0.18 a 0.3 para webcam); `focus` ([x, y], padrão o centro: onde cortar quando a proporção do quadro difere da fonte, como `reframe.focus`); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha), `follow_background` (padrão true: a legenda acompanha o tom claro/escuro do cartão por baixo; false mantém o estilo de quem está sobre vídeo, como no quadro do rosto do `explicativo`). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
-- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
+- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `sfx` (efeitos sonoros num instante marcado, ver "Efeitos sonoros"), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
 - **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa encoder de hardware quando `dmaker doctor` detectar um, mais rápido e com qualidade um pouco menor), `fps`, `thumbnail_at`, `path`.
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.
+
+### Efeitos sonoros (whoosh, pop, clique)
+
+Sons curtos num instante do vídeo: a entrada de um infográfico, a troca de fundo, o fim de uma contagem. Os da
+biblioteca são sintetizados pelo próprio DMaker e ficam em `assets/sfx` (nada é baixado: o render funciona sem
+internet); `dmaker sfx list` mostra o que há e `dmaker sfx build` os gera de novo.
+
+| som | duração | para quê |
+|---|---|---|
+| `whoosh` | 0,75 s | passagem de ar que sobe e some: entrada de elemento, troca de cena |
+| `whip` | 0,3 s | chicote curto e agudo: entradas rápidas |
+| `pop` | 0,16 s | estalo de bolha: texto ou ícone que aparece |
+| `click` | 0,08 s | clique de mouse: toque, seleção |
+| `riser` | 1,6 s | subida de tensão que cresce até o fim: ponha `at` 1,6 s antes da revelação |
+| `impact` | 1,4 s | pancada grave com cauda: o momento de maior peso |
+| `ding` | 1,3 s | sino curto: um resultado, um número que terminou de contar |
+
+```json
+{
+  "timeline": [
+    { "type": "card", "flat": true, "duration": 6 },
+    { "type": "card", "flat": true, "duration": 6,
+      "transition": { "type": "slideleft", "duration": 0.5, "sound": "whip" } }
+  ],
+  "overlays": [
+    { "type": "text", "text": "78% menos faltas", "role": "hook", "start": 3, "end": 6, "sound": true },
+    { "type": "image", "src": "grafico.png", "start": 8, "sound": { "sound": "whoosh", "volume": 0.7, "offset": -0.1 } }
+  ],
+  "audio": {
+    "sfx": [ { "sound": "whoosh", "at": 12.4 }, { "sound": "impact", "at": 31.0, "volume": 1.2 } ]
+  }
+}
+```
+
+- **`audio.sfx`**: lista de `{sound, at, volume}`. `sound` é um nome da tabela ou o caminho de um arquivo de
+  áudio (relativo à pasta da spec); `at` é o instante no vídeo final, em segundos; `volume` vai de 0 a 1,5 e o
+  padrão 1 é o nível de referência (abaixo).
+- **Som na entrada** (`sound` em sobreposição de texto, imagem ou vídeo, e em `transition`): desligado por
+  padrão, o que evita repetir os tempos. `true` toca o som padrão do tipo (`pop` em texto e imagem, `whoosh` em
+  vídeo e transição), uma string escolhe o som, e `{sound, volume, offset}` ajusta o nível e desloca o instante
+  (`offset` negativo antecipa, como um whoosh que chega um instante antes do elemento). Na sobreposição o som
+  toca em `start`; na transição, no começo dela (o começo do trecho que entra); a de um corte seco toca no corte.
+- **Nível e mixagem**: o efeito entra com atraso exato em amostras, é somado depois do ducking e antes do
+  loudnorm (a música não abaixa por causa dele, e a loudness final continua no alvo) e fica abaixo da voz. O
+  render mede a voz sozinha (clipes, picture-in-picture e narração) e, com `volume` 1, põe o pico do efeito 6 dB
+  abaixo do pico que a voz terá na saída, já contando o limite de -1,5 dBTP do loudnorm; no máximo (1,5) ainda
+  sobram 2,5 dB. Vídeo sem fala usa um pico de voz típico (-6 dBFS) como régua.
+- Cada som da biblioteca tem pico de -3 dBFS, então o `volume` significa o mesmo em todos. Um arquivo seu
+  entra com o nível dele (o pico dele conta: um arquivo normalizado a 0 dBFS chega 3 dB acima de um da
+  biblioteca). Um nome que não é da biblioteca e não é um arquivo existente falha antes de gerar qualquer trecho.
+- `audio.sfx` marca tempos do vídeo final: o render parcial (`segments`) o ignora, e `validate_project` avisa de
+  efeito marcado depois do fim do vídeo.
 
 ### Transições
 
@@ -164,6 +216,8 @@ De movimento (feitas pelo DMaker; a troca é montada só sobre os quadros da jan
 - `lightleak`: vazamento de luz. Uma faixa de luz rosa, laranja e quente cruza o quadro na diagonal e a troca acontece embaixo dela. A luz é gerada pelo próprio DMaker (sem arquivo de terceiros).
 
 Giro 3D e folha virando não existem como transição de ffmpeg; ficam para a composição em HTML.
+
+**Som na troca** (`transition.sound`): `true` toca um whoosh no começo da transição, um nome escolhe outro som (`"sound": "whip"` no `whippan`). Veja "Efeitos sonoros".
 
 Do xfade (nome em `type`): `fade` (dissolve suave, o recomendado; `dissolve` troca por grãos e costuma parecer pixelado), `fadeblack`, `fadewhite`, `fadegrays`, `wipeleft/right/up/down`, `wipetl/tr/bl/br`, `slideleft/right/up/down`, `smoothleft/right/up/down`, `coverleft/right/up/down`, `revealleft/right/up/down`, `circleopen`, `circleclose`, `circlecrop`, `rectcrop`, `radial`, `pixelize`, `distance`, `zoomin`, `squeezev`, `squeezeh`, `hlslice`, `hrslice`, `vuslice`, `vdslice`, `diagtl/tr/bl/br`, `hblur`. `dmaker transitions list --kind xfade` diz o que cada uma faz.
 

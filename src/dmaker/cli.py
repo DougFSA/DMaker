@@ -1897,6 +1897,43 @@ def audio_isolate(
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
 
 
+# ---------- efeitos sonoros ----------
+
+sfx_app = typer.Typer(
+    help="Efeitos sonoros curtos (whoosh, pop, clique...) para pôr num instante do vídeo: ver e gerar a biblioteca.",
+    no_args_is_help=True,
+)
+app.add_typer(sfx_app, name="sfx")
+
+
+@sfx_app.command("list")
+def sfx_list() -> None:
+    """Lista os sons da biblioteca (nomes que a spec aceita em `audio.sfx` e em `sound`)."""
+    from .sfx import library_names, library_path, sound_def
+
+    table = Table("Som", "Duração", "No disco", "Para quê")
+    for name in library_names():
+        definition = sound_def(name)
+        present = "sim" if library_path(name).exists() else "não (rode dmaker sfx build)"
+        table.add_row(name, f"{definition.duration:.2f} s", present, definition.description)
+    console.print(table)
+
+
+@sfx_app.command("build")
+def sfx_build(
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out", help="Pasta de saída (padrão: assets/sfx, a biblioteca do DMaker)."),
+    ] = None,
+) -> None:
+    """Sintetiza de novo os sons da biblioteca (determinístico: o mesmo código gera os mesmos arquivos) e o
+    LICENSES. Só é preciso ao mudar uma receita em `sfx/synth.py`."""
+    from .sfx import write_library
+
+    for path in write_library(out_dir):
+        console.print(f"[green]gravado[/green] {path}", highlight=False, soft_wrap=True)
+
+
 # ---------- modelos ----------
 
 models_app = typer.Typer(

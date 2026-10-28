@@ -9,6 +9,8 @@ from ..domain.spec import ColorAdjust
 
 AUDIO_FMT_MEZZ = "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo"
 AUDIO_FMT_MIX = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+# Teto de pico verdadeiro do loudnorm final (e da medição que o antecede): a conta de nível dos efeitos sonoros parte dele
+LOUDNORM_TRUE_PEAK_DB = -1.5
 
 
 def ffq(path: str | Path) -> str:

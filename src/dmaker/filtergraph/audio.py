@@ -8,7 +8,8 @@ from typing import Protocol
 
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
-from .common import Inputs
+from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
+from .sfx import SfxInput, sfx_streams
 
 
 class NarrationInput(Protocol):
@@ -53,11 +54,14 @@ def audio_graph(
     extra_voices: list[str] | None = None,
     music_duration: float | None = None,
     narrations: Sequence[NarrationInput] = (),
+    sfx: Sequence[SfxInput] = (),
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
     `narrations` entram no barramento de voz depois do ganho e do mudo dos clipes (narrar sobre clipes
     mudos é o caso comum) e antes do ducking: a música abaixa sob elas e o loudnorm as conta.
+    `sfx` (efeitos sonoros) somam-se por último, depois do ducking e antes do loudnorm: a música não abaixa
+    por causa deles (o sidechain só enxerga a voz) e o loudnorm os conta. Sem `sfx` o grafo é o de sempre.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -95,8 +99,18 @@ def audio_graph(
             lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         a = "[amix]"
 
+    effects = sfx_streams(lines, inputs, sfx)
+    if effects:
+        # sem normalizar (`normalize=0`): o nível de cada efeito já foi acertado contra a voz, e dividir por
+        # N entradas o rebaixaria; `duration=first` corta o que passa do fim do vídeo
+        lines.append(
+            f"{a}{''.join(effects)}amix=inputs={1 + len(effects)}:duration=first"
+            ":dropout_transition=0:normalize=0[a_fx]"
+        )
+        a = "[a_fx]"
+
     if audio.normalize != "off" and include_norm:
-        ln = f"loudnorm=I={audio.target_lufs:g}:TP=-1.5:LRA=11"
+        ln = f"loudnorm=I={audio.target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11"
         if measured:
             ln += (
                 f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
@@ -111,7 +125,7 @@ def audio_graph(
 
 
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
-    return f"{cur_a}loudnorm=I={target_lufs:g}:TP=-1.5:LRA=11:print_format=json{out}"
+    return f"{cur_a}loudnorm=I={target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11:print_format=json{out}"
 
 
 def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[NarrationInput]) -> list[str]:

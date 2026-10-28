@@ -1,0 +1,18 @@
+Biblioteca de efeitos sonoros do DMaker
+
+Todo arquivo desta pasta é sintetizado pelo próprio DMaker (src/dmaker/sfx/synth.py), por código:
+ruído filtrado com envelope e varredura de frequência, tons com queda de afinação e parciais de sino,
+com semente fixa (o mesmo código gera sempre os mesmos arquivos). Nenhum som vem de terceiros, de banco
+de sons, de obra protegida ou da internet.
+
+Licença de todos: obra própria do projeto DMaker, sob a mesma licença do repositório (MIT).
+Formato: WAV de 48 kHz, 16 bits, estéreo (dois canais iguais), pico em -3 dBFS.
+Para gerar de novo: dmaker sfx build
+
+whoosh.wav: passagem de ar que sobe e some, para entrada de elemento ou troca de cena. Origem: sintetizado pelo DMaker (semente 11). Licença: MIT, obra própria.
+whip.wav: chicote curto e agudo, para entradas rápidas. Origem: sintetizado pelo DMaker (semente 12). Licença: MIT, obra própria.
+pop.wav: estalo de bolha, para texto ou ícone que aparece. Origem: sintetizado pelo DMaker (semente 13). Licença: MIT, obra própria.
+click.wav: clique de mouse (aperta e solta), para toque e seleção. Origem: sintetizado pelo DMaker (semente 14). Licença: MIT, obra própria.
+riser.wav: subida de tensão que cresce até o fim, para pôr logo antes de uma revelação. Origem: sintetizado pelo DMaker (semente 15). Licença: MIT, obra própria.
+impact.wav: pancada grave com cauda, para o momento de maior peso. Origem: sintetizado pelo DMaker (semente 16). Licença: MIT, obra própria.
+ding.wav: sino curto e limpo, para destacar um resultado. Origem: sintetizado pelo DMaker (semente 17). Licença: MIT, obra própria.
