@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from ...domain import curves
+from ...domain.curves import smoothstep
 from ..expressions import lookup, sendcmd_table
 from .registry import TransitionRequest, register
 from .window import close_window, monotone, no_undershoot, open_window, paced_crossfade
@@ -35,11 +36,6 @@ class CrossZoomPlan:
     blur: list[float]  # sigma do desfoque em fração da largura
 
 
-def _smoothstep(x: float) -> float:
-    x = min(max(x, 0.0), 1.0)
-    return x * x * (3.0 - 2.0 * x)
-
-
 def plan_crosszoom(curve: str, frames: int) -> CrossZoomPlan:
     """A curva dirige tudo: o progresso `p` amplia a imagem que sai, reduz a ampliação da que entra (em p=0,5
     as duas têm o mesmo zoom, então a emenda é contínua) e põe o pico do desfoque no meio da troca."""
@@ -47,7 +43,7 @@ def plan_crosszoom(curve: str, frames: int) -> CrossZoomPlan:
     return CrossZoomPlan(
         zoom_out=[1.0 + ZOOM_GAIN * x for x in p],
         zoom_in=[max(MIN_ZOOM, 1.0 + ZOOM_GAIN * (1.0 - x)) for x in p],
-        mix=monotone([_smoothstep((x - MIX_START) / (MIX_END - MIX_START)) for x in p]),
+        mix=monotone([smoothstep((x - MIX_START) / (MIX_END - MIX_START)) for x in p]),
         blur=[BLUR_FRACTION * math.sin(math.pi * min(max(x, 0.0), 1.0)) for x in p],
     )
 

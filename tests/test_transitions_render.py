@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from dmaker.domain import curves
 from dmaker.domain.spec import Project, Transition
 from dmaker.domain.timeline import effective_transition
 from dmaker.filtergraph.expressions import lookup
@@ -22,6 +23,7 @@ from dmaker.filtergraph.timeline import timeline_graph
 from dmaker.filtergraph.transitions.crosszoom import plan_crosszoom
 from dmaker.filtergraph.transitions.push import plan_whippan
 from dmaker.filtergraph.transitions.registry import first_frame_at, frame_count
+from dmaker.filtergraph.transitions.window import monotone
 from dmaker.media.ffmpeg import SubprocessRunner, ffmpeg_path
 from dmaker.media.probe import probe
 from dmaker.pipeline import RenderOptions, RenderPipeline
@@ -367,3 +369,17 @@ def test_light_leak_source_shows_each_table_value_on_its_own_frame_with_alpha():
     assert len(frames) == len(intensity)
     alpha = frames.reshape(len(frames), -1).mean(axis=1) / 255
     assert alpha == pytest.approx(intensity, abs=0.03)
+
+
+@pytest.mark.parametrize("curve", ["linear", "ease", "spring"])
+def test_xfade_curve_remaps_the_time_of_the_window_and_leaves_the_rest_alone(curve):
+    """Entre preto e branco o brilho de cada quadro é o progresso da transição: mede a curva no render real."""
+    frames = _window("fade", curve, (_solid("black"), _solid("white")))
+    n = frame_count(DURATION, FPS)
+    brightness = (
+        frames.reshape(len(frames), -1).mean(axis=1) / 255
+    )  # 0 = preto, 1 = branco (o gray vem em faixa cheia)
+    assert brightness[0] == pytest.approx(0.0, abs=0.01) and brightness[n + 1] == pytest.approx(1.0, abs=0.01)
+    expected = monotone(curves.samples(curve, n))  # a mola passa de 1, o xfade não: limitado
+    assert brightness[1 : n + 1] == pytest.approx(expected, abs=0.02)
+    assert np.diff(brightness).min() > -0.01  # nunca volta atrás

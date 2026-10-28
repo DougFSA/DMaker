@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from ...domain import curves
+from ...domain.curves import smoothstep
 from ..lightleak import LeakLook, light_leak_source
 from .registry import TransitionRequest, register
 from .window import close_window, monotone, open_window, paced_crossfade
@@ -41,11 +42,6 @@ FILM_BURN_MIX = (0.42, 0.58)
 FILM_FLICKER = 0.08
 
 
-def _smoothstep(x: float) -> float:
-    x = min(max(x, 0.0), 1.0)
-    return x * x * (3.0 - 2.0 * x)
-
-
 def _bell(progress: float) -> float:
     """Sino de 0 a 1 sobre o progresso (0 nas pontas, 1 no meio); a mola passa de 1 sem acender a luz de novo."""
     return math.sin(math.pi * min(max(progress, 0.0), 1.0))
@@ -55,7 +51,7 @@ def _soft_bell(progress: float) -> float:
     """Sino de 0 a 1 com inclinação zero nas pontas e no pico: a luz entra, queima e sai sem degrau (o `sin`
     puro tem pico pontudo, que no vazamento de luz é bom, mas a queima precisa ficar cheia um instante)."""
     edge = min(max(progress, 0.0), 1.0)
-    return _smoothstep(2.0 * min(edge, 1.0 - edge))
+    return smoothstep(2.0 * min(edge, 1.0 - edge))
 
 
 def plan_lightleak(curve: str, frames: int) -> BurnPlan:
@@ -64,7 +60,7 @@ def plan_lightleak(curve: str, frames: int) -> BurnPlan:
     start, end = LIGHT_LEAK_SPAN
     low, high = LIGHT_LEAK_MIX
     return BurnPlan(
-        mix=monotone([_smoothstep((x - low) / (high - low)) for x in p]),
+        mix=monotone([smoothstep((x - low) / (high - low)) for x in p]),
         intensity=[LIGHT_LEAK_PEAK * _bell(x) for x in p],
         position=[start + (end - start) * min(max(x, 0.0), 1.0) for x in p],
     )
@@ -77,7 +73,7 @@ def plan_filmburn(curve: str, frames: int) -> BurnPlan:
     low, high = FILM_BURN_MIX
     flicker = [1.0 - FILM_FLICKER * ((k * 7919) % 13) / 12.0 for k in range(frames)]
     return BurnPlan(
-        mix=monotone([_smoothstep((x - low) / (high - low)) for x in p]),
+        mix=monotone([smoothstep((x - low) / (high - low)) for x in p]),
         intensity=[_soft_bell(x) * flicker[k] for k, x in enumerate(p)],
         position=[start + (end - start) * min(max(x, 0.0), 1.0) for x in p],
     )

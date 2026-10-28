@@ -77,3 +77,10 @@ def test_samples_are_one_per_frame_and_the_last_is_before_one():
 def test_unknown_curve_is_refused_in_portuguese():
     with pytest.raises(ValueError, match="Curva desconhecida"):
         progress("elastico", 0.5)
+
+
+def test_smoothstep_is_flat_at_both_ends_and_clamped():
+    from dmaker.domain.curves import smoothstep
+
+    assert smoothstep(-1.0) == 0.0 and smoothstep(2.0) == 1.0 and smoothstep(0.5) == 0.5
+    assert smoothstep(0.05) < 0.01 and smoothstep(0.95) > 0.99

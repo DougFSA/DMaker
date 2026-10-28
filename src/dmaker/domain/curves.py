@@ -43,6 +43,12 @@ def progress(curve: str, u: float) -> float:
     raise ValueError(f"Curva desconhecida: {curve!r}. Use {', '.join(CURVES)}.")
 
 
+def smoothstep(x: float) -> float:
+    """Degrau suave de 0 a 1 (inclinação zero nas duas pontas), para mesclas e envelopes que entram e saem sem degrau."""
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
 def samples(curve: str, frames: int) -> list[float]:
     """Progresso de cada quadro da janela: o quadro k mostra o instante k/frames, então a janela termina um
     quadro antes de 1 e o primeiro quadro do trecho seguinte é quem vale exatamente 1."""

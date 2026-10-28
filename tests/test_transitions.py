@@ -399,9 +399,11 @@ def test_leak_expressions_cover_color_and_alpha_and_use_the_frame_tables():
 
 def test_leak_source_is_a_small_frame_scaled_up_with_alpha_and_the_window_timestamps():
     (line,) = light_leak_source("[leak]", SIZE, 30.0, LOOK, [0.0, 0.5, 1.0], [0.0, 0.5, 1.0])
-    assert line.startswith("color=c=black@0:s=135x240:r=30")  # 1/8 de cada lado: 32 mil pixels, não 2 milhões
+    assert line.startswith("color=c=black@0:s=66x120:r=30")  # 1/16 de cada lado: 8 mil pixels, não 2 milhões
     assert "format=gbrap,geq=" in line and "trim=end_frame=3" in line
-    assert "scale=1080:1920:flags=bicubic,format=yuva420p" in line
+    assert (
+        "format=yuva420p,scale=1080:1920:flags=bicubic,format=yuva420p" in line
+    )  # converte pequeno, amplia, fixa o alfa
     assert line.endswith("settb=AVTB,setpts=N/30/TB[leak]")
 
 

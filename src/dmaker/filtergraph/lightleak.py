@@ -12,13 +12,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .common import even
 from .expressions import lookup, number
 
 Rgb = tuple[int, int, int]
 
-# O feixe é calculado em um quadro 8 vezes menor em cada lado: 1080x1920 vira 135x240, 32 mil pixels em vez de 2
-# milhões, e como a luz é um gradiente suave a ampliação bicúbica não perde nada que se veja.
-DOWNSCALE = 8
+# O feixe é calculado em um quadro 16 vezes menor em cada lado: 1080x1920 vira 66x120, 8 mil pixels em vez de 2
+# milhões (a expressão do `geq` roda por pixel e por plano, e era o maior custo da troca: 26 ms por quadro com
+# 8 vezes menor). Como a luz é um gradiente suave, a ampliação bicúbica não perde nada que se veja.
+DOWNSCALE = 16
 
 
 @dataclass(frozen=True)
@@ -81,13 +83,14 @@ def light_leak_source(
         raise ValueError("intensity e position precisam ter um valor por quadro")
     frames = len(intensity)
     width, height = size
-    small_w, small_h = max(2, width // DOWNSCALE), max(2, height // DOWNSCALE)
+    small_w, small_h = even(width / DOWNSCALE), even(height / DOWNSCALE)  # par: o yuv420p subamostra o croma
     expressions = ":".join(
         f"{plane}='{expression}'" for plane, expression in leak_expressions(look, intensity, position).items()
     )
     return [
         f"color=c=black@0:s={small_w}x{small_h}:r={fps:g}:d={frames / fps + 1 / fps:.4f},"
         f"format=gbrap,geq={expressions},trim=end_frame={frames},"
-        f"scale={width}:{height}:flags=bicubic,format=yuva420p,"
+        # converte no quadro pequeno (barato) e amplia; o `format` final fixa o alfa na saída do scale
+        f"format=yuva420p,scale={width}:{height}:flags=bicubic,format=yuva420p,"
         f"settb=AVTB,setpts=N/{fps:g}/TB{out}"
     ]
