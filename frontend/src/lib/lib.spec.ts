@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type {
   CutReport,
   OutputFile,
+  LookInfo,
   ProjectListItem,
   QaReport,
   TemplateInfo,
   TransitionInfo,
 } from '@/api'
+import { effectChips, filterLooks, specSnippet as lookSnippet } from './looks'
 import { cutsSummary, defaultCutName, formatCutTime, reasonCounts, reasonTone } from './cuts'
 import { baseName, formatClock, formatDuration, formatRelative, formatSizeMb } from './format'
 import { filterOutputs, renderResultsFromJob } from './outputs'
@@ -215,5 +217,37 @@ describe('transições', () => {
     expect(specSnippet('whippan', 'spring')).toBe(
       '"transition": { "type": "whippan", "duration": 0.5, "curve": "spring" }',
     )
+  })
+})
+
+describe('looks', () => {
+  const list: LookInfo[] = [
+    {
+      name: 'cinema',
+      summary: 'Verde-azulado nas sombras e grão fino.',
+      source: 'padrão',
+      effects: { vignette: 0.35, grain: 0.2 },
+    },
+    { name: 'clinica', summary: 'Cores limpas da marca.', source: 'marca', effects: {} },
+  ]
+
+  it('filtra pela origem e busca em nome e descrição sem diferenciar maiúsculas', () => {
+    expect(filterLooks(list, '', 'all')).toHaveLength(2)
+    expect(filterLooks(list, '', 'marca').map((l) => l.name)).toEqual(['clinica'])
+    expect(filterLooks(list, 'GRÃO', 'all').map((l) => l.name)).toEqual(['cinema'])
+    expect(filterLooks(list, 'cinema', 'marca')).toEqual([])
+    expect(filterLooks(list, '  ', 'all')).toHaveLength(2)
+  })
+
+  it('lista só os efeitos ligados, na ordem da galeria, com a quantidade de cada um', () => {
+    expect(effectChips(list[0]!)).toEqual([
+      { name: 'vignette', label: 'vinheta', amount: 0.35 },
+      { name: 'grain', label: 'grão', amount: 0.2 },
+    ])
+    expect(effectChips(list[1]!)).toEqual([])
+  })
+
+  it('monta o trecho de spec do projeto inteiro', () => {
+    expect(lookSnippet('pb-contraste')).toBe('"look": "pb-contraste"')
   })
 })

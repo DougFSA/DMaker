@@ -257,6 +257,14 @@ do ponto e assenta. Para ver o que cada transição faz, rode `dmaker transition
 `dmaker transitions sheet <nome>` (folha de contato em `output/transitions`), ou abra a tela
 **Transições** da interface nova.
 
+O acabamento visual vem em looks prontos, por nome: `"look": "cinema"` na raiz do projeto vale para todos
+os trechos, e um trecho com `look` próprio (ou `"nenhum"`, que desliga) vence o do projeto; um trecho com
+`color` próprio mantém a cor dele. Os padrões são `cinema`, `quente`, `frio`, `pb-contraste` e `vintage`, e a
+marca pode definir os seus em `looks` no `brand.json`. Em `color` valem ainda `vignette` (`true` ou uma
+intensidade de 0 a 1), `grain` (granulação de filme), `glow`, `aberration` e `light_leak`, de 0 a 1. Para ver
+cada look, rode `dmaker looks list` e `dmaker looks sheet all` (folhas em `output/looks`), ou abra a tela
+**Looks** da interface nova. A granulação aumenta o tamanho do arquivo; o guia diz quanto.
+
 ### 3.5 Sobreposições (overlays)
 
 Ficam por cima da timeline principal, com seu próprio intervalo de tempo (`start`/`end`):

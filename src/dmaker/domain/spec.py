@@ -84,15 +84,30 @@ class Matte(Strict):
 
 
 class ColorAdjust(Strict):
+    """Cor e acabamento de um trecho (ou de um look). Os quatro últimos campos são efeitos de acabamento de
+    câmera e filme: 0 desliga e 1 é o máximo (ver `filtergraph/finish.py`, que justifica cada um)."""
+
     brightness: float = Field(0.0, ge=-1, le=1)
     contrast: float = Field(1.0, ge=0, le=3)
     saturation: float = Field(1.0, ge=0, le=3)
     gamma: float = Field(1.0, ge=0.1, le=10)
     sharpen: float = Field(0.0, ge=0, le=2)
     denoise: bool = False
-    vignette: bool = False
+    # true é a vinheta de sempre; um número de 0 a 1 ajusta a intensidade (0.4 equivale a true)
+    vignette: bool | float = False
     lut: str | None = None  # arquivo .cube
     extra: str | None = None  # cadeia de filtros ffmpeg de vídeo, para casos especiais
+    glow: float = Field(0.0, ge=0, le=1)  # brilho suave nas altas luzes
+    aberration: float = Field(0.0, ge=0, le=1)  # aberração cromática (separação de vermelho e azul)
+    light_leak: float = Field(0.0, ge=0, le=1)  # vazamento de luz quente que cruza o quadro
+    grain: float = Field(0.0, ge=0, le=1)  # granulação de filme (animada, sempre igual a cada render)
+
+    @field_validator("vignette")
+    @classmethod
+    def _vignette_range(cls, v: bool | float) -> bool | float:
+        if not isinstance(v, bool) and not 0 <= v <= 1:
+            raise ValueError("vignette: use true/false ou uma intensidade de 0 a 1")
+        return v
 
     def is_identity(self) -> bool:
         return (
@@ -105,6 +120,7 @@ class ColorAdjust(Strict):
             and not self.vignette
             and not self.lut
             and not self.extra
+            and not (self.glow or self.aberration or self.light_leak or self.grain)
         )
 
 
@@ -137,6 +153,9 @@ class SegmentBase(Strict):
     fade_out: float = Field(0.0, ge=0)
     reframe: Reframe = Reframe()
     color: ColorAdjust = ColorAdjust()
+    # nome de um look (ver `domain/looks.py`) só deste trecho; "nenhum" desliga o do projeto. Sem ele, vale o
+    # `look` do projeto, a não ser que o trecho traga ajuste de cor próprio em `color`
+    look: str | None = None
 
 
 class ClipSegment(SegmentBase):
@@ -622,6 +641,7 @@ class Project(Strict):
     sources: dict[str, SourceRef] = {}  # fontes sincronizadas (multicâmera, gravadores)
     master: str | None = None  # fonte principal = relógio da sessão; padrão: a primeira de `sources`
     timeline: list[Segment] = Field(min_length=1)
+    look: str | None = None  # acabamento visual de todos os trechos, por nome (ver `domain/looks.py`)
     overlays: list[Overlay] = []
     captions: Captions | None = None
     audio: AudioSettings = AudioSettings()

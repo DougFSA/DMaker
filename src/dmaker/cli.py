@@ -891,6 +891,98 @@ def transitions_sheet(
         _fail(str(exc))
 
 
+looks_app = typer.Typer(
+    help="Looks: acabamentos visuais prontos por nome (cinema, quente, frio...) e a folha de contato de cada um.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(looks_app, name="looks")
+
+EFFECT_LABELS = {
+    "vignette": "vinheta",
+    "glow": "brilho",
+    "aberration": "aberração",
+    "light_leak": "vazamento de luz",
+    "grain": "grão",
+}
+
+
+def _brand_looks(brand: str | None) -> dict:
+    """Looks da marca (brand.json); marca desconhecida ou look inválido param o comando com a mensagem."""
+    from .domain.brand import load_theme
+    from .domain.looks import available_looks
+
+    if not brand:
+        return {}
+    try:
+        theme = load_theme(brand)
+        available_looks(theme.looks)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+    return theme.looks
+
+
+@looks_app.command("list")
+def looks_list(
+    brand: Annotated[
+        str | None, typer.Option(help="Soma os looks desta marca (os dela valem no lugar).")
+    ] = None,
+) -> None:
+    """Lista os looks aceitos em `look` (no projeto e no trecho) e o que cada um faz."""
+    from .domain.looks import NO_LOOK, available_looks, look_effects
+
+    table = Table(
+        Column("nome", no_wrap=True),
+        Column("origem", no_wrap=True),
+        "efeitos",
+        "o que faz",
+        title="Looks",
+    )
+    for look in available_looks(_brand_looks(brand)).values():
+        effects = ", ".join(
+            f"{EFFECT_LABELS[name]} {amount:g}" for name, amount in look_effects(look).items()
+        )
+        table.add_row(look.name, look.source, effects or "só cor", look.summary)
+    console.print(table)
+    console.print(
+        f'No projeto: "look": "cinema". Num trecho, o dele vence; "{NO_LOOK}" desliga o do projeto. '
+        "Trecho com `color` próprio não recebe o look do projeto."
+    )
+
+
+@looks_app.command("sheet")
+def looks_sheet(
+    name: Annotated[str, typer.Argument(help="Nome do look, ou `all` para todos lado a lado.")],
+    brand: Annotated[str | None, typer.Option(help="Soma os looks desta marca.")] = None,
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/looks).")] = None,
+) -> None:
+    """Folha de contato: a mesma cena de teste sem acabamento e com o look (JPEG), da esquerda para a direita."""
+    import shutil
+
+    from .domain.looks import UnknownLookError, available_looks
+    from .media.ffmpeg import FFmpegError, SubprocessRunner
+    from .pipeline.look_preview import LookPreview
+
+    brand_looks = _brand_looks(brand)
+    folder = out_dir or config.OUTPUT_DIR / "looks"
+    folder.mkdir(parents=True, exist_ok=True)
+    preview = LookPreview(SubprocessRunner(quiet=True))
+    try:
+        names = list(available_looks(brand_looks)) if name == "all" else [name]
+        jobs = [("looks-todos", preview.overview(brand_looks))] if name == "all" else []
+        jobs += [(look, preview.sheet(look, brand_looks)) for look in names]
+    except UnknownLookError as exc:
+        _fail(f"{exc} Veja `dmaker looks list`.")
+    except FFmpegError as exc:
+        _fail(str(exc))
+    for stem, source in jobs:
+        target = folder / f"{stem}.jpg"
+        shutil.copyfile(source, target)
+        console.print(f"[green]Folha salva:[/green] {target}")
+    if name == "all":
+        console.print("Na folha dos todos, da esquerda para a direita: original, " + ", ".join(names) + ".")
+
+
 @app.command()
 def quick(
     src: Annotated[Path, typer.Argument(help="Vídeo fonte.")],

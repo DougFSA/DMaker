@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,6 +38,17 @@ def atempo_chain(speed: float) -> str:
     return ",".join(f"atempo={f:.5g}" for f in factors)
 
 
+def vignette_angle(intensity: float) -> str:
+    """Ângulo de lente do `vignette` para uma intensidade de 0 a 1. O filtro escurece o canto por cos(ângulo)^4:
+    ângulo 0 não escurece nada e PI/2 deixa o canto preto. A escala é linear em PI/2, então 0.4 cai em PI/5, o
+    ângulo que o `true` sempre usou.
+
+    A intensidade em número também desliga o `dither` do filtro (o `true` o mantém, como sempre foi): o dither
+    soma ruído novo a cada quadro para esconder faixas de 1 nível, e o x264 gasta bits nele (medido: cena parada
+    de 0,1 MB a 3 MB em 10 s). As faixas que sobram são menores que as do próprio x264, e com grão no look somem."""
+    return f"{intensity * math.pi / 2:.4f}"
+
+
 def color_chain(color: ColorAdjust) -> list[str]:
     steps: list[str] = []
     if color.brightness != 0 or color.contrast != 1 or color.saturation != 1 or color.gamma != 1:
@@ -48,8 +60,10 @@ def color_chain(color: ColorAdjust) -> list[str]:
         steps.append("hqdn3d=3:2:4:3")
     if color.sharpen:
         steps.append(f"unsharp=5:5:{color.sharpen:.2f}:5:5:0")
-    if color.vignette:
+    if color.vignette is True:
         steps.append("vignette=angle=PI/5")
+    elif color.vignette:
+        steps.append(f"vignette=angle={vignette_angle(color.vignette)}:dither=0")
     if color.lut:
         steps.append(f"lut3d=file={ffq(color.lut)}")
     if color.extra:

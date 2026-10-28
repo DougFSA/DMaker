@@ -259,6 +259,23 @@ export interface TransitionCatalog {
   transitions: TransitionInfo[]
 }
 
+/** Efeitos de acabamento que um look liga e a quantidade (0 a 1) de cada um. */
+export type LookEffectName = 'vignette' | 'glow' | 'aberration' | 'light_leak' | 'grain'
+
+/** Item de GET /api/looks: `source` diz se o look é um dos padrões ou veio do brand.json da marca. */
+export interface LookInfo {
+  name: string
+  summary: string
+  source: 'padrão' | 'marca'
+  effects: Partial<Record<LookEffectName, number>>
+}
+
+export interface LookCatalog {
+  /** Valor de `look` que desliga o acabamento (no trecho, desliga o do projeto). */
+  off: string
+  looks: LookInfo[]
+}
+
 /* ---------- lote: vários vídeos de uma planilha (src/dmaker/ui/batch_routes.py) ---------- */
 
 export type BatchIssueLevel = 'erro' | 'aviso'

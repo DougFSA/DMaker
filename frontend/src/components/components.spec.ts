@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import type {
   CutReport,
+  LookCatalog,
   OutputFile,
   ProjectListItem,
   TemplateParam,
@@ -25,6 +26,7 @@ import ToastHost from './ui/ToastHost.vue'
 import OutputsView from '@/views/OutputsView.vue'
 import ProjectDetailView from '@/views/ProjectDetailView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
+import LooksView from '@/views/LooksView.vue'
 import TransitionsView from '@/views/TransitionsView.vue'
 
 function stubApi(routes: Record<string, unknown>): void {
@@ -93,6 +95,7 @@ describe('SidebarNav', () => {
       'Modelos',
       'Saídas',
       'Transições',
+      'Looks',
     ])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
@@ -101,7 +104,7 @@ describe('SidebarNav', () => {
   it('recolhida, esconde os rótulos mas mantém o texto para leitor de tela', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: true })
     expect(wrapper.find('.nav__label').exists()).toBe(false)
-    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(9)
+    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(10)
   })
 })
 
@@ -478,5 +481,102 @@ describe('TransitionsView', () => {
     const wrapper = await mountWithRouter(TransitionsView)
     await flushPromises()
     expect(wrapper.text()).toContain('Não foi possível carregar as transições')
+  })
+})
+
+describe('LooksView', () => {
+  const catalog: LookCatalog = {
+    off: 'nenhum',
+    looks: [
+      {
+        name: 'cinema',
+        summary: 'Verde-azulado nas sombras e grão fino.',
+        source: 'padrão',
+        effects: { vignette: 0.35, grain: 0.2 },
+      },
+      { name: 'frio', summary: 'Tom azulado e calmo.', source: 'padrão', effects: { vignette: 0.15 } },
+      { name: 'clinica', summary: 'Cores limpas da marca.', source: 'marca', effects: {} },
+    ],
+  }
+  const state = {
+    presets: [],
+    brands: [
+      { key: 'default', name: 'Padrão', colors: {} },
+      { key: 'minha', name: 'Minha', colors: {} },
+    ],
+    projects: [],
+  }
+  const routes = { '/api/looks': catalog, '/api/state': state, '/api/templates': [] }
+
+  it('lista cada look com o que ele faz, os efeitos e a folha de contato', async () => {
+    stubApi(routes)
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+    const cards = wrapper.findAll('.look')
+    expect(cards.map((card) => card.find('.look__name').text())).toEqual(['cinema', 'frio', 'clinica'])
+    expect(cards[0]!.text()).toContain('grão fino')
+    expect(cards[0]!.findAll('.look__effects li').map((li) => li.text())).toEqual(['vinheta 0.35', 'grão 0.2'])
+    expect(cards[2]!.text()).toContain('marca')
+    expect(cards[2]!.text()).toContain('Só ajuste de cor')
+    expect(cards[0]!.find('img').attributes('src')).toBe('/api/looks/cinema/sheet')
+    expect(wrapper.find('.overview img').attributes('src')).toBe('/api/looks/sheet')
+  })
+
+  it('filtra pela origem e pela busca, e avisa quando nada combina', async () => {
+    stubApi(routes)
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+
+    const sources = wrapper.findAll('[aria-label="Origem do look"] button')
+    await sources[2]!.trigger('click')
+    expect(wrapper.findAll('.look__name').map((node) => node.text())).toEqual(['clinica'])
+    await sources[0]!.trigger('click')
+
+    await wrapper.find('input[type="search"]').setValue('azulado')
+    expect(wrapper.findAll('.look__name').map((node) => node.text())).toEqual(['cinema', 'frio'])
+    await wrapper.find('input[type="search"]').setValue('zzz')
+    expect(wrapper.text()).toContain('Nada encontrado')
+  })
+
+  it('pede os looks da marca escolhida e muda as folhas', async () => {
+    stubApi(routes)
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+    await wrapper.find('#look-brand').setValue('minha')
+    await flushPromises()
+    expect(wrapper.find('.look img').attributes('src')).toBe('/api/looks/cinema/sheet?brand=minha')
+    expect(wrapper.find('.overview img').attributes('src')).toBe('/api/looks/sheet?brand=minha')
+  })
+
+  it('mostra o aviso e tenta de novo quando a prévia não é gerada', async () => {
+    stubApi(routes)
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+    const first = wrapper.findAll('.look')[0]!
+    await first.find('img').trigger('error')
+    expect(first.text()).toContain('Não foi possível gerar a prévia')
+    await first.find('[role="alert"] button').trigger('click')
+    expect(first.find('img').attributes('src')).toContain('?tentativa=1')
+    await first.find('img').trigger('load')
+    expect(first.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('copia o trecho da spec do look', async () => {
+    stubApi(routes)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+    await wrapper.findAll('.look')[1]!.find('footer button').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('"look": "frio"')
+    expect(useToastsStore().items.at(-1)?.title).toBe('Trecho copiado')
+  })
+
+  it('explica quando a API falha', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    const wrapper = await mountWithRouter(LooksView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Não foi possível carregar os looks')
   })
 })

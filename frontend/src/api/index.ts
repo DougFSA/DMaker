@@ -14,6 +14,7 @@ import type {
   CutReport,
   JobSnapshot,
   JobStartResponse,
+  LookCatalog,
   NewProjectRequest,
   NewProjectResponse,
   OutputFile,
@@ -28,6 +29,9 @@ import type {
 } from './types'
 
 const enc = encodeURIComponent
+
+/** `?brand=` só quando há marca: sem ela a rota devolve os looks padrão. */
+const brandQuery = (brand?: string) => (brand && brand !== 'default' ? `?brand=${enc(brand)}` : '')
 
 export const api = {
   state: () => http.get<AppState>('/api/state'),
@@ -78,6 +82,15 @@ export const api = {
     catalog: () => http.get<TransitionCatalog>('/api/transitions'),
     /** Folha de contato (PNG) da transição; o servidor gera na primeira vez e guarda em cache. */
     sheetUrl: (name: string, curve: TransitionCurve) => `/api/transitions/${enc(name)}/sheet?curve=${enc(curve)}`,
+  },
+
+  looks: {
+    /** `brand` soma os looks do brand.json da marca (os dela valem no lugar dos padrões de mesmo nome). */
+    catalog: (brand?: string) => http.get<LookCatalog>(`/api/looks${brandQuery(brand)}`),
+    /** Folha de contato (JPEG) de um look: a cena de teste sem acabamento e com ele; gerada na primeira vez. */
+    sheetUrl: (name: string, brand?: string) => `/api/looks/${enc(name)}/sheet${brandQuery(brand)}`,
+    /** Folha com todos os looks lado a lado. */
+    overviewUrl: (brand?: string) => `/api/looks/sheet${brandQuery(brand)}`,
   },
 
   jobs: {
