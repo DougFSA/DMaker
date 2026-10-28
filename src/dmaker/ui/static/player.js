@@ -7,6 +7,9 @@
  * vista não carrega, como velocidade do clipe ou aparência de uma sobreposição), o tema da
  * marca e um mapa de proxies, e desenha um palco com as camadas na ordem V1 -> GR -> V2+ -> TX.
  * Não mostra transições, Ken Burns, legendas nem correção de cor: é uma prévia aproximada.
+ * O som do V1 sai do próprio <video>; em cada trilha de áudio (A2 em diante e MUS) toca só o item do
+ * instante, que a vista já fatiou como o render (arquivo, ponto no arquivo e volume), com um <audio>
+ * por trilha.
  *
  * window.DMakerPlayer.create(container, callbacks) -> controlador:
  *   setData({ view, spec, theme, proxyUrls })
@@ -59,6 +62,64 @@ function plTextPosition(role, position) {
   return "bottom";
 }
 
+/* ---------- o que tocar em cada instante (funções puras, expostas em DMakerPlayer.pure) ---------- */
+
+const PL_SEEK_GRACE_MS = 800; // depois de uma busca, o tempo que o elemento tem para carregar antes de ser buscado de novo
+const PL_RESEEK_WINDOW = 0.5; // dentro da carência, só busca de novo se o alvo andou além do que a busca anterior prevê
+
+/** Item da trilha que cobre o instante t (start <= t < end), ou null: onde nenhum item soa, a trilha
+ * fica muda (a vista só manda um item por trecho que a faixa realmente cobre). */
+function plItemAt(items, t) {
+  return (items || []).find((it) => t >= it.start && t < it.end) || null;
+}
+
+/** Deslocamento, no relógio da sessão, que `in_point` ainda precisa descontar para virar tempo no
+ * arquivo: o `extra.offset` explícito do item (zero nos itens fatiados, cujo `in_point` já é tempo no
+ * arquivo) ou o da fonte nomeada. */
+function plFileOffset(item, sourceOffsetOf) {
+  if (item.extra && typeof item.extra.offset === "number") return item.extra.offset;
+  return item.source ? sourceOffsetOf(item.source) : 0;
+}
+
+/** Tempo no arquivo de origem para um item com in_point/start, dado o tempo t da linha do tempo
+ * (mesma conta usada por clipes, PiP, faixas externas e música: ver timeline_view.py). */
+function plFileTime(item, t, itemRate, sourceOffsetOf) {
+  return item.in_point + (t - item.start) * itemRate - plFileOffset(item, sourceOffsetOf);
+}
+
+/** Onde buscar dentro do arquivo para tocar `fileTime`, ou null para pausar: nunca um tempo negativo
+ * nem além do fim (que dispararia busca a cada quadro e estalos). Com `loop`, passar do fim dá a volta,
+ * como a música em loop do render. Sem a duração (metadados ainda não chegaram), vale o tempo pedido. */
+function plPlayableTime(fileTime, duration, loop) {
+  if (!(fileTime >= 0)) return null;
+  if (!Number.isFinite(duration) || duration <= 0) return fileTime;
+  if (fileTime < duration) return fileTime;
+  return loop ? fileTime % duration : null;
+}
+
+/** Arquivo e tempo nele que um clipe do V1 toca em t. Clipe de fonte em várias partes traz
+ * `extra.pieces`, um pedaço por arquivo (já com o ponto de cada um), e toca o que grava o instante. */
+function plClipPlayback(item, t, itemRate, sourceOffsetOf, fallbackPath) {
+  const pieces = item.extra && item.extra.pieces;
+  if (pieces && pieces.length) {
+    const piece = pieces.find((p) => t >= p.start && t < p.end) || (t < pieces[0].start ? pieces[0] : pieces[pieces.length - 1]);
+    return { path: piece.path, fileTime: piece.in_point + (t - piece.start) * itemRate };
+  }
+  return { path: fallbackPath, fileTime: plFileTime(item, t, itemRate, sourceOffsetOf) };
+}
+
+/** Mudo e volume (0 a 1) de um item de áudio: o volume do item (faixa ou música) vezes o geral. O mudo
+ * vem do item, da trilha ou de qualquer um dos dois volumes zerado. */
+function plAudioGain(item, trackMuted, master) {
+  const itemVolume = item.extra && typeof item.extra.volume === "number" ? item.extra.volume : 1;
+  const muted = !!(item.muted || trackMuted || itemVolume <= 0 || master <= 0);
+  return { muted, volume: muted ? 0 : Math.min(1, itemVolume * master) };
+}
+
+function plIsPlayableAudioTrack(track) {
+  return track.id === "MUS" || /^A[2-9]\d*$/.test(track.id);
+}
+
 function createPlayer(container, callbacks) {
   const cb = Object.assign({ onTick() {}, onMediaError() {} }, callbacks || {});
   let view = { total: 0, fps: 30, tracks: [], sources: {} };
@@ -73,6 +134,10 @@ function createPlayer(container, callbacks) {
   let volume = 1;
   const mediaCache = new Map(); // url -> { el }
   const activeChannel = new Map(); // canal -> url atual
+  // trilha de áudio (A2..., MUS) -> { el, url, path, errored, lastSeek }: um <audio> por TRILHA, que troca de
+  // src quando o item muda de arquivo, para não abrir uma conexão por arquivo (limite de 6 por servidor
+  // do Chrome em HTTP/1.1)
+  const audioChannels = new Map();
 
   container.classList.add("player-root");
   container.innerHTML = `
@@ -157,18 +222,37 @@ function createPlayer(container, callbacks) {
     return `/api/card-preview?${params.toString()}`;
   }
 
-  /** Tempo no arquivo de origem para um item com in_point/start, dado o tempo t da linha do
-   * tempo (mesma conta usada por clipes, PiP, faixas externas e música: ver timeline_view.py). */
   function fileTimeFor(item, t, itemRate) {
-    const sessionTime = item.in_point + (t - item.start) * itemRate;
-    const offset = item.source ? sourceOffset(item.source) : (item.extra && item.extra.offset) || 0;
-    return sessionTime - offset;
+    return plFileTime(item, t, itemRate, sourceOffset);
   }
 
-  /** Um `<video>`/`<audio>` por URL única (proxy ou arquivo original), criado uma vez e reaproveitado
-   * enquanto o item mostrar essa mesma URL. Bug real encontrado aqui: o elemento nunca tinha `src`
-   * atribuído (só ficava no DOM, mudo e sem quadro nenhum) - por isso nenhum clipe tocava na prévia,
-   * mesmo com o caminho já certo. */
+  /** Arquivo e tempo nele que o clipe do V1 toca em t (ver `plClipPlayback`). */
+  function clipPlayback(item, t) {
+    return plClipPlayback(item, t, clipSpeed(item), sourceOffset, sourcePath(item));
+  }
+
+  /** O som do clipe sai do próprio <video> do V1; ele fica mudo se o clipe, a A1 ou o mute_clips pedem. */
+  function clipAudioMuted(item) {
+    if (item.muted) return true;
+    if (spec.audio && spec.audio.mute_clips) return true;
+    const a1 = view.tracks.find((t) => t.id === "A1");
+    if (!a1) return false;
+    if (a1.muted) return true;
+    const a1Item = a1.items.find((it) => it.index === item.index);
+    return !!(a1Item && a1Item.muted);
+  }
+
+  function clipVolume(item) {
+    const seg = spec.timeline && spec.timeline[item.index];
+    return seg && typeof seg.volume === "number" ? seg.volume : 1;
+  }
+
+  /** Um `<video>` por URL única (proxy ou arquivo original) dos clipes e PiPs, criado uma vez e
+   * reaproveitado enquanto o item mostrar essa mesma URL. Bug real encontrado aqui: o elemento nunca
+   * tinha `src` atribuído (só ficava no DOM, mudo e sem quadro nenhum) - por isso nenhum clipe tocava
+   * na prévia, mesmo com o caminho já certo. O som das faixas externas e da música não passa por aqui:
+   * cada trilha tem o seu <audio> (`audioChannels`), para um arquivo de câmera tocado como faixa não
+   * dividir o elemento com o <video> do V1. */
   function getMediaEntry(url, kind) {
     let entry = mediaCache.get(url);
     if (!entry) {
@@ -217,14 +301,17 @@ function createPlayer(container, callbacks) {
       const url = cardPreviewUrl(item);
       layerV1.innerHTML = url ? `<img class="player-media" src="${plEsc(url)}" alt="">` : "";
     } else if (item.kind === "clip") {
-      const path = sourcePath(item);
+      const { path } = clipPlayback(item, currentTime);
       const url = plResolveMediaUrl(path, proxyUrls);
       if (!url) { layerV1.innerHTML = ""; return; }
       const entry = getMediaEntry(url, "video");
       entry.path = path;
       entry.el.className = "player-media";
-      layerV1.innerHTML = "";
-      layerV1.appendChild(entry.el);
+      // tirar o <video> do DOM o pausa: só troca quando o arquivo do instante muda (corte ou fronteira de parte)
+      if (layerV1.firstChild !== entry.el || layerV1.childNodes.length !== 1) {
+        layerV1.innerHTML = "";
+        layerV1.appendChild(entry.el);
+      }
     } else {
       layerV1.innerHTML = "";
     }
@@ -232,21 +319,21 @@ function createPlayer(container, callbacks) {
 
   function syncV1(item) {
     if (!item || item.kind !== "clip") return;
-    const path = sourcePath(item);
+    const { path, fileTime } = clipPlayback(item, currentTime);
     const url = plResolveMediaUrl(path, proxyUrls);
     if (!url) return;
     const entry = mediaCache.get(url);
     if (!entry) return;
     const el = entry.el;
     const itemRate = clipSpeed(item);
-    const target = fileTimeFor(item, currentTime, itemRate);
     activeChannel.set("v1", url);
-    if (Math.abs(el.currentTime - target) > PL_SYNC_TOLERANCE) el.currentTime = Math.max(0, target);
-    el.muted = !!item.muted;
-    el.volume = item.muted ? 0 : volume;
+    if (Math.abs(el.currentTime - fileTime) > PL_SYNC_TOLERANCE) el.currentTime = Math.max(0, fileTime);
+    const muted = clipAudioMuted(item);
+    el.muted = muted;
+    el.volume = muted ? 0 : Math.min(1, clipVolume(item) * volume);
     if (rate > 0 && !entry.errored) {
       el.playbackRate = Math.min(16, Math.max(0.0625, itemRate * rate));
-      el.play().catch(() => {});
+      if (el.paused) el.play().catch(() => {});
     } else {
       el.pause();
     }
@@ -425,27 +512,96 @@ function createPlayer(container, callbacks) {
     playPauseBtn.textContent = rate > 0 ? "Pause" : "Play";
   }
 
+  /* ---------- trilhas de áudio (A2 em diante e MUS): um <audio> por trilha ---------- */
+
+  function audioChannelFor(trackId) {
+    let channel = audioChannels.get(trackId);
+    if (!channel) {
+      const el = document.createElement("audio");
+      el.preload = "auto";
+      el.dataset.track = trackId; // só para inspecionar no navegador qual elemento é de qual trilha
+      channel = { el, url: null, path: null, errored: false, lastSeek: null };
+      el.addEventListener("error", () => {
+        if (!channel.url) return; // limpar o src ao desmontar o canal também dispara "error"
+        channel.errored = true;
+        showNotice("sem proxy: gerando...");
+        cb.onMediaError(channel.path || channel.url);
+      });
+      mediaPool.appendChild(el);
+      audioChannels.set(trackId, channel);
+    }
+    return channel;
+  }
+
+  function dropAudioChannel(trackId) {
+    const channel = audioChannels.get(trackId);
+    if (!channel) return;
+    channel.url = null;
+    channel.el.pause();
+    channel.el.removeAttribute("src");
+    channel.el.load();
+    channel.el.remove();
+    audioChannels.delete(trackId);
+  }
+
+  /** Busca o <audio> para `target` quando ele se afastou além da tolerância. Logo depois de uma busca o
+   * elemento fica parado carregando dados, enquanto `target` segue andando: sem a carência, esse atraso
+   * estoura a tolerância e dispara outra busca, e outra (visto em faixa de câmera a 2x). `mediaRate` é
+   * quantos segundos de arquivo passam por segundo de relógio. */
+  function seekChannel(channel, target, mediaRate) {
+    const el = channel.el;
+    if (Math.abs(el.currentTime - target) <= PL_SYNC_TOLERANCE) return;
+    const now = performance.now();
+    const last = channel.lastSeek;
+    if (last && now - last.at < PL_SEEK_GRACE_MS) {
+      const continued = last.target + ((now - last.at) / 1000) * mediaRate;
+      if (Math.abs(continued - target) < PL_RESEEK_WINDOW) return; // a busca anterior ainda está carregando
+    }
+    el.currentTime = target;
+    channel.lastSeek = { target, at: now };
+  }
+
+  /** Toca na trilha só o item do instante (o que a faixa realmente grava ali, como no render); sem item,
+   * ou com o ponto fora do arquivo, o elemento da trilha pausa. */
+  function syncAudioTrack(track) {
+    const item = plItemAt(track.items, currentTime);
+    const channel = item ? audioChannelFor(track.id) : audioChannels.get(track.id);
+    if (!channel) return;
+    const path = item ? sourcePath(item) : null;
+    const url = plResolveMediaUrl(path, proxyUrls);
+    if (!item || !url) { channel.el.pause(); return; }
+    if (channel.url !== url) {
+      channel.url = url;
+      channel.path = path;
+      channel.errored = false;
+      channel.lastSeek = null;
+      channel.el.src = url;
+    }
+    const speed = item.extra && item.extra.speed > 0 ? item.extra.speed : 1;
+    const loop = !!(item.extra && item.extra.loop);
+    const target = plPlayableTime(fileTimeFor(item, currentTime, speed), channel.el.duration, loop);
+    if (target == null) { channel.el.pause(); return; }
+    seekChannel(channel, target, rate > 0 ? speed * rate : 0);
+    const gain = plAudioGain(item, track.muted, volume);
+    channel.el.muted = gain.muted;
+    channel.el.volume = gain.volume;
+    if (rate > 0 && !channel.errored) {
+      channel.el.playbackRate = Math.min(16, Math.max(0.0625, speed * rate));
+      if (channel.el.paused) channel.el.play().catch(() => {});
+    } else {
+      channel.el.pause();
+    }
+  }
+
   function syncAudioTracks() {
+    const live = new Set();
     for (const track of view.tracks) {
-      if (track.id !== "MUS" && !/^A[2-9]\d*$/.test(track.id)) continue;
-      const item = track.items[0];
-      if (!item) continue;
-      const url = plResolveMediaUrl(sourcePath(item), proxyUrls);
-      if (!url) continue;
-      const entry = getMediaEntry(url, "audio");
-      entry.path = sourcePath(item);
-      const el = entry.el;
-      const target = fileTimeFor(item, currentTime, 1);
-      activeChannel.set(`audio:${track.id}`, url);
-      if (Math.abs(el.currentTime - target) > PL_SYNC_TOLERANCE) el.currentTime = Math.max(0, target);
-      el.muted = !!item.muted;
-      el.volume = item.muted ? 0 : volume;
-      if (rate > 0 && !entry.errored) {
-        el.playbackRate = Math.min(16, Math.max(0.0625, rate));
-        el.play().catch(() => {});
-      } else {
-        el.pause();
-      }
+      if (!plIsPlayableAudioTrack(track)) continue;
+      live.add(track.id);
+      syncAudioTrack(track);
+    }
+    for (const trackId of [...audioChannels.keys()]) {
+      if (!live.has(trackId)) dropAudioChannel(trackId);
     }
   }
 
@@ -542,9 +698,19 @@ function createPlayer(container, callbacks) {
     destroy() {
       stageObserver.disconnect();
       if (rafId) cancelAnimationFrame(rafId);
+      for (const trackId of [...audioChannels.keys()]) dropAudioChannel(trackId);
     },
   };
   return controller;
 }
 
-window.DMakerPlayer = { create: createPlayer };
+window.DMakerPlayer = {
+  create: createPlayer,
+  pure: {
+    itemAt: plItemAt,
+    fileTime: plFileTime,
+    playableTime: plPlayableTime,
+    clipPlayback: plClipPlayback,
+    audioGain: plAudioGain,
+  },
+};

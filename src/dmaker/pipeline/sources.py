@@ -36,6 +36,21 @@ class Source:
         return session_time - self.offset
 
 
+def part_name(name: str, k: int) -> str:
+    """Nome interno da parte `k` de uma fonte com `parts` (`nome#k`): a chave dela na sessão."""
+    return f"{name}#{k}"
+
+
+def physical_source_names(project: Project, name: str) -> list[str]:
+    """Nomes, na sessão, dos arquivos que uma fonte da spec grava: uma entrada por parte quando ela
+    tem `parts`, ou o próprio nome. É a regra que o render usa para partir as faixas externas
+    (`expand_parts`) e que a vista de linha do tempo reaproveita para achar a faixa de cada parte."""
+    ref = project.sources.get(name)
+    if ref is not None and ref.parts:
+        return [part_name(name, k) for k in range(len(ref.parts))]
+    return [name]
+
+
 def resolve_session(
     project: Project,
     prober: Prober,
@@ -57,7 +72,7 @@ def resolve_session(
                     raise FileNotFoundError(
                         f"sources.{name}: parte {k} não encontrada: {filename} (procurado em {path})"
                     )
-                key = f"{name}#{k}"
+                key = part_name(name, k)
                 session[key] = Source(path, prober(path), start, ref.audio_stream, key)
             continue
         path = project.resolve(ref.src)
@@ -103,7 +118,7 @@ def _coverage(session: dict[str, Source], name: str, count: int) -> list[tuple[f
     """Intervalo (início, fim) de cada parte de `name` no relógio da sessão, na ordem das partes."""
     spans = []
     for k in range(count):
-        source = session[f"{name}#{k}"]
+        source = session[part_name(name, k)]
         assert source.info is not None
         spans.append((source.offset, source.offset + source.info.duration))
     return spans
@@ -138,7 +153,7 @@ def _split_clip_over_parts(
     return [
         segment.model_copy(
             update={
-                "source": f"{name}#{k}",
+                "source": part_name(name, k),
                 "start": piece_start,
                 "end": piece_end,
                 "transition": segment.transition if i == 0 else None,
@@ -196,8 +211,8 @@ def expand_parts(
     for track in project.audio.tracks:
         if track.source in parted:
             tracks.extend(
-                track.model_copy(update={"source": f"{track.source}#{k}"})
-                for k in range(len(coverage[track.source]))
+                track.model_copy(update={"source": physical})
+                for physical in physical_source_names(project, track.source)
             )
         else:
             tracks.append(track)
@@ -206,7 +221,7 @@ def expand_parts(
     for overlay in project.overlays:
         if isinstance(overlay, VideoOverlay) and overlay.source in parted:
             k = _overlay_part(overlay, coverage[overlay.source], warn)
-            overlays.append(overlay.model_copy(update={"source": f"{overlay.source}#{k}"}))
+            overlays.append(overlay.model_copy(update={"source": part_name(overlay.source, k)}))
         else:
             overlays.append(overlay)
 

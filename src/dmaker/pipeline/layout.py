@@ -36,6 +36,7 @@ class ProjectLayout:
     project: Project  # projeto FÍSICO (parts já partidas); quem renderiza usa este, não o original
     origin: list[int] = field(default_factory=list)  # trecho físico -> índice na timeline original
     warnings: list[str] = field(default_factory=list)  # avisos da sincronização (ex.: cadeia por relógio)
+    session: dict[str, Source] = field(default_factory=dict)  # fontes nomeadas (`nome#k` nas partes)
 
 
 def project_layout(
@@ -68,6 +69,7 @@ def project_layout(
         physical,
         origin,
         resolution.warnings,
+        session,
     )
 
 

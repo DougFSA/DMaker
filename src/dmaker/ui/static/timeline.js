@@ -168,21 +168,23 @@ function tlSourcePath(view, item) {
   return null;
 }
 
-/** Velocidade do clipe (A1 usa `spec.timeline[index].speed`, guardado em `extra.speed` pela vista);
- * as demais trilhas de áudio tocam na velocidade normal. Função pura. */
+/** Velocidade do clipe (A1 e as faixas externas fatiadas por clipe guardam `spec.timeline[index].speed`
+ * em `extra.speed`); os demais itens tocam na velocidade normal. Função pura. */
 function tlItemAudioRate(track, item) {
   const speed = item.extra && item.extra.speed;
-  return track.id === "A1" && typeof speed === "number" && speed > 0 ? speed : 1;
+  return typeof speed === "number" && speed > 0 ? speed : 1;
 }
 
-/** Deslocamento da fonte no relógio da sessão: o de `view.sources[item.source]` (A2+, PiP por fonte
- * sincronizada) ou o já calculado em `extra.offset`; 0 para arquivos avulsos. Função pura. */
+/** Deslocamento da fonte no relógio da sessão: o `extra.offset` explícito do item (zero nas faixas
+ * fatiadas, cujo `in_point` já é tempo no arquivo), senão o de `view.sources[item.source]` (A1, PiP por
+ * fonte sincronizada); 0 para arquivos avulsos. Função pura. */
 function tlItemAudioOffset(view, item) {
+  if (item.extra && typeof item.extra.offset === "number") return item.extra.offset;
   if (item.source) {
     const src = view.sources && view.sources[item.source];
     return src ? src.offset || 0 : 0;
   }
-  return (item.extra && item.extra.offset) || 0;
+  return 0;
 }
 
 function tlItemLoops(item) {
@@ -194,6 +196,37 @@ function tlItemLoops(item) {
  * da fonte. Função pura. */
 function tlFileTimeAt(item, sessionTime, rate, offset) {
   return item.in_point + (sessionTime - item.start) * rate - offset;
+}
+
+/** Um canvas de forma de onda por pedaço quando o clipe atravessa mais de um arquivo (`extra.pieces`,
+ * fonte com `parts`), senão um só para o item inteiro. Função pura. */
+function tlWaveformCanvasesHtml(item) {
+  const pieces = item.extra && item.extra.pieces;
+  if (!pieces || !pieces.length) return '<canvas class="tl-waveform"></canvas>';
+  return pieces.map((_, k) => `<canvas class="tl-waveform" data-piece="${k}"></canvas>`).join("");
+}
+
+/** O que um canvas de forma de onda desenha: o intervalo de tempo que cobre, o arquivo e o tempo no
+ * arquivo em cada instante. Com `pieceIndex`, o pedaço do clipe que cai naquele arquivo. Função pura. */
+function tlWaveformWindow(view, track, item, pieceIndex) {
+  const rate = tlItemAudioRate(track, item);
+  const pieces = item.extra && item.extra.pieces;
+  const piece = pieces && pieceIndex !== null ? pieces[pieceIndex] : null;
+  if (piece) {
+    return {
+      path: piece.path,
+      start: piece.start,
+      end: piece.end,
+      fileTimeAt: (t) => piece.in_point + (t - piece.start) * rate,
+    };
+  }
+  const offset = tlItemAudioOffset(view, item);
+  return {
+    path: tlSourcePath(view, item),
+    start: item.start,
+    end: item.end,
+    fileTimeAt: (t) => tlFileTimeAt(item, t, rate, offset),
+  };
 }
 
 function createTimeline(container, callbacks) {
@@ -304,7 +337,7 @@ function createTimeline(container, callbacks) {
     const handles = tlHasTrimHandles(track.id, item)
       ? '<div class="tl-item-handle tl-item-handle-in" data-handle="in"></div><div class="tl-item-handle tl-item-handle-out" data-handle="out"></div>'
       : "";
-    const waveform = tlWaveformEligible(track, item) ? '<canvas class="tl-waveform"></canvas>' : "";
+    const waveform = tlWaveformEligible(track, item) ? tlWaveformCanvasesHtml(item) : "";
     return `<div class="${classes}" data-item-id="${tlEsc(item.id)}" data-track-id="${tlEsc(track.id)}"
         data-draggable="${draggable ? "1" : "0"}" style="left:${left}px;width:${width}px"
         title="${tlEsc(tlItemTitle(item))}">
@@ -363,10 +396,13 @@ function createTimeline(container, callbacks) {
       const item = track && track.items.find((it) => it.id === itemEl.dataset.itemId);
       if (!track || !item) continue;
 
+      const pieceIndex = canvas.dataset.piece === undefined ? null : Number(canvas.dataset.piece);
+      const wave = tlWaveformWindow(view, track, item, pieceIndex);
       const itemLeft = item.start * pxPerSec;
-      const itemWidth = (item.end - item.start) * pxPerSec;
-      const visStart = Math.max(itemLeft, viewLeft);
-      const visEnd = Math.min(itemLeft + itemWidth, viewRight);
+      const rangeLeft = wave.start * pxPerSec;
+      const rangeRight = wave.end * pxPerSec;
+      const visStart = Math.max(rangeLeft, viewLeft);
+      const visEnd = Math.min(rangeRight, viewRight);
       if (visEnd <= visStart) {
         canvas.hidden = true;
         continue;
@@ -382,14 +418,10 @@ function createTimeline(container, callbacks) {
       if (canvas.width !== backingWidth) canvas.width = backingWidth;
       if (canvas.height !== backingHeight) canvas.height = backingHeight;
 
-      const path = tlSourcePath(view, item);
+      const path = wave.path;
       if (!path) continue;
-      const rate = tlItemAudioRate(track, item);
-      const offset = tlItemAudioOffset(view, item);
-      const sessionAtLeft = item.start + leftInItem / pxPerSec;
-      const sessionAtRight = item.start + (leftInItem + widthPx) / pxPerSec;
-      const fileStart = tlFileTimeAt(item, sessionAtLeft, rate, offset);
-      const fileEnd = tlFileTimeAt(item, sessionAtRight, rate, offset);
+      const fileStart = wave.fileTimeAt(visStart / pxPerSec);
+      const fileEnd = wave.fileTimeAt((visStart + widthPx) / pxPerSec);
       const drawOptions = {
         loop: tlItemLoops(item),
         muted: !!item.muted,
@@ -703,4 +735,6 @@ window.DMakerTimeline = {
   hasTrimHandles: tlHasTrimHandles,
   narrationMoveOp: tlNarrationMoveOp,
   itemTitle: tlItemTitle,
+  waveformWindow: tlWaveformWindow,
+  waveformCanvasesHtml: tlWaveformCanvasesHtml,
 };
