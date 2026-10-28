@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..domain.brand import Theme
+from ..domain.regions import resolve_region
 from ..domain.spec import ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay, parse_aspect
 from ..domain.timeline import tone_for
 from ..filtergraph.common import even
@@ -16,6 +17,10 @@ from ..text.captions import Cue
 from ..text.overlays import Canvas, add_captions, add_guides, add_progress_bar, add_text_overlay
 from ..visuals.pip import render_pip_assets
 from .context import RenderContext
+
+# `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
+FRAME_SLACK_PX = 1e-6
+PIP_SHORT_TOLERANCE = 0.5  # s: o vídeo do PiP pode terminar um pouco antes do pedido sem merecer aviso
 
 
 @dataclass
@@ -67,6 +72,12 @@ def resolve_video_overlay(
     end = min(overlay.end if overlay.end is not None else total, total)
     if end <= overlay.start:
         return None
+    available = info.duration - in_point
+    if info.duration and available + PIP_SHORT_TOLERANCE < end - overlay.start:
+        ctx.warn(
+            f"o vídeo de sobreposição {overlay.src or overlay.source!r} tem {available:.1f}s a partir do ponto "
+            f"de entrada, menos que os {end - overlay.start:.1f}s pedidos: o quadro some antes do fim"
+        )
 
     width = even(ctx.width * overlay.width)
     if overlay.shape == "circle":
@@ -75,7 +86,7 @@ def resolve_video_overlay(
         aspect = parse_aspect(overlay.aspect)
     else:
         aspect = info.aspect or 16 / 9
-    height = even(width / aspect)
+    height = even(width / aspect + FRAME_SLACK_PX)
     assets = render_pip_assets(
         width,
         height,
@@ -122,6 +133,7 @@ def build_text_layer(
     text_index = 0
     for overlay in project.overlays:
         if isinstance(overlay, TextOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             end = min(overlay.end if overlay.end is not None else total, total)
             tone = tone_for(overlay.start, end, spans, tones)
             add_text_overlay(layer.doc, canvas, overlay, text_index, tone=tone)
@@ -130,17 +142,21 @@ def build_text_layer(
             add_progress_bar(layer.doc, canvas, overlay)
         elif isinstance(overlay, ImageOverlay):
             path = resolve_overlay_image(project, ctx.theme, overlay.src)
+            if overlay.region:  # a imagem cabe na região: precisa da proporção do arquivo
+                aspect = ctx.prober(path).aspect
+                overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height, aspect)
             end = min(overlay.end if overlay.end is not None else total, total)
             if end > overlay.start:
                 layer.image_overlays.append(ResolvedImageOverlay(overlay, path, overlay.start, end))
         elif isinstance(overlay, VideoOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             pip = resolve_video_overlay(ctx, overlay, total, len(layer.video_overlays))
             if pip is not None:
                 layer.video_overlays.append(pip)
     if cues and project.captions:
-        add_captions(
-            layer.doc, canvas, cues, project.captions.style, tone_fn=lambda a, b: tone_for(a, b, spans, tones)
-        )
+        style = project.captions.style
+        tone_fn = (lambda a, b: tone_for(a, b, spans, tones)) if style.follow_background else None
+        add_captions(layer.doc, canvas, cues, style, tone_fn=tone_fn)
     if guides:
         add_guides(layer.doc, canvas)
     return layer

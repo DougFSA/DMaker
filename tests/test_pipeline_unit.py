@@ -4,6 +4,7 @@ o cache, o ASS gerado e o tratamento de silêncio."""
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -428,3 +429,139 @@ def test_dry_run_does_not_synthesize(tmp_path):
     pipeline.options.dry_run = True
     result = pipeline.run()
     assert synthesizer.texts == [] and result.captions_file is None
+
+
+# ---------- regiões nomeadas, quadro do rosto e áudio das sobreposições ----------
+
+EXPLAINER_REGIONS = {
+    "topo": {"x": 0.5, "y": 0.2575, "width": 0.7222, "height": 0.265},
+    "rosto": {"x": 0.5, "y": 0.6, "width": 0.8889, "height": 0.36},
+}
+
+
+def _explainer(workspace: dict, **overrides) -> dict:
+    """Projeto no formato do modelo "explicativo": dois fundos lisos, a gravação num quadro (região rosto)
+    e a imagem (região topo) de cada assunto. Troca o projeto da oficina e devolve a própria oficina."""
+    spec = {
+        "name": "explicativo",
+        "output": {"preset": "instagram/reels"},
+        "brand": "medlycare",  # o vocabulário da marca é o que o transcritor falso confere
+        "regions": EXPLAINER_REGIONS,
+        "timeline": [
+            {
+                "type": "card",
+                "flat": True,
+                "background": "#0F172A",
+                "variant": "dark",
+                "logo": False,
+                "motion": "none",
+                "duration": 4,
+            },
+            {
+                "type": "card",
+                "flat": True,
+                "background": "#F1E8D8",
+                "variant": "light",
+                "logo": False,
+                "motion": "none",
+                "duration": 4,
+            },
+        ],
+        "overlays": [
+            {
+                "type": "video",
+                "src": "take.mp4",
+                "region": "rosto",
+                "shape": "rounded",
+                "animation": "none",
+                "focus": [0.5, 0.3],
+            },
+            {"type": "image", "src": "print.png", "region": "topo", "start": 0, "end": 4},
+            {"type": "text", "text": "Assunto dois", "region": "topo", "start": 4, "end": 8},
+        ],
+        "captions": {"source": "auto", "language": "pt", "style": {"mode": "rounded", "y": 0.72}},
+        "audio": {"normalize": "two-pass"},
+        **overrides,
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = workspace["dir"]
+    workspace["project"] = project
+    return workspace
+
+
+def test_regions_become_concrete_positions_in_the_final_graph(workspace):
+    from dmaker.domain.regions import region_pixels
+    from dmaker.domain.spec import Region
+
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _pipeline(_explainer(workspace), runner, no_captions=True).run()
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    left, top, width, height = region_pixels(Region(**EXPLAINER_REGIONS["rosto"]), 540, 960)
+
+    # o quadro do rosto: o vídeo preenche a região (corta o excesso, sem distorcer) em torno do foco
+    assert f"scale={width // 2 * 2}:{height // 2 * 2}:force_original_aspect_ratio=increase" in graph
+    assert "crop=" in graph and ":(iw-ow)*0.5000:(ih-oh)*0.3000" in graph
+    assert f"overlay=x='{left}':y='{top}'" in graph  # canto do quadro, pela região
+    # a imagem do assunto (1000x620, mais larga que a região de cima) encosta nos lados e se centra nela
+    image_width = int(re.search(r"\[2:v\]format=rgba,scale=(\d+):-2", graph).group(1))
+    assert 386 <= image_width <= 390  # a largura da região (389.99 px), com o truncamento para par
+    assert "overlay=x=270.00-w/2:y=247.20-h/2" in graph
+    # o texto na região de cima já nasce no lugar dela (centro x 270, y 247)
+    ass = (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+    assert "\\pos(270,247)" in ass
+
+
+def test_the_face_frame_has_the_exact_pixels_of_the_region(workspace):
+    """Regressão da conta em ponto flutuante: 480 / (480/226) dava 225.99999 e o quadro saía 2 px mais baixo."""
+    regions = {"rosto": {"x": 0.5, "y": 0.6, "width": 480 / 540, "height": 226 / 960}}
+    workspace = _explainer(
+        workspace, regions=regions, overlays=[{"type": "video", "src": "take.mp4", "region": "rosto"}]
+    )
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _pipeline(workspace, runner, no_captions=True).run()
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "scale=480:226:force_original_aspect_ratio=increase" in graph
+
+
+def test_the_loudness_pass_measures_the_audio_of_a_video_overlay(workspace):
+    """No modelo "explicativo" a única voz é a da gravação, que é uma sobreposição: sem ela na medição o
+    áudio saía medido como silêncio e a normalização era pulada."""
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _pipeline(_explainer(workspace), runner, no_captions=True).run()
+    measure = next(c for c in runner.commands if "null" in c and "-filter_complex" in c)
+    chain = measure[measure.index("-filter_complex") + 1]
+    assert "[pipaud0]" in chain and "amix=inputs=2" in chain and "loudnorm" in chain
+    assert any(
+        arg == str(workspace["dir"] / "take.mp4") for arg in measure
+    )  # a gravação é uma entrada da medição
+    assert not any("silencioso" in w for w in result.warnings)
+    graph = (result.job_dir / "graph.txt").read_text(encoding="utf-8")
+    assert "measured_I=-23.5" in graph  # e a medida chega à normalização linear da montagem
+
+
+def test_a_video_overlay_shorter_than_asked_is_reported(workspace):
+    longer = [{"type": "card", "flat": True, "logo": False, "motion": "none", "duration": 12}]
+    workspace = _explainer(workspace, timeline=longer)  # a gravação (falsa) tem 8 s, o vídeo pede 12
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _pipeline(workspace, runner, no_captions=True).run()
+    assert any("tem 8.0s" in w and "12.0s" in w and "some antes do fim" in w for w in result.warnings)
+    quiet = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    assert not any(
+        "some antes" in w for w in _pipeline(_explainer(workspace), quiet, no_captions=True).run().warnings
+    )
+
+
+def test_a_caption_can_ignore_the_tone_of_the_background(workspace):
+    """Sobre o quadro do rosto a legenda fica sobre vídeo: o tom do fundo ao redor não troca o estilo dela."""
+
+    def caption_styles(follow: bool) -> str:
+        project = _explainer(workspace)["project"]
+        project.captions.style.follow_background = follow
+        runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+        result = _pipeline(workspace, runner, force=True).run()
+        return (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+
+    following = caption_styles(True)
+    assert "Style: CapDark," in following  # a cue cai sobre o fundo escuro do primeiro assunto
+    ignoring = caption_styles(False)
+    assert "Style: Cap," in ignoring and "CapDark" not in ignoring

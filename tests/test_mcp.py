@@ -147,6 +147,46 @@ def test_new_from_template_via_mcp(synthetic_media):
     spec_path.parent.rmdir()
 
 
+@requires_ffmpeg
+def test_explanatory_template_via_mcp_shows_the_topic_format_and_checks_the_topics(synthetic_media):
+    """O formato da lista de assuntos (objetos) chega à IA pelo `list_templates`, e um vão entre assuntos
+    volta como erro claro em vez de um projeto com fundo faltando."""
+    recording = str(synthetic_media["clip_a"])
+
+    async def go(session):
+        listed = (await session.call_tool("list_templates", {})).structured_content["result"]
+        created = await session.call_tool(
+            "new_from_template",
+            {
+                "template": "explicativo",
+                "name": "mcp-explicativo-teste",
+                "params": {"gravacao": recording, "assuntos": [{"fim": 1}, {"fim": 3, "fundo": "bege"}]},
+            },
+        )
+        gap = await session.call_tool(
+            "new_from_template",
+            {
+                "template": "explicativo",
+                "name": "mcp-explicativo-erro",
+                "params": {"gravacao": recording, "assuntos": [{"fim": 1}, {"inicio": 2, "fim": 3}]},
+            },
+        )
+        return listed, _text(created), gap
+
+    listed, created, gap = asyncio.run(_session(go))
+    explicativo = next(t for t in listed if t["name"] == "explicativo")
+    assert explicativo["params"]["assuntos"]["example"][0]["fim"] == 20
+    assert "exemplo:" in explicativo["summary"]
+    assert json.loads(created)["total_s"] == 3.0
+    assert gap.is_error and "assunto 2" in _text(gap) and "emendar" in _text(gap)
+
+    spec_path = config.PROJECTS_DIR / "mcp-explicativo-teste" / "spec.json"
+    saved = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert set(saved["regions"]) == {"topo", "rosto"} and len(saved["timeline"]) == 2
+    spec_path.unlink()
+    spec_path.parent.rmdir()
+
+
 def test_new_from_template_missing_required_param_via_mcp():
     async def go(session):
         return await session.call_tool(

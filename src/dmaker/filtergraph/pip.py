@@ -78,6 +78,15 @@ def _slide_expr(axis_value: int, size: int, edge_far: int, start: float, positio
     return f"{axis_value}{sign}{off}*(1-{ease})"
 
 
+def pip_crop(width: int, height: int, focus: tuple[float, float]) -> str:
+    """Filtro `crop` do quadro do PiP. No centro (o padrão) deixa o ffmpeg centrar; fora dele, a janela
+    desliza pelo excesso da fonte até o ponto de interesse, como em `reframe.focus`."""
+    fx, fy = focus
+    if (fx, fy) == (0.5, 0.5):
+        return f"crop={width}:{height}"
+    return f"crop={width}:{height}:(iw-ow)*{fx:.4f}:(ih-oh)*{fy:.4f}"
+
+
 def video_overlay_graph(
     lines: list[str],
     inputs: Inputs,
@@ -95,12 +104,12 @@ def video_overlay_graph(
     for k, pip in enumerate(pips):
         ov = pip.overlay
         dur = pip.duration
-        idx = inputs.add(pip.path, "-ss", f"{max(pip.in_point, 0):.3f}", "-t", f"{dur:.3f}")
+        idx = _add_pip_input(inputs, pip)
         mask_idx = inputs.add_looped_image(pip.mask, fps, dur)
         w, h = pip.width, pip.height
         lines.append(
             f"[{idx}:v]setpts=PTS-STARTPTS,fps={fps:g},scale={w}:{h}:force_original_aspect_ratio=increase"
-            f":flags=lanczos,crop={w}:{h},format=rgba[pipv{k}]"
+            f":flags=lanczos,{pip_crop(w, h, ov.focus)},format=rgba[pipv{k}]"
         )
         lines.append(f"[{mask_idx}:v]format=gray,scale={w}:{h}[pipm{k}]")
         post = [f"[pipv{k}][pipm{k}]alphamerge"]
@@ -145,12 +154,33 @@ def video_overlay_graph(
         cur_v = f"[pv{k}]"
 
         if pip.has_audio and ov.volume > 0:
-            chain = [
-                f"[{idx}:a:{pip.audio_stream}]asetpts=PTS-STARTPTS",
-                f"adelay={int(round(pip.start * 1000))}:all=1",
-                f"volume={ov.volume:.3f}",
-                AUDIO_FMT_MIX,
-            ]
-            lines.append(",".join(chain) + f"[pipaud{k}]")
+            lines.append(_pip_audio_chain(idx, pip, k))
             audio_labels.append(f"[pipaud{k}]")
     return cur_v, audio_labels
+
+
+def _add_pip_input(inputs: Inputs, pip: ResolvedVideoOverlay) -> int:
+    """Entrada do arquivo do PiP, já posicionada no ponto em que ele começa e limitada à sua duração."""
+    return inputs.add(pip.path, "-ss", f"{max(pip.in_point, 0):.3f}", "-t", f"{pip.duration:.3f}")
+
+
+def _pip_audio_chain(idx: int, pip: ResolvedVideoOverlay, k: int) -> str:
+    """Ramo de áudio do PiP: volume e atraso até o instante em que ele entra na linha do tempo."""
+    chain = [
+        f"[{idx}:a:{pip.audio_stream}]asetpts=PTS-STARTPTS",
+        f"adelay={int(round(pip.start * 1000))}:all=1",
+        f"volume={pip.overlay.volume:.3f}",
+        AUDIO_FMT_MIX,
+    ]
+    return ",".join(chain) + f"[pipaud{k}]"
+
+
+def pip_audio_graph(lines: list[str], inputs: Inputs, pips: list[ResolvedVideoOverlay]) -> list[str]:
+    """Só os ramos de áudio dos PiPs, para a medição de loudness (que não monta vídeo): sem eles, uma
+    gravação que vem inteira numa sobreposição, como no modelo "explicativo", seria medida como silêncio."""
+    labels: list[str] = []
+    for k, pip in enumerate(pips):
+        if pip.has_audio and pip.overlay.volume > 0:
+            lines.append(_pip_audio_chain(_add_pip_input(inputs, pip), pip, k))
+            labels.append(f"[pipaud{k}]")
+    return labels

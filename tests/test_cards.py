@@ -64,3 +64,13 @@ def test_sparkles_stay_out_of_text_and_logo(size):
         x, y = sparkle_spot(rng, w, h)
         for x0, y0, x1, y1 in SPARKLE_KEEP_OUT:
             assert not (x0 * w <= x <= x1 * w and y0 * h <= y <= y1 * h)
+
+
+def test_flat_card_is_only_the_background_color():
+    """`flat` tira as curvas, a rede e os brilhos do tema: sobra a cor, sem título e sem logo."""
+    theme = load_theme("medlycare")
+    img = render_card(theme, 270, 480, "", None, "dark", False, "#F1E8D8", None, seed=1, flat=True)
+    assert img.size == (270, 480)
+    assert img.getcolors(maxcolors=4) == [(270 * 480, (0xF1, 0xE8, 0xD8))]  # uma cor só, em todos os pixels
+    decorated = render_card(theme, 270, 480, "", None, "dark", False, "#F1E8D8", None, seed=1)
+    assert len(decorated.getcolors(maxcolors=100_000) or []) > 1  # o cartão de sempre continua decorado

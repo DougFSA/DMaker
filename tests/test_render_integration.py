@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dmaker.domain.spec import Project
+from dmaker.media import ffmpeg
 from dmaker.media.probe import probe
 from dmaker.pipeline import RenderOptions, RenderPipeline, contact_sheet
 
@@ -809,3 +812,106 @@ def test_dub_stems_of_a_stretched_video_follow_the_new_timeline_with_the_pitch_i
     mix, _ = read_wav_channels(premix)
     summed = voice_dubbed + background_out
     assert float(np.abs(summed - mix[: len(summed)]).max()) < 2e-4
+
+
+def _face_recording(path: Path, size: tuple[int, int]) -> None:
+    """Gravação sintética (parede azul, cabeça redonda cor de pele, tom de 440 Hz) de 3 s, para medir
+    no quadro renderizado se o recorte distorce (a cabeça tem que continuar um círculo)."""
+    from PIL import Image, ImageDraw
+
+    width, height = size
+    image = Image.new("RGB", size, WALL)
+    # vertical: o rosto fica no terço de cima, onde o foco padrão do modelo mantém a janela do quadro
+    center_y, radius = (
+        (int(height * 0.28), int(height * 0.09)) if height > width else (height // 2, int(height * 0.22))
+    )
+    ImageDraw.Draw(image).ellipse(
+        [width // 2 - radius, center_y - radius, width // 2 + radius, center_y + radius], fill=SKIN
+    )
+    png = path.with_suffix(".png")
+    image.save(png)
+    ffmpeg.run(
+        ["-loop", "1", "-framerate", "30", "-t", "3", "-i", str(png)]
+        + ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3"]
+        + ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)],
+        quiet=True,
+    )
+
+
+WALL = (90, 120, 150)
+SKIN = (235, 190, 150)
+TOPIC_BACKGROUNDS = [(0x0F, 0x17, 0x2A), (0xF1, 0xE8, 0xD8), (0xF8, 0xFA, 0xFC)]  # escuro, bege, claro
+
+
+def _bounding_box(mask):
+    ys, xs = np.nonzero(mask)
+    return (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())) if len(xs) else None
+
+
+@pytest.mark.parametrize("size", [(720, 1280), (1280, 720)], ids=["vertical", "horizontal"])
+def test_explainer_template_renders_the_recording_in_its_frame_without_distortion(
+    synthetic_media, tmp_path, size
+):
+    """Modelo "explicativo" de ponta a ponta com ffmpeg: o rosto fica contínuo num quadro com os pixels da
+    região "rosto", o fundo troca nos limites dos assuntos, a imagem cabe em "topo" e a cabeça não distorce,
+    seja a gravação vertical ou horizontal."""
+    from PIL import Image
+
+    from dmaker.domain.regions import region_pixels
+    from dmaker.domain.templates import find_template, render_template
+
+    recording = tmp_path / "gravacao.mp4"
+    _face_recording(recording, size)
+    topics = [
+        {"fim": 1, "fundo": "escuro", "imagem": str(synthetic_media["photo"])},
+        {"fim": 2, "fundo": "bege", "imagem": str(synthetic_media["photo"])},
+        {"fim": 3, "fundo": "claro"},
+    ]
+    spec = render_template(
+        find_template("explicativo"), {"gravacao": str(recording), "assuntos": topics, "legendas": False}
+    )
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    out = tmp_path / "explicativo.mp4"
+    result = RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True, thumbnail=False)).run()
+
+    info = probe(out)
+    assert (info.width, info.height) == (540, 960) and abs(info.duration - 3.0) < 0.25 and info.has_audio
+    assert not any("some antes" in w or "silencioso" in w for w in result.warnings)
+    loudness = json.loads((result.job_dir / "loudnorm.json").read_text(encoding="utf-8"))
+    assert float(loudness["input_i"]) > -40  # a voz da gravação entrou na medição (era medida como silêncio)
+
+    left, top, width, height = region_pixels(project.regions["rosto"], 540, 960)
+    topo_left, topo_top, topo_width, topo_height = region_pixels(project.regions["topo"], 540, 960)
+    for index, instant in enumerate((0.5, 1.5, 2.5)):
+        frame_path = tmp_path / f"quadro{index}.png"
+        ffmpeg.run(["-ss", str(instant), "-i", str(out), "-frames:v", "1", str(frame_path)], quiet=True)
+        frame = np.asarray(Image.open(frame_path).convert("RGB")).astype(int)
+        # o fundo troca em cada assunto
+        assert np.abs(frame[5, 5] - np.array(TOPIC_BACKGROUNDS[index])).max() <= 6
+        # o quadro do rosto ocupa a região (a parede da gravação preenche, sem fresta)
+        wall = np.abs(frame - np.array(WALL)).max(axis=2) <= 14
+        x0, y0, x1, y1 = _bounding_box(wall)
+        assert abs(x0 - left) <= 3 and abs(y0 - top) <= 3
+        assert abs(x1 - (left + width - 1)) <= 3 and abs(y1 - (top + height - 1)) <= 3
+        # a cabeça continua um círculo: a gravação foi cortada para preencher, não esticada
+        skin = np.abs(frame - np.array(SKIN)).max(axis=2) <= 14
+        hx0, hy0, hx1, hy1 = _bounding_box(skin)
+        assert abs((hx1 - hx0 + 1) / (hy1 - hy0 + 1) - 1) < 0.05
+        # a imagem do assunto (só nos dois primeiros) fica dentro de "topo"; no terceiro, o fundo liso
+        above = np.abs(frame[: top - 15] - np.array(TOPIC_BACKGROUNDS[index])).max(axis=2) > 24
+        box = _bounding_box(above)
+        if index < 2:
+            assert box and box[0] >= topo_left - 3 and box[2] <= topo_left + topo_width + 3
+            assert box[1] >= topo_top - 3 and box[3] <= topo_top + topo_height + 3
+        else:
+            assert box is None
+
+    # a fala não é cortada na troca de fundo: o nível do áudio segue parelho de ponta a ponta
+    wav = tmp_path / "saida.wav"
+    ffmpeg.run(["-i", str(out), "-vn", "-ac", "1", "-ar", "16000", str(wav)], quiet=True)
+    with wave.open(str(wav)) as handle:
+        samples = np.frombuffer(handle.readframes(handle.getnframes()), dtype=np.int16).astype(float)
+    windows = [samples[i : i + 1600] for i in range(1600, len(samples) - 1600, 1600)]  # 100 ms, sem as pontas
+    levels = np.array([np.sqrt((w**2).mean()) for w in windows])
+    assert levels.min() > 0.7 * np.median(levels)

@@ -32,6 +32,75 @@ normal com placeholders `{{nome}}`, listas via `$for` e trechos condicionais via
 Só escreva a spec na mão (`save_project`) quando nenhum template cobrir o pedido: aí ainda assim comece
 copiando o template mais próximo.
 
+### Vídeo explicativo: o rosto num quadro embaixo e a área de cima livre (template `explicativo`)
+
+Formato de reel (1080x1920) para quem explica um assunto: a gravação do apresentador num quadro de cantos
+arredondados embaixo, uma área livre em cima para a imagem ou o infográfico de cada assunto, legenda curta
+sobre a parte de baixo do quadro e o fundo da tela trocando a cada assunto. O quadro do rosto e a área de
+cima ficam dentro da zona segura do Reels (nada importante sob a interface do app).
+
+```
+new_from_template("explicativo", "meu-explicativo", {
+  "gravacao": "D:/videos/gravacao.mp4",
+  "assuntos": [
+    {"fim": 20, "fundo": "escuro", "imagem": "D:/imagens/assunto1.png"},
+    {"fim": 40, "fundo": "bege",   "imagem": "D:/imagens/assunto2.png"},
+    {"fim": 60, "fundo": "claro"}
+  ]
+})
+```
+
+Na CLI: `dmaker new-from-template explicativo meu-explicativo --param gravacao=D:/videos/gravacao.mp4
+--params-json '{"assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "D:/imagens/assunto1.png"}, ...]}'`.
+
+- **Assuntos**: em ordem e emendados (o início de cada um é o fim do anterior; `inicio` é opcional e, se
+  dado, precisa bater com esse fim; o primeiro começa em 0). O fim do último é a duração do vídeo e
+  deve ser a duração da gravação: gravação mais curta gera aviso. `fundo`: `escuro`, `claro`, `bege`, uma
+  cor `#RRGGBB`, uma chave do tema ou o caminho de uma imagem (preenche a tela); sem ele os fundos se
+  alternam. `imagem` (opcional) entra na região `topo` durante o assunto, inteira e centrada, sem distorcer.
+- **A gravação é uma sobreposição de vídeo só**, do começo ao fim, com o áudio dela: a troca de fundo
+  nunca corta a fala. Gravação horizontal ou vertical: o quadro preenche cortando o excesso, sem distorcer;
+  `foco` ([x, y], padrão [0.5, 0.3]) diz o ponto que a janela do corte mantém visível (o rosto de uma
+  gravação vertical fica no terço de cima; na horizontal só o x conta).
+- `legendas` (padrão true; `false` tira) e `legenda_modo` (`rounded` padrão, `karaoke`, `classic`, `boxed`);
+  `marca` (opcional) traz cores e estilo de uma marca.
+- Fundos sem texto são cartões `flat` (cor lisa, sem os brilhos do tema): `{"type": "card", "flat": true,
+  "background": "#F1E8D8"}` não pede `title`.
+
+#### Regiões nomeadas (`regions`)
+
+A spec pode declarar retângulos nomeados do quadro, em fração (0 a 1) da largura e da altura, com `x`/`y` no
+CENTRO (a mesma convenção de `x`/`y` das sobreposições). Sobreposições de texto, imagem e vídeo se encaixam
+numa região por nome, no lugar de `position`/`x`/`y`/`width`, e quem monta um infográfico ou uma composição
+aponta para a mesma região, sem conta de pixel. O modelo `explicativo` declara duas:
+
+```json
+"regions": {
+  "topo":  { "x": 0.5, "y": 0.2575, "width": 0.7222, "height": 0.265 },
+  "rosto": { "x": 0.5, "y": 0.6,    "width": 0.8889, "height": 0.36 }
+},
+"overlays": [
+  { "type": "image", "src": "grafico.png", "region": "topo", "start": 0, "end": 20 },
+  { "type": "text", "text": "Três passos", "region": "topo", "start": 20, "end": 40 },
+  { "type": "video", "src": "gravacao.mp4", "region": "rosto", "shape": "rounded", "radius": 0.05 }
+]
+```
+
+- **Imagem**: cabe inteira na região, centrada, sem distorcer (a largura vem da região; `position` e `width`
+  são ignorados). **Texto**: centrado na região e quebrado na largura dela (`style.align` left/right encosta
+  na borda; `style.max_width` só pode estreitar). **Vídeo**: sem `aspect`, o quadro é a região inteira e o
+  vídeo a preenche cortando o excesso (`focus` escolhe o ponto); com `aspect` (ou `shape: circle`), o maior
+  quadro dessa proporção que cabe nela.
+- `region` junto de `x`/`y` (e, no texto, de `position`) é erro: a região já define o lugar. Nome que o projeto
+  não declara em `regions` é erro na validação, e a mensagem lista as regiões que existem. Projeto sem
+  `regions` não muda em nada.
+- Quem desenha dentro de uma região pede os pixels dela a `dmaker.domain.regions.region_pixels(region, largura,
+  altura)`; a resolução de `region` em x/y/width está em `resolve_region`.
+- Medidas do `explicativo` no Reels (1080x1920, zona segura de 220 px em cima, 420 embaixo, 60 à esquerda e 150
+  à direita): `topo` fica dentro da zona segura (x 150 a 930, y 240 a 749); `rosto` é um quadro de 960x691 px
+  centrado, terminando em y 1497, acima da faixa da interface (ele vai até a lateral direita, sob a coluna de
+  botões, mas só o fundo da gravação cai ali). A legenda (`captions.style.y` 0.72) fica dentro do quadro.
+
 ## Spec JSON (referência completa)
 
 ```json
@@ -63,16 +132,16 @@ copiando o template mais próximo.
 Regras e valores:
 
 - **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior); tipos: `cut`, `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `smoothleft`, `circleopen`, `zoomin`, `fadeblack`, `fadewhite`, `pixelize`... (nomes do xfade). Transição consome tempo: duração final = soma dos trechos menos as transições (`validate_project` mostra).
-- **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
+- **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`; `flat: true` deixa só a cor de `background`, sem decoração e sem exigir título).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; senão usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, separa melhor cadeira/objeto que encosta na pessoa, mais lento na CPU) ou `mobilenetv3` (mais leve e rápido, bom para rascunho). O recorte fica em cache: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos podem falhar na borda.
 - **audio_mode** (só em `clip`): `original` (padrão), `voice` (só a voz, limpa de música e ruído) ou `background` (só o fundo, para dublar ou trocar a fala). Usa o isolamento vocal, lento na CPU; veja a seção "Isolamento vocal". Vale só para o áudio da própria câmera, não para `audio.tracks`.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
-- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição.
-- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `opacity`, `start`/`end`, `fade`.
+- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada.
+- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`.
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
-- **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y`; `width` (fração da largura, 0.18 a 0.3 para webcam); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
-- **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
+- **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y` ou `region` (o quadro ocupa uma região nomeada); `width` (fração da largura, 0.18 a 0.3 para webcam); `focus` ([x, y], padrão o centro: onde cortar quando a proporção do quadro difere da fonte, como `reframe.focus`); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
+- **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha), `follow_background` (padrão true: a legenda acompanha o tom claro/escuro do cartão por baixo; false mantém o estilo de quem está sobre vídeo, como no quadro do rosto do `explicativo`). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
 - **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
 - **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa encoder de hardware quando `dmaker doctor` detectar um, mais rápido e com qualidade um pouco menor), `fps`, `thumbnail_at`, `path`.
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.

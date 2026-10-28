@@ -3,7 +3,9 @@
 Convenções:
 - tempos em segundos; cores em #RRGGBB ou chave do tema (primary, accent, text...);
 - tamanhos de texto em px na base 1080 (lado menor do vídeo): escalam com a resolução;
-- posições x/y em fração (0..1) do quadro.
+- posições x/y em fração (0..1) do quadro;
+- regiões nomeadas (`regions`): retângulos do quadro, em fração, que as sobreposições usam por nome
+  (`region`) em vez de x/y/width.
 """
 
 from __future__ import annotations
@@ -210,17 +212,47 @@ class CardSegment(SegmentBase):
     motion_amount: float = Field(0.04, ge=0, le=0.3)
     layout: str | None = None  # nome de um layout em `card_layouts` do brand.json da marca
     fields: dict[str, str | list[str]] = {}  # campos que preenchem o layout ({{campo}} e listas)
+    # cor lisa: sem as curvas e os brilhos do tema, e sem exigir título. É o fundo de apoio atrás de um
+    # quadro de vídeo ou de uma imagem (modelo "explicativo"), onde a decoração só atrapalharia
+    flat: bool = False
 
     @model_validator(mode="after")
     def _title_or_layout(self) -> CardSegment:
-        if not self.layout and not self.title.strip():
+        if not self.layout and not self.title.strip() and not self.flat:
             raise ValueError(
-                "cartão precisa de `title` (ou `layout` com `fields`, cartão por layout da marca)"
+                "cartão precisa de `title` (ou `layout` com `fields`, cartão por layout da marca, "
+                "ou `flat: true` para um fundo de cor lisa)"
             )
         return self
 
 
 Segment = Annotated[ClipSegment | ImageSegment | CardSegment, Field(discriminator="type")]
+
+
+# ---------- regiões nomeadas ----------
+
+_EDGE_TOLERANCE = 1e-6  # folga das contas de ponto flutuante ao conferir se a região cabe no quadro
+
+
+class Region(Strict):
+    """Retângulo nomeado do quadro, em fração (0..1) da largura e da altura. `x`/`y` são o CENTRO, a mesma
+    convenção de `x`/`y` nas sobreposições. Quem monta um layout (o modelo "explicativo") declara as
+    regiões uma vez e as sobreposições se encaixam nelas por nome (`region`), sem conta de pixel."""
+
+    x: float = Field(gt=0, lt=1)
+    y: float = Field(gt=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _inside_frame(self) -> Region:
+        for axis, center, size in (("horizontal", self.x, self.width), ("vertical", self.y, self.height)):
+            if center - size / 2 < -_EDGE_TOLERANCE or center + size / 2 > 1 + _EDGE_TOLERANCE:
+                raise ValueError(
+                    f"região fora do quadro no eixo {axis}: centro {center:g} e tamanho {size:g} "
+                    "passam da borda (x/y são o centro, em fração)"
+                )
+        return self
 
 
 # ---------- sobreposições ----------
@@ -258,8 +290,17 @@ class TextOverlay(Strict):
     position: Literal["top", "center", "bottom"] | None = None
     x: float | None = Field(None, ge=0, le=1)
     y: float | None = Field(None, ge=0, le=1)
+    region: str | None = None  # nome em `regions`: o texto se centra na região (no lugar de position/x/y)
     animation: Literal["none", "fade", "pop", "slide-up", "typewriter"] | None = None
     style: TextStyle = TextStyle()
+
+    @model_validator(mode="after")
+    def _region_or_position(self) -> TextOverlay:
+        if self.region and (self.x is not None or self.y is not None or self.position is not None):
+            raise ValueError(
+                "texto com `region` não leva `position`, `x` nem `y`: a região já define o lugar"
+            )
+        return self
 
 
 class ImageOverlay(Strict):
@@ -268,6 +309,11 @@ class ImageOverlay(Strict):
     position: Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] = (
         "top-right"
     )
+    x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (x e y juntos; sobrescreve position)
+    y: float | None = Field(None, ge=0, le=1)
+    # nome em `regions`: a imagem inteira cabe na região, centrada e sem distorcer (no lugar de
+    # position/x/y; a largura vem da região)
+    region: str | None = None
     width: float = Field(0.22, gt=0, le=1)  # fração da largura do vídeo
     margin: float = Field(40, ge=0)  # px na base 1080
     safe_zone: bool = True  # False cola no canto do quadro, só com a margem (ignora a interface do app)
@@ -275,6 +321,14 @@ class ImageOverlay(Strict):
     start: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     fade: float = Field(0.3, ge=0)
+
+    @model_validator(mode="after")
+    def _place(self) -> ImageOverlay:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("imagem: informe `x` e `y` juntos (o centro da imagem)")
+        if self.region and self.x is not None:
+            raise ValueError("imagem com `region` não leva `x` nem `y`: a região já define o lugar")
+        return self
 
 
 class ProgressBar(Strict):
@@ -300,8 +354,14 @@ class VideoOverlay(Strict):
     )
     x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (sobrescreve position)
     y: float | None = Field(None, ge=0, le=1)
+    # nome em `regions`: o quadro ocupa a região (no lugar de position/x/y/width). Sem `aspect`, o vídeo
+    # preenche a região inteira cortando o excesso; com `aspect`, o quadro dessa proporção cabe nela
+    region: str | None = None
     width: float = Field(0.28, gt=0, le=1)  # fração da largura do vídeo
     aspect: str | None = None  # "16:9", "1:1"...; None = proporção da fonte (círculo força 1:1)
+    # onde cortar quando a proporção do quadro difere da fonte, como em `reframe.focus`: (0.5, 0.5) mantém
+    # o centro; (0.5, 0.3) sobe a janela para um rosto de vídeo vertical, que fica no terço de cima
+    focus: tuple[float, float] = (0.5, 0.5)
     shape: Literal["rect", "rounded", "circle"] = "rounded"
     radius: float = Field(0.08, ge=0, le=0.5)  # cantos redondos, fração da largura do PiP
     softness: float = Field(0.0, ge=0)  # suavidade da borda da máscara, px na base 1080
@@ -322,6 +382,10 @@ class VideoOverlay(Strict):
             raise ValueError("end precisa ser maior que start na sobreposição de vídeo")
         if self.aspect is not None:
             parse_aspect(self.aspect)
+        if self.region and (self.x is not None or self.y is not None):
+            raise ValueError("vídeo com `region` não leva `x` nem `y`: a região já define o lugar")
+        if not all(0 <= v <= 1 for v in self.focus):
+            raise ValueError("focus do vídeo precisa ter os dois valores entre 0 e 1")
         return self
 
 
@@ -361,6 +425,10 @@ class CaptionStyle(Strict):
     pop: bool = False  # aumentar a palavra ativa desloca a linha; fica desligado por padrão
     box_color: str = "#000000"  # hex ou chave do tema (primary, accent...)
     box_alpha: float = Field(0.6, ge=0, le=1)
+    # acompanha o tom (claro/escuro) do cartão ou fundo gerado que passa por baixo. False: a legenda mantém
+    # sempre o estilo de quem está sobre vídeo, como quando fica sobre o quadro do rosto e o fundo do tema
+    # só aparece ao redor dele
+    follow_background: bool = True
 
 
 class Captions(Strict):
@@ -565,7 +633,21 @@ class Project(Strict):
     multicam: MulticamBlock | None = None  # trecho ainda por planejar; `plan_multicam` o substitui
     tracks: dict[str, TrackState] = {}  # mudo/oculto/bloqueio por trilha (ids da vista: V1, A1, A2...,
     # MUS, CC, TX, GR, V2, V3...); ver `domain.tracks.apply_track_state`
+    # retângulos nomeados do quadro (ex.: "topo", "rosto" no modelo "explicativo"); as sobreposições se
+    # encaixam neles por `region`, e infográficos e composições usam o mesmo nome (ver `domain.regions`)
+    regions: dict[str, Region] = {}
     base_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def _region_refs(self) -> Project:
+        used = {ov.region for ov in self.overlays if getattr(ov, "region", None)}
+        unknown = sorted(used - set(self.regions))
+        if unknown:
+            known = ", ".join(sorted(self.regions)) or "nenhuma declarada"
+            raise ValueError(
+                f"região desconhecida: {', '.join(unknown)} (declare em `regions`; regiões do projeto: {known})"
+            )
+        return self
 
     @model_validator(mode="after")
     def _session_refs(self) -> Project:
