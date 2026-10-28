@@ -2,7 +2,9 @@
 import { http } from './http'
 import type {
   AppState,
+  AutoCutRequest,
   BrowseResponse,
+  CutReport,
   JobSnapshot,
   JobStartResponse,
   NewProjectRequest,
@@ -31,6 +33,14 @@ export const api = {
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/render`, request),
     export: (name: string, presets: string[]) =>
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/export`, { presets }),
+    /** Devolve ao projeto o trecho de um corte automático; responde com a lista de cortes atualizada. */
+    undoCut: (name: string, cutId: number) =>
+      http.post<CutReport>(`/api/projects/${enc(name)}/cuts/${cutId}/undo`),
+  },
+
+  autocut: {
+    /** Corta as pausas, os vícios e as repetições de uma gravação num projeto novo (job com progresso). */
+    start: (request: AutoCutRequest) => http.post<JobStartResponse>('/api/autocut', request),
   },
 
   templates: {

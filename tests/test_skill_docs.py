@@ -52,6 +52,14 @@ def test_guide_is_package_data_for_wheel_installs():
     assert "resources/*.md" in pyproject
 
 
+def test_guide_and_skill_send_spoken_recordings_to_autocut_instead_of_manual_cutting():
+    guide = GUIDE_PATH.read_text(encoding="utf-8")
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    for tool in ("autocut", "list_cuts", "undo_cut", "audio_fade"):
+        assert tool in guide
+    assert "autocut" in skill and "undo_cut" in skill
+
+
 def test_manual_exists_is_dash_free_and_covers_all_sections():
     assert MANUAL_PATH.exists()
     text = MANUAL_PATH.read_text(encoding="utf-8")

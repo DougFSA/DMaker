@@ -69,6 +69,17 @@ def fade_chains(fade_in: float, fade_out: float, duration: float) -> tuple[list[
     return video, audio
 
 
+def audio_edge_fades(fade: float, duration: float) -> list[str]:
+    """Fade de áudio nas duas pontas do trecho (só o som; a imagem não escurece), de no máximo metade dele."""
+    length = min(fade, duration / 2)
+    if length <= 0:
+        return []
+    return [
+        f"afade=t=in:st=0:d={length:.3f}",
+        f"afade=t=out:st={duration - length:.3f}:d={length:.3f}",
+    ]
+
+
 @dataclass
 class Inputs:
     """Lista de entradas `-i` com os índices que os rótulos do grafo usam."""

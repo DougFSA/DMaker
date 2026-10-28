@@ -36,6 +36,16 @@ def active_rms(samples: np.ndarray, sample_rate: int) -> float:
     return float(np.sqrt(np.mean(np.square(active))))
 
 
+def active_frames(levels: np.ndarray) -> np.ndarray | None:
+    """Máscara dos quadros com fala (a mesma régua de `active_rms`); None se tudo é silêncio ou não há quadros."""
+    if levels.size == 0:
+        return None
+    loud = float(np.percentile(levels, 95))
+    if loud < SILENCE_FLOOR:
+        return None
+    return levels >= loud * 10.0 ** (-ACTIVE_BELOW_PEAK_DB / 20.0)
+
+
 def gain_to_match_db(speech_rms: float, reference_rms: float, limit_db: float = MAX_GAIN_DB) -> float:
     """Ganho em dB que leva `speech_rms` até `reference_rms`, limitado a ±`limit_db`; 0 se faltar medida."""
     if speech_rms <= SILENCE_FLOOR or reference_rms <= SILENCE_FLOOR:

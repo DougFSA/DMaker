@@ -38,7 +38,7 @@ from .isolation import default_isolation_service, progress_logger
 from .sources import Source
 from .track_slices import track_slices
 
-MEZZ_VERSION = "m5"  # muda quando a receita do mezanino muda (invalida o cache)
+MEZZ_VERSION = "m6"  # muda quando a receita do mezanino muda (invalida o cache)
 
 
 def cache_key(*parts: object) -> str:

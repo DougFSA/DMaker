@@ -285,6 +285,110 @@ def plan_multicam(name_or_path: str) -> dict:
     }
 
 
+# ---------- cortar pausas, vícios e repetições de uma gravação falada ----------
+
+
+def _autocut_service(job: Job | None = None) -> Any:
+    """O serviço de corte com as peças de verdade; com `job`, o ffmpeg e as etapas viram progresso dele."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.autocut import AutoCutService
+
+    if job is None:
+        return AutoCutService()
+    return AutoCutService(runner=SubprocessRunner(sink=job.sink()), log=job.log)
+
+
+def _autocut_work(job: Job, request: Any) -> dict:
+    """O corte ligado ao job: a transcrição é lenta na CPU, então cada etapa vira progresso."""
+    from .pipeline.jobs import stage_progress
+
+    result = _autocut_service(job).cut(request, stage_progress(job))
+    return {
+        "project": result.project.name,
+        "spec_path": str(result.spec_path),
+        "report": result.report.to_dict(),
+        "warnings": result.warnings,
+    }
+
+
+@server.tool(
+    description=(
+        "Corta as pausas, os vícios de fala e as frases repetidas de uma gravação falada (use no lugar de "
+        "transcrever e cortar clipe a clipe à mão). Cria o projeto `name` com os clipes já cortados, as "
+        "legendas seguindo a fala cortada, e devolve a lista do que saiu (cada corte com id, tempo na "
+        "gravação original, motivo e as palavras tiradas) para conferir ANTES de renderizar. "
+        "intensity: suave (só pausas), normal (pausas e vícios: hã, é isolado, tipo isolado, né no fim da "
+        "frase; o 'né' de 'não é' no meio da frase fica) ou agressiva (inclui falsos começos e frases "
+        "repetidas, ficando com a última tomada). min_pause: pausa em segundos acima da qual vira corte; "
+        "breath: silêncio mantido de cada lado. Cada borda cai no vale de energia, com fade de áudio de "
+        "10 ms. Roda em segundo plano (transcreve com o Whisper; ~1 min por minuto de gravação na CPU): "
+        "devolve job_id, consulte com job_status; a segunda chamada na mesma gravação reaproveita a "
+        "transcrição. Corrija o resultado com undo_cut (devolve um corte) e confira com list_cuts."
+    )
+)
+def autocut(
+    source: str,
+    name: str,
+    intensity: Literal["suave", "normal", "agressiva"] = "normal",
+    min_pause: float = 0.5,
+    breath: float = 0.15,
+    preset: str = "instagram/reels",
+    brand: str | None = None,
+    captions: bool = True,
+    language: str = "pt",
+    model: str = "small",
+    overwrite: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.autocut import AutoCutRequest
+    from .voice.cut_plan import CutOptions
+
+    request = AutoCutRequest(
+        source=Path(source),
+        name=name,
+        options=CutOptions(intensity=intensity, min_pause=min_pause, breath=breath),
+        preset=preset,
+        brand=brand,
+        captions=captions,
+        language=language,
+        model=model,
+        overwrite=overwrite,
+    )
+    _autocut_service().validate(request)  # o erro de nome, arquivo ou formato aparece já, não só no job
+    job = jobs.start(f"autocut {name}", lambda job: _autocut_work(job, request))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Lista o que o `autocut` removeu de um projeto: para cada corte, id, início e fim na gravação original, "
+        "duração, motivo (silence, filler, repetition), as palavras tiradas e se já foi desfeito, mais a "
+        "duração antes e depois."
+    )
+)
+def list_cuts(name_or_path: str) -> dict:
+    from .pipeline.autocut import load_cut_report
+    from .pipeline.projects import project_path
+
+    report = load_cut_report(project_path(name_or_path).parent)
+    if report is None:
+        raise ValueError(f"{name_or_path} não tem lista de cortes (só projetos criados por autocut têm)")
+    return report.to_dict()
+
+
+@server.tool(
+    description=(
+        "Desfaz um corte do `autocut` (id de list_cuts): o trecho removido volta ao projeto, juntando os "
+        "clipes vizinhos, e as legendas voltam a incluir as palavras dele. Devolve a lista atualizada."
+    )
+)
+def undo_cut(name_or_path: str, cut_id: int) -> dict:
+    from .pipeline.autocut import undo_cut as _undo_cut
+
+    return _undo_cut(name_or_path, cut_id).to_dict()
+
+
 @server.tool(description="Projetos existentes em projects/.")
 def list_projects() -> list[dict]:
     out = []
