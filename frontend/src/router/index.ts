@@ -38,6 +38,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         component: () => import('@/views/OutputsView.vue'),
         meta: { title: 'Saídas' },
       },
+      {
+        path: '/transicoes',
+        name: 'transitions',
+        component: () => import('@/views/TransitionsView.vue'),
+        meta: { title: 'Transições' },
+      },
       // telas das próximas fases: a rota já existe, só o componente muda quando a fase chegar
       ...NAV_ITEMS.filter((item) => !item.ready).map((item) => ({
         path: item.to,

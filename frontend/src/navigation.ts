@@ -56,6 +56,7 @@ export const NAV_ITEMS: NavItem[] = [
     promise: 'Os modelos de voz e de transcrição instalados na máquina.',
   },
   { key: 'outputs', label: 'Saídas', to: '/saidas', icon: 'video', ready: true },
+  { key: 'transitions', label: 'Transições', to: '/transicoes', icon: 'sparkles', ready: true },
 ]
 
 /** Onde a interface anterior continua disponível enquanto a nova não cobre tudo. */

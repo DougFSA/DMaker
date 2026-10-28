@@ -2,7 +2,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
-import type { CutReport, OutputFile, ProjectListItem, TemplateParam } from '@/api'
+import type {
+  CutReport,
+  OutputFile,
+  ProjectListItem,
+  TemplateParam,
+  TransitionCatalog,
+} from '@/api'
 import { createAppRouter } from '@/router'
 import { useJobsStore } from '@/stores/jobs'
 import { useThemeStore } from '@/stores/theme'
@@ -19,6 +25,7 @@ import ToastHost from './ui/ToastHost.vue'
 import OutputsView from '@/views/OutputsView.vue'
 import ProjectDetailView from '@/views/ProjectDetailView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
+import TransitionsView from '@/views/TransitionsView.vue'
 
 function stubApi(routes: Record<string, unknown>): void {
   vi.stubGlobal(
@@ -73,10 +80,20 @@ describe('ProgressBar', () => {
 })
 
 describe('SidebarNav', () => {
-  it('lista as oito áreas na ordem e marca as futuras como em breve', async () => {
+  it('lista as áreas na ordem e marca as futuras como em breve', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: false })
     const labels = wrapper.findAll('.nav__label').map((node) => node.text())
-    expect(labels).toEqual(['Projetos', 'Lote', 'Editor', 'Voz', 'Dublagem', 'Fila', 'Modelos', 'Saídas'])
+    expect(labels).toEqual([
+      'Projetos',
+      'Lote',
+      'Editor',
+      'Voz',
+      'Dublagem',
+      'Fila',
+      'Modelos',
+      'Saídas',
+      'Transições',
+    ])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
   })
@@ -84,7 +101,7 @@ describe('SidebarNav', () => {
   it('recolhida, esconde os rótulos mas mantém o texto para leitor de tela', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: true })
     expect(wrapper.find('.nav__label').exists()).toBe(false)
-    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(7)
+    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(9)
   })
 })
 
@@ -378,5 +395,88 @@ describe('OutputsView', () => {
     const wrapper = await mountWithRouter(OutputsView)
     await flushPromises()
     expect(wrapper.text()).toContain('Nenhum vídeo gerado ainda')
+  })
+})
+
+
+describe('TransitionsView', () => {
+  const catalog: TransitionCatalog = {
+    curves: ['linear', 'ease', 'spring'],
+    transitions: [
+      { name: 'whippan', kind: 'motion', summary: 'Chicote: o quadro corre com borrão.' },
+      { name: 'crosszoom', kind: 'motion', summary: 'Zoom de passagem.' },
+      { name: 'wipeleft', kind: 'xfade', summary: 'Uma cortina corre para a esquerda.' },
+    ],
+  }
+
+  it('lista cada transição com o que ela faz e a folha de contato da curva escolhida', async () => {
+    stubApi({ '/api/transitions': catalog })
+    const wrapper = await mountWithRouter(TransitionsView)
+    await flushPromises()
+    const cards = wrapper.findAll('.transition')
+    expect(cards.map((card) => card.find('.transition__name').text())).toEqual(['whippan', 'crosszoom', 'wipeleft'])
+    expect(cards[0]!.text()).toContain('Chicote')
+    expect(cards[0]!.text()).toContain('movimento')
+    expect(cards[2]!.text()).toContain('xfade')
+    expect(cards[0]!.find('img').attributes('src')).toBe('/api/transitions/whippan/sheet?curve=linear')
+
+    const curveButtons = wrapper.findAll('[aria-label="Curva de tempo"] button')
+    expect(curveButtons.map((button) => button.text())).toEqual(['Linear', 'Suave', 'Mola'])
+    await curveButtons[2]!.trigger('click')
+    expect(wrapper.findAll('.transition')[0]!.find('img').attributes('src')).toBe(
+      '/api/transitions/whippan/sheet?curve=spring',
+    )
+    expect(wrapper.text()).toContain('passa um pouco do ponto final')
+  })
+
+  it('filtra por tipo e pela busca, e avisa quando nada combina', async () => {
+    stubApi({ '/api/transitions': catalog })
+    const wrapper = await mountWithRouter(TransitionsView)
+    await flushPromises()
+
+    const kinds = wrapper.findAll('[aria-label="Tipo de transição"] button')
+    await kinds[1]!.trigger('click')
+    expect(wrapper.findAll('.transition')).toHaveLength(2)
+    await kinds[2]!.trigger('click')
+    expect(wrapper.findAll('.transition__name').map((node) => node.text())).toEqual(['wipeleft'])
+    await kinds[0]!.trigger('click')
+
+    await wrapper.find('input[type="search"]').setValue('zoom')
+    expect(wrapper.findAll('.transition__name').map((node) => node.text())).toEqual(['crosszoom'])
+    await wrapper.find('input[type="search"]').setValue('zzz')
+    expect(wrapper.text()).toContain('Nada encontrado')
+  })
+
+  it('mostra o aviso e tenta de novo quando a prévia não é gerada', async () => {
+    stubApi({ '/api/transitions': catalog })
+    const wrapper = await mountWithRouter(TransitionsView)
+    await flushPromises()
+    const first = wrapper.findAll('.transition')[0]!
+    await first.find('img').trigger('error')
+    expect(first.text()).toContain('Não foi possível gerar a prévia')
+    await first.find('[role="alert"] button').trigger('click')
+    expect(first.find('img').attributes('src')).toContain('&tentativa=1')
+    await first.find('img').trigger('load')
+    expect(first.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('copia o trecho da spec com a curva escolhida', async () => {
+    stubApi({ '/api/transitions': catalog })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const wrapper = await mountWithRouter(TransitionsView)
+    await flushPromises()
+    await wrapper.findAll('[aria-label="Curva de tempo"] button')[1]!.trigger('click')
+    await wrapper.findAll('.transition')[1]!.find('footer button').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('"transition": { "type": "crosszoom", "duration": 0.5, "curve": "ease" }')
+    expect(useToastsStore().items.at(-1)?.title).toBe('Trecho copiado')
+  })
+
+  it('explica quando a API falha', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    const wrapper = await mountWithRouter(TransitionsView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Não foi possível carregar as transições')
   })
 })

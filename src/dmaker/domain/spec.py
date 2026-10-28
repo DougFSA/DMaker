@@ -17,6 +17,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import config
+from .curves import Curve
+from .transitions import all_transition_names
 
 
 class Strict(BaseModel):
@@ -75,61 +77,12 @@ class ColorAdjust(Strict):
         )
 
 
-XFADE_TYPES = {
-    "fade",
-    "fadeblack",
-    "fadewhite",
-    "dissolve",
-    "wipeleft",
-    "wiperight",
-    "wipeup",
-    "wipedown",
-    "slideleft",
-    "slideright",
-    "slideup",
-    "slidedown",
-    "smoothleft",
-    "smoothright",
-    "smoothup",
-    "smoothdown",
-    "circleopen",
-    "circleclose",
-    "circlecrop",
-    "rectcrop",
-    "radial",
-    "pixelize",
-    "distance",
-    "zoomin",
-    "fadegrays",
-    "squeezev",
-    "squeezeh",
-    "hlslice",
-    "hrslice",
-    "vuslice",
-    "vdslice",
-    "diagtl",
-    "diagtr",
-    "diagbl",
-    "diagbr",
-    "hblur",
-    "wipetl",
-    "wipetr",
-    "wipebl",
-    "wipebr",
-    "coverleft",
-    "coverright",
-    "coverup",
-    "coverdown",
-    "revealleft",
-    "revealright",
-    "revealup",
-    "revealdown",
-}
-
-
 class Transition(Strict):
+    """Como um trecho entra a partir do anterior: o tipo (xfade ou de movimento) e o ritmo (`curve`)."""
+
     type: str = "fade"
     duration: float = Field(0.5, gt=0, le=5)
+    curve: Curve = "linear"
 
     @field_validator("type")
     @classmethod
@@ -137,9 +90,10 @@ class Transition(Strict):
         v = v.lower()
         if v == "cut":
             return v
-        if v not in XFADE_TYPES:
+        if v not in all_transition_names():
             raise ValueError(
-                f"Transição desconhecida: {v!r}. Use cut ou um tipo xfade (fade, wipeleft, slideup...)"
+                f"Transição desconhecida: {v!r}. Use cut, um tipo xfade (fade, wipeleft, slideup...) "
+                "ou uma de movimento (crosszoom, whippan, blurslide, filmburn, lightleak)"
             )
         return v
 

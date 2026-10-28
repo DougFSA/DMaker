@@ -22,6 +22,8 @@ import type {
   QaReport,
   RenderRequest,
   TemplateInfo,
+  TransitionCatalog,
+  TransitionCurve,
   ValidationSummary,
 } from './types'
 
@@ -70,6 +72,12 @@ export const api = {
 
   outputs: {
     list: () => http.get<OutputFile[]>('/api/outputs'),
+  },
+
+  transitions: {
+    catalog: () => http.get<TransitionCatalog>('/api/transitions'),
+    /** Folha de contato (PNG) da transição; o servidor gera na primeira vez e guarda em cache. */
+    sheetUrl: (name: string, curve: TransitionCurve) => `/api/transitions/${enc(name)}/sheet?curve=${enc(curve)}`,
   },
 
   jobs: {

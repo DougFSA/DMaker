@@ -37,6 +37,7 @@ from .models_routes import build_models_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
 from .speech_routes import build_speech_router
+from .transition_routes import build_transitions_router
 from .voice_routes import Services, VoiceServices, build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -68,6 +69,7 @@ app.include_router(build_dub_router(jobs))
 app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
+app.include_router(build_transitions_router())
 
 
 # ---------- modelos de entrada ----------
