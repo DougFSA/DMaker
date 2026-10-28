@@ -29,6 +29,7 @@ FFMPEG_DIR = BIN_DIR / "ffmpeg"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 BRANDS_DIR = ASSETS_DIR / "brands"
+SFX_DIR = ASSETS_DIR / "sfx"  # biblioteca de efeitos sonoros (WAV sintetizados pelo DMaker, versionados)
 VOICES_DIR = DATA_DIR / "assets" / "voices"
 LEXICON_DIR = DATA_DIR / "assets"  # pronunciation.json global e brands/<marca>/pronunciation.json
 CACHE_DIR = DATA_DIR / "cache"

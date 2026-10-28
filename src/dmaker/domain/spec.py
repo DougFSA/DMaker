@@ -23,6 +23,37 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# ---------- efeitos sonoros ----------
+
+
+class SfxCue(Strict):
+    """Efeito sonoro solto num instante da linha do tempo (item de `audio.sfx`).
+
+    `sound` é um nome da biblioteca (whoosh, whip, pop, click, riser, impact, ding) ou o caminho de um
+    arquivo de áudio. `volume` 1 é o nível padrão: o pico do efeito fica 6 dB abaixo do pico da voz (ver
+    `filtergraph/sfx.py`); até 1,5 ele sobe, ainda sem passar da voz."""
+
+    sound: str = Field(min_length=1)
+    at: float = Field(ge=0)  # instante do vídeo final, em segundos
+    volume: float = Field(1.0, ge=0, le=1.5)
+
+
+class EntrySound(Strict):
+    """Som que toca na entrada de uma sobreposição (texto, imagem, vídeo) ou no começo de uma transição.
+
+    Sem `sound`, vale o som padrão do tipo (ver `domain/sfx.py`). `offset` desloca o instante em relação à
+    entrada: negativo antecipa o som, como num whoosh que chega um instante antes do elemento."""
+
+    sound: str | None = Field(None, min_length=1)
+    volume: float = Field(1.0, ge=0, le=1.5)
+    offset: float = Field(0.0, ge=-2, le=2)
+
+
+# `true` liga o som padrão do tipo, uma string escolhe o som, um objeto ajusta volume e deslocamento;
+# ausente ou `false` não toca nada (o som automático é opt-in)
+SoundSpec = bool | str | EntrySound
+
+
 # ---------- trechos da linha do tempo ----------
 
 
@@ -130,6 +161,7 @@ XFADE_TYPES = {
 class Transition(Strict):
     type: str = "fade"
     duration: float = Field(0.5, gt=0, le=5)
+    sound: SoundSpec | None = None  # som no começo da transição (ver `EntrySound`)
 
     @field_validator("type")
     @classmethod
@@ -296,6 +328,7 @@ class TextOverlay(Strict):
     region: str | None = None  # nome em `regions`: o texto se centra na região (no lugar de position/x/y)
     animation: Literal["none", "fade", "pop", "slide-up", "typewriter"] | None = None
     style: TextStyle = TextStyle()
+    sound: SoundSpec | None = None  # som na entrada do texto (em `start`)
 
     @model_validator(mode="after")
     def _region_or_position(self) -> TextOverlay:
@@ -324,6 +357,7 @@ class ImageOverlay(Strict):
     start: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     fade: float = Field(0.3, ge=0)
+    sound: SoundSpec | None = None  # som na entrada da imagem (em `start`)
 
     @model_validator(mode="after")
     def _place(self) -> ImageOverlay:
@@ -376,6 +410,7 @@ class VideoOverlay(Strict):
     volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
     animation: Literal["none", "fade", "slide"] = "fade"
     fade: float = Field(0.3, ge=0)
+    sound: SoundSpec | None = None  # som na entrada do quadro (em `start`)
 
     @model_validator(mode="after")
     def _origin(self) -> VideoOverlay:
@@ -535,6 +570,9 @@ class AudioSettings(Strict):
     music: Music | None = None
     tracks: list[AudioTrack] = []
     narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
+    # efeitos sonoros soltos (whoosh, pop...): entram na mixagem antes da normalização, sem abaixar a música
+    # e abaixo da voz; os sons de entrada das sobreposições (`sound`) se juntam a estes
+    sfx: list[SfxCue] = []
     voice_gain: float = Field(1.0, ge=0, le=4)
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
