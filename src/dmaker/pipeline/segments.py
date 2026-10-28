@@ -374,6 +374,7 @@ class CardPreparer:
                 scaled_safe,
                 seed=index,
                 supersample=supersample,
+                flat=segment.flat,
             )
 
         if segment.motion == "none" or segment.motion_amount <= 0:

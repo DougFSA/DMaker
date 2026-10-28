@@ -223,6 +223,7 @@ def describe_templates() -> list[dict]:
                         "type": p.type,
                         "default": p.default,
                         "required": p.required,
+                        "example": p.example,
                     }
                     for name, p in t.params.items()
                 },

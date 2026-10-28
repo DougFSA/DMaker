@@ -15,7 +15,7 @@ from ..filtergraph.audio import audio_graph, loudnorm_measure_graph
 from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.overlays import image_overlay_graph
-from ..filtergraph.pip import video_overlay_graph
+from ..filtergraph.pip import ResolvedVideoOverlay, pip_audio_graph, video_overlay_graph
 from ..filtergraph.provenance import inherited_provenance_args
 from ..filtergraph.timeline import timeline_graph
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_encoder
@@ -73,6 +73,7 @@ class LoudnessMeter:
         music_path: Path | None,
         total: float,
         voiceovers: Sequence[PreparedVoiceover] = (),
+        video_overlays: Sequence[ResolvedVideoOverlay] = (),
     ) -> LoudnessMeasure:
         inputs = Inputs()
         for item in prepared:
@@ -81,6 +82,8 @@ class LoudnessMeter:
             len(prepared), [p.duration for p in prepared], transitions, ctx.fps, want_video=False
         )
         lines = list(graph.lines)
+        # o áudio dos PiPs entra na medição como entra na mixagem final; sem ele a medida não vale
+        pip_audio = pip_audio_graph(lines, inputs, list(video_overlays))
         aout = audio_graph(
             lines,
             inputs,
@@ -89,6 +92,7 @@ class LoudnessMeter:
             music_path,
             total,
             include_norm=False,
+            extra_voices=pip_audio,
             music_duration=_music_duration(ctx, music_path),
             narrations=voiceovers,
         )

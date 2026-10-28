@@ -181,6 +181,28 @@ def test_check_text_safe_zone_default_position_is_clean(tmp_path):
     assert check_text_safe_zone(project, _layout(project, make_prober({}))) == []
 
 
+def test_check_text_safe_zone_measures_a_region_text_where_the_region_puts_it(tmp_path):
+    """Um texto com `region` é conferido no lugar da região: dentro da zona segura passa, encostado no topo avisa."""
+    _touch(tmp_path, "take.mp4")
+
+    def findings(region: dict) -> list[Finding]:
+        spec = {
+            "name": "p",
+            "output": {"preset": "instagram/reels"},
+            "regions": {"faixa": region},
+            "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+            "overlays": [{"type": "text", "text": "Assunto", "region": "faixa", "start": 0, "end": 3}],
+            "audio": {"normalize": "off"},
+        }
+        project = _project(tmp_path, spec)
+        return check_text_safe_zone(project, _layout(project, make_prober({})))
+
+    assert findings({"x": 0.46, "y": 0.26, "width": 0.7, "height": 0.2}) == []  # dentro da zona segura
+    assert any(
+        "área coberta" in f.message for f in findings({"x": 0.5, "y": 0.03, "width": 0.7, "height": 0.05})
+    )
+
+
 def test_check_text_safe_zone_flags_word_wider_than_area(tmp_path):
     _touch(tmp_path, "take.mp4")
     spec = {

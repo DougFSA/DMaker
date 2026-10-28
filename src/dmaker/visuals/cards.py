@@ -177,8 +177,10 @@ def render_card(
     safe: SafeZone | None = None,
     seed: int | None = None,
     supersample: int = 2,
+    flat: bool = False,
 ) -> Image.Image:
-    """Cartão RGB de `width` x `height`. Desenha em `supersample`x e reduz com LANCZOS."""
+    """Cartão RGB de `width` x `height`. Desenha em `supersample`x e reduz com LANCZOS. `flat` deixa só a
+    cor de fundo, sem as curvas e os brilhos do tema (fundo de apoio atrás de um quadro de vídeo)."""
     ss = max(1, supersample)
     w, h = width * ss, height * ss
     safe = safe or SafeZone()
@@ -187,7 +189,8 @@ def render_card(
     bg = background or (theme.colors["bg_dark"] if dark else theme.colors["bg"])
     rng = random.Random(seed if seed is not None else hash(title) & 0xFFFF)
     img = Image.new("RGBA", (w, h), _rgba(bg, 1.0))
-    _draw_background(img, theme, dark, rng)
+    if not flat:
+        _draw_background(img, theme, dark, rng)
 
     base = min(w, h)
     draw = ImageDraw.Draw(img)

@@ -947,6 +947,7 @@ muda de vídeo para vídeo (comando `new-from-template`, seção 7.1, ou `new_fr
 | `youtube-longo` | Vídeo longo para YouTube: abertura, gravação principal, CTA. | `titulo`, `video` (obrigatório) |
 | `casamento-multicam` | Cerimônia multicâmera sincronizada por áudio (cortes ajustados à mão depois). | `cam_principal`, `cam_secundaria`, `audio_externo` (obrigatórios), `nomes`, `data` |
 | `tutorial-tela-webcam` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
+| `explicativo` | Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro e o fundo trocando a cada assunto. | `gravacao`, `assuntos` (obrigatórios; cada assunto leva `fim`, `fundo` e `imagem`), `legendas`, `legenda_modo`, `foco`, `marca` |
 | `casamento-pascom` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala, cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data` (obrigatórios), mais celebrante, cerimonial, cidade, igreja, diácono, músicos, trilha, início, fim |
 
 Formato de um arquivo de template (para criar um novo): duas chaves de metadados no topo,

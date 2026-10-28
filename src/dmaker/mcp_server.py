@@ -168,7 +168,7 @@ def save_project(name: str, spec: dict) -> dict:
 
 @server.tool(
     description=(
-        "Templates disponíveis (produto, depoimento, stories, vlog, tutorial, casamento...) com os "
+        "Templates disponíveis (produto, depoimento, stories, vlog, tutorial, explicativo, casamento...) com os "
         "parâmetros de cada um. Caminho preferido para criar projetos: em vez de escrever a spec "
         "inteira, veja aqui os parâmetros e chame `new_from_template`."
     )
