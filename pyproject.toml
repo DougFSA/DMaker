@@ -33,6 +33,9 @@ captions = ["faster-whisper>=1.0", "av>=11,<16"]
 voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5", "demucs>=4.1", "sherpa-onnx>=1.13.8", "audioseal>=0.2"]
 # lote: ler planilha .xlsx no `dmaker batch` (CSV e JSON não precisam de nada)
 lote = ["openpyxl>=3.1"]
+# docs: exportar o manual em PDF (`dmaker manual export`) e tirar as capturas de tela, pelo Chromium do Playwright,
+# que baixa à parte: python -m playwright install chromium
+docs = ["playwright>=1.45"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
