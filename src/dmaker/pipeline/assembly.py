@@ -13,6 +13,7 @@ from ..config import FONTS_DIR
 from ..domain.spec import Transition
 from ..filtergraph.audio import AudioTaps, audio_graph, loudnorm_measure_graph
 from ..filtergraph.audiogram import audiogram_graph
+from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.overlays import image_overlay_graph
@@ -214,10 +215,12 @@ def build_assembly(
     sfx: Sequence[SfxInput] = (),
     voice_files: Sequence[PreparedVoiceFile] = (),
     visual_gain_db: float = 0.0,
+    person_layers: Sequence[ResolvedPersonLayer] = (),
 ) -> Assembly:
     """Comando final. O grafo vai em arquivo (graph.txt) e o ASS é referenciado por caminho relativo
     ao diretório do job, o que evita a escapada de `C:` nos filtros. `visual_gain_db` é o ganho que a
-    normalização aplica à saída, repetido na cópia do áudio que os audiogramas leem."""
+    normalização aplica à saída, repetido na cópia do áudio que os audiogramas leem. `person_layers` são os
+    vídeos da pessoa recortada que passam por cima do texto `behind-person` (ver `pipeline/person_layer.py`)."""
     p, o = ctx.project, ctx.options
     inputs = Inputs()
     for item in prepared:
@@ -232,6 +235,13 @@ def build_assembly(
     )
     lines = list(graph.lines)
     cur_v = graph.video or ""
+    # a pilha de profundidade vem logo depois da linha do tempo: o que fica atrás da pessoa, depois a pessoa; as
+    # imagens, o PiP, os audiogramas e o ASS da frente entram por cima de tudo isso
+    behind: list[BehindLayer] = []
+    if layer.has_behind_text:
+        behind.append(AssBehindLayer("overlay_behind.ass", _relpath(FONTS_DIR, ctx.job_dir)))
+    if behind or person_layers:
+        cur_v = behind_person_graph(lines, inputs, cur_v, behind, person_layers, ctx.fps)
     cur_v = image_overlay_graph(
         lines,
         inputs,
