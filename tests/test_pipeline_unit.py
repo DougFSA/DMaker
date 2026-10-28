@@ -154,6 +154,25 @@ def test_full_pipeline_with_fakes(workspace):
     assert store.exists() and json.loads(store.read_text(encoding="utf-8"))["hash"]
 
 
+def test_rounded_captions_and_text_boxes_reach_the_ass(workspace):
+    """O modo `rounded` e a opção `box_shape` da spec chegam ao ASS da montagem, com a caixa sob o texto."""
+    project = workspace["project"]
+    project.captions.style.mode = "rounded"
+    project.overlays[1].style.box_shape = "rounded"
+    runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    result = _pipeline(workspace, runner).run()
+
+    ass = (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+    events = [line for line in ass.splitlines() if line.startswith("Dialogue:")]
+    caption_boxes = [e for e in events if e.startswith("Dialogue: 4,") and "\\p1" in e]
+    caption_texts = [e for e in events if e.startswith("Dialogue: 5,")]
+    assert len(caption_boxes) == 1 and "\\q2" in caption_texts[0]  # uma caixa para a cue, texto sobre ela
+    # o destaque anda palavra a palavra por cima da mesma caixa (a marca pinta a ativa de verde)
+    assert len(caption_texts) == 3 and "&H00A2B975}MEDLYCARE" in caption_texts[2]
+    hook_box = [e for e in events if e.startswith("Dialogue: 10,") and "\\p1" in e]
+    assert len(hook_box) == 1 and " b " in hook_box[0]  # o gancho ganhou a caixa arredondada
+
+
 def test_second_run_reuses_cache(workspace):
     FakeTranscriber.calls = 0
     runner = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)

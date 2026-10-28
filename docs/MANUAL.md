@@ -266,7 +266,7 @@ Ficam por cima da timeline principal, com seu próprio intervalo de tempo (`star
 
 `captions.source: "auto"` transcreve a fala com Whisper (local, sem enviar nada para fora da máquina) e
 gera `projects/<nome>/captions.auto.json` (com a confiança de cada palavra) e um `.srt`. O estilo padrão
-é `karaoke`: destaque palavra a palavra, como nos Reels. `captions.vocabulary` e `.replacements`
+é `karaoke`: destaque palavra a palavra, como nos Reels. O modo `rounded` põe uma caixa de fundo arredondada atrás de cada linha, no estilo do TikTok, sem perder o destaque da palavra ativa; os textos sobrepostos pedem o mesmo desenho com `box_shape: "rounded"`, e o raio e a margem da caixa vêm da marca. `captions.vocabulary` e `.replacements`
 corrigem nomes próprios e termos técnicos que o Whisper costuma errar (a marca já traz os seus, que se
 somam aos do projeto). Alternativa: apontar `captions.source` para um `.srt` já pronto.
 

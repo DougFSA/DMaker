@@ -25,7 +25,7 @@ from ..media import fonts
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..text.captions import from_json, suspicious_cues
-from ..text.overlays import ROLE_DEFAULTS, Canvas, effective_style, wrap_lines
+from ..text.overlays import BOX_SHAPES, ROLE_DEFAULTS, Canvas, effective_style, wrap_lines
 from .context import Prober
 from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
@@ -156,8 +156,9 @@ def _text_geometry(ov: TextOverlay, theme: Theme, canvas: Canvas, tone: str | No
     spacing = st["spacing"] * s
     text = ov.text.upper() if st["uppercase"] else ov.text
     max_w = W * st["max_width"] - 2 * st["box_padding"] * s
-    lines = wrap_lines(text, ref, size, max_w, spacing)
-    line_widths = [fonts.measure(ln, ref, size, spacing)[0] for ln in lines]
+    measure = BOX_SHAPES[st["box_shape"] if st["box"] else "block"].measure  # a mesma régua do desenho
+    lines = wrap_lines(text, ref, size, max_w, spacing, measure)
+    line_widths = [measure(ln, ref, size, spacing)[0] for ln in lines]
     block_w = max(line_widths) if line_widths else 0.0
     block_h = size * len(lines) * 1.2
     if st["box"]:
