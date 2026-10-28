@@ -239,6 +239,9 @@ class TextStyle(Strict):
     box_alpha: float | None = Field(None, ge=0, le=1)
     box_radius: float | None = Field(None, ge=0)
     box_padding: float | None = Field(None, ge=0)
+    # "block": um retângulo em volta do texto todo (padrão); "rounded": uma caixa por linha, emendadas
+    # com curvas (estilo TikTok), com raio e margem da marca; pedi-la já liga a `box`
+    box_shape: Literal["block", "rounded"] | None = None
     uppercase: bool | None = None
     align: Literal["left", "center", "right"] | None = None
     max_width: float | None = Field(None, gt=0, le=1)  # fração da largura
@@ -341,7 +344,8 @@ Overlay = Annotated[TextOverlay | ImageOverlay | ProgressBar | VideoOverlay, Fie
 
 
 class CaptionStyle(Strict):
-    mode: Literal["karaoke", "classic", "boxed"] = "karaoke"
+    # "rounded": caixa arredondada por linha (estilo TikTok) com o destaque da palavra ativa por cima
+    mode: Literal["karaoke", "classic", "boxed", "rounded"] = "karaoke"
     font: str | None = None
     weight: Literal["light", "regular", "medium", "semibold", "bold", "extrabold"] = "bold"
     size: float = Field(72, gt=0)

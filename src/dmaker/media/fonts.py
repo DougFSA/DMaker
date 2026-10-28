@@ -6,6 +6,7 @@ libass identifica a fonte pelo nome de família gravado no TTF. Para pesos que n
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -109,6 +110,66 @@ def measure(text: str, ref: FontRef, ass_size: float, spacing: float = 0) -> tup
     """Largura e altura (célula) do texto como o libass renderiza, em px."""
     font = pil_font(ref, ass_size)
     width = font.getlength(text) + spacing * max(len(text) - 1, 0)
+    return width, ass_size
+
+
+# Corpo de referência para medir: em corpos pequenos o FreeType arredonda cada avanço para pixel inteiro
+# (hinting) e a soma sai até 4% maior do que o libass desenha; medir grande e escalar elimina isso.
+_REFERENCE_EM = 2000
+
+
+def _sfnt_table(file: Path, tag: bytes) -> bytes | None:
+    """Bytes de uma tabela do TrueType/OpenType (cabeçalho sfnt), ou None se não existir ou não for sfnt."""
+    with file.open("rb") as handle:
+        header = handle.read(12)
+        if len(header) < 12:
+            return None
+        (table_count,) = struct.unpack(">H", header[4:6])
+        directory = handle.read(16 * table_count)
+        for index in range(table_count):
+            entry_tag, _checksum, offset, length = struct.unpack(
+                ">4sIII", directory[16 * index : 16 * index + 16]
+            )
+            if entry_tag == tag:
+                handle.seek(offset)
+                return handle.read(length)
+    return None
+
+
+@lru_cache(maxsize=64)
+def _libass_cell_ratio(file: str) -> float:
+    """(winAscent+winDescent)/unitsPerEm: o libass dimensiona o Fontsize pela célula do OS/2, como o VSFilter.
+
+    Na Poppins isso dá 1,76 (a hhea que o Pillow expõe dá 1,40), então o corpo real é 20% menor do que
+    `em_px` supõe e a largura que `measure` devolve sai 26% maior que a desenhada. Sem a tabela OS/2 o
+    libass cai na hhea, e nós também.
+    """
+    try:
+        os2 = _sfnt_table(Path(file), b"OS/2")
+        head = _sfnt_table(Path(file), b"head")
+        if os2 is not None and head is not None and len(os2) >= 78 and len(head) >= 20:
+            (units_per_em,) = struct.unpack(">H", head[18:20])
+            win_ascent, win_descent = struct.unpack(">HH", os2[74:78])
+            if units_per_em and win_ascent + win_descent:
+                return (win_ascent + win_descent) / units_per_em
+    except (OSError, struct.error):
+        pass
+    return _cell_ratio(file)
+
+
+@lru_cache(maxsize=64)
+def _reference_font(file: str) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(file, _REFERENCE_EM)
+
+
+def measure_rendered(text: str, ref: FontRef, ass_size: float, spacing: float = 0) -> tuple[float, float]:
+    """Largura e altura (célula) do texto exatamente como o libass o desenha, em px.
+
+    Serve para desenhar uma caixa que abraça o texto: `measure` supõe uma célula menor do que a do libass
+    e superestima a largura da Poppins em cerca de 26%. O espaçamento entra a cada caractere, como no libass.
+    """
+    em = ass_size / _libass_cell_ratio(str(ref.file))
+    width = _reference_font(str(ref.file)).getlength(text) * em / _REFERENCE_EM + spacing * len(text)
     return width, ass_size
 
 
