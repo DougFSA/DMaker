@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 29 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -36,10 +36,12 @@ São 29 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Deixar a legenda em caixa arredondada](#deixar-a-legenda-em-caixa-arredondada) | Põe uma caixa de fundo arredondada atrás de cada linha da legenda, no estilo do TikTok, mantendo o destaque da palavra que está sendo falada. | sim |
 | [Corrigir uma palavra errada na legenda](#corrigir-uma-palavra-errada-na-legenda) | Troca uma palavra que o Whisper ouviu errado nas legendas automáticas (um nome próprio, um termo técnico) sem transcrever tudo de novo. | sim |
 | [Fazer um vídeo explicativo](#fazer-um-vídeo-explicativo) | Monta um vídeo de reel em que a gravação de quem explica fica num quadro arredondado embaixo, a área de cima mostra a imagem de cada assunto e o fundo troca a cada assunto. | sim |
+| [Fazer um audiograma de um áudio](#fazer-um-audiograma-de-um-áudio) | Transforma um áudio (corte de podcast, entrevista, áudio de WhatsApp) em um vídeo vertical com a capa num círculo, a onda ou as barras animadas no ritmo da fala e a legenda automática. | sim |
 | [Escolher a transição entre os trechos](#escolher-a-transição-entre-os-trechos) | Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola). | sim |
 | [Dar um acabamento de cinema ao vídeo](#dar-um-acabamento-de-cinema-ao-vídeo) | Aplica um acabamento visual pronto, por nome (cinema, quente, frio, preto e branco, vintage), com vinheta, grão, brilho e vazamento de luz. | sim |
 | [Pôr efeitos sonoros num instante do vídeo](#pôr-efeitos-sonoros-num-instante-do-vídeo) | Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição. | sim |
 | [Trocar o fundo atrás da pessoa](#trocar-o-fundo-atrás-da-pessoa) | Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural. | sim |
+| [Pôr o texto atrás da pessoa](#pôr-o-texto-atrás-da-pessoa) | Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece. | sim |
 | [Fazer o vídeo do casamento com duas câmeras](#fazer-o-vídeo-do-casamento-com-duas-câmeras) | Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento. | sim |
 | [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | ainda não: `validate_batch`, `run_batch`, `batch_status`, `resume_batch` |
 | [Exportar o vídeo para outras plataformas](#exportar-o-vídeo-para-outras-plataformas) | Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma. | sim |
@@ -240,7 +242,7 @@ Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do anter
 
 ### Sobreposições (overlays)
 
-Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra) e **barra de progresso**. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
+Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra), **barra de progresso** e **audiograma** (a onda ou as barras de um áudio, animadas no ritmo dele). Uma imagem com `shape: "circle"` aparece recortada num círculo, e um texto com `layer: "behind-person"` passa atrás da pessoa. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
 
 ### Legendas
 
@@ -248,7 +250,7 @@ Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start
 
 ### Áudio
 
-`audio.music` toca uma trilha de fundo, com `ducking` (abaixa quando há voz). `audio.tracks` são faixas externas (a mesa de som, por exemplo) que seguem os cortes e se misturam ao áudio dos clipes. `audio.narration` põe a fala sintetizada como voz do vídeo. `audio.sfx` põe efeitos sonoros em instantes marcados. `audio.normalize: "two-pass"` (padrão) mede e ajusta a loudness para -14 LUFS em duas passadas, o alvo comum das redes.
+`audio.music` toca uma trilha de fundo, com `ducking` (abaixa quando há voz). `audio.tracks` são faixas externas (a mesa de som, por exemplo) que seguem os cortes e se misturam ao áudio dos clipes. `audio.narration` põe a fala sintetizada como voz do vídeo, e `audio.voiceover` põe um arquivo de áudio seu (um corte de podcast, um áudio de WhatsApp) como voz, sem precisar de um trecho de vídeo. `audio.sfx` põe efeitos sonoros em instantes marcados. `audio.normalize: "two-pass"` (padrão) mede e ajusta a loudness para -14 LUFS em duas passadas, o alvo comum das redes.
 
 ### Fontes de sessão e multicâmera
 
@@ -646,7 +648,7 @@ dmaker render projects\story-dica\spec.json --preview
 dmaker render projects\story-dica\spec.json
 ```
 
-`--param chave=valor` repete para cada parâmetro (listas separadas por vírgula); `--params-json '{"titulo": "..."}'` passa tudo de uma vez. Os modelos: `reel-medlycare-produto` (capturas de tela com movimento e CTA), `reel-medlycare-depoimento` (um corte com gancho e crédito), `stories-medlycare` (uma dica sobre um print), `pessoal-vlog-reel` (vídeos em sequência com título e trilha), `youtube-longo` (abertura, gravação, CTA), `tutorial-tela-webcam` (tela e webcam em picture-in-picture), `explicativo` (veja a tarefa própria), `casamento-multicam` e `casamento-pascom` (veja "Fazer o vídeo do casamento com duas câmeras"). `dmaker templates` mostra os parâmetros de cada um.
+`--param chave=valor` repete para cada parâmetro (listas separadas por vírgula); `--params-json '{"titulo": "..."}'` passa tudo de uma vez. Os modelos: `reel-medlycare-produto` (capturas de tela com movimento e CTA), `reel-medlycare-depoimento` (um corte com gancho e crédito), `stories-medlycare` (uma dica sobre um print), `pessoal-vlog-reel` (vídeos em sequência com título e trilha), `youtube-longo` (abertura, gravação, CTA), `tutorial-tela-webcam` (tela e webcam em picture-in-picture), `explicativo` (veja a tarefa própria), `audiograma` (um áudio com capa, onda e legenda; veja a tarefa própria), `casamento-multicam` e `casamento-pascom` (veja "Fazer o vídeo do casamento com duas câmeras"). `dmaker templates` mostra os parâmetros de cada um.
 
 #### Como conferir
 
@@ -883,6 +885,68 @@ O quadro do rosto e a área de cima ficam dentro da zona segura do Reels. `dmake
 - **Rosto cortado**: ajuste `foco` (em gravação vertical o rosto fica no terço de cima).
 - **Imagem fora do lugar**: ela entra inteira e centrada na região `topo`, sem distorcer; use uma imagem com a proporção da área de cima.
 
+### Fazer um audiograma de um áudio
+<!-- tarefa: audiograma -->
+Transforma um áudio (corte de podcast, entrevista, áudio de WhatsApp) em um vídeo vertical com a capa num círculo, a onda ou as barras animadas no ritmo da fala e a legenda automática.
+
+#### Quando usar
+
+Você só tem o áudio e quer divulgá-lo numa rede social, onde o que roda é vídeo. O vídeo dura o que o áudio toca: o modelo `audiograma` mede o arquivo sozinho.
+
+**Pedidos que levam a esta tarefa:**
+- "Faz um audiograma desse corte do podcast com esta capa"
+- "Transforma esse áudio de WhatsApp em um vídeo com onda e legenda"
+- "Quero um vídeo do episódio 12 com a foto e as barras mexendo no ritmo da fala"
+
+#### Antes de começar
+
+- O arquivo de áudio (`.mp3`, `.wav`, `.m4a`, `.ogg`) e a capa (PNG ou JPG, a foto do episódio ou do convidado), com o caminho completo.
+- O título (opcional, sem travessão) e o desenho: `circle` (o padrão, barras em volta da foto), `bars` (barras simétricas embaixo dela) ou `wave` (linha de onda embaixo dela).
+- Se há música de fundo junto da voz, peça `seguir=voice`: o desenho então acompanha só a voz e fica parado nas pausas.
+
+#### Pela IA
+
+Diga: "Faz um audiograma de `ep12.mp3` com a capa `capa.jpg`, título 'Episódio 12', desenho em círculo." A IA cria o projeto pelo modelo `audiograma` (que mede o áudio), valida, gera a prévia, lê o relatório de QA e só então renderiza. A legenda sai do próprio áudio, pelo Whisper, no instante em que ele toca.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "probe_media", "arguments": {"paths": ["C:/audios/ep12.mp3"]}, "para": "conferir que o áudio abre e quanto dura"},
+  {"tool": "new_from_template", "arguments": {"template": "audiograma", "name": "episodio-12", "params": {"audio": "C:/audios/ep12.mp3", "capa": "C:/imagens/capa.jpg", "titulo": "Episódio 12", "estilo": "circle"}}, "para": "criar o projeto (a duração do vídeo é a do áudio)"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "episodio-12"}, "para": "avisar de áudio que passa do fim do vídeo ou de arquivo ausente"},
+  {"tool": "render_project", "arguments": {"name_or_path": "episodio-12", "preview": true}, "para": "gerar a prévia"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "episodio-12", "output": false}, "para": "conferir texto, legenda e zona segura"},
+  {"tool": "render_project", "arguments": {"name_or_path": "episodio-12"}, "para": "gerar a versão final"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Projetos**, **Novo projeto**, **Modelo** `audiograma`: preencha o **audio** e a **capa** (os obrigatórios) e, se quiser, o título, o desenho (**estilo**), o que o desenho acompanha (**seguir**) e o **fundo**. **Criar projeto**, **Validar** e **Renderizar** (**Prévia**). O ajuste fino do desenho (tamanho, posição, raio do círculo) se faz na aba **JSON** da interface clássica.
+
+#### Pela CLI
+
+```powershell
+dmaker new-from-template audiograma episodio-12 --param audio=ep12.mp3 --param capa=capa.jpg --param titulo="Episódio 12"
+dmaker validate projects\episodio-12\spec.json
+dmaker render projects\episodio-12\spec.json --preview
+dmaker render projects\episodio-12\spec.json
+```
+
+`--param estilo=bars` troca o desenho, `--param seguir=voice` faz a onda seguir só a voz, `--param fundo=capa` usa a própria capa, cortada e desfocada, e `--param legendas=false` tira a legenda. Na spec, o áudio é `audio.voiceover` (`{"src": "ep12.mp3"}`, com `start`, `offset`, `end` e `volume`) e o desenho é a sobreposição `audiogram` (`style` `wave`, `bars` ou `circle`).
+
+#### Como conferir
+
+A duração do vídeo é a do áudio. `dmaker validate` avisa quando o áudio passa do fim do vídeo, quando o arquivo não existe e quando `follow: "voice"` não tem voz para seguir. Na prévia, o pico da fala e o pico do desenho caem no mesmo quadro, e o desenho fica parado nas pausas.
+
+#### Se der errado
+
+- **Aviso de áudio que passa do fim**: o fundo precisa durar o que o áudio toca. O modelo `audiograma` mede sozinho; numa spec escrita à mão, meça com `dmaker probe` e use a duração dele.
+- **A onda se mexe no silêncio da fala**: há música de fundo e o desenho segue a mistura; use `seguir=voice`.
+- **Sem legenda**: o modelo do Whisper baixa na primeira vez (precisa de internet nessa vez); `legendas=false` desliga.
+- **Capa esticada**: use uma imagem quadrada; o círculo recorta o maior quadrado central.
+
 ### Escolher a transição entre os trechos
 <!-- tarefa: transicoes -->
 Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola).
@@ -1104,6 +1168,63 @@ Veja a borda do cabelo e das mãos na prévia. Gravação com movimento rápido 
 - **Modelo não encontrado**: rode `dmaker setup` (ou `dmaker models download rvm-resnet50`).
 - **Render lento**: o recorte pesa na CPU; use `mobilenetv3` para rascunho e `downsample` menor.
 - **A cadeira ou um objeto some**: use `resnet50`, que separa melhor o que encosta na pessoa.
+
+### Pôr o texto atrás da pessoa
+<!-- tarefa: texto-atras -->
+Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece.
+
+#### Quando usar
+
+O vídeo mostra uma pessoa de frente, com a câmera parada, e você quer um título grande no cenário ("CINCO CAMADAS") com a cabeça e os ombros por cima das letras. O recorte usa a mesma rede neural da troca de fundo e só roda do início ao fim do texto: o resto do vídeo não é tocado.
+
+**Pedidos que levam a esta tarefa:**
+- "Põe o título atrás da minha cabeça"
+- "Faz aquele efeito de texto atrás da pessoa"
+
+#### Antes de começar
+
+- O trecho tem uma pessoa de frente (cartão e foto não têm: o `validate` avisa) e o texto já está na spec com `start` e `end`. Se ainda não está, crie-o antes (um texto de papel `title`, no meio).
+- Custo: perto de 0,5 s por quadro do intervalo em 1080x1920 (3 s de efeito somam uns 50 s ao render final). O recorte fica em cache: trocar só a frase ou a cor do texto não recorta de novo.
+- Modelos: o render final usa o `resnet50` (o `dmaker setup` baixa) e a prévia usa o `mobilenetv3`, que baixa na primeira vez (15 MB).
+
+#### Pela IA
+
+Diga: "No `meu-reel`, o título dos 0 aos 3 segundos deve ficar atrás da pessoa." A IA acha o índice do texto, põe `layer: "behind-person"` nele e gera a prévia. Funciona melhor com a pessoa de frente e a câmera parada.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "timeline_view", "arguments": {"name": "meu-reel"}, "para": "achar o índice do texto entre as sobreposições"},
+  {"tool": "edit_project", "arguments": {"name": "meu-reel", "op": {"type": "set_field", "path": "overlays.1.layer", "value": "behind-person"}}, "para": "pôr o texto atrás da pessoa"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "meu-reel"}, "para": "avisar se o intervalo só cobre cartão ou foto"},
+  {"tool": "render_project", "arguments": {"name_or_path": "meu-reel", "preview": true}, "para": "ver o efeito na prévia"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "meu-reel", "output": false}, "para": "conferir o projeto"}
+]
+```
+
+#### Pela interface
+
+Não existe um botão para a camada: na interface clássica, aba **JSON**, ponha `"layer": "behind-person"` no texto e **Aplicar** (o campo é preservado ao salvar). A prévia ao vivo do player não mostra o efeito: gere a **Preview**.
+
+#### Pela CLI
+
+```powershell
+dmaker validate projects\meu-reel\spec.json
+dmaker render projects\meu-reel\spec.json --preview
+```
+
+Na spec, o texto leva `{"type": "text", "text": "CINCO CAMADAS", "role": "title", "layer": "behind-person", "start": 0, "end": 3, "position": "center", "style": {"size": 190, "color": "#FFFFFF", "outline": 0}}`. O padrão de `layer` é `"front"`, na frente de tudo.
+
+#### Como conferir
+
+A ordem das camadas, de baixo para cima, é: o vídeo, os textos atrás da pessoa, a pessoa recortada e, por cima, imagens, picture-in-picture, audiogramas, textos comuns e legendas. Veja a borda do cabelo e das mãos na prévia (o `mobilenetv3` é mais grosseiro que o `resnet50` do render final). O ASS dos textos atrás da pessoa fica em `overlay_behind.ass`, na pasta do job.
+
+#### Se der errado
+
+- **Aviso em `overlays[N].layer`**: o intervalo do texto só cobre cartão ou foto; não há pessoa a recortar.
+- **A borda piscou**: movimento rápido ou câmera em movimento; o efeito pede a pessoa de frente e a câmera parada.
+- **Render lento**: o recorte pesa na CPU; reduza o intervalo do texto ou confira só a prévia.
 
 ### Fazer o vídeo do casamento com duas câmeras
 <!-- tarefa: multicam -->
@@ -2201,6 +2322,8 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 
 | Chamado | O que você ganhou | Onde está |
 | --- | --- | --- |
+| DMK-28 | Texto atrás da pessoa (`layer: "behind-person"`): o título grande passa entre a parede e quem fala, recortando a pessoa só enquanto o texto aparece | "Pôr o texto atrás da pessoa" |
+| DMK-34 | Audiograma: a onda ou as barras de um áudio animadas no ritmo dele, com capa num círculo e legenda; `audio.voiceover` e o modelo `audiograma` | "Fazer um audiograma de um áudio" |
 | DMK-23 | Vídeo explicativo: o rosto num quadro embaixo, a imagem de cada assunto em cima, o fundo trocando a cada assunto; regiões nomeadas (`regions`) na spec | "Fazer um vídeo explicativo" |
 | DMK-25 | Efeitos sonoros (whoosh, pop, clique, riser, impacto) em `audio.sfx` e na entrada de textos, imagens e transições; `dmaker sfx list` | "Pôr efeitos sonoros num instante do vídeo" |
 | DMK-27 | Cortar pausas, vícios e frases repetidas de uma gravação falada (`dmaker autocut`, botão **Cortar gravação**), com a lista do que saiu e **Desfazer** | "Cortar as pausas de uma gravação falada" |
@@ -2695,7 +2818,7 @@ São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 28 blocos e 273 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 30 blocos e 296 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -2712,7 +2835,7 @@ A raiz do `spec.json`.
 | `master` | texto | nenhum | Fonte que é o relógio principal da sessão (a primeira, se vazio). |
 | `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` (pelo menos 1) | obrigatório | Os trechos do vídeo, em ordem (clipe, imagem ou cartão). |
 | `look` | texto | nenhum | Acabamento visual pronto, por nome, para todos os trechos. |
-| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture) e barra de progresso por cima da linha do tempo. |
+| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture) e barra de progresso por cima da linha do tempo. |
 | `captions` | `Captions` | nenhum | Legendas: automáticas, de um .srt ou da narração. |
 | `audio` | `AudioSettings` | os valores padrão do bloco | Música, faixas externas, narração, efeitos, volume e normalização. |
 | `multicam` | `MulticamBlock` | nenhum | Bloco de corte automático de cerimônia, expandido por `dmaker plan`. |
@@ -2729,6 +2852,7 @@ Usado em `Project.audio`.
 | `music` | `Music` | nenhum | Trilha de fundo. |
 | `tracks` | lista de `AudioTrack` | vazio | Faixas externas sincronizadas (gravador de mesa, lapela). |
 | `narration` | lista de `Narration` | vazio | Falas sintetizadas que entram como a voz do vídeo. |
+| `voiceover` | lista de `VoiceoverClip` | vazio | Arquivos de áudio (corte de podcast, áudio de WhatsApp) que viram a voz do vídeo, sem trecho de vídeo. |
 | `sfx` | lista de `SfxCue` | vazio | Efeitos sonoros marcados em instantes do vídeo final. |
 | `voice_gain` | número, de 0 a 4 | 1.0 | Multiplicador do volume da voz. |
 | `normalize` | `"two-pass"` ou `"fast"` ou `"off"` | `two-pass` | `two-pass` mede e ajusta em duas passadas (padrão das redes); `fast` numa só; `off` desliga. |
@@ -2743,6 +2867,28 @@ Usado em `AudioSettings.tracks`.
 | --- | --- | --- | --- |
 | `source` | texto | obrigatório | Nome da fonte em `sources`. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume da faixa. |
+
+#### AudiogramOverlay
+
+Usado em `Project.overlays`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"audiogram"` | `audiogram` | Tipo do item: escolhe qual dos blocos vale. |
+| `style` | `"wave"` ou `"bars"` ou `"circle"` | `bars` | `wave` (linha de onda), `bars` (barras simétricas) ou `circle` (barras em volta de um círculo, onde cabe a foto). |
+| `follow` | `"auto"` ou `"voice"` ou `"mix"` | `auto` | O que o desenho acompanha: `voice` (só a voz), `mix` (o áudio final) ou `auto` (a voz, se houver). |
+| `color` | texto | nenhum | Ajuste de cor e efeitos de acabamento. |
+| `position` | `"top-left"` ou `"top-right"` ou `"bottom-left"` ou `"bottom-right"` ou `"top"` ou `"bottom"` ou `"center"` | nenhum | Canto ou borda onde fica. |
+| `x` | número, de 0 a 1 | nenhum | Posição horizontal do centro, de 0 a 1 (use junto de `y`). |
+| `y` | número, de 0 a 1 | nenhum | Posição vertical do centro, de 0 a 1 (use junto de `x`). |
+| `region` | texto | nenhum | Nome de uma região declarada em `regions`: o item se encaixa nela no lugar de `position`, `x` e `y`. |
+| `width` | número, maior que 0, até 1 | 0.8 | Largura, em fração da largura do quadro. |
+| `height` | número, maior que 0, até 1 | nenhum | Altura, em fração do quadro; vazio usa a proporção do estilo. |
+| `inner_radius` | número, de 0.1 a 0.95 | 0.6 | No `circle`, onde as barras nascem, em fração do raio externo. |
+| `margin` | número, mínimo 0 | 40 | Margem da borda, em px na base 1080. |
+| `safe_zone` | sim ou não | sim | Respeita a área que a interface do app cobre. |
+| `start` | número, mínimo 0 | 0.0 | Quando o desenho aparece, em segundos. |
+| `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
 
 #### CaptionStyle
 
@@ -2885,6 +3031,7 @@ Usado em `Project.overlays`.
 | `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
+| `shape` | `"rect"` ou `"circle"` | `rect` | `rect` (padrão) ou `circle`, que recorta o maior quadrado central da imagem num círculo. |
 
 #### ImageSegment
 
@@ -3088,6 +3235,7 @@ Usado em `Project.overlays`.
 | `animation` | `"none"` ou `"fade"` ou `"pop"` ou `"slide-up"` ou `"typewriter"` | nenhum | Como entra: `fade`, `pop`, `slide-up`, `typewriter` ou `none`. |
 | `style` | `TextStyle` | os valores padrão do bloco | Aparência: sobrescreve a do papel. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
+| `layer` | `"front"` ou `"behind-person"` | `front` | `front` (padrão, na frente de tudo) ou `behind-person`, que passa o texto atrás da pessoa recortada. |
 
 #### TextStyle
 
@@ -3165,6 +3313,18 @@ Usado em `Project.overlays`.
 | `animation` | `"none"` ou `"fade"` ou `"slide"` | `fade` | Como entra: `fade`, `slide` ou `none`. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
+
+#### VoiceoverClip
+
+Usado em `AudioSettings.voiceover`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `src` | texto | obrigatório | Arquivo de áudio, relativo à pasta da spec. |
+| `start` | número, mínimo 0 | 0.0 | Instante do vídeo final em que o áudio começa, em segundos. |
+| `offset` | número, mínimo 0 | 0.0 | Ponto de entrada no arquivo, em segundos. |
+| `end` | número, mínimo 0 | nenhum | Ponto de saída no arquivo, em segundos; vazio vai até o fim dele. |
+| `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 
 <!-- dmaker:fim-gerado spec -->
 

@@ -98,6 +98,25 @@ def test_project_roundtrip_and_validation(client):
     assert client.get("/api/projects/nao-existe").status_code == 404
 
 
+def test_a_text_behind_the_person_survives_save_and_load_through_the_api(client):
+    """DMK-28: o campo `layer` do texto não se perde no caminho da interface (salvar, carregar, salvar de novo)."""
+    spec = dict(SPEC, overlays=[{"type": "text", "text": "CINCO CAMADAS", "layer": "behind-person"}])
+    assert client.put(f"/api/projects/{PROJECT}", json=spec).json()["ok"]
+    loaded = client.get(f"/api/projects/{PROJECT}").json()["spec"]
+    assert loaded["overlays"][0]["layer"] == "behind-person"
+
+    loaded["overlays"][0]["text"] = "SEIS CAMADAS"  # a interface edita um campo e devolve o projeto inteiro
+    assert client.put(f"/api/projects/{PROJECT}", json=loaded).json()["ok"]
+    again = client.get(f"/api/projects/{PROJECT}").json()["spec"]
+    assert again["overlays"][0]["layer"] == "behind-person" and again["overlays"][0]["text"] == "SEIS CAMADAS"
+    assert "behind-person" in (config.PROJECTS_DIR / PROJECT / "spec.json").read_text(encoding="utf-8")
+
+    invalid = dict(spec, overlays=[{"type": "text", "text": "x", "layer": "no-meio"}])
+    assert client.put(f"/api/projects/{PROJECT}", json=invalid).status_code == 422
+    schema = client.get("/api/schema").json()
+    assert "behind-person" in json.dumps(schema)  # o esquema da spec (e o do MCP) já anuncia a camada
+
+
 def test_get_project_with_invalid_spec_returns_422_with_raw_spec(client):
     """Simula um servidor com código antigo lendo uma spec com um campo que ele não conhece: a
     interface precisa do JSON cru para mostrar na aba JSON em vez de travar ao abrir o projeto."""

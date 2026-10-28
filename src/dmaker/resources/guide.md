@@ -139,12 +139,13 @@ Regras e valores:
 - **audio_fade** (só em `clip`, segundos, padrão 0): fade de áudio nas duas pontas do clipe, sem escurecer a imagem (ao contrário de `fade_in`/`fade_out`). Tira o estalo de um corte seco no meio da fala; o `autocut` usa 0,01.
 - **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette` (`true`, ou uma intensidade de 0 a 1), `lut` (.cube), `extra` (filtro ffmpeg cru) e os efeitos de acabamento `glow`, `aberration`, `light_leak` e `grain` (0 a 1 cada; ver "Looks e acabamento").
 - **look** (na raiz do projeto ou num trecho): nome de um acabamento pronto, como `"look": "cinema"`. Os nomes e a regra de qual vale em cada trecho estão em "Looks e acabamento" abaixo.
-- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada.
-- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`.
+- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada. `layer`: `front` (padrão, na frente de tudo) ou `behind-person` (o texto fica entre o fundo e a pessoa; ver "Texto atrás da pessoa" abaixo).
+- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`, `shape` (`rect`, padrão, ou `circle`, que recorta o maior quadrado central da imagem num círculo, como a foto do audiograma).
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
+- **audiogram** (`type: "audiogram"`): a onda ou as barras do áudio, animadas no ritmo dele, para divulgar um corte de podcast, entrevista ou áudio de WhatsApp. `style` wave, bars ou circle; `follow` auto, voice ou mix; `color`, `position`/`x`/`y`/`region`, `width`/`height`, `inner_radius`, `start`/`end`. Ver a seção "Audiograma" abaixo.
 - **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y` ou `region` (o quadro ocupa uma região nomeada); `width` (fração da largura, 0.18 a 0.3 para webcam); `focus` ([x, y], padrão o centro: onde cortar quando a proporção do quadro difere da fonte, como `reframe.focus`); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha), `follow_background` (padrão true: a legenda acompanha o tom claro/escuro do cartão por baixo; false mantém o estilo de quem está sobre vídeo, como no quadro do rosto do `explicativo`). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
-- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `sfx` (efeitos sonoros num instante marcado, ver "Efeitos sonoros"), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
+- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `sfx` (efeitos sonoros num instante marcado, ver "Efeitos sonoros"), `voiceover` (arquivos de áudio gravados como voz do vídeo, ver "Audiograma"), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
 - **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa encoder de hardware quando `dmaker doctor` detectar um, mais rápido e com qualidade um pouco menor), `fps`, `thumbnail_at`, `path`.
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.
 
@@ -241,6 +242,28 @@ Um **look** é um acabamento visual pronto, com nome: ajuste de cor mais os efei
 - **Custo**: o grão é o que pesa no arquivo, porque o x264 gasta bits nele, e gasta uns 3 a 4 MB a cada 10 s em 1080x1920 qualquer que seja a cena. Em porcentagem isso depende do vídeo: numa cena de muito detalhe (uns 9 Mbps, 11,8 MB por 10 s) o arquivo final cresceu 17% com `grain` 0.25 e 21% com 0.35 (o look `cinema` inteiro chega a 37%, perto do teto de 12 Mbps do Reels, que segura o resto); numa cena de pouco detalhe (4 MB por 10 s) cresceu 81% com 0.25; numa cena parada e limpa, de uns 0,3 MB, passa dos 4 MB. Para um vídeo curto que precisa ficar leve, `grain` baixo ou `"look": "frio"` ou `"quente"`, que não têm grão. Cada efeito soma também de 1 a 5 s de CPU por 10 s de vídeo (o vazamento de luz é o mais caro), e o trecho pronto fica em cache enquanto a spec não mudar.
 
 Para ver cada look sem montar um projeto: `dmaker looks list` (tabela com os looks e os efeitos de cada um; `--brand` soma os da marca) e `dmaker looks sheet <nome|all>`, que gera a folha de contato (a mesma cena de teste sem acabamento e com o look, lado a lado) em `output/looks`. Na interface nova, a tela **Looks** mostra a folha de cada um, com o trecho de spec pronto para copiar.
+
+### Texto atrás da pessoa (efeito de profundidade)
+
+Para o título grande que fica atrás de quem fala e na frente da parede, como se estivesse no cenário (muito usado em Reels), ponha `"layer": "behind-person"` no texto. O padrão é `"front"`, na frente de tudo. O DMaker recorta a pessoa com a mesma rede neural do `matte` (RVM, sem modelo novo nem chroma key) e a põe por cima do texto, só do `start` ao `end` dele.
+
+```json
+{
+  "timeline": [{"type": "clip", "src": "gravacao.mp4", "start": 0, "end": 12}],
+  "overlays": [
+    {"type": "text", "text": "CINCO CAMADAS", "role": "title", "layer": "behind-person",
+     "start": 0, "end": 3, "position": "center", "animation": "fade",
+     "style": {"size": 190, "color": "#FFFFFF", "outline": 0}}
+  ]
+}
+```
+
+- **Ordem das camadas**, de baixo para cima: o vídeo, os textos `behind-person`, a pessoa recortada e só então imagens, picture-in-picture, audiogramas, textos `front` e legendas. As legendas ficam sempre na frente.
+- **Onde o recorte vale**: sobre o que o vídeo final mostra (enquadramento, velocidade, look e transições já aplicados), só nos quadros do intervalo do texto. O resto do vídeo sai idêntico ao render sem o efeito. Textos `behind-person` que se sobrepõem no tempo dividem um recorte só.
+- **Custo**: roda na CPU, perto de 0,5 s por quadro em 1080x1920 com o `resnet50` (num teste, 3 s de efeito somaram uns 50 s ao render e 6 s uns 105 s, contando 12 quadros de aquecimento do modelo por intervalo). O recorte fica em cache por conteúdo: um segundo render sem mudança não recorta de novo (4 s contra os 3,8 s do render sem o efeito), e mudar só a frase, a cor ou a posição do texto também reaproveita o recorte. Mudar o intervalo, o trecho, o enquadramento, o look ou o modelo recorta de novo.
+- **Rascunho**: no `--preview` o recorte usa o modelo `mobilenetv3` (2,5x mais rápido; 15 MB que baixam na primeira vez); o render final usa o `resnet50`, com a borda melhor em cabelo e mãos. O modelo entra na chave do cache, então rascunho e render final não se misturam.
+- **Avisos**: `dmaker validate` e `dmaker qa` avisam, em `overlays[N].layer`, quando o intervalo só cobre cartão ou foto: não há pessoa a recortar e o render gastaria o recorte à toa.
+- **Limites**: funciona melhor com a pessoa de frente e a câmera parada, como o `matte`; movimento muito rápido pode errar a borda. A borda vem do primeiro plano que o modelo prevê (sem a cor da parede nos fios de cabelo) e o corpo usa o pixel do próprio vídeo.
 
 ## Vídeos longos, multicâmera e áudio externo
 
@@ -698,6 +721,79 @@ cartões e imagens, ela é a voz (com `mute_clips` a música também abaixa sob 
   narração estimada passa do fim do vídeo; `render_project` avisa se a real passou.
 - Com `dry_run` nada é sintetizado (usa a estimativa). Render parcial (`segments`) ignora a narração.
 
+### Audiograma (onda ou barras do áudio, para cortes de podcast e áudios)
+
+Formato para divulgar um trecho de podcast, entrevista ou áudio de WhatsApp quando não há vídeo: a capa ou a
+foto, a onda ou as barras animadas no ritmo da fala e a legenda com o texto falado. Duas peças novas da spec:
+`audio.voiceover` (o arquivo de áudio como voz do vídeo) e a sobreposição `audiogram` (o desenho).
+
+**Caminho curto: o template `audiograma`** (1080x1920, dentro da zona segura do Reels). Ele mede o arquivo de
+áudio e usa a duração dele como duração do vídeo, então só pede o áudio e a capa:
+
+```
+dmaker new-from-template audiograma episodio-12 --param audio=C:/audios/ep12.mp3 --param capa=C:/imagens/capa.jpg --param titulo="Episódio 12"
+dmaker render episodio-12
+```
+
+Parâmetros: `audio` e `capa` (obrigatórios), `titulo`, `estilo` (`circle`, o padrão: barras em volta da foto;
+`bars` ou `wave`: embaixo dela), `seguir` (`auto`, `voice` ou `mix`), `cor` (chave do tema ou `#RRGGBB`; sem ela,
+a cor de destaque da marca), `fundo` (`escuro`, `claro`, `bege`, uma cor `#RRGGBB`, uma imagem, ou `capa`: a
+própria capa, cortada e desfocada), `legendas`, `legenda_modo`, `idioma`, `marca` e `duracao` (omitida, é a do
+áudio). A legenda é a automática (Whisper), que transcreve o próprio `audio`, no tempo em que ele toca.
+
+**`audio.voiceover`**: lista de `{src, start, offset, end, volume}`. `src` é relativo à spec; `start` é o instante
+do vídeo final em que o áudio começa (padrão 0); `offset` e `end` aparam o arquivo (ponto de entrada e de saída,
+em segundos do próprio arquivo; `end` ausente = até o fim dele); `volume` de 0 a 4. Ele entra no mesmo barramento
+de voz da narração: a música abaixa sob ele (ducking), o nível dos efeitos sonoros e o loudness final o contam e
+a legenda `auto` o transcreve, mesmo num projeto só de fundo parado e voiceover (com `mute_clips` também).
+
+**A conta da duração.** Quem manda no tamanho do vídeo é a linha do tempo, não o áudio: o fundo (um `card` com
+`flat: true`, ou uma `image` com `motion: "none"`) precisa durar o que o áudio toca, senão o final dele é cortado.
+Meça o arquivo (`probe_media`, ou `dmaker probe ARQUIVO`) e use a `duration` dele; com `offset` e `end`, a
+duração é `end - offset` (ou a do arquivo menos o `offset`). O `validate_project` avisa em
+`audio.voiceover[0]` quando o áudio passa do fim do vídeo e em `audio.voiceover[0].src` quando o arquivo não existe.
+
+```json
+{
+  "name": "episodio-12",
+  "output": { "preset": "instagram/reels" },
+  "regions": { "anel": { "x": 0.5, "y": 0.42, "width": 0.7222, "height": 0.40625 } },
+  "timeline": [{ "type": "card", "flat": true, "background": "#0F172A", "duration": 58.4, "motion": "none" }],
+  "overlays": [
+    { "type": "image", "src": "capa.jpg", "x": 0.5, "y": 0.42, "width": 0.4, "shape": "circle" },
+    { "type": "audiogram", "style": "circle", "region": "anel", "inner_radius": 0.6 }
+  ],
+  "captions": { "source": "auto", "language": "pt", "style": { "mode": "rounded", "y": 0.73, "follow_background": false } },
+  "audio": { "voiceover": [{ "src": "ep12.mp3" }], "music": { "src": "trilha.mp3", "volume": 0.12 } }
+}
+```
+
+**Estilos de `audiogram`:**
+
+| `style` | desenho | onde cabe |
+|---|---|---|
+| `wave` | linha de onda (o grave da voz), lisa e reta no silêncio | faixa baixa: sem `height`, largura / 5 |
+| `bars` | 48 barras simétricas (em cima e embaixo, as graves no meio) que ficam num traço no silêncio | sem `height`, largura / 4 |
+| `circle` | 48 barras em volta de um círculo, que nascem em `inner_radius` (fração do raio externo, padrão 0.6): ali cabe a foto | quadrado do menor lado da caixa |
+
+Lugar e tamanho: `region` (o desenho ocupa a região nomeada; no círculo, o maior quadrado dela), ou `x`/`y` (o
+centro, em fração do quadro) com `width`/`height` (frações do quadro), ou `position` (os cantos, `top`, `bottom`,
+`center`) com `margin` e `safe_zone`. `start` e `end` limitam o desenho no tempo. O audiograma não leva `sound`.
+
+**O que a animação acompanha (`follow`).** `voice` é o barramento de voz (clipes, PiP, faixas, narração e
+`audio.voiceover`, depois do `voice_gain`, antes de música e efeitos); `mix` é o áudio final; `auto` (padrão) é
+`voice` quando o projeto tem alguma voz e `mix` quando não tem (um visualizador de música). Com trilha de fundo
+use `voice`: a onda que segue a mistura se mexe no silêncio da fala. O desenho nunca volta para a saída de
+áudio: o áudio do vídeo é o mesmo com ou sem audiograma. O `validate_project` avisa se `follow: "voice"` não
+tem voz para seguir.
+
+**Como ele se comporta** (para quem ajusta): a cópia do áudio recebe o mesmo ganho linear que a normalização
+dá à saída, então a altura não depende do nível da gravação, e não passa por compressão (o ruído das pausas não
+sobe: com ruído de sala de -50 dBFS o desenho continua parado). As barras são a média de 160 ms das alturas de
+24 faixas de 0 a 2 kHz, o que tira o tremor sem borrar a sílaba. O render é offline e o áudio inteiro é conhecido,
+então a cópia anda adiantada o atraso do desenho: o pico da fala e o pico do desenho caem no mesmo quadro
+(medido a 24, 30 e 60 fps).
+
 ## Cartões por layout (brand.json)
 
 Marcas com identidade visual própria (placa floral, fontes cursivas) podem definir cartões fixos no
@@ -775,7 +871,8 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 ## Depuração
 
 - `dmaker render ... --dry-run` mostra os comandos ffmpeg. Grafos em `cache/jobs/<nome>/graph.pretty.txt`,
-  o ASS (textos/legendas) em `overlay.ass`, comandos em `cmd.txt`.
+  o ASS (textos/legendas) em `overlay.ass` (e o dos textos atrás da pessoa em `overlay_behind.ass`), comandos
+  em `cmd.txt`.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status(job_id)`/`list_jobs()` acompanham um render em segundo plano, local ou na interface.
 - Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade e leva uns 2 min).

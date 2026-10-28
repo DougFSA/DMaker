@@ -16,6 +16,7 @@ class ResolvedImageOverlay:
     path: Path
     start: float
     end: float
+    mask: Path | None = None  # máscara circular (`shape: "circle"`), gerada em `pipeline/textlayer.py`
 
 
 def overlay_position(position: str, W: int, H: int, margin: float, safe: SafeZone) -> tuple[str, str]:
@@ -58,7 +59,16 @@ def image_overlay_graph(
         ov = item.overlay
         idx = inputs.add_looped_image(item.path, fps, total)
         w = even(W * ov.width)
-        chain = [f"[{idx}:v]format=rgba", f"scale={w}:-2:flags=lanczos"]
+        if item.mask is not None:
+            # círculo: corta o maior quadrado central da imagem e recorta com a máscara, que é a mesma do PiP
+            mask_idx = inputs.add_looped_image(item.mask, fps, total)
+            lines.append(
+                f"[{idx}:v]format=rgba,crop='min(iw,ih)':'min(iw,ih)',scale={w}:{w}:flags=lanczos[ovsq{k}]"
+            )
+            lines.append(f"[{mask_idx}:v]format=gray,scale={w}:{w}[ovmask{k}]")
+            chain = [f"[ovsq{k}][ovmask{k}]alphamerge"]
+        else:
+            chain = [f"[{idx}:v]format=rgba", f"scale={w}:-2:flags=lanczos"]
         if ov.opacity < 1:
             chain.append(f"colorchannelmixer=aa={ov.opacity:.3f}")
         if ov.fade > 0:

@@ -120,7 +120,13 @@ chave `"prepare": "<nome>"` aponta para uma função pura registrada em `PARAM_P
 (`src/dmaker/domain/templates.py`). Ela recebe os parâmetros já validados, devolve os mesmos mais os valores
 derivados, e o JSON usa o resultado como qualquer outro parâmetro. Um `ValueError` da função vira
 `TemplateError` com o nome do template. Um template novo nessa situação registra a sua função, sem mexer no
-resto do motor. Hoje só o `explicativo` usa (`src/dmaker/domain/explainer.py`).
+resto do motor. Hoje usam o `explicativo` (`src/dmaker/domain/explainer.py`) e o `audiograma`
+(`src/dmaker/domain/audiogram_template.py`, que confere o estilo e monta o trecho de fundo).
+
+Um parâmetro numérico pode declarar `"duration_of": "<outro parâmetro>"` (um arquivo de áudio ou vídeo): se o
+pedido o omite, quem cria o projeto (`new-from-template`, `new_from_template`, a interface) mede o arquivo com o
+probe e usa a duração dele. É assim que o `audiograma` dispensa o `duracao`. O motor de templates em si não
+toca o disco: a medição fica em `pipeline/projects.py` (`with_media_durations`).
 
 ## Em lote: um vídeo por linha de uma planilha
 
@@ -151,6 +157,7 @@ falta ou o que está errado, e chega assim até a CLI e o MCP.
 | `casamento-multicam.json` | Cerimônia multicâmera sincronizada por áudio. | `cam_principal`, `cam_secundaria`, `audio_externo` (obrigatórios), `nomes`, `data` |
 | `tutorial-tela-webcam.json` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
 | `explicativo.json` | Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima (região `topo`) livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro e o fundo trocando a cada assunto. | `gravacao`, `assuntos` (obrigatórios), `legendas`, `legenda_modo`, `foco`, `marca` |
+| `audiograma.json` | Audiograma para divulgar um corte de podcast, entrevista ou áudio de WhatsApp sem vídeo: a capa num círculo no meio, a onda ou as barras animadas no ritmo da fala (em volta da foto ou embaixo dela), o título no alto e a legenda automática. | `audio`, `capa` (obrigatórios), `titulo`, `estilo` (`circle`, `bars`, `wave`), `seguir`, `cor`, `fundo`, `legendas`, `legenda_modo`, `idioma`, `marca`; `duracao` omitida é a do áudio |
 | `casamento-pascom.json` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (bloco `multicam`), cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data` (obrigatórios), `titulo`, `igreja`, `cidade`, `celebrante`, `diacono`, `cerimonial`, `musicos`, `trilha`, `inicio`, `fim` |
 
 Todos validam como `Project` quando renderizados com os valores padrão (mais valores fictícios

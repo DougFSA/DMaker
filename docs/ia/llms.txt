@@ -10,10 +10,12 @@
 - [Deixar a legenda em caixa arredondada](legenda-caixa.md): Põe uma caixa de fundo arredondada atrás de cada linha da legenda, no estilo do TikTok, mantendo o destaque da palavra que está sendo falada.
 - [Corrigir uma palavra errada na legenda](corrigir-legenda.md): Troca uma palavra que o Whisper ouviu errado nas legendas automáticas (um nome próprio, um termo técnico) sem transcrever tudo de novo.
 - [Fazer um vídeo explicativo](explicativo.md): Monta um vídeo de reel em que a gravação de quem explica fica num quadro arredondado embaixo, a área de cima mostra a imagem de cada assunto e o fundo troca a cada assunto.
+- [Fazer um audiograma de um áudio](audiograma.md): Transforma um áudio (corte de podcast, entrevista, áudio de WhatsApp) em um vídeo vertical com a capa num círculo, a onda ou as barras animadas no ritmo da fala e a legenda automática.
 - [Escolher a transição entre os trechos](transicoes.md): Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola).
 - [Dar um acabamento de cinema ao vídeo](looks.md): Aplica um acabamento visual pronto, por nome (cinema, quente, frio, preto e branco, vintage), com vinheta, grão, brilho e vazamento de luz.
 - [Pôr efeitos sonoros num instante do vídeo](efeitos-sonoros.md): Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição.
 - [Trocar o fundo atrás da pessoa](trocar-fundo.md): Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural.
+- [Pôr o texto atrás da pessoa](texto-atras.md): Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece.
 - [Fazer o vídeo do casamento com duas câmeras](multicam.md): Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento.
 - [Fazer vários vídeos de uma planilha](lote.md): Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada.
 - [Exportar o vídeo para outras plataformas](exportar.md): Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma.

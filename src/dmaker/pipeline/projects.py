@@ -22,12 +22,13 @@ from ..domain.spec import (
     TextOverlay,
     Transition,
 )
-from ..domain.templates import find_template, list_templates, render_template, template_summary
+from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
 from ..media.probe import probe
 from .context import Prober
 from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
+from .voicefiles import voice_file_playtimes
 from .voiceover import known_voices
 
 
@@ -106,6 +107,7 @@ def summarize(
         infos,
         [s.offset for s in presentation.sources],
         known_voices=known_voices(project),
+        voiceover_playtimes=voice_file_playtimes(project, prober),
     )
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
@@ -197,11 +199,28 @@ def quick_project(
     )
 
 
-def project_from_template(template_name: str, name: str, params: dict, folder: Path | None = None) -> Project:
+def with_media_durations(template: Template, params: dict, prober: Prober = probe) -> dict:
+    """`params` com a duração do arquivo de áudio ou vídeo nos parâmetros que o modelo declara com `duration_of`
+    e o pedido omitiu (o modelo "audiograma" assim dispensa o `duracao`). Arquivo ausente falha dizendo qual."""
+    filled = dict(params)
+    for name, param in template.params.items():
+        source = filled.get(param.duration_of) if param.duration_of else None
+        if name in filled or not isinstance(source, str):
+            continue
+        path = Path(source).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f'arquivo não encontrado em "{param.duration_of}": {source}')
+        filled[name] = round(prober(path).duration, 3)
+    return filled
+
+
+def project_from_template(
+    template_name: str, name: str, params: dict, folder: Path | None = None, prober: Prober = probe
+) -> Project:
     """Monta um projeto a partir de um template (`templates/*.json`) e parâmetros, sem exigir a spec
     inteira: o jeito preferido de criar projetos quando um template já cobre o que se quer editar."""
     template = find_template(template_name)
-    spec = dict(render_template(template, params))
+    spec = dict(render_template(template, with_media_durations(template, params, prober)))
     spec["name"] = name
     project = Project.model_validate(spec)
     save_project(project, folder)
@@ -222,7 +241,7 @@ def describe_templates() -> list[dict]:
                         "description": p.description,
                         "type": p.type,
                         "default": p.default,
-                        "required": p.required,
+                        "required": p.required and not p.duration_of,  # o motor mede o arquivo quando omitido
                         "example": p.example,
                     }
                     for name, p in t.params.items()
