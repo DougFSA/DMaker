@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TypeVar
 
-from .spec import ImageOverlay, Region, TextOverlay, VideoOverlay, parse_aspect
+from .spec import AudiogramOverlay, ImageOverlay, Region, TextOverlay, VideoOverlay, parse_aspect
 
 # folga em px na largura devolvida: o ffmpeg trunca `largura * fração` para par, e sem ela uma divisão
 # que desse 971.9999 viraria 970 e deixaria uma fresta entre o quadro e a borda da região
@@ -92,6 +92,22 @@ def _resolve_video(overlay: VideoOverlay, region: Region, width: int, height: in
     )
 
 
+def _resolve_audiogram(
+    overlay: AudiogramOverlay, region: Region, width: int, height: int, aspect: float | None
+):
+    """O desenho ocupa a região inteira (o círculo, o maior quadrado dela, centrado): a caixa vem dela."""
+    return overlay.model_copy(
+        update={
+            "x": region.x,
+            "y": region.y,
+            "width": region.width,
+            "height": region.height,
+            "position": None,
+            "region": None,
+        }
+    )
+
+
 Resolver = Callable[..., object]
 Overlay = TypeVar("Overlay")
 
@@ -100,6 +116,7 @@ RESOLVERS: dict[type, Resolver] = {
     TextOverlay: _resolve_text,
     ImageOverlay: _resolve_image,
     VideoOverlay: _resolve_video,
+    AudiogramOverlay: _resolve_audiogram,
 }
 
 

@@ -271,10 +271,14 @@ Ficam por cima da timeline principal, com seu próprio intervalo de tempo (`star
 
 - **texto**, com um `role` que já define aparência e posição: `hook` (gancho grande no topo), `title`,
   `subtitle`, `cta` (pílula na cor da marca), `lower-third` (nome e cargo), `custom`;
-- **imagem**, para logo (`src: "logo"`/`"logo:symbol"`) ou qualquer PNG;
+- **imagem**, para logo (`src: "logo"`/`"logo:symbol"`) ou qualquer PNG; com `shape: "circle"` a imagem
+  (a foto do episódio, por exemplo) é recortada num círculo;
 - **vídeo** (picture-in-picture): uma segunda fonte de vídeo sobre a linha do tempo, em retângulo,
   cantos redondos ou círculo, com borda e sombra;
-- **barra de progresso** (`progress-bar`), fina, na cor de destaque do tema.
+- **barra de progresso** (`progress-bar`), fina, na cor de destaque do tema;
+- **audiograma** (`audiogram`): a onda ou as barras do áudio, animadas no ritmo dele (estilos `wave`, `bars` e
+  `circle`, este em volta da foto), para divulgar um corte de podcast ou um áudio de WhatsApp sem vídeo; ver
+  a seção "Audiograma" do `dmaker://guide` e o template `audiograma`.
 
 ### 3.6 Legendas automáticas
 
@@ -290,6 +294,12 @@ somam aos do projeto). Alternativa: apontar `captions.source` para um `.srt` já
 costuma bastar). `audio.tracks` são faixas externas (um gravador de mesa de som, por exemplo) que seguem
 os cortes da timeline e se misturam ao áudio dos clipes. `audio.normalize: "two-pass"` (padrão) mede e
 ajusta o loudness para -14 LUFS em duas passadas, o alvo comum das redes sociais.
+
+**Áudio gravado como voz (`audio.voiceover`).** Um arquivo de áudio (corte de podcast, entrevista, áudio de
+WhatsApp) vira a voz do vídeo sem precisar de um trecho de vídeo: `{"src": "ep12.mp3", "start": 0, "offset": 0,
+"end": null, "volume": 1}`. Ele entra no mesmo barramento da narração (a música abaixa sob ele e a legenda
+automática o transcreve). O fundo do vídeo (um cartão liso ou uma imagem) precisa durar o que o áudio toca: meça
+com `dmaker probe` e use a duração dele, ou parta do template `audiograma`, que faz a conta sozinho.
 
 **Efeitos sonoros.** `audio.sfx` põe um som curto (whoosh, pop, clique, riser, impacto) num instante do vídeo
 final: `{"sound": "whoosh", "at": 12.4}`. Os sons são sintetizados pelo próprio DMaker e ficam em `assets/sfx`
@@ -951,7 +961,7 @@ principais (a referência completa, com todos os valores possíveis de cada um, 
 - **`brand`**: nome de uma marca em `assets/brands/`.
 - **`timeline`**: lista de `clip`, `image` ou `card` (seção 3.4), cada um com `transition`, `reframe` e
   `color` opcionais.
-- **`overlays`**: lista de texto, imagem, vídeo (picture-in-picture) e `progress-bar` (seção 3.5).
+- **`overlays`**: lista de texto, imagem, vídeo (picture-in-picture), `audiogram` e `progress-bar` (seção 3.5).
 - **`captions`**: `source` (`auto` ou caminho de `.srt`), `language`, `model`, `style` (seção 3.6).
 - **`audio`**: `music`, `tracks`, `normalize` (seção 3.7).
 - **`sources`**: fontes de uma sessão multicâmera, com `sync` (seção 3.8 e 7.6).
@@ -975,6 +985,7 @@ muda de vídeo para vídeo (comando `new-from-template`, seção 7.1, ou `new_fr
 | `casamento-multicam` | Cerimônia multicâmera sincronizada por áudio (cortes ajustados à mão depois). | `cam_principal`, `cam_secundaria`, `audio_externo` (obrigatórios), `nomes`, `data` |
 | `tutorial-tela-webcam` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
 | `explicativo` | Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro e o fundo trocando a cada assunto. | `gravacao`, `assuntos` (obrigatórios; cada assunto leva `fim`, `fundo` e `imagem`), `legendas`, `legenda_modo`, `foco`, `marca` |
+| `audiograma` | Audiograma para divulgar um corte de podcast, entrevista ou áudio de WhatsApp sem vídeo: a capa num círculo, a onda ou as barras animadas no ritmo da fala, o título e a legenda automática. | `audio`, `capa` (obrigatórios), `titulo`, `estilo` (`circle`, `bars` ou `wave`), `seguir`, `cor`, `fundo`, `legendas`, `idioma`, `marca`; a duração do vídeo é a do áudio, medida sozinha |
 | `casamento-pascom` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala, cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data` (obrigatórios), mais celebrante, cerimonial, cidade, igreja, diácono, músicos, trilha, início, fim |
 
 Formato de um arquivo de template (para criar um novo): duas chaves de metadados no topo,

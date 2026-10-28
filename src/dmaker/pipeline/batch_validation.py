@@ -199,6 +199,8 @@ def media_references(project: Project) -> list[tuple[str, str]]:
             refs.append((f"overlays[{i}].src", overlay.src))
     if project.audio.music:
         refs.append(("audio.music.src", project.audio.music.src))
+    for i, clip in enumerate(project.audio.voiceover):
+        refs.append((f"audio.voiceover[{i}].src", clip.src))
     return refs
 
 

@@ -7,12 +7,14 @@ from pathlib import Path
 
 from .. import config
 from ..config import ensure_dirs
+from ..domain.audiogram import project_has_voice
 from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
 from ..domain.sfx import plan_sfx
 from ..domain.spec import Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
 from ..domain.tracks import apply_track_state
+from ..filtergraph.audiogram import normalization_gain_db
 from ..filtergraph.sfx import voice_reference_db
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
@@ -29,6 +31,7 @@ from .sfx import SfxTrack, level_tracks, resolve_files
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
+from .voicefiles import prepare_voice_files, voice_file_playtimes
 from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings, voice_spans
 
 
@@ -150,6 +153,7 @@ class RenderPipeline:
                 infos,
                 [s.offset for s in sources],
                 known_voices=known_voices(p, self.voiceover.library),
+                voiceover_playtimes=voice_file_playtimes(p, self.prober),
             )
         )
 
@@ -166,21 +170,35 @@ class RenderPipeline:
         tones = [item.tone for item in prepared]
         voiceovers = self.voiceover.prepare(ctx)
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
+        voice_files = prepare_voice_files(p, self.prober)
 
         if p.captions and p.captions.enabled and not o.no_captions:
             ctx.log(
                 "legendas: "
                 + ("transcrição automática" if p.captions.source == "auto" else p.captions.source)
             )
-        captions = self.captions.produce(ctx, sources, prepared, transitions, voiceovers)
+        captions = self.captions.produce(ctx, sources, prepared, transitions, voiceovers, voice_files)
         guides = o.guides if o.guides is not None else p.output.guides
-        layer = build_text_layer(ctx, total, spans, tones, captions.cues if captions else None, guides)
+        has_voice = project_has_voice(p, [bool(info and info.has_audio) for info in infos])
+        layer = build_text_layer(
+            ctx, total, spans, tones, captions.cues if captions else None, guides, has_voice
+        )
         layer.doc.write(ctx.job_dir / "overlay.ass")
 
         music_path = self._music_path()
-        sfx = self._effects(ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays)
-        measured, normalize = self._loudness(
-            ctx, prepared, transitions, music_path, total, voiceovers, layer.video_overlays, sfx
+        sfx = self._effects(
+            ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays, voice_files
+        )
+        measured, normalize, visual_gain = self._loudness(
+            ctx,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            layer.video_overlays,
+            sfx,
+            voice_files,
         )
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +215,8 @@ class RenderPipeline:
             voiceovers,
             provenance=self._provenance(ctx, voiceovers, total),
             sfx=sfx,
+            voice_files=voice_files,
+            visual_gain_db=visual_gain,
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -237,7 +257,7 @@ class RenderPipeline:
                 "overlays": [],
                 "captions": None,
                 "audio": project.audio.model_copy(
-                    update={"narration": [], "sfx": []}
+                    update={"narration": [], "voiceover": [], "sfx": []}
                 ),  # tempos absolutos não valem no recorte
             }
         )
@@ -266,7 +286,7 @@ class RenderPipeline:
         return ctx.narrator.provenance(voice_spans(voiceovers), total)
 
     def _effects(
-        self, ctx, prepared, transitions, spans, total, voiceovers, video_overlays=()
+        self, ctx, prepared, transitions, spans, total, voiceovers, video_overlays=(), voice_files=()
     ) -> list[SfxTrack]:
         """Efeitos sonoros do projeto (`audio.sfx` e os de entrada), com o nível acertado contra a voz.
 
@@ -278,7 +298,9 @@ class RenderPipeline:
         resolved = resolve_files(ctx.project, items)
         reference = None
         if not ctx.options.dry_run:
-            voice = self.voice_level.measure(ctx, prepared, transitions, total, voiceovers, video_overlays)
+            voice = self.voice_level.measure(
+                ctx, prepared, transitions, total, voiceovers, video_overlays, voice_files
+            )
             if voice is not None:
                 audio = ctx.project.audio
                 target = None if audio.normalize == "off" else audio.target_lufs
@@ -294,20 +316,31 @@ class RenderPipeline:
         return level_tracks(resolved, reference)
 
     def _loudness(
-        self, ctx, prepared, transitions, music_path, total, voiceovers, video_overlays=(), sfx=()
-    ) -> tuple[dict | None, bool]:
+        self,
+        ctx,
+        prepared,
+        transitions,
+        music_path,
+        total,
+        voiceovers,
+        video_overlays=(),
+        sfx=(),
+        voice_files=(),
+    ) -> tuple[dict | None, bool, float]:
         """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição
-        alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só."""
+        alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só. O terceiro valor é
+        o ganho (dB) que a normalização dá à saída, que os audiogramas repetem na cópia do áudio que leem."""
         mode = ctx.project.audio.normalize
         if mode == "off" or ctx.options.dry_run:
-            return None, mode != "off"
+            return None, mode != "off", 0.0
         measure = self.loudness.measure(
-            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx
+            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
         )
         if measure.silent:
             ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")
-            return None, False
-        return (measure.values if mode == "two-pass" else None), True
+            return None, False, 0.0
+        gain = normalization_gain_db(measure.values, ctx.project.audio.target_lufs)
+        return (measure.values if mode == "two-pass" else None), True, gain
 
     def _thumbnail(self, ctx: RenderContext, out_path: Path, total: float) -> Path | None:
         if not ctx.options.thumbnail or ctx.options.dry_run:

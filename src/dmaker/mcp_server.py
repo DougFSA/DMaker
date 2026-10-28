@@ -194,8 +194,8 @@ def new_from_template(template: str, name: str, params: dict) -> dict:
 
     try:
         project = project_from_template(template, name, params)
-    except TemplateError as exc:
-        # anticipada: mensagem chega ao cliente (nome do template ou parâmetros faltando)
+    except (TemplateError, FileNotFoundError) as exc:
+        # anticipada: mensagem chega ao cliente (nome do template, parâmetros faltando ou arquivo de mídia ausente)
         raise ToolError(str(exc)) from exc
     return {"spec_path": str(project_path(name)), **_summary_dict(summarize(project))}
 
