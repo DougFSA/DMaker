@@ -33,6 +33,7 @@ from . import layouts as layout_files
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
+from .look_routes import build_looks_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
@@ -70,6 +71,7 @@ app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
 app.include_router(build_transitions_router())
+app.include_router(build_looks_router())
 
 
 # ---------- modelos de entrada ----------

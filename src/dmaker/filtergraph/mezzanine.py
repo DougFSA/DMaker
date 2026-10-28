@@ -12,20 +12,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.spec import ClipSegment, Reframe
+from ..domain.spec import ClipSegment, ColorAdjust, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
-from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, color_chain, fade_chains
+from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, fade_chains
 from .encode import mezzanine_output_args
+from .finish import post_video_lines
 from .reframe import reframe_graph
 
 
-def _post_chain(
-    segment_color, fade_in: float, fade_out: float, duration: float
-) -> tuple[list[str], list[str]]:
-    vfades, afades = fade_chains(fade_in, fade_out, duration)
-    video = color_chain(segment_color) + vfades + ["format=yuv420p", "setsar=1"]
-    return video, afades
+def _audio_fades(fade_in: float, fade_out: float, duration: float) -> list[str]:
+    return fade_chains(fade_in, fade_out, duration)[1]
 
 
 def _finish(
@@ -82,14 +79,16 @@ def clip_mezzanine(
     backdrop: Path | None = None,
     reframe: Reframe | None = None,
     has_brand: bool = False,
+    look: ColorAdjust | None = None,
     label: str = "trecho",
 ) -> FFmpegCommand:
     """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
     `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
     já recortado no trecho (começa no `in_point`) que substitui o da câmera, como a voz isolada;
-    `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec."""
+    `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec; `look` é o
+    acabamento (cor e efeitos) do look que vale no trecho, já resolvido."""
     reframe = reframe or seg.reframe
-    post, afades = _post_chain(seg.color, seg.fade_in, seg.fade_out, duration)
+    afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
     afades += audio_edge_fades(seg.audio_fade, duration)
     inputs = Inputs()
     start = seg.start if in_point is None else in_point
@@ -101,7 +100,9 @@ def clip_mezzanine(
     lines.append(
         reframe_graph("[mz_v0]", "[mz_v1]", info.width, info.height, W, H, reframe, has_brand, backdrop_label)
     )
-    lines.append("[mz_v1]" + ",".join(post) + "[vout]")
+    lines += post_video_lines(
+        "[mz_v1]", "[vout]", seg.color, look, seg.fade_in, seg.fade_out, duration, (W, H), fps
+    )
 
     # áudio: câmera (se houver e não estiver muda) + faixas externas, tudo já alinhado ao trecho
     voices: list[str] = []
@@ -143,13 +144,17 @@ def still_mezzanine(
     fps: float,
     out: Path,
     label: str = "trecho",
+    *,
+    look: ColorAdjust | None = None,
+    size: tuple[int, int] | None = None,
 ) -> FFmpegCommand:
-    """Imagem já no tamanho de saída, parada pela duração do trecho."""
-    post, _ = _post_chain(segment_color, fade_in, fade_out, duration)
+    """Imagem já no tamanho de saída, parada pela duração do trecho. `size` (largura, altura) é preciso quando há
+    efeito de acabamento no look ou na cor."""
     inputs = Inputs()
     inputs.add_looped_image(png, fps, duration)
     inputs.add_silence(duration)
-    lines = ["[0:v]" + ",".join(post) + "[vout]", f"[1:a]{AUDIO_FMT_MEZZ}[aout]"]
+    lines = post_video_lines("[0:v]", "[vout]", segment_color, look, fade_in, fade_out, duration, size, fps)
+    lines.append(f"[1:a]{AUDIO_FMT_MEZZ}[aout]")
     return _finish(inputs, lines, fps, duration, out, label)
 
 
@@ -192,11 +197,13 @@ def frames_mezzanine(
     fps: float,
     out: Path,
     label: str = "trecho",
+    *,
+    look: ColorAdjust | None = None,
 ) -> FFmpegCommand:
     """Quadros RGB24 de WxH vindos do stdin (movimento renderizado com precisão sub-pixel)."""
-    post, _ = _post_chain(segment_color, fade_in, fade_out, duration)
     inputs = Inputs()
     inputs.add("pipe:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", f"{fps:g}")
     inputs.add_silence(duration)
-    lines = ["[0:v]" + ",".join(post) + "[vout]", f"[1:a]{AUDIO_FMT_MEZZ}[aout]"]
+    lines = post_video_lines("[0:v]", "[vout]", segment_color, look, fade_in, fade_out, duration, (W, H), fps)
+    lines.append(f"[1:a]{AUDIO_FMT_MEZZ}[aout]")
     return _finish(inputs, lines, fps, duration, out, label, frames=frames)
