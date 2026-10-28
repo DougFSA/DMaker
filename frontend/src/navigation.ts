@@ -14,6 +14,7 @@ export interface NavItem {
 /** Ordem da barra lateral. Cada fase seguinte troca `ready` e a rota, sem mexer no resto do layout. */
 export const NAV_ITEMS: NavItem[] = [
   { key: 'projects', label: 'Projetos', to: '/projetos', icon: 'folder', ready: true },
+  { key: 'batch', label: 'Lote', to: '/lote', icon: 'copy', ready: true },
   {
     key: 'editor',
     label: 'Editor',

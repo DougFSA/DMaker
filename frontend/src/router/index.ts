@@ -27,6 +27,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         meta: { title: 'Projeto' },
       },
       {
+        path: '/lote',
+        name: 'batch',
+        component: () => import('@/views/BatchView.vue'),
+        meta: { title: 'Lote' },
+      },
+      {
         path: '/saidas',
         name: 'outputs',
         component: () => import('@/views/OutputsView.vue'),

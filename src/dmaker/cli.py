@@ -790,7 +790,7 @@ def qa(
         report = build_report(project, output=output)
     except (FFmpegError, *RENDER_ERRORS) as exc:
         _fail(str(exc))
-    console.print(report.to_text(), markup=False, highlight=False)
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
 
 
 @app.command()
@@ -1018,6 +1018,182 @@ def agent(
         answer = _ask(message)
         if answer is not None:
             console.print(answer, markup=False)
+
+
+# ---------- lote: vários vídeos de uma planilha ----------
+
+batch_app = typer.Typer(
+    help="Lote: um vídeo por linha de uma planilha (CSV, XLSX ou JSON) sobre um modelo de projeto.",
+    no_args_is_help=True,
+)
+app.add_typer(batch_app, name="batch")
+
+
+def _batch_service():
+    from .pipeline.batch import BatchService
+
+    return BatchService()
+
+
+def _batch_fail(exc: Exception) -> None:
+    """Erro do lote com a frase pronta; a validação que o causou vem junto, linha por linha."""
+    from .pipeline.batch import BatchInvalidError
+
+    if isinstance(exc, BatchInvalidError):
+        console.print(exc.validation.to_text(), markup=False, highlight=False, soft_wrap=True)
+    _fail(str(exc.args[0]) if isinstance(exc, KeyError) else str(exc))
+
+
+def _batch_errors() -> tuple[type[Exception], ...]:
+    from .domain.batch_sheet import SheetError
+    from .domain.templates import TemplateError
+    from .pipeline.batch import BatchBusyError, BatchError
+    from .pipeline.batch_state import BatchFileError, BatchNotFoundError
+
+    return (
+        SheetError,
+        TemplateError,
+        BatchError,
+        BatchBusyError,
+        BatchNotFoundError,
+        BatchFileError,
+        FileNotFoundError,
+    )
+
+
+def _parse_rows(rows: str | None) -> set[int] | None:
+    """ "2,4" -> {2, 4}; sem valor, todas as linhas do lote."""
+    if not rows:
+        return None
+    try:
+        return {int(item) for item in rows.replace(";", ",").split(",") if item.strip()}
+    except ValueError:
+        _fail(f'--rows inválido: "{rows}" (use números de vídeo separados por vírgula, ex.: 2,4)')
+        return None
+
+
+def _run_batch(name: str, rows: set[int] | None, force: bool) -> None:
+    service = _batch_service()
+    try:
+        report = service.run(name, rows=rows, force=force, log=_console_log)
+    except KeyboardInterrupt:
+        _fail(f"Interrompido. O que já saiu fica; retome com: dmaker batch resume {name}")
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if report.failed:
+        raise typer.Exit(code=1)
+
+
+@batch_app.command("validate")
+def batch_validate(
+    template: Annotated[str, typer.Argument(help="Nome do modelo (dmaker templates).")],
+    sheet: Annotated[Path, typer.Argument(help="Planilha: .csv, .xlsx ou .json, uma linha por vídeo.")],
+    name_column: Annotated[
+        str | None, typer.Option("--name-column", help="Coluna cujo texto dá nome ao arquivo de cada vídeo.")
+    ] = None,
+) -> None:
+    """Confere a planilha contra o modelo sem renderizar nada: campo faltando, arquivo inexistente, texto que
+    não cabe e travessão. Sai com erro se alguma linha tem problema."""
+    try:
+        validation = _batch_service().validate(template, sheet, name_column)
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(validation.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if not validation.ok:
+        raise typer.Exit(code=1)
+    console.print("[green]Planilha válida:[/green] todas as linhas podem ser renderizadas.")
+
+
+@batch_app.command("run")
+def batch_run(
+    template: Annotated[str, typer.Argument(help="Nome do modelo (dmaker templates).")],
+    sheet: Annotated[Path, typer.Argument(help="Planilha: .csv, .xlsx ou .json, uma linha por vídeo.")],
+    lote: Annotated[
+        str | None, typer.Option("--lote", help="Nome do lote (pasta em output/). Padrão: o da planilha.")
+    ] = None,
+    name_column: Annotated[
+        str | None, typer.Option("--name-column", help="Coluna cujo texto dá nome ao arquivo de cada vídeo.")
+    ] = None,
+    skip_invalid: Annotated[
+        bool, typer.Option("--skip-invalid", help="Segue sem as linhas com problema, em vez de parar.")
+    ] = False,
+    preview: Annotated[bool, typer.Option(help="Prévias rápidas em baixa resolução.")] = False,
+    preset: Annotated[str | None, typer.Option(help="Sobrescreve o formato de saída do modelo.")] = None,
+    replace: Annotated[
+        bool,
+        typer.Option(
+            help="Refaz um lote de mesmo nome a partir da planilha atual (o que não mudou não é refeito)."
+        ),
+    ] = False,
+) -> None:
+    """Valida, cria um projeto por linha e renderiza tudo em output/<lote>/. Ctrl+C interrompe; retome com
+    `dmaker batch resume`."""
+    service = _batch_service()
+    try:
+        batch = service.create(
+            template,
+            sheet,
+            name=lote,
+            name_column=name_column,
+            preview=preview,
+            preset=preset,
+            skip_invalid=skip_invalid,
+            replace=replace,
+        )
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    skipped = sum(1 for row in batch.rows if row.project is None)
+    console.print(
+        f"[green]Lote criado:[/green] {batch.name}, {len(batch.rows) - skipped} projeto(s) em projects/"
+        + (f", {skipped} linha(s) pulada(s)" if skipped else "")
+    )
+    _run_batch(batch.name, None, False)
+
+
+@batch_app.command("resume")
+def batch_resume(
+    lote: Annotated[str, typer.Argument(help="Nome do lote (dmaker batch status).")],
+    rows: Annotated[
+        str | None, typer.Option("--rows", help="Só estes vídeos (números da tabela), ex.: 2,4.")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Refaz também os vídeos que já estão prontos.")] = False,
+) -> None:
+    """Continua o lote: renderiza o que falta, o que falhou e o que mudou no projeto. O que já saiu e continua
+    igual não é refeito."""
+    _run_batch(lote, _parse_rows(rows), force)
+
+
+@batch_app.command("pause")
+def batch_pause(lote: Annotated[str, typer.Argument(help="Nome do lote.")]) -> None:
+    """Pede a um lote em andamento (em outra janela) que pare depois do vídeo que está renderizando."""
+    try:
+        _batch_service().pause(lote)
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(f"[green]Pausa pedida:[/green] {lote} para depois do vídeo em andamento.")
+
+
+@batch_app.command("status")
+def batch_status(
+    lote: Annotated[str | None, typer.Argument(help="Nome do lote. Sem ele, lista todos.")] = None,
+) -> None:
+    """Mostra o relatório de um lote (o que saiu, o que falhou e por quê) ou a lista de lotes."""
+    service = _batch_service()
+    try:
+        if lote:
+            console.print(service.report(lote).to_text(), markup=False, highlight=False, soft_wrap=True)
+            return
+        reports = service.reports()
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    if not reports:
+        console.print("Nenhum lote ainda. Use `dmaker batch run`.")
+        return
+    table = Table("lote", "modelo", "estado", "andamento")
+    for report in reports:
+        table.add_row(report.name, report.template, report.to_dict()["status_label"], report.summary())
+    console.print(table)
 
 
 # ---------- voz e narração ----------

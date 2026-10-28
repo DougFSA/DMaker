@@ -210,7 +210,7 @@ export interface JobStartResponse {
   job_id: string
 }
 
-export type JobStatus = 'running' | 'done' | 'error'
+export type JobStatus = 'running' | 'done' | 'error' | 'cancelled'
 
 export interface JobProgress {
   label?: string
@@ -243,4 +243,106 @@ export interface BrowseResponse {
   parent: string | null
   dirs: string[]
   files: Array<{ path: string; name: string; size_mb: number }>
+}
+
+/* ---------- lote: vários vídeos de uma planilha (src/dmaker/ui/batch_routes.py) ---------- */
+
+export type BatchIssueLevel = 'erro' | 'aviso'
+
+/** Um problema (ou aviso) da planilha: onde está, em que coluna e o que fazer. `line` nulo = planilha inteira. */
+export interface BatchIssue {
+  line: number | null
+  field: string | null
+  message: string
+  level: BatchIssueLevel
+}
+
+export interface BatchValidationRow {
+  index: number
+  line: number
+  title: string
+  valid: boolean
+  issues: BatchIssue[]
+}
+
+/** O que a validação achou antes de renderizar qualquer coisa. */
+export interface BatchValidation {
+  template: string
+  name_column: string | null
+  headers: string[]
+  columns: { matched: Record<string, string>; unused: string[]; missing: string[] }
+  issues: BatchIssue[]
+  rows: BatchValidationRow[]
+  total: number
+  valid: number
+  invalid: number
+  ok: boolean
+  text: string
+}
+
+export interface BatchValidateRequest {
+  template: string
+  sheet: string
+  name_column?: string | null
+}
+
+export interface BatchStartRequest extends BatchValidateRequest {
+  name?: string | null
+  skip_invalid?: boolean
+  preview?: boolean
+  preset?: string | null
+}
+
+export interface BatchResumeRequest {
+  /** Só estes vídeos (números da tabela); sem valor, todos os que faltam. */
+  rows?: number[]
+  /** Refaz também os que já estão prontos. */
+  force?: boolean
+}
+
+export type BatchRowState = 'pending' | 'running' | 'done' | 'failed' | 'invalid'
+export type BatchStatus = 'running' | 'paused' | 'finished'
+
+export interface BatchRow {
+  index: number
+  line: number
+  title: string
+  state: BatchRowState
+  state_label: string
+  project: string | null
+  output: string | null
+  duration_s: number | null
+  render_s: number | null
+  error: string | null
+  warnings: string[]
+  issues: BatchIssue[]
+}
+
+/** O relatório do lote: o que saiu, o que falhou e por quê. */
+export interface BatchReport {
+  name: string
+  template: string
+  status: BatchStatus
+  status_label: string
+  preview: boolean
+  output_dir: string
+  total: number
+  done: number
+  failed: number
+  skipped: number
+  waiting: number
+  summary: string
+  rows: BatchRow[]
+  /** Só na consulta de um lote: o relatório em texto e o job que o está rodando (se houver). */
+  text?: string
+  job_id?: string | null
+}
+
+export interface BatchListItem extends Omit<BatchReport, 'rows'> {
+  rows: number
+}
+
+export interface BatchStartResponse {
+  name: string
+  job_id: string
 }

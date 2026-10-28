@@ -73,10 +73,10 @@ describe('ProgressBar', () => {
 })
 
 describe('SidebarNav', () => {
-  it('lista as sete áreas na ordem e marca as futuras como em breve', async () => {
+  it('lista as oito áreas na ordem e marca as futuras como em breve', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: false })
     const labels = wrapper.findAll('.nav__label').map((node) => node.text())
-    expect(labels).toEqual(['Projetos', 'Editor', 'Voz', 'Dublagem', 'Fila', 'Modelos', 'Saídas'])
+    expect(labels).toEqual(['Projetos', 'Lote', 'Editor', 'Voz', 'Dublagem', 'Fila', 'Modelos', 'Saídas'])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
   })
