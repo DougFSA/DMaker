@@ -135,6 +135,17 @@ class JobSink:
             self.job.emit("progress", **self.job.progress)
 
 
+def stage_progress(job: Job) -> Callable[[str, float], None]:
+    """Etapa e fração (0 a 1) de um serviço sem ffmpeg para acompanhar (ex.: transcrição) viram progresso do job."""
+
+    def report(label: str, fraction: float) -> None:
+        percent = round(fraction * 100)
+        job.progress = {"label": label, "done": percent, "total": 100, "percent": percent}
+        job.emit("progress", **job.progress)
+
+    return report
+
+
 class JobManager:
     def __init__(self, keep: int = 50) -> None:
         self._jobs: dict[str, Job] = {}

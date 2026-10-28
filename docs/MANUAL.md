@@ -463,6 +463,7 @@ O projeto já traz `.mcp.json` configurado para o Claude Code. Para o Claude Des
 | `edit_project` | Aplica uma edição pontual (cortar, mover, aparar, duplicar, mudar um campo). |
 | `timeline_view` | Vista multitrilha da linha do tempo, com índices e tempos já calculados. |
 | `plan_multicam` | Planeja o corte automático de um bloco `multicam` (transcreve, reconhece fases, monta os clipes). |
+| `autocut`, `list_cuts`, `undo_cut` | Cortam pausas, vícios e frases repetidas de uma gravação falada (projeto novo com a lista do que saiu), listam os cortes e devolvem um deles ao projeto. |
 | `list_projects` | Projetos existentes em `projects/`. |
 | `render_project` | Renderiza (prévia ou final); abre a interface para acompanhar por padrão. |
 | `export_project` | Exporta o mesmo projeto para vários presets de uma vez. |
@@ -846,6 +847,8 @@ Python global). Use `dmaker <comando> --help` para ver as opções na hora, com 
 | `new <nome>` | Cria `projects/<nome>/spec.json` a partir de arquivos fonte. Opções: `--preset`, `--src` (repetível), `--brand`, `--captions/--no-captions` (padrão liga), `--logo/--no-logo`. | `dmaker new meu-reel --preset instagram/reels --src a.mp4 b.mp4 --brand medlycare` |
 | `new-from-template <template> <nome>` | Cria o projeto a partir de um template e parâmetros. Opções: `--param chave=valor` (repetível; listas separadas por vírgula), `--params-json`. | `dmaker new-from-template reel-medlycare-produto meu-reel --param titulo="Sua agenda organizada" --param prints="C:\1.png,C:\2.png"` |
 | `plan <nome>` | Planeja o corte automático de um bloco `multicam`: transcreve, reconhece as fases da cerimônia e substitui o bloco pelos clipes concretos. | `dmaker plan meu-casamento` |
+| `autocut <gravação>` | Corta as pausas, os vícios de fala e as frases repetidas de uma gravação falada: cria um projeto com os clipes já cortados e mostra a lista do que saiu (tempo e motivo). Opções: `--name`, `--intensity suave\|normal\|agressiva`, `--min-pause`, `--breath`, `--preset`, `--brand`, `--captions/--no-captions`, `--overwrite`. | `dmaker autocut entrevista.mp4 --intensity normal` |
+| `cuts <nome>` e `uncut <nome> <número>` | Lista os cortes do `autocut` e devolve um deles ao projeto (as legendas acompanham). | `dmaker uncut entrevista-corte 3` |
 | `validate <spec>` | Valida a spec, confere arquivos e mostra a duração final e avisos. | `dmaker validate projects\meu-reel\spec.json` |
 
 **Render**

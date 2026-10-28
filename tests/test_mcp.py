@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 
 from mcp import ClientSession
@@ -20,7 +21,12 @@ async def _session(fn):
         command=sys.executable,
         args=["-m", "dmaker.mcp_server"],
         cwd=str(config.ROOT),
-        env={**get_default_environment(), "DMAKER_DATA_DIR": str(config.DATA_DIR)},
+        env={
+            **get_default_environment(),
+            "DMAKER_DATA_DIR": str(config.DATA_DIR),
+            # num worktree o pacote instalado é o da pasta principal: sem o PYTHONPATH o servidor testaria o código errado
+            **({"PYTHONPATH": os.environ["PYTHONPATH"]} if "PYTHONPATH" in os.environ else {}),
+        },
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -70,6 +76,9 @@ def test_lists_tools_and_prompt():
         "voice_queue_list",
         "pronunciation",
         "models",
+        "autocut",
+        "list_cuts",
+        "undo_cut",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources

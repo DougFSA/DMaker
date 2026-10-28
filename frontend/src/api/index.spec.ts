@@ -50,6 +50,17 @@ describe('cliente da API', () => {
     })
   })
 
+  it('inicia o corte automático e desfaz um corte da lista', async () => {
+    await api.autocut.start({ source: 'D:/g.mp4', name: 'g-corte', intensity: 'agressiva', min_pause: 0.8 })
+    expect(lastCall()).toMatchObject({
+      url: '/api/autocut',
+      method: 'POST',
+      body: { source: 'D:/g.mp4', name: 'g-corte', intensity: 'agressiva', min_pause: 0.8 },
+    })
+    await api.projects.undoCut('meu corte', 3)
+    expect(lastCall()).toMatchObject({ url: '/api/projects/meu%20corte/cuts/3/undo', method: 'POST' })
+  })
+
   it('lista templates, saídas e jobs', async () => {
     await api.templates.list()
     expect(lastCall().url).toBe('/api/templates')

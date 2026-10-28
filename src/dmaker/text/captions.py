@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -251,6 +252,33 @@ def edit_distance(a: str, b: str) -> int:
             cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
         prev = cur
     return prev[-1]
+
+
+def remap_to_ranges(cues: list[Cue], ranges: Sequence[tuple[float, float]]) -> list[Cue]:
+    """Legendas de uma gravação cortada: só as palavras dentro dos trechos mantidos, com o tempo de quem vê
+    o vídeo já emendado (os trechos, na ordem dada, viram uma linha contínua)."""
+    bases: list[float] = []
+    cursor = 0.0
+    for start, end in ranges:
+        bases.append(cursor)
+        cursor += end - start
+
+    def remap(word: Word) -> Word | None:
+        middle = (word.start + word.end) / 2
+        for (start, end), base in zip(ranges, bases, strict=True):
+            if start <= middle < end:  # pelo meio da palavra: as pontas dela podem ter sido esticadas
+                move = base - start
+                return Word(
+                    max(word.start, start) + move, min(word.end, end) + move, word.text, word.probability
+                )
+        return None
+
+    out: list[Cue] = []
+    for cue in cues:
+        words = [mapped for word in cue.words or flatten_words([cue]) if (mapped := remap(word))]
+        if words:
+            out.append(Cue(words[0].start, words[-1].end, " ".join(w.text for w in words), words))
+    return out
 
 
 def shift(cues: list[Cue], offset: float) -> list[Cue]:

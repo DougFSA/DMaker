@@ -405,6 +405,133 @@ def plan(
         console.print(f"[yellow]aviso:[/yellow] {w}")
 
 
+def _format_clock(seconds: float) -> str:
+    return f"{int(seconds // 60):02d}:{seconds % 60:04.1f}"
+
+
+def _print_cut_report(report) -> None:
+    """Resumo e tabela do que foi cortado (tempos na gravação original), para conferir antes de renderizar."""
+    from .voice.cut_plan import REASON_LABELS
+
+    removed = report.removed_seconds
+    percent = 100 * removed / report.duration if report.duration else 0.0
+    by_reason = (
+        ", ".join(f"{n} {REASON_LABELS.get(r, r)}" for r, n in report.counts().items()) or "nenhum corte"
+    )
+    console.print(
+        f"[green]{report.duration:.1f}s -> {report.duration_after:.1f}s[/green] "
+        f"({percent:.0f}% a menos, intensidade {report.intensity}): {by_reason}"
+    )
+    if not report.cuts:
+        return
+    table = Table(
+        Column("#", justify="right"),
+        "Início",
+        "Fim",
+        Column("Duração", justify="right"),
+        "Motivo",
+        "Palavras",
+    )
+    for cut in report.cuts:
+        mark = " (desfeito)" if cut.undone else ""
+        table.add_row(
+            str(cut.id),
+            _format_clock(cut.start),
+            _format_clock(cut.end),
+            f"{cut.duration:.2f}s",
+            REASON_LABELS.get(cut.reason, cut.reason) + mark,
+            cut.text,
+            style="dim" if cut.undone else None,
+        )
+    console.print(table)
+
+
+@app.command()
+def autocut(
+    source: Annotated[Path, typer.Argument(help="Gravação falada (vídeo ou áudio).")],
+    name: Annotated[
+        str | None, typer.Option(help="Nome do projeto (padrão: nome do arquivo + -corte).")
+    ] = None,
+    intensity: Annotated[
+        str,
+        typer.Option(
+            help="suave (só pausas) | normal (pausas e vícios) | agressiva (inclui frases repetidas)."
+        ),
+    ] = "normal",
+    min_pause: Annotated[float, typer.Option(help="Pausa (s) acima da qual vira corte.")] = 0.5,
+    breath: Annotated[float, typer.Option(help="Silêncio (s) mantido antes e depois de cada fala.")] = 0.15,
+    preset: Annotated[str, typer.Option()] = "instagram/reels",
+    brand: Annotated[str | None, typer.Option()] = None,
+    captions: Annotated[bool, typer.Option(help="Legendas automáticas seguindo a fala cortada.")] = True,
+    language: Annotated[str, typer.Option(help="Idioma da fala (pt, en, es...).")] = "pt",
+    model: Annotated[str, typer.Option(help="Whisper: tiny | base | small | medium | large-v3")] = "small",
+    device: Annotated[str, typer.Option(help="cpu | cuda")] = "cpu",
+    overwrite: Annotated[bool, typer.Option(help="Refaz o projeto se ele já existir.")] = False,
+) -> None:
+    """Corta as pausas, os vícios e as frases repetidas de uma gravação falada. Cria um projeto com os clipes
+    já cortados e mostra a lista do que saiu (tempo e motivo) para conferir antes de renderizar."""
+    from .pipeline.autocut import AutoCutRequest, default_autocut_service
+    from .voice.cut_plan import CutOptions
+
+    project_name = name or f"{source.stem}-corte"
+    try:
+        request = AutoCutRequest(
+            source=source,
+            name=project_name,
+            options=CutOptions(intensity=intensity, min_pause=min_pause, breath=breath),  # type: ignore[arg-type]
+            preset=preset,
+            brand=brand,
+            captions=captions,
+            language=language,
+            model=model,
+            device=device,  # type: ignore[arg-type]
+            overwrite=overwrite,
+        )
+        service = default_autocut_service(lambda m: console.print(f"  {m}", markup=False, highlight=False))
+        result = service.cut(request, lambda label, fraction: console.print(f"  {label}...", markup=False))
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    _print_cut_report(result.report)
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {warning}")
+    console.print(f"Projeto: {result.spec_path}", markup=False, highlight=False)
+    console.print(
+        f"Confira com [bold]dmaker cuts {project_name}[/bold]; devolva um corte com "
+        f"[bold]dmaker uncut {project_name} <número>[/bold]; depois renderize com "
+        f"[bold]dmaker render {project_name} --preview[/bold]."
+    )
+
+
+@app.command()
+def cuts(name: Annotated[str, typer.Argument(help="Projeto criado por `dmaker autocut`.")]) -> None:
+    """Lista o que o autocut removeu do projeto (tempo na gravação original e motivo)."""
+    from .pipeline.autocut import load_cut_report
+    from .pipeline.projects import project_path
+
+    report = load_cut_report(project_path(name).parent)
+    if report is None:
+        _fail(f"{name} não tem lista de cortes (só projetos criados por `dmaker autocut` têm).")
+    _print_cut_report(report)
+
+
+@app.command()
+def uncut(
+    name: Annotated[str, typer.Argument(help="Projeto criado por `dmaker autocut`.")],
+    cut_ids: Annotated[list[int], typer.Argument(help="Número do corte na lista de `dmaker cuts`.")],
+) -> None:
+    """Desfaz cortes do autocut: o trecho volta ao projeto e as legendas acompanham."""
+    from .pipeline.autocut import undo_cut
+
+    report = None
+    try:
+        for cut_id in cut_ids:
+            report = undo_cut(name, cut_id)
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    assert report is not None
+    _print_cut_report(report)
+
+
 @app.command()
 def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
     """Valida a spec, confere arquivos e mostra a duração final e avisos."""

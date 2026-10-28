@@ -12,6 +12,7 @@ import {
 import PageHeader from '@/components/layout/PageHeader.vue'
 import OutputCard from '@/components/outputs/OutputCard.vue'
 import VideoPlayerDialog, { type PlayableVideo } from '@/components/outputs/VideoPlayerDialog.vue'
+import CutsCard from '@/components/projects/CutsCard.vue'
 import JobProgressCard from '@/components/projects/JobProgressCard.vue'
 import QaReportCard from '@/components/projects/QaReportCard.vue'
 import RenderDialog, { type RenderChoice } from '@/components/projects/RenderDialog.vue'
@@ -40,6 +41,7 @@ const loadError = ref<{ title: string; message: string } | null>(null)
 const summary = ref<ValidationSummary | null>(null)
 const report = ref<QaReport | null>(null)
 const busy = ref<'validate' | 'qa' | null>(null)
+const undoingCut = ref<number | null>(null)
 
 const renderOpen = ref(false)
 const starting = ref(false)
@@ -80,6 +82,22 @@ async function reloadOutputs(): Promise<void> {
     detail.value = await api.projects.get(props.name)
   } catch {
     // a lista de saídas fica como estava; o próximo render tenta de novo
+  }
+}
+
+/** Devolve o trecho de um corte automático ao projeto; a linha do tempo mudou, então o que foi conferido vale de novo. */
+async function undoCut(cutId: number): Promise<void> {
+  undoingCut.value = cutId
+  try {
+    await api.projects.undoCut(props.name, cutId)
+    summary.value = null
+    report.value = null
+    await reloadOutputs()
+    toasts.push({ tone: 'success', title: 'Corte desfeito', description: 'O trecho voltou para o projeto.' })
+  } catch (error) {
+    toasts.push({ tone: 'error', title: 'Não foi possível desfazer o corte', description: errorMessage(error) })
+  } finally {
+    undoingCut.value = null
   }
 }
 
@@ -186,6 +204,8 @@ watch(() => props.name, load, { immediate: true })
 
       <div class="stack">
         <JobProgressCard v-for="job in projectJobs" :key="job.id" :job="job" @play="playResult" />
+
+        <CutsCard v-if="detail.cuts" :report="detail.cuts" :busy-id="undoingCut" @undo="undoCut" />
 
         <ValidationCard v-if="summary" :summary="summary" />
         <QaReportCard v-if="report" :report="report" />

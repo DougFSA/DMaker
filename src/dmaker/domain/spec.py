@@ -127,6 +127,9 @@ class ClipSegment(SegmentBase):
     mute: bool = False
     matte: Matte | None = None  # fundo substituído por cor lisa (pessoa recortada)
     audio_mode: Literal["original", "voice", "background"] = "original"
+    # fade de áudio curto nas duas pontas do clipe, sem escurecer a imagem (ao contrário de fade_in/fade_out):
+    # tira o estalo de um corte seco no meio da fala, como os de `autocut`. 0 = sem fade
+    audio_fade: float = Field(0.0, ge=0, le=0.5)
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
