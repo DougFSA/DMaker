@@ -46,6 +46,12 @@ DEFAULT_THEME = {
 }
 
 
+# Caixa arredondada por linha (legendas `rounded` e textos com `box_shape: rounded`), px na base 1080. O raio
+# acompanha a altura de uma linha de legenda sem virar pílula; a margem dá folga lateral ao texto.
+DEFAULT_ROUNDED_BOX_RADIUS = 28.0
+DEFAULT_ROUNDED_BOX_PADDING = 28.0
+
+
 def normalize_hex(value: str) -> str:
     m = HEX_RE.match(value.strip())
     if not m:
@@ -94,6 +100,22 @@ class Theme:
     @property
     def no_dash(self) -> bool:
         return bool(self.rules.get("no_dash"))
+
+    def _rounded_box_metric(self, key: str, default: float) -> float:
+        value = self.style.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+            raise ValueError(f"{key} da marca precisa ser um número maior ou igual a zero, veio {value!r}")
+        return float(value)
+
+    @property
+    def rounded_box_radius(self) -> float:
+        """Raio dos cantos da caixa arredondada, em px na base 1080 (`style.rounded_box_radius` da marca)."""
+        return self._rounded_box_metric("rounded_box_radius", DEFAULT_ROUNDED_BOX_RADIUS)
+
+    @property
+    def rounded_box_padding(self) -> float:
+        """Margem lateral entre o texto e a borda da caixa arredondada (`style.rounded_box_padding`)."""
+        return self._rounded_box_metric("rounded_box_padding", DEFAULT_ROUNDED_BOX_PADDING)
 
     def resolve_asset(self, rel: str | Path) -> Path:
         """Caminho de um arquivo da marca (fundo ou imagem de um layout de cartão); absoluto passa direto."""

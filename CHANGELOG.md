@@ -34,6 +34,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-33**: legendas no estilo TikTok: novo modo `captions.style.mode: "rounded"`, em que cada linha ganha uma caixa de fundo do tamanho dela, de cantos arredondados, e as caixas de linhas de larguras diferentes se emendam com curvas suaves (desenho vetorial, nítido em qualquer resolução); o destaque da palavra ativa continua por cima da caixa. Os textos sobrepostos (gancho, título, CTA) ganham o mesmo desenho com `style.box_shape: "rounded"`. Raio e margem da caixa vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` do `brand.json`, padrão 28 px na base 1080). O modo `boxed` segue como era.
+
 ## v1 — 2026-10-27
 
 ### Added
