@@ -458,6 +458,7 @@ O projeto já traz `.mcp.json` configurado para o Claude Code. Para o Claude Des
 | `timeline_view` | Vista multitrilha da linha do tempo, com índices e tempos já calculados. |
 | `plan_multicam` | Planeja o corte automático de um bloco `multicam` (transcreve, reconhece fases, monta os clipes). |
 | `autocut`, `list_cuts`, `undo_cut` | Cortam pausas, vícios e frases repetidas de uma gravação falada (projeto novo com a lista do que saiu), listam os cortes e devolvem um deles ao projeto. |
+| `validate_batch`, `run_batch`, `resume_batch`, `pause_batch`, `batch_status` | Lote: vários vídeos de uma planilha (CSV, XLSX ou JSON), um por linha, sobre um modelo. Validam a planilha antes de renderizar, rodam num job, pausam, retomam sem refazer o que já saiu e devolvem o relatório do que saiu e do que falhou. |
 | `list_projects` | Projetos existentes em `projects/`. |
 | `render_project` | Renderiza (prévia ou final); abre a interface para acompanhar por padrão. |
 | `export_project` | Exporta o mesmo projeto para vários presets de uma vez. |
@@ -843,6 +844,10 @@ Python global). Use `dmaker <comando> --help` para ver as opções na hora, com 
 | `plan <nome>` | Planeja o corte automático de um bloco `multicam`: transcreve, reconhece as fases da cerimônia e substitui o bloco pelos clipes concretos. | `dmaker plan meu-casamento` |
 | `autocut <gravação>` | Corta as pausas, os vícios de fala e as frases repetidas de uma gravação falada: cria um projeto com os clipes já cortados e mostra a lista do que saiu (tempo e motivo). Opções: `--name`, `--intensity suave\|normal\|agressiva`, `--min-pause`, `--breath`, `--preset`, `--brand`, `--captions/--no-captions`, `--overwrite`. | `dmaker autocut entrevista.mp4 --intensity normal` |
 | `cuts <nome>` e `uncut <nome> <número>` | Lista os cortes do `autocut` e devolve um deles ao projeto (as legendas acompanham). | `dmaker uncut entrevista-corte 3` |
+| `batch validate <template> <planilha>` | Confere a planilha contra o modelo sem renderizar nada: campo faltando, arquivo inexistente, texto que não cabe e travessão, cada um com linha e coluna. Opção: `--name-column`. Sai com erro se alguma linha tem problema. | `dmaker batch validate stories-medlycare semana.csv --name-column titulo` |
+| `batch run <template> <planilha>` | Valida, cria um projeto por linha e renderiza tudo em `output/<lote>/`. Com linha inválida não começa, a não ser com `--skip-invalid`. Opções: `--lote`, `--name-column`, `--preview`, `--preset`, `--replace`. Ctrl+C interrompe sem perder o que já saiu. | `dmaker batch run stories-medlycare semana.csv --name-column titulo --lote semana` |
+| `batch resume <lote>` | Continua o lote: renderiza o que falta, o que falhou e o projeto que você corrigiu; o que já saiu e continua igual não é refeito. Opções: `--rows 2,4`, `--force`. | `dmaker batch resume semana` |
+| `batch pause <lote>` e `batch status [lote]` | Pede a um lote em andamento (em outra janela) que pare depois do vídeo atual; mostra o relatório de um lote (o que saiu, o que falhou e por quê) ou a lista de lotes. | `dmaker batch status semana` |
 | `validate <spec>` | Valida a spec, confere arquivos e mostra a duração final e avisos. | `dmaker validate projects\meu-reel\spec.json` |
 
 **Render**
@@ -958,6 +963,31 @@ elemento de uma lista; `$if` remove um item ou uma chave quando o valor não é 
 completa e receitas em [`templates/README.md`](../templates/README.md). Todos os templates existentes
 são validados como `Project` a cada mudança no código (`tests/test_templates.py`), com os parâmetros
 obrigatórios preenchidos por valores fictícios.
+
+**Lote: vários vídeos de uma planilha.** Para uma série ("procedimento da semana", o mesmo anúncio por
+clínica ou cidade), uma planilha com uma linha por vídeo gera um projeto e um vídeo por linha sobre um
+template. Exemplo de planilha para `stories-medlycare` (CSV com `;`, como o Excel brasileiro exporta):
+
+```
+titulo;texto;print
+Dica um;A fila de espera organiza quem chega;imagens/dica1.png
+Dica dois;Agenda online para o paciente;imagens/dica2.png
+```
+
+- O nome de cada coluna casa com o parâmetro do template sem diferenciar maiúscula, acento ou espaço
+  (`Título`, `titulo` e `TITULO` servem). Coluna que não casa é ignorada, com aviso. Caminhos relativos
+  partem da pasta da planilha. Aceita `.csv`, `.json` (lista de objetos) e `.xlsx`; para ler `.xlsx`,
+  `pip install -e ".[lote]"`.
+- A validação roda antes de tudo e não renderiza nada: aponta linha, coluna e motivo de campo vazio,
+  arquivo inexistente, texto que não cabe e travessão (a regra da marca vale para o texto da planilha).
+  Com linha inválida o lote não começa; `--skip-invalid` segue sem elas, e o relatório diz por que cada
+  uma ficou de fora.
+- Cada linha vira um projeto em `projects/<lote>-<nome>`: para corrigir um vídeo, edite esse projeto e
+  rode `dmaker batch resume <lote>`, que refaz só ele. O vídeo sai em `output/<lote>/<nome>.mp4`, com o
+  nome vindo da coluna escolhida em `--name-column`. O relatório fica em `output/<lote>/relatorio.txt`.
+- Pausar (`dmaker batch pause`, ou o botão na interface) vale depois do vídeo em andamento. Retomar não
+  refaz o que já saiu. Na interface nova, a tela **Lote** faz o mesmo passo a passo, com a validação em
+  tabela, a confirmação para seguir sem as linhas com problema e o progresso de cada vídeo.
 
 ### 7.5 Depuração de um render
 
@@ -1091,7 +1121,8 @@ DMaker/
   assets/         fonts/ (Poppins) e brands/<nome>/ (brand.json + logos)
   templates/      specs de exemplo parametrizadas
   projects/       seus projetos: <nome>/spec.json (+ captions.auto.json/.srt e sync.json gerados)
-  output/         renders finais e thumbnails (ignorado pelo git)
+  projects/_lotes/  estado de cada lote (uma linha da planilha por vídeo); os projetos do lote ficam ao lado
+  output/         renders finais e thumbnails; um lote sai em output/<lote>/ (ignorado pelo git)
   cache/          mezaninos, proxies, formas de onda, jobs, modelos (ignorado pelo git)
   bin/ffmpeg/     FFmpeg baixado pelo setup (ignorado pelo git)
   scripts/setup.ps1  bootstrap

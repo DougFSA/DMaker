@@ -79,6 +79,11 @@ def test_lists_tools_and_prompt():
         "autocut",
         "list_cuts",
         "undo_cut",
+        "validate_batch",
+        "run_batch",
+        "resume_batch",
+        "pause_batch",
+        "batch_status",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources

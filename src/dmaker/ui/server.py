@@ -26,10 +26,12 @@ from ..domain.brand import available_brands, load_theme
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
 from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
+from ..pipeline.batch_files import SHEET_SUFFIXES
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
 from . import layouts as layout_files
 from .autocut_routes import build_autocut_router
+from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
@@ -65,6 +67,7 @@ app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
 app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
+app.include_router(build_batch_router(jobs))
 
 
 # ---------- modelos de entrada ----------
@@ -817,14 +820,15 @@ def get_waveform(path: str, stream: int = 0) -> dict:
 
 
 @app.get("/api/browse")
-def browse(path: str | None = None) -> dict:
-    """Navegador de arquivos para escolher fontes (só pastas e mídia)."""
+def browse(path: str | None = None, kind: str = "media") -> dict:
+    """Navegador de arquivos para escolher fontes (só pastas e mídia; `kind=sheet` mostra as planilhas de lote)."""
     if not path:
         drives = [f"{d}:/" for d in string.ascii_uppercase if Path(f"{d}:/").exists()]
         return {"path": "", "parent": None, "dirs": drives, "files": []}
     p = Path(path)
     if not p.is_dir():
         raise _error(404, "pasta não encontrada")
+    listed = SHEET_SUFFIXES if kind == "sheet" else MEDIA_EXTS
     dirs, files = [], []
     try:
         for child in sorted(p.iterdir(), key=lambda c: c.name.lower()):
@@ -832,7 +836,7 @@ def browse(path: str | None = None) -> dict:
                 continue
             if child.is_dir():
                 dirs.append(child.as_posix())
-            elif child.suffix.lower() in MEDIA_EXTS:
+            elif child.suffix.lower() in listed:
                 files.append(
                     {
                         "path": child.as_posix(),

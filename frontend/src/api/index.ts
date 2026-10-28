@@ -3,6 +3,13 @@ import { http } from './http'
 import type {
   AppState,
   AutoCutRequest,
+  BatchListItem,
+  BatchReport,
+  BatchResumeRequest,
+  BatchStartRequest,
+  BatchStartResponse,
+  BatchValidateRequest,
+  BatchValidation,
   BrowseResponse,
   CutReport,
   JobSnapshot,
@@ -47,6 +54,20 @@ export const api = {
     list: () => http.get<TemplateInfo[]>('/api/templates'),
   },
 
+  batches: {
+    list: () => http.get<{ batches: BatchListItem[] }>('/api/batches'),
+    /** Confere a planilha contra o modelo sem renderizar nada. */
+    validate: (request: BatchValidateRequest) => http.post<BatchValidation>('/api/batches/validate', request),
+    /** Cria um projeto por linha e renderiza tudo num job; linha com problema só fica de fora com `skip_invalid`. */
+    start: (request: BatchStartRequest) => http.post<BatchStartResponse>('/api/batches', request),
+    get: (name: string) => http.get<BatchReport>(`/api/batches/${enc(name)}`),
+    resume: (name: string, request: BatchResumeRequest = {}) =>
+      http.post<BatchStartResponse>(`/api/batches/${enc(name)}/resume`, request),
+    /** Para depois do vídeo em andamento; nada se perde. */
+    pause: (name: string) => http.post<{ name: string; pause_requested: boolean }>(`/api/batches/${enc(name)}/pause`),
+    remove: (name: string) => http.delete<{ removed: string }>(`/api/batches/${enc(name)}`),
+  },
+
   outputs: {
     list: () => http.get<OutputFile[]>('/api/outputs'),
   },
@@ -58,8 +79,11 @@ export const api = {
   },
 
   files: {
-    browse: (path?: string) =>
-      http.get<BrowseResponse>(path ? `/api/browse?path=${enc(path)}` : '/api/browse'),
+    /** `kind: 'sheet'` mostra as planilhas de lote (.csv, .xlsx, .json) no lugar da mídia. */
+    browse: (path?: string, kind: 'media' | 'sheet' = 'media') => {
+      const query = [path ? `path=${enc(path)}` : '', kind === 'sheet' ? 'kind=sheet' : ''].filter(Boolean)
+      return http.get<BrowseResponse>(query.length ? `/api/browse?${query.join('&')}` : '/api/browse')
+    },
   },
 
   clients: {

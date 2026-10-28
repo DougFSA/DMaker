@@ -317,6 +317,45 @@ de corte nenhum: são clipes comuns (`src`, `start`, `end`), cada um com `audio_
   `qa_report`. Gravação com ruído de fundo forte ou muito baixa pode não ter pausas detectáveis: a resposta
   traz o aviso "Nada passou do limite"; tente `intensity=agressiva` ou um `min_pause` menor.
 
+## Lote: vários vídeos de uma planilha (`run_batch`)
+
+Para gerar uma série (10 Reels "procedimento da semana") ou o mesmo anúncio em versões por clínica ou cidade,
+use o lote: uma planilha com uma linha por vídeo, sobre um modelo (`list_templates`). Cada linha vira um projeto
+salvo (`projects/<lote>-<nome>`, para corrigir e renderizar de novo só aquele) e um vídeo em
+`output/<lote>/<nome>.mp4`.
+
+- Planilha: `.csv` (UTF-8 com ou sem BOM, ou o ANSI do Excel brasileiro; separador `,`, `;` ou tabulação),
+  `.xlsx` (primeira aba; precisa do extra `lote`: `pip install -e ".[lote]"`) ou `.json` (lista de objetos).
+  O nome de cada coluna casa com o parâmetro do modelo sem diferenciar maiúscula, acento, espaço, hífen ou
+  sublinhado ("Título" casa com `titulo`, "CTA final" com `cta_final`). Coluna que não casa é ignorada, com aviso.
+  Exemplo para `stories-medlycare`: colunas `titulo;texto;print`. Célula vazia usa o padrão do modelo.
+- Valores: texto como está; número aceita vírgula decimal ("3,5"); `bool` aceita sim, não, 1, 0; `path` relativo
+  parte da pasta da planilha; `paths` e `list` aceitam itens separados por `|`, quebra de linha ou vírgula, ou
+  um JSON (`[{"fim": 20, "imagem": "a.png"}]`, necessário para lista de objetos como os `assuntos` do
+  `explicativo`; caminho de mídia dentro dele também parte da pasta da planilha).
+- Validação ANTES de tudo, sem renderizar nada: `validate_batch(template, sheet, name_column)` (CLI
+  `dmaker batch validate`). Aponta, com linha, coluna e motivo: campo obrigatório vazio, número ou lista
+  ilegível, arquivo inexistente, travessão ou meia-risca (regra da marca) e texto que não cabe no espaço (palavra
+  mais larga que a área, texto fora da zona segura, cartão alto demais), as mesmas medidas do `qa_report`. Um
+  problema que o próprio modelo já tem com texto curto sobe uma vez só como aviso da planilha, não como erro de
+  linha. `name_column` é a coluna cujo texto dá nome ao arquivo (padrão: `nome`, `arquivo`, `titulo`...).
+- Rodar: `run_batch(template, sheet, name, name_column, skip_invalid, preview, preset, replace)` valida, cria os
+  projetos e renderiza num job (um lote por vez; acompanhe com `job_status` ou `batch_status`). Com linha
+  inválida NÃO começa e devolve a validação, a não ser com `skip_invalid=true`, que segue sem elas (ficam
+  "Pulada" no relatório, com o motivo). `replace=true` refaz um lote de mesmo nome a partir da planilha atual.
+- Pausar e retomar: `pause_batch(name)` para depois do vídeo em andamento; `resume_batch(name, rows, force)`
+  continua. O que já saiu com a mesma spec e o arquivo ainda lá não é refeito; o que falhou e o que você
+  corrigiu no projeto (spec diferente) é renderizado de novo. Se o processo cair no meio de um vídeo, a
+  retomada refaz só esse. `rows` (números da tabela do relatório) e `force=true` refazem vídeos escolhidos.
+- Relatório: `batch_status(name)` devolve, por vídeo, o estado (Pendente, Renderizando, Pronto, Falhou, Pulada),
+  o arquivo, o tempo e o motivo da falha; sem `name` lista os lotes. O mesmo relatório fica em
+  `output/<lote>/relatorio.txt`. O estado do lote fica em `projects/_lotes/<lote>.json`.
+- CLI: `dmaker batch validate|run|resume|pause|status`. Interface nova: tela "Lote" (modelo, planilha,
+  validação em tabela, confirmação para seguir sem as linhas inválidas, progresso por vídeo, pausa, retomada,
+  "Refazer" em cada linha e o relatório final).
+- Fluxo: `validate_batch` -> corrigir a planilha -> `run_batch` (com `preview=true` para conferir rápido) ->
+  `batch_status` -> corrigir o projeto de um vídeo se preciso -> `resume_batch`.
+
 ## Voz e narração
 
 Duas engines locais, sem custo, escolhidas pela voz (extra `voice`: `pip install torch torchaudio
