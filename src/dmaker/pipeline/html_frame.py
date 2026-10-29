@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from ..domain.edits import add_overlay
 from ..domain.spec import Project
 from ..media.html_render import HtmlComposition, HtmlRenderer, PlaywrightHtmlRenderer
 from ..media.html_site import entry_file
+from .html_layer import brand_page_fields
 
 DEFAULT_SIZE = (1080, 1920)
 SIZE_RE = re.compile(r"^\s*(\d+)\s*[xX×]\s*(\d+)\s*$")
@@ -69,10 +71,12 @@ def render_html_frame(
     brand: str | None = None,
     background: str | None = None,
     renderer: HtmlRenderer | None = None,
+    files: Mapping[str, Path] | None = None,
 ) -> HtmlFrame:
     """Renderiza o quadro de `source` no instante `at` e o grava em `out` (PNG, com alfa; com `background`, sobre
     essa cor). A página é desenhada com `size` px (base 1080) e `scale` pixels de saída por px; a marca (`brand`)
-    chega a ela por variáveis CSS, como no render do vídeo."""
+    chega a ela por variáveis CSS, como no render do vídeo; `files` são os arquivos de fora da pasta que a página lê
+    (ver `HtmlOverlay.files`)."""
     if at < 0 or duration <= 0 or fps <= 0 or scale <= 0:
         raise ValueError(
             "o instante, a duração, o fps e a escala precisam ser positivos (o instante pode ser 0)"
@@ -86,8 +90,8 @@ def render_html_frame(
         fps=fps,
         duration=duration,
         data=data or {},
-        colors=dict(theme.colors),
-        font_family=theme.font_family,
+        files=files or {},
+        **brand_page_fields(theme),
     )
     warnings: list[str] = []
     png = (renderer or PlaywrightHtmlRenderer()).still(composition, at, warnings.append)

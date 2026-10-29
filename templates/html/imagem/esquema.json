@@ -1,0 +1,62 @@
+{
+  "title": "Imagem animada",
+  "description": "Uma imagem (PNG com transparência, foto) que entra com slide, pop ou zoom e ganha um leve movimento de câmera (Ken Burns) enquanto fica na tela.",
+  "size": [800, 600],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.72, "height": 0.26 },
+  "duration": 4,
+  "example": { "arquivo": "exemplo.png" },
+  "params": {
+    "arquivo": {
+      "type": "path",
+      "label": "Imagem",
+      "description": "O caminho do arquivo PNG, JPG ou WEBP (relativo à pasta do projeto, ou absoluto). O exemplo.png que vem junto do modelo serve para testar.",
+      "required": true
+    },
+    "entrada": {
+      "type": "choice",
+      "label": "Como entra",
+      "description": "slide desliza de um lado; pop cresce com um pequeno quique; zoom chega de perto e assenta.",
+      "default": "slide",
+      "options": ["slide", "pop", "zoom"]
+    },
+    "direcao": {
+      "type": "choice",
+      "label": "De onde vem o slide",
+      "default": "esquerda",
+      "options": ["esquerda", "direita", "cima", "baixo"]
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo para entrar (s)",
+      "default": 0.7,
+      "min": 0.1,
+      "max": 5
+    },
+    "ken_burns": {
+      "type": "number",
+      "label": "Movimento de câmera",
+      "description": "Quanto a imagem cresce devagar enquanto fica na tela (0,06 é 6%). 0 deixa a imagem parada.",
+      "default": 0.06,
+      "min": 0,
+      "max": 0.5
+    },
+    "ajuste": {
+      "type": "choice",
+      "label": "Encaixe na área",
+      "description": "conter mostra a imagem inteira; cobrir preenche a área e corta o que sobra.",
+      "default": "conter",
+      "options": ["conter", "cobrir"]
+    },
+    "cantos": {
+      "type": "bool",
+      "label": "Cantos arredondados",
+      "description": "Arredonda os cantos com o raio da marca. Em PNG com transparência, deixe desligado.",
+      "default": false
+    },
+    "sombra": {
+      "type": "bool",
+      "label": "Sombra suave",
+      "default": true
+    }
+  }
+}

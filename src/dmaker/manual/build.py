@@ -16,11 +16,12 @@ from .ia_docs import MAX_TOKENS, build_ia_files, oversize
 from .markers import replace_generated
 from .outline import parse_manual, structure_problems
 from .reference_cli import cli_reference
+from .reference_infographics import infographics_reference
 from .reference_mcp import ToolDoc, mcp_reference
 from .reference_spec import spec_reference
 from .task_index import tasks_index
 
-GENERATED_BLOCKS = ("indice", "cli", "mcp", "spec")
+GENERATED_BLOCKS = ("indice", "cli", "mcp", "spec", "infograficos")
 
 
 class ManualBuildError(ValueError):
@@ -40,6 +41,7 @@ class BuildInputs:
     spec_schema: dict[str, Any]
     agent_tools: tuple[str, ...]
     field_notes: Mapping[str, str] = field(default_factory=dict)
+    infographics: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ def build_all(manual_text: str, inputs: BuildInputs) -> BuildResult:
         "cli": cli_reference(inputs.cli_root),
         "mcp": mcp_reference(inputs.tools),
         "spec": spec_reference(inputs.spec_schema, inputs.field_notes),
+        "infograficos": infographics_reference(inputs.infographics),
     }
     for name in GENERATED_BLOCKS:
         text = replace_generated(text, name, blocks[name])

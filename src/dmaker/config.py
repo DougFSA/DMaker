@@ -53,6 +53,9 @@ MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = DATA_DIR / "output"
 PROJECTS_DIR = DATA_DIR / "projects"
 TEMPLATES_DIR = ROOT / "templates"
+# Infográficos prontos (contador, barra, linha...): cada um é uma pasta de composição em HTML com o seu esquema de
+# parâmetros; moram ao lado dos modelos de projeto, como os outros recursos versionados do clone.
+INFOGRAPHICS_DIR = TEMPLATES_DIR / "html"
 LAYOUTS_FILE = DATA_DIR / "layouts.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"

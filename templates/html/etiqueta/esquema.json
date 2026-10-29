@@ -1,0 +1,75 @@
+{
+  "title": "Etiqueta",
+  "description": "Um rótulo pequeno de borda arredondada que surge num ponto (como \"QUARTO\" ou \"conteúdo ilustrativo\"). O arredondado vem da marca.",
+  "size": [700, 240],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.65, "height": 0.1 },
+  "duration": 3,
+  "example": { "texto": "QUARTO" },
+  "params": {
+    "texto": {
+      "type": "text",
+      "label": "Texto",
+      "required": true,
+      "max_length": 40,
+      "example": "QUARTO"
+    },
+    "x": {
+      "type": "number",
+      "label": "Posição horizontal",
+      "description": "Onde fica o centro da etiqueta, de 0 (borda esquerda da área) a 1 (borda direita).",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    "y": {
+      "type": "number",
+      "label": "Posição vertical",
+      "description": "De 0 (topo da área) a 1 (base).",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    "estilo": {
+      "type": "choice",
+      "label": "Estilo",
+      "description": "cheia pinta o fundo da etiqueta; contorno deixa só a borda, sobre um fundo escuro suave.",
+      "default": "cheia",
+      "options": ["cheia", "contorno"]
+    },
+    "entrada": {
+      "type": "choice",
+      "label": "Como surge",
+      "default": "pop",
+      "options": ["pop", "fade", "deslizar"]
+    },
+    "tamanho": {
+      "type": "number",
+      "label": "Tamanho da letra (px)",
+      "default": 56,
+      "min": 16,
+      "max": 240
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo para surgir (s)",
+      "default": 0.35,
+      "min": 0.05,
+      "max": 5
+    },
+    "cor": {
+      "type": "color",
+      "label": "Cor da etiqueta",
+      "default": "accent"
+    },
+    "cor_texto": {
+      "type": "color",
+      "label": "Cor do texto",
+      "description": "Sem escolher, o modelo usa a cor da marca (ou o branco) que contrasta mais com a etiqueta."
+    },
+    "sombra": {
+      "type": "bool",
+      "label": "Sombra suave",
+      "default": true
+    }
+  }
+}

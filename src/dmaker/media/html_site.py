@@ -2,7 +2,8 @@
 
 A página é aberta em `http://dmaker.composicao/` e cada pedido dela é respondido daqui, do disco, sem rede: a
 composição (um arquivo `.html` ou uma pasta com `index.html`), as bibliotecas do DMaker em `/_dmaker/` (three.js,
-lottie-web) e a fonte Poppins. Nada aqui abre navegador nem rede, então o que é servido e o que é negado se testa
+lottie-web, rough-notation, os emojis animados), a fonte da marca e os arquivos do projeto que a composição
+declarou (`/_dmaker/files/`). Nada aqui abre navegador nem rede, então o que é servido e o que é negado se testa
 sem Chromium. Uma origem falsa, e não `file://`, porque o `file://` bloqueia `fetch` de JSON local, módulos ES e o
 Lottie.
 """
@@ -10,6 +11,7 @@ Lottie.
 from __future__ import annotations
 
 import mimetypes
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -21,6 +23,9 @@ HOST = "dmaker.composicao"
 ENTRY_PATH = "/index.html"
 DMAKER_PREFIX = "/_dmaker/"
 FONTS_PREFIX = DMAKER_PREFIX + "fonts/"
+# arquivos de fora da pasta da composição que ela declarou (imagens do projeto, fontes da marca): o nome na URL
+# é o que a composição pediu, nunca um caminho do disco
+FILES_PREFIX = DMAKER_PREFIX + "files/"
 HTML_SUFFIXES = (".html", ".htm")
 
 # O `mimetypes` do Windows lê o registro da máquina e erra tipos de script e dados; os que a composição usa de
@@ -59,6 +64,16 @@ POPPINS_FACES: tuple[tuple[str, int, str], ...] = (
     ("Poppins-Italic.ttf", 400, "italic"),
     ("Poppins-BoldItalic.ttf", 700, "italic"),
 )
+
+
+@dataclass(frozen=True)
+class FontFace:
+    """Um arquivo de fonte da marca que a página recebe por `@font-face`: a família CSS, o peso e o estilo."""
+
+    family: str
+    weight: int
+    style: str
+    path: Path
 
 
 @dataclass(frozen=True)
@@ -121,11 +136,46 @@ def font_face_probes(fonts_dir: Path, family: str = "Poppins") -> list[str]:
     ]
 
 
-def brand_css(colors: dict[str, str], family: str) -> str:
-    """As cores da marca como variáveis CSS (`--dm-primary`, `--dm-accent`...) e a fonte dela em `--dm-font`:
-    a composição usa `var(--dm-accent)` e muda de marca sem mudar uma linha."""
+def font_file_names(faces: Sequence[FontFace]) -> dict[str, Path]:
+    """O nome servido de cada fonte da marca (`font-0.ttf`...), na ordem recebida."""
+    return {f"font-{index}{face.path.suffix.lower()}": face.path for index, face in enumerate(faces)}
+
+
+def brand_font_faces_css(faces: Sequence[FontFace]) -> str:
+    """As `@font-face` das fontes da marca que não estão em `assets/fonts` (a família do `brand.json` quando não é a
+    Poppins e as fontes por papel de `fonts.files`), servidas pelo nome de `font_file_names`."""
+    rules = []
+    for name, face in zip(font_file_names(faces), faces, strict=True):
+        rules.append(
+            f'@font-face{{font-family:"{face.family}";font-weight:{face.weight};font-style:{face.style};'
+            f"font-display:block;src:url({FILES_PREFIX}{name}) format('truetype')}}"
+        )
+    return "".join(rules)
+
+
+def brand_font_probes(faces: Sequence[FontFace]) -> list[str]:
+    """Os atalhos de fonte das fontes da marca, para a página mandá-las carregar antes do primeiro quadro."""
+    return [
+        f'{face.style if face.style != "normal" else ""} {face.weight} 16px "{face.family}"'.strip()
+        for face in faces
+    ]
+
+
+def brand_css(
+    colors: dict[str, str],
+    family: str,
+    radius: float | None = None,
+    role_fonts: Mapping[str, str] | None = None,
+) -> str:
+    """As cores da marca como variáveis CSS (`--dm-primary`, `--dm-accent`...), a fonte dela em `--dm-font`, o raio
+    dos cantos em `--dm-radius` (px na base 1080) e as fontes por papel em `--dm-font-<papel>`: a composição usa
+    `var(--dm-accent)` e muda de marca sem mudar uma linha."""
     variables = [f"--dm-{name.replace('_', '-')}:{value}" for name, value in sorted(colors.items())]
     variables.append(f'--dm-font:"{family}",sans-serif')
+    if radius is not None:
+        variables.append(f"--dm-radius:{radius:g}px")
+    for role, css_family in sorted((role_fonts or {}).items()):
+        variables.append(f'--dm-font-{role}:"{css_family}","{family}",sans-serif')
     return ":root{" + ";".join(variables) + "}"
 
 
@@ -138,11 +188,19 @@ class CompositionSite:
     """Responde, do disco, ao que a página pede. `lookup` devolve None para o que não existe ou está fora do
     alcance dela (uma pasta acima, outro disco): quem pede recebe 404 e o aviso."""
 
-    def __init__(self, source: Path, *, assets_dir: Path | None = None, fonts_dir: Path | None = None):
+    def __init__(
+        self,
+        source: Path,
+        *,
+        assets_dir: Path | None = None,
+        fonts_dir: Path | None = None,
+        files: Mapping[str, Path] | None = None,
+    ):
         self.entry = entry_file(source)
         self.root = source.resolve() if source.is_dir() else None
         self.assets_dir = (assets_dir or config.HTML_ASSETS_DIR).resolve()
         self.fonts_dir = (fonts_dir or config.FONTS_DIR).resolve()
+        self.files = {name: Path(path) for name, path in (files or {}).items()}
 
     def lookup(self, url_path: str) -> Served | None:
         path = unquote(url_path)
@@ -150,6 +208,9 @@ class CompositionSite:
             return self._file(self.entry)
         if path.startswith(FONTS_PREFIX):
             return self._inside(self.fonts_dir, path[len(FONTS_PREFIX) :])
+        if path.startswith(FILES_PREFIX):
+            declared = self.files.get(path[len(FILES_PREFIX) :])
+            return self._file(declared) if declared is not None and declared.is_file() else None
         if path.startswith(DMAKER_PREFIX):
             return self._inside(self.assets_dir, path[len(DMAKER_PREFIX) :])
         if self.root is None:

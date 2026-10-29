@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Contador: um número que conta de `de` até `ate`. Os parâmetros chegam em `dmaker.data` (o esquema.json diz quais).
+  Este modelo faz uma coisa só: não traz fundo. A cor, a fonte e os cantos vêm das variáveis da marca (--dm-*).
+  Serve de exemplo para escrever composições novas: o desenho de cada instante sai de `dmakerSeek(t)`, sem
+  depender do quadro anterior, e a composição some um instante antes do fim (dmaker.duration).
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro {
+    position: absolute; inset: 0; container-type: size;
+    display: grid; place-items: center;
+    font-family: var(--dm-font);
+  }
+  .linha {
+    display: flex; align-items: baseline; justify-content: center; gap: 0.12em;
+    white-space: nowrap; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .afixo { font-size: 0.46em; font-weight: 700; }
+  #numero { text-align: right; }
+  .com-sombra { text-shadow: 0 0.04em 0.18em rgba(0, 0, 0, 0.45); }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro">
+  <div class="linha" id="linha">
+    <span class="afixo" id="prefixo"></span><span id="numero"></span><span class="afixo" id="sufixo"></span>
+  </div>
+</div>
+<script>
+  const d = dmaker.data;
+  const corDaMarca = (valor) => (String(valor).startsWith("#") ? valor : `var(--dm-${String(valor).replace(/_/g, "-")})`);
+
+  const quadro = document.getElementById("quadro");
+  const linha = document.getElementById("linha");
+  const numero = document.getElementById("numero");
+  numero.style.color = corDaMarca(d.cor);
+  for (const id of ["prefixo", "sufixo"]) {
+    const afixo = document.getElementById(id);
+    afixo.style.color = corDaMarca(d.cor_texto);
+    afixo.textContent = d[id];
+  }
+  if (d.sombra) linha.classList.add("com-sombra");
+
+  // formatação brasileira: ponto nos milhares e vírgula nos decimais (10.000 e 1.234,5), escrita à mão para a
+  // saída não depender dos dados de idioma do navegador
+  function formatar(valor) {
+    const fixo = Math.abs(valor).toFixed(d.casas);
+    const [inteiro, decimais] = fixo.split(".");
+    const milhares = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    const negativo = valor < 0 && Number(fixo) !== 0 ? "-" : "";
+    return negativo + milhares + (decimais ? "," + decimais : "");
+  }
+
+  // a velocidade da contagem: "suave" começa rápida e desacelera até o valor (saída cúbica)
+  const ritmos = {
+    suave: (p) => 1 - Math.pow(1 - p, 3),
+    "entrada-saida": (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    linear: (p) => p,
+  };
+  const ritmo = ritmos[d.easing] || ritmos.suave;
+
+  function valorEm(t) {
+    const p = Math.min(Math.max(t / d.duracao, 0), 1);
+    return p >= 1 ? d.ate : d.de + (d.ate - d.de) * ritmo(p); // no fim, exatamente `ate` (sem resto de conta)
+  }
+
+  // o texto mais largo da contagem decide o tamanho da letra: o número cresce em dígitos, e a linha cabe no quadro
+  let ajustado = false;
+  function ajustar() {
+    ajustado = true;
+    const altura = quadro.clientHeight, largura = quadro.clientWidth;
+    let corpo = altura * 0.62;
+    linha.style.fontSize = corpo + "px";
+    let maior = 0;
+    for (const valor of [d.de, d.ate]) {
+      numero.textContent = formatar(valor);
+      maior = Math.max(maior, linha.getBoundingClientRect().width);
+    }
+    if (maior > largura * 0.94) corpo *= (largura * 0.94) / maior;
+    linha.style.fontSize = corpo + "px";
+    // a caixa do número tem a largura do maior valor, alinhada à direita: o prefixo e o sufixo não andam
+    // quando o número ganha um dígito
+    numero.style.minWidth = "0";
+    let largo = 0;
+    for (const valor of [d.de, d.ate]) {
+      numero.textContent = formatar(valor);
+      largo = Math.max(largo, numero.getBoundingClientRect().width);
+    }
+    numero.style.minWidth = largo + "px";
+  }
+
+  window.dmakerSeek = (t) => {
+    if (!ajustado) ajustar();
+    numero.textContent = formatar(valorEm(t));
+    // entra em um quarto de segundo e sai nos últimos três décimos, sem sumir de repente no corte do DMaker
+    const entra = Math.min(t / 0.25, 1), sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    // em repouso a página fica sem opacidade nem transformação: uma camada com posição fracionária seria rasterizada
+    // com ruído de arredondamento de um quadro para o outro, e o número parado precisa sair sempre igual
+    const visivel = Math.min(entra, sai);
+    quadro.style.opacity = visivel < 1 ? String(visivel) : "";
+    linha.style.transform = entra < 1 ? `translateY(${(1 - entra) * 0.12}em)` : "";
+  };
+</script>
+</body>
+</html>

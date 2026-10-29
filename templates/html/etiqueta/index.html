@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Etiqueta: um rótulo pequeno de borda arredondada que surge num ponto da página.
+  Uma coisa só: sem fundo além da própria etiqueta. O arredondado vem da marca (--dm-radius), as cores de --dm-*.
+  O desenho de cada instante sai de `dmakerSeek(t)`.
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro { position: absolute; inset: 0; font-family: var(--dm-font); }
+  .etiqueta {
+    position: absolute; left: 0; top: 0; white-space: nowrap; font-weight: 700; line-height: 1;
+    padding: 0.5em 0.95em; box-sizing: border-box;
+    border-radius: min(var(--dm-radius), 1.4em); border: 0.09em solid transparent;
+  }
+  .com-sombra { box-shadow: 0 0.12em 0.5em rgba(0, 0, 0, 0.35); }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro"><div class="etiqueta" id="etiqueta"></div></div>
+<script>
+  const d = dmaker.data;
+  const corDaMarca = (valor) => (String(valor).startsWith("#") ? valor : `var(--dm-${String(valor).replace(/_/g, "-")})`);
+  const W = dmaker.width, H = dmaker.height;
+  const quadro = document.getElementById("quadro"), etiqueta = document.getElementById("etiqueta");
+
+  etiqueta.textContent = d.texto;
+  etiqueta.style.fontSize = d.tamanho + "px";
+  if (d.sombra) etiqueta.classList.add("com-sombra");
+
+  // luminância relativa de uma cor já resolvida pelo navegador ("rgb(r, g, b)")
+  function luminancia(css) {
+    const [r, g, b] = css.match(/[\d.]+/g).slice(0, 3).map((v) => {
+      const c = Number(v) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const contraste = (x, y) => (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  const resolvida = (cor) => {
+    const sonda = document.createElement("span");
+    sonda.style.color = corDaMarca(cor);
+    document.body.append(sonda);
+    const css = getComputedStyle(sonda).color;
+    sonda.remove();
+    return css;
+  };
+
+  // sem `cor_texto`: a cor da marca (ou o branco) que mais contrasta com a etiqueta
+  const preenchimento = resolvida(d.cor);
+  let corTexto;
+  if (d.estilo === "contorno") {
+    etiqueta.style.background = "rgba(11, 18, 32, 0.68)";
+    etiqueta.style.borderColor = corDaMarca(d.cor);
+    corTexto = d.cor_texto ? corDaMarca(d.cor_texto) : "var(--dm-white)";
+  } else {
+    etiqueta.style.background = corDaMarca(d.cor);
+    if (d.cor_texto) {
+      corTexto = corDaMarca(d.cor_texto);
+    } else {
+      const fundo = luminancia(preenchimento);
+      corTexto = contraste(fundo, luminancia(resolvida("primary"))) >= contraste(fundo, luminancia(resolvida("white")))
+        ? "var(--dm-primary)" : "var(--dm-white)";
+    }
+  }
+  etiqueta.style.color = corTexto;
+
+  // as medidas (encolher até caber e posicionar) esperam o primeiro quadro: antes disso a fonte da marca ainda
+  // não carregou e o texto mediria menos do que vai ocupar
+  let largura = 0, altura = 0, preparado = false;
+  function preparar() {
+    preparado = true;
+    // uma etiqueta mais larga que a página encolhe a letra até caber
+    let corpo = d.tamanho;
+    for (let passo = 0; passo < 6 && etiqueta.getBoundingClientRect().width > W * 0.98; passo++) {
+      corpo *= (W * 0.98) / etiqueta.getBoundingClientRect().width;
+      etiqueta.style.fontSize = corpo + "px";
+    }
+
+    // o ponto da página onde a etiqueta surge: o centro dela fica nele, sem sair da página
+    largura = etiqueta.offsetWidth; altura = etiqueta.offsetHeight;
+    const esquerda = Math.min(Math.max(d.x * W - largura / 2, 0), Math.max(W - largura, 0));
+    const topo = Math.min(Math.max(d.y * H - altura / 2, 0), Math.max(H - altura, 0));
+    etiqueta.style.left = esquerda + "px";
+    etiqueta.style.top = topo + "px";
+  }
+
+  window.dmakerSeek = (t) => {
+    if (!preparado) preparar();
+    const p = Math.min(Math.max(t / d.duracao, 0), 1);
+    const suave = 1 - Math.pow(1 - p, 3);
+    let escala = 1, deslocamento = 0;
+    if (d.entrada === "pop") {
+      // cresce de 0,4 até um pouco acima do tamanho e assenta em 1 (curva de saída com uma passada leve)
+      escala = p >= 1 ? 1 : 0.4 + 0.6 * suave + 0.14 * Math.sin(Math.PI * p) * (1 - p);
+    } else if (d.entrada === "deslizar") {
+      deslocamento = (1 - suave) * 0.9 * altura;
+    }
+    const sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    etiqueta.style.opacity = String(Math.min(d.entrada === "pop" ? Math.min(p * 2.5, 1) : suave, sai));
+    etiqueta.style.transform = `translateY(${deslocamento}px) scale(${escala})`;
+    etiqueta.style.transformOrigin = "center";
+  };
+</script>
+</body>
+</html>

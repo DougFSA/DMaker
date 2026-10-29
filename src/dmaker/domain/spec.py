@@ -484,18 +484,40 @@ class MotionBlur(Strict):
 PageSize = Annotated[int, Field(ge=16, le=8192)]
 
 
+class CaptionAnchor(Strict):
+    """Prende a composição a uma palavra da legenda: ela aparece quando a palavra é dita e ocupa o lugar dela na
+    tela (um círculo em volta, um sublinhado). `occurrence` escolhe qual vez que a palavra aparece, `hold`
+    diz até quando fica (`line`: enquanto a linha da legenda está na tela; `word`: só enquanto a palavra é dita)
+    e `margin` é a folga em volta da palavra, em px na base 1080, para o traço caber."""
+
+    word: str = Field(min_length=1)
+    occurrence: int = Field(1, ge=1, le=50)
+    hold: Literal["word", "line"] = "line"
+    margin: float = Field(24.0, ge=0, le=400)
+
+    @field_validator("hold", mode="before")
+    @classmethod
+    def _hold_in_portuguese(cls, value: object) -> object:
+        """`palavra` e `linha` (como o formulário do infográfico os mostra) valem como `word` e `line`."""
+        return {"palavra": "word", "linha": "line"}.get(value, value) if isinstance(value, str) else value
+
+
 class HtmlOverlay(Strict):
     """Composição animada escrita em HTML, CSS e JavaScript (inclusive three.js e Lottie), renderizada quadro a
     quadro com fundo transparente por cima do vídeo: títulos animados, gráficos, mapas, objetos em 3D.
 
-    `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que a página usa.
-    O lugar vem de `region` (uma região nomeada) ou do centro `x`/`y` com `width`/`height` (frações do quadro; sem
-    nada, o quadro todo). A página é desenhada com o tamanho da área em px na base 1080 (`size` muda isso: o
-    resultado é então ajustado à área). `data` é entregue à página como `dmaker.data`. A página não acessa a
-    internet: só os arquivos locais dela. `layer: "behind-person"` põe a composição atrás da pessoa."""
+    `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que a página usa;
+    no lugar dele, `infographic` usa um modelo pronto pelo nome (`contador`, `barra`...) e `data` leva os seus
+    parâmetros. O lugar vem de `region` (uma região nomeada) ou do centro `x`/`y` com `width`/`height` (frações do
+    quadro; sem nada, o quadro todo). A página é desenhada com o tamanho da área em px na base 1080 (`size` muda
+    isso: o resultado é então ajustado à área). `data` é entregue à página como `dmaker.data`. A página não
+    acessa a internet: só os arquivos locais dela e os de `files`. `layer: "behind-person"` põe a composição
+    atrás da pessoa. `anchor` prende a composição a uma palavra da legenda."""
 
     type: Literal["html"] = "html"
-    src: str = Field(min_length=1)
+    src: str | None = Field(None, min_length=1)
+    # nome de um modelo pronto de `templates/html/` (ver `domain/infographics.py`); exatamente um entre src e infographic
+    infographic: str | None = Field(None, min_length=1)
     start: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     region: str | None = None  # nome em `regions`: a composição ocupa a região (no lugar de x/y/width/height)
@@ -505,6 +527,10 @@ class HtmlOverlay(Strict):
     height: float = Field(1.0, gt=0, le=1)  # fração da altura do quadro
     size: tuple[PageSize, PageSize] | None = None  # largura e altura da página, em px na base 1080
     data: dict[str, Any] = {}  # entregue à página como `dmaker.data` (entra na chave do cache)
+    # arquivos de fora da pasta da composição que a página pode ler, por nome: `{"foto": "C:/fotos/a.png"}` fica
+    # em `/_dmaker/files/foto.png`. Entram na chave do cache pelo conteúdo.
+    files: dict[str, str] = {}
+    anchor: CaptionAnchor | None = None
     motion_blur: MotionBlur | None = None
     layer: OverlayLayer = "front"
     sound: SoundSpec | None = None  # som na entrada da composição (em `start`)
@@ -521,10 +547,20 @@ class HtmlOverlay(Strict):
 
     @model_validator(mode="after")
     def _place(self) -> HtmlOverlay:
+        if (self.src is None) == (self.infographic is None):
+            raise ValueError(
+                "composição html: informe `src` (a pasta ou o arquivo da composição) ou `infographic` "
+                "(o nome de um modelo pronto), um dos dois e não os dois"
+            )
         if (self.x is None) != (self.y is None):
             raise ValueError("composição html: informe `x` e `y` juntos (o centro da área)")
         if self.region and self.x is not None:
             raise ValueError("composição html com `region` não leva `x` nem `y`: a região já define o lugar")
+        if self.anchor and (self.region or self.x is not None):
+            raise ValueError(
+                "composição html presa a uma palavra da legenda (`anchor`) não leva `region` nem `x`/`y`: "
+                "o lugar vem da palavra"
+            )
         if self.end is not None and self.end <= self.start:
             raise ValueError("end precisa ser maior que start na composição html")
         return self
