@@ -41,6 +41,12 @@ def agent_tools() -> tuple[str, ...]:
     return tuple(AGENT_TOOLS)
 
 
+def kits() -> tuple[Any, ...]:
+    from ..agent.kits import KITS
+
+    return KITS
+
+
 def build_inputs() -> BuildInputs:
     return BuildInputs(
         cli_root=cli_root(),
@@ -48,4 +54,5 @@ def build_inputs() -> BuildInputs:
         spec_schema=spec_schema(),
         agent_tools=agent_tools(),
         field_notes=FIELD_NOTES,
+        kits=kits(),
     )

@@ -43,6 +43,14 @@ class ChatModel(Protocol):
     def chat(self, messages: list[dict], tools: list[dict]) -> Reply: ...
 
 
+class HealthCheckedChat(ChatModel, Protocol):
+    """Um motor de conversa que sabe dizer se o servidor está no ar e se o modelo configurado está instalado."""
+
+    def is_alive(self) -> bool: ...
+
+    def has_model(self) -> bool: ...
+
+
 def _parse_arguments(raw: Any) -> dict[str, Any]:
     """`arguments` de uma tool_call pode vir como dict (formato usual) ou como string JSON."""
     if isinstance(raw, dict):
@@ -58,7 +66,7 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _parse_tool_calls(raw: list[dict] | None) -> list[ToolCall]:
+def parse_tool_calls(raw: list[dict] | None) -> list[ToolCall]:
     calls = []
     for item in raw or []:
         function = item.get("function", {})
@@ -120,7 +128,7 @@ class OllamaChat:
         message = data.get("message") or {}
         return Reply(
             content=message.get("content") or "",
-            tool_calls=_parse_tool_calls(message.get("tool_calls")),
+            tool_calls=parse_tool_calls(message.get("tool_calls")),
             thinking=message.get("thinking") or None,
         )
 

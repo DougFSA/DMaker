@@ -17,13 +17,9 @@ O vídeo é feito de cartões e imagens (ou de clipes mudos) e a voz é narrada.
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
-1. `edit_project`: pôr a narração no projeto
-   Argumentos de exemplo: `{"name": "meu-video", "op": {"type": "set_field", "path": "audio.narration", "value": [{"text": "Bem-vindo ao DMaker.", "voice": "narradora", "start": 0.5, "seed": 1}]}}`
-2. `edit_project`: usar o texto falado como legenda
-   Argumentos de exemplo: `{"name": "meu-video", "op": {"type": "set_field", "path": "captions", "value": {"source": "narration"}}}`
-3. `validate_project`: avisar de voz inexistente ou narração que passa do fim
-   Argumentos de exemplo: `{"name_or_path": "meu-video"}`
-4. `render_project`: gerar a prévia
+1. `narrate_into_project`: pôr a narração no projeto, usar o texto como legenda e avisar de voz inexistente
+   Argumentos de exemplo: `{"name_or_path": "meu-video", "text": "Bem-vindo ao DMaker.", "voice": "narradora", "start": 0.5, "seed": 1}`
+2. `render_project`: gerar a prévia
    Argumentos de exemplo: `{"name_or_path": "meu-video", "preview": true}`
 
 ## Equivalente na CLI

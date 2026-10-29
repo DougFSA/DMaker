@@ -128,8 +128,12 @@ def test_ajuda_no_model_never_calls_ollama(monkeypatch):
 def test_agent_offer_tells_which_tasks_the_local_agent_can_run_and_which_tools_it_lacks():
     runnable = service.agent_offer("modelo")
     assert runnable is not None and runnable.runnable and "Tarefa `modelo`" in runnable.manual
-    lacking = service.agent_offer("reel")
-    assert lacking is not None and not lacking.runnable and lacking.missing_tools == ("quick_edit",)
+    lacking = service.agent_offer(
+        "modelos"
+    )  # `models` baixa e apaga modelos: fica fora dos kits de propósito
+    assert lacking is not None and not lacking.runnable and lacking.missing_tools == ("models",)
+    reel = service.agent_offer("reel")
+    assert reel is not None and reel.runnable and "quick_edit" in reel.tools
     assert service.agent_offer("nao-existe") is None
 
 
@@ -137,15 +141,16 @@ def test_offer_runs_the_local_agent_with_the_task_file_as_its_manual(monkeypatch
     captured: dict = {}
 
     class FakeLoop:
-        def __init__(self, model, tools, system, on_event):
+        def __init__(self, model, tools, system, on_event, gate):
             captured["system"] = system
+            captured["gate"] = gate
 
         def ask(self, message):
             captured.setdefault("messages", []).append(message)
             return "pronto"
 
     monkeypatch.setattr("dmaker.agent.AgentLoop", FakeLoop)
-    monkeypatch.setattr("dmaker.agent.McpToolHost", lambda: object())
+    monkeypatch.setattr("dmaker.agent.McpToolHost", lambda **kwargs: object())
     monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
     monkeypatch.setattr(cli.console, "input", lambda *a, **k: "")
     cli._offer_agent("modelo", "faz um story com esse print", object())
@@ -159,9 +164,9 @@ def test_offer_for_a_task_the_agent_cannot_run_explains_instead_of_pretending(mo
     monkeypatch.setattr(
         cli.typer, "confirm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deve oferecer"))
     )
-    cli._offer_agent("reel", "faz um reel", object())
+    cli._offer_agent("modelos", "baixa o modelo de voz", object())
     out = capsys.readouterr().out
-    assert "ainda não enxerga" in out and "quick_edit" in out
+    assert "ainda não enxerga" in out and "models" in out
 
 
 def test_ajuda_offer_only_happens_in_an_interactive_terminal(monkeypatch):

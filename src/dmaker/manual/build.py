@@ -11,8 +11,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..agent.kits import Kit
 from .examples import ToolCall, call_problems, cli_problems, parse_calls
 from .ia_docs import MAX_TOKENS, build_ia_files, oversize
+from .kit_manuals import KIT_MAX_TOKENS, build_kit_manuals, oversize_kits
 from .markers import replace_generated
 from .outline import parse_manual, structure_problems
 from .reference_cli import cli_reference
@@ -40,6 +42,7 @@ class BuildInputs:
     spec_schema: dict[str, Any]
     agent_tools: tuple[str, ...]
     field_notes: Mapping[str, str] = field(default_factory=dict)
+    kits: tuple[Kit, ...] = ()  # os kits do agente local: cada um ganha o seu `docs/ia/agente-<kit>.md`
 
 
 @dataclass(frozen=True)
@@ -73,14 +76,17 @@ def build_all(manual_text: str, inputs: BuildInputs) -> BuildResult:
     tasks = parse_manual(manual_text).tasks
     tools = {tool.name: tool for tool in inputs.tools}
     ia_files = build_ia_files(tasks, calls_by_task, tools)
-    too_big = oversize(ia_files)
+    kit_files = build_kit_manuals(inputs.kits, tasks, calls_by_task, tools)
+    too_big = [
+        f"docs/ia/{name}: ~{size} tokens, acima do limite de {MAX_TOKENS}."
+        for name, size in oversize(ia_files).items()
+    ] + [
+        f"docs/ia/{name}: ~{size} tokens, acima do limite de {KIT_MAX_TOKENS} de um kit."
+        for name, size in oversize_kits(kit_files).items()
+    ]
     if too_big:
-        raise ManualBuildError(
-            [
-                f"docs/ia/{name}: ~{size} tokens, acima do limite de {MAX_TOKENS}."
-                for name, size in too_big.items()
-            ]
-        )
+        raise ManualBuildError(too_big)
+    ia_files = {**ia_files, **kit_files}
     text = manual_text
     blocks = {
         "indice": tasks_index(tasks, calls_by_task, inputs.agent_tools),

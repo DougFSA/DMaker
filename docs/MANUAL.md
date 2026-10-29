@@ -30,9 +30,9 @@ São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 
 | Quero | O que entrega | Agente local |
 | --- | --- | --- |
-| [Fazer um Reel a partir de uma gravação](#fazer-um-reel-a-partir-de-uma-gravação) | Transforma uma gravação sua em um vídeo vertical para o Instagram, com legenda automática palavra a palavra, gancho no começo e barra de progresso. | ainda não: `quick_edit` |
+| [Fazer um Reel a partir de uma gravação](#fazer-um-reel-a-partir-de-uma-gravação) | Transforma uma gravação sua em um vídeo vertical para o Instagram, com legenda automática palavra a palavra, gancho no começo e barra de progresso. | sim |
 | [Criar um projeto a partir de um modelo pronto](#criar-um-projeto-a-partir-de-um-modelo-pronto) | Cria um projeto completo de um modelo pronto (produto, depoimento, stories, vlog, tutorial, YouTube, explicativo, casamento), passando só o que muda de vídeo para vídeo. | sim |
-| [Cortar as pausas de uma gravação falada](#cortar-as-pausas-de-uma-gravação-falada) | Tira as pausas, os vícios de fala e as frases repetidas de uma gravação falada e entrega um projeto de clipes já cortados, com a lista do que saiu. | ainda não: `autocut`, `list_cuts`, `undo_cut` |
+| [Cortar as pausas de uma gravação falada](#cortar-as-pausas-de-uma-gravação-falada) | Tira as pausas, os vícios de fala e as frases repetidas de uma gravação falada e entrega um projeto de clipes já cortados, com a lista do que saiu. | sim |
 | [Deixar a legenda em caixa arredondada](#deixar-a-legenda-em-caixa-arredondada) | Põe uma caixa de fundo arredondada atrás de cada linha da legenda, no estilo do TikTok, mantendo o destaque da palavra que está sendo falada. | sim |
 | [Corrigir uma palavra errada na legenda](#corrigir-uma-palavra-errada-na-legenda) | Troca uma palavra que o Whisper ouviu errado nas legendas automáticas (um nome próprio, um termo técnico) sem transcrever tudo de novo. | sim |
 | [Fazer um vídeo explicativo](#fazer-um-vídeo-explicativo) | Monta um vídeo de reel em que a gravação de quem explica fica num quadro arredondado embaixo, a área de cima mostra a imagem de cada assunto e o fundo troca a cada assunto. | sim |
@@ -43,7 +43,7 @@ São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Trocar o fundo atrás da pessoa](#trocar-o-fundo-atrás-da-pessoa) | Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural. | sim |
 | [Pôr o texto atrás da pessoa](#pôr-o-texto-atrás-da-pessoa) | Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece. | sim |
 | [Fazer o vídeo do casamento com duas câmeras](#fazer-o-vídeo-do-casamento-com-duas-câmeras) | Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento. | sim |
-| [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | ainda não: `validate_batch`, `run_batch`, `batch_status`, `resume_batch` |
+| [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | sim |
 | [Exportar o vídeo para outras plataformas](#exportar-o-vídeo-para-outras-plataformas) | Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma. | sim |
 | [Conferir o vídeo antes de publicar](#conferir-o-vídeo-antes-de-publicar) | Roda as checagens automáticas em texto (duração, zona segura, ritmo de leitura, contraste, legendas e o arquivo renderizado) sem gastar tempo olhando imagem. | ainda não: `contact_sheet` |
 
@@ -51,25 +51,25 @@ São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 
 | Quero | O que entrega | Agente local |
 | --- | --- | --- |
-| [Narrar um roteiro com a minha voz](#narrar-um-roteiro-com-a-minha-voz) | Transforma um texto em áudio falado com a sua voz (clonada de uma gravação sua, com a sua autorização) ou com uma voz pronta, e gera a legenda com o tempo de cada fala. | ainda não: `list_voices`, `synthesize_speech`, `verify_watermark` |
-| [Clonar uma voz](#clonar-uma-voz) | Cria uma voz da biblioteca a partir de uma gravação limpa de quem fala, para usar na narração, na troca de voz e na correção de fala. | ainda não: `clone_voice`, `list_voices`, `synthesize_speech` |
-| [Criar uma voz descrevendo como ela soa](#criar-uma-voz-descrevendo-como-ela-soa) | Cria uma voz sem gravação nenhuma, só descrevendo gênero, idade, tom e sotaque. | ainda não: `design_voice`, `synthesize_speech` |
-| [Ensinar o DMaker a pronunciar um nome](#ensinar-o-dmaker-a-pronunciar-um-nome) | Cadastra como a voz deve falar um termo (uma marca, um nome estrangeiro, uma sigla) sem mudar o que está escrito na legenda. | ainda não: `pronunciation`, `synthesize_speech` |
-| [Narrar um roteiro longo em segundo plano (fila)](#narrar-um-roteiro-longo-em-segundo-plano-fila) | Põe um roteiro longo (audiobook, manual narrado, vários roteiros) numa fila que narra um item por vez, retoma de onde parou e separa por capítulos. | ainda não: `voice_queue_add`, `voice_queue_list` |
+| [Narrar um roteiro com a minha voz](#narrar-um-roteiro-com-a-minha-voz) | Transforma um texto em áudio falado com a sua voz (clonada de uma gravação sua, com a sua autorização) ou com uma voz pronta, e gera a legenda com o tempo de cada fala. | sim |
+| [Clonar uma voz](#clonar-uma-voz) | Cria uma voz da biblioteca a partir de uma gravação limpa de quem fala, para usar na narração, na troca de voz e na correção de fala. | sim |
+| [Criar uma voz descrevendo como ela soa](#criar-uma-voz-descrevendo-como-ela-soa) | Cria uma voz sem gravação nenhuma, só descrevendo gênero, idade, tom e sotaque. | sim |
+| [Ensinar o DMaker a pronunciar um nome](#ensinar-o-dmaker-a-pronunciar-um-nome) | Cadastra como a voz deve falar um termo (uma marca, um nome estrangeiro, uma sigla) sem mudar o que está escrito na legenda. | sim |
+| [Narrar um roteiro longo em segundo plano (fila)](#narrar-um-roteiro-longo-em-segundo-plano-fila) | Põe um roteiro longo (audiobook, manual narrado, vários roteiros) numa fila que narra um item por vez, retoma de onde parou e separa por capítulos. | sim |
 | [Pôr a narração dentro de um vídeo](#pôr-a-narração-dentro-de-um-vídeo) | Coloca a fala sintetizada como voz do vídeo, direto na spec, e usa o texto falado como legenda, sem gerar o áudio antes. | sim |
-| [Separar a voz da música e do ruído](#separar-a-voz-da-música-e-do-ruído) | Separa a fala da música e do ruído de fundo de um vídeo ou áudio, em dois arquivos: a voz limpa e o fundo. | ainda não: `isolate_vocals` |
-| [Corrigir uma palavra errada sem regravar](#corrigir-uma-palavra-errada-sem-regravar) | Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada. | ainda não: `speech_words`, `fix_speech` |
-| [Trocar a voz de uma gravação inteira](#trocar-a-voz-de-uma-gravação-inteira) | Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo. | ainda não: `list_voices`, `convert_voice` |
-| [Verificar se um áudio foi gerado pelo DMaker](#verificar-se-um-áudio-foi-gerado-pelo-dmaker) | Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio. | ainda não: `verify_watermark` |
+| [Separar a voz da música e do ruído](#separar-a-voz-da-música-e-do-ruído) | Separa a fala da música e do ruído de fundo de um vídeo ou áudio, em dois arquivos: a voz limpa e o fundo. | sim |
+| [Corrigir uma palavra errada sem regravar](#corrigir-uma-palavra-errada-sem-regravar) | Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada. | sim |
+| [Trocar a voz de uma gravação inteira](#trocar-a-voz-de-uma-gravação-inteira) | Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo. | sim |
+| [Verificar se um áudio foi gerado pelo DMaker](#verificar-se-um-áudio-foi-gerado-pelo-dmaker) | Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio. | sim |
 
 **Tarefas de dublagem e modelos**
 
 | Quero | O que entrega | Agente local |
 | --- | --- | --- |
-| [Dublar um vídeo para outro idioma](#dublar-um-vídeo-para-outro-idioma) | Traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma escolhido, mantendo o fundo; você revisa a tradução antes de gerar. | ainda não: `dub_prepare`, `dub_get`, `dub_update_segment`, `dub_render` |
-| [Dublar com mais de uma pessoa falando](#dublar-com-mais-de-uma-pessoa-falando) | Descobre quem fala em cada trecho e dubla cada pessoa com a sua própria voz clonada. | ainda não: `dub_prepare`, `dub_get`, `dub_update_segment`, `dub_render` |
-| [Dublar esticando o vídeo onde a fala não cabe](#dublar-esticando-o-vídeo-onde-a-fala-não-cabe) | Quando a tradução é mais longa que a fala original, estica o vídeo só naquele trecho em vez de acelerar ou cortar a voz. | ainda não: `dub_prepare`, `dub_render` |
-| [Exportar as trilhas separadas da dublagem](#exportar-as-trilhas-separadas-da-dublagem) | Exporta a voz dublada, o fundo e a voz original em arquivos separados, para refazer a mixagem em outro editor (Premiere, DaVinci, CapCut). | ainda não: `dub_stems` |
+| [Dublar um vídeo para outro idioma](#dublar-um-vídeo-para-outro-idioma) | Traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma escolhido, mantendo o fundo; você revisa a tradução antes de gerar. | sim |
+| [Dublar com mais de uma pessoa falando](#dublar-com-mais-de-uma-pessoa-falando) | Descobre quem fala em cada trecho e dubla cada pessoa com a sua própria voz clonada. | sim |
+| [Dublar esticando o vídeo onde a fala não cabe](#dublar-esticando-o-vídeo-onde-a-fala-não-cabe) | Quando a tradução é mais longa que a fala original, estica o vídeo só naquele trecho em vez de acelerar ou cortar a voz. | sim |
+| [Exportar as trilhas separadas da dublagem](#exportar-as-trilhas-separadas-da-dublagem) | Exporta a voz dublada, o fundo e a voz original em arquivos separados, para refazer a mixagem em outro editor (Premiere, DaVinci, CapCut). | sim |
 | [Ver, baixar e apagar os modelos de IA](#ver-baixar-e-apagar-os-modelos-de-ia) | Mostra cada modelo de IA que o DMaker baixa (tamanho no disco, licença, para que serve), baixa antes de precisar, apaga o que não usa e limpa as sobras. | ainda não: `models` |
 
 <!-- dmaker:fim-gerado indice -->
@@ -348,27 +348,48 @@ A lista de todas as ferramentas, com os parâmetros, está em "Referência gerad
 
 ## Usando com LLM local (Ollama)
 
-Sem internet, quem opera o DMaker pode ser um modelo pequeno rodando na sua máquina. O DMaker oferece três coisas para isso: o **agente local** (`dmaker agent`), que chama as ferramentas; a **pasta `docs/ia`**, o manual em arquivos curtos, um por tarefa; e o **`dmaker ajuda`**, que responde dúvidas com o modelo e a busca no manual.
+Sem internet, quem opera o DMaker pode ser um modelo pequeno rodando na sua máquina. O DMaker oferece quatro coisas para isso: o **agente local** (`dmaker agent` e a tela **Agente** da interface), que chama as ferramentas; a **pasta `docs/ia`**, o manual em arquivos curtos, um por tarefa e um por kit; o **`dmaker ajuda`**, que responde dúvidas com o modelo e a busca no manual; e o **`dmaker doctor --offline`**, que confere se tudo já está baixado.
 
 ### Requisitos
 
-- O [Ollama](https://ollama.com) instalado e no ar (o aplicativo aberto, ou `ollama serve`).
-- Um modelo que chame ferramentas: `ollama pull gpt-oss:20b` (padrão) ou `ollama pull qwen3:30b-a3b`. Contexto de 16 mil a 32 mil tokens basta.
-- Memória: o `gpt-oss:20b` ocupa cerca de 14 GB. Com 16 GB de RAM, feche o resto; sem placa de vídeo a resposta leva de dezenas de segundos a minutos.
+- Um servidor de modelo local: o [Ollama](https://ollama.com) no ar (o aplicativo aberto, ou `ollama serve`) ou, por `DMAKER_AGENT_ENGINE=openai`, qualquer servidor compatível com a API da OpenAI (llama.cpp server, LM Studio).
+- Um modelo que chame ferramentas: `ollama pull gpt-oss:20b` (padrão). Contexto de 16 mil a 32 mil tokens basta.
+- Memória: o `gpt-oss:20b` ocupa cerca de 14 GB. Com 16 GB de RAM, feche o resto; sem placa de vídeo a resposta leva de dezenas de segundos a minutos. Modelos de 30 bilhões de parâmetros (Qwen3-30B-A3B, Qwen3-Coder-30B-A3B) pedem mais memória e não cabem numa máquina de 16 GB.
+
+### Usar sem internet: o passo a passo
+
+1. **Com internet, uma vez**: baixe o que as funções usam. `dmaker doctor --offline` lista cada peça (modelo de linguagem, Whisper, OmniVoice, Demucs, recorte de pessoa, AudioSeal, Chromium do Playwright, sons e fontes), diz onde procurou, o que falha sem ela e o comando para baixar (`dmaker models download <modelo>`, `ollama pull <modelo>`, `python -m playwright install chromium`).
+2. **Confira de novo**: `dmaker doctor --offline` sai com código 0 e a frase "Tudo pronto: o DMaker funciona sem internet" quando não falta nada.
+3. **Desligue a rede e use**: `dmaker agent`, a tela **Agente** da interface ou `dmaker ajuda`. Nada nesse caminho fala com a internet: o modelo, a transcrição, a voz e o render rodam na sua máquina.
 
 ### O agente local (`dmaker agent`)
 
 ```powershell
 dmaker agent                                          # conversa no terminal
 dmaker agent --once "liste os templates disponíveis"  # um pedido só
-dmaker agent --model qwen3:30b-a3b --num-ctx 32768
+dmaker agent --model qwen3:8b --num-ctx 32768         # outro modelo, por opção
+dmaker agent --engine openai --url http://127.0.0.1:8080 --model meu-modelo
 ```
 
-No modo de conversa: `/sair` encerra, `/limpar` reinicia o histórico e `/ferramentas` lista o que o agente pode usar. Cada chamada de ferramenta aparece numa linha discreta (`-> render_project(...)`).
+No modo de conversa: `/sair` encerra, `/limpar` reinicia o histórico e `/ferramentas` lista o que o agente pode usar agora. Cada chamada de ferramenta aparece numa linha discreta (`-> render_project(...)`), e a primeira linha de cada pedido diz o kit escolhido.
 
-**O que ele faz bem**: criar projeto a partir de um modelo pronto, validar, renderizar (prévia e final), ler o `qa_report`, corrigir legendas, exportar, e o casamento padrão da PASCOM (`casamento-pascom` seguido de `plan_multicam`). **O que fica para o Claude ou para uma pessoa**: decidir cortes e ritmo, escolher a câmera de cada momento e escrever uma spec do zero.
+**Kits de ferramentas.** O modelo pequeno se perde com dezenas de ferramentas, então cada pedido passa por uma triagem curta que escolhe um kit e o modelo só vê as ferramentas e o manual curto daquele kit. Os kits são: **Edição e render**, **Legendas**, **Voz e narração**, **Dublagem**, **Correção de fala e isolamento**, **Multicâmera**, **Composições e infográficos** e **Lote**. A triagem é por palavras (português com e sem acento) e só chama o modelo quando as palavras não decidem; um pedido que cruza dois kits recebe os dois. O manual de cada kit é o arquivo `docs/ia/agente-<kit>.md`, **gerado** pelo `dmaker manual build` das mesmas tarefas deste manual.
 
-Hoje o agente enxerga um subconjunto curado das ferramentas (`AGENT_TOOLS`, em `src/dmaker/agent/tools.py`). A coluna "Agente local" da tabela "Quero fazer X, onde está?" diz, tarefa por tarefa, se ele já tem todas as ferramentas necessárias; as demais ficam para o Claude, a interface ou a CLI até os kits de ferramentas por tarefa chegarem.
+**Receitas.** Três ferramentas do servidor MCP fazem em uma chamada o que seriam várias, para o agente local e para o Claude: `narrate_into_project` (narra o roteiro e o põe no projeto, com a legenda), `cut_pauses_and_caption` (corta pausas e vícios e deixa a legenda, esperando o fim) e `build_explainer_video` (monta o vídeo explicativo dos assuntos).
+
+**Proteções.** O agente confere os argumentos de cada chamada contra o esquema da ferramenta e devolve o erro ao modelo em português simples; nunca usa um caminho de arquivo que não existe e não veio de você nem de uma listagem (ele pergunta); e **pede a sua confirmação** antes do que é longo ou difícil de desfazer: render final, exportar, dublar, rodar um lote, apagar um trecho, sobrescrever um projeto ou um arquivo. Clonar uma voz só acontece se você confirmar que o dono da voz autorizou. No terminal a pergunta aparece na própria conversa; na interface, vira um botão. Sem terminal interativo, tudo que pede confirmação é recusado.
+
+**Configuração.** Por variável de ambiente (as opções da linha de comando valem por cima): `DMAKER_AGENT_ENGINE` (`ollama` ou `openai`), `DMAKER_AGENT_MODEL`, `DMAKER_AGENT_URL`, `DMAKER_AGENT_NUM_CTX`, `DMAKER_AGENT_TIMEOUT`, `DMAKER_AGENT_THINK` (`low`, `medium` ou `high`: o esforço de raciocínio dos modelos que o aceitam, como o `gpt-oss`; `low` encurta bastante a espera na CPU) e `DMAKER_AGENT_FREE_HTML` (`1` libera o HTML livre nas composições, só com um modelo que a avaliação mostrou dar conta; sem isso o agente usa só os infográficos prontos).
+
+**O que ele faz bem**: criar projeto a partir de um modelo pronto, validar, gerar prévia, ler o `qa_report`, cortar pausas, narrar, dublar, corrigir uma palavra da fala, legendas, lote e o casamento padrão da PASCOM. **O que fica para o Claude ou para uma pessoa**: decidir cortes e ritmo, escolher a câmera de cada momento e escrever uma spec do zero. A coluna "Agente local" da tabela "Quero fazer X, onde está?" diz, tarefa por tarefa, se ele já tem todas as ferramentas necessárias.
+
+### A tela Agente (interface nova)
+
+A tela **Agente** é a mesma conversa na interface: você escreve o pedido, e a resposta aparece ao vivo, com o kit escolhido, cada ferramenta chamada (com a barra de andamento de um render ou de uma transcrição) e a resposta final. Quando o agente precisa de um sim, ele para e mostra os botões **Confirmar** e **Não fazer** (ou **O dono da voz autorizou** e **Não autorizou**, ao clonar uma voz). **Nova conversa** limpa o histórico. Se o servidor do modelo não está respondendo, a tela diz qual endereço tentou e o que abrir.
+
+### Medir o agente: `dmaker agent eval`
+
+`dmaker agent eval` roda a bateria de pedidos reais em português (`tests/data/agent_eval.json`) contra o modelo configurado e gera o relatório por modelo: acerto, média de passos, tempo por pedido, tempo até a primeira resposta e memória do processo do modelo, além de quantos arquivos foram apagados ou sobrescritos sem confirmação (precisa ser zero). Cada pedido roda numa pasta de dados temporária, com mídia sintética. Por padrão as ferramentas pesadas (render, Whisper, dublagem) são simuladas; `--real-tools` as executa de verdade. `--fake` usa um modelo falso que segue o roteiro de cada pedido e serve para validar a própria bateria. O teste lento equivalente fica desligado: `DMAKER_AGENT_EVAL=1` o liga. Modelos grandes demais para a máquina ficam registrados no relatório como "não medidos".
 
 ### Pergunte ao manual: `dmaker ajuda`
 
@@ -408,7 +429,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições** e **Looks**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições** e **Looks**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve" e levam à interface clássica.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve" e levam à interface clássica.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -416,6 +437,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Editar na clássica** (abre o editor de linha do tempo) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. O andamento aparece ao vivo.
 - **Lote**: o passo a passo de vários vídeos de uma planilha (veja a tarefa "Fazer vários vídeos de uma planilha").
 - **Saídas**: os vídeos já gerados, com busca e filtro; assista ali ou baixe.
+- **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
 - **Transições** e **Looks**: catálogos com a prévia de cada uma (veja as tarefas "Escolher a transição entre os trechos" e "Dar um acabamento de cinema ao vídeo").
 
 Um aviso de **jobs** na barra superior mostra o que está rodando e leva ao andamento.
@@ -680,13 +702,13 @@ Você gravou falando (entrevista, aula, depoimento) e quer o vídeo sem silênci
 
 #### Pela IA
 
-Diga: "Corta as pausas e os vícios de `entrevista.mp4`, intensidade normal." A IA cria o projeto, mostra a lista dos cortes e você diz quais devolver. A transcrição leva cerca de 1 minuto por minuto de gravação, e cortar de novo a mesma gravação com outra intensidade reaproveita a transcrição.
+Diga: "Corta as pausas e os vícios de `entrevista.mp4`, intensidade normal." A IA usa a receita `cut_pauses_and_caption`, que corta, deixa a legenda seguindo a fala cortada e espera o fim em uma chamada só; depois mostra a lista dos cortes e você diz quais devolver. A transcrição leva cerca de 1 minuto por minuto de gravação, e cortar de novo a mesma gravação com outra intensidade reaproveita a transcrição. Quem quer só o corte, sem esperar, usa `autocut`.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "autocut", "arguments": {"source": "C:/videos/entrevista.mp4", "name": "entrevista-corte", "intensity": "normal"}, "para": "criar o projeto cortado"},
+  {"tool": "cut_pauses_and_caption", "arguments": {"source": "C:/videos/entrevista.mp4", "name": "entrevista-corte", "intensity": "normal"}, "para": "cortar as pausas e deixar a legenda pronta, esperando o fim"},
   {"tool": "list_cuts", "arguments": {"name_or_path": "entrevista-corte"}, "para": "mostrar o que saiu, com tempo e motivo"},
   {"tool": "undo_cut", "arguments": {"name_or_path": "entrevista-corte", "cut_id": 3}, "para": "devolver ao projeto o corte número 3"},
   {"tool": "render_project", "arguments": {"name_or_path": "entrevista-corte", "preview": true}, "para": "gerar a prévia"},
@@ -848,15 +870,13 @@ Você grava uma explicação de frente para a câmera e tem uma imagem ou infogr
 
 #### Pela IA
 
-Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com `assunto2.png`, assunto 3 até 60 s." A IA cria o projeto pelo modelo `explicativo`, valida e gera a prévia.
+Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com `assunto2.png`, assunto 3 até 60 s." A IA usa a receita `build_explainer_video`, que cria o projeto pelo modelo `explicativo` e já devolve a duração e os avisos; sem o `fim` dos assuntos, ela divide a gravação em partes iguais. Depois gera a prévia.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "probe_media", "arguments": {"paths": ["C:/videos/gravacao.mp4"]}, "para": "conhecer a duração da gravação"},
-  {"tool": "new_from_template", "arguments": {"template": "explicativo", "name": "meu-explicativo", "params": {"gravacao": "C:/videos/gravacao.mp4", "assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png"}, {"fim": 60, "fundo": "claro"}]}}, "para": "criar o projeto"},
-  {"tool": "validate_project", "arguments": {"name_or_path": "meu-explicativo"}, "para": "conferir duração e avisos"},
+  {"tool": "build_explainer_video", "arguments": {"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png"}, {"fim": 60, "fundo": "claro"}]}, "para": "criar o projeto e conferir duração e avisos"},
   {"tool": "render_project", "arguments": {"name_or_path": "meu-explicativo", "preview": true}, "para": "gerar a prévia"}
 ]
 ```
@@ -1770,15 +1790,13 @@ O vídeo é feito de cartões e imagens (ou de clipes mudos) e a voz é narrada.
 
 #### Pela IA
 
-Diga: "No `meu-video`, narra 'Bem-vindo ao DMaker' com a voz `narradora` desde 0,5 s e usa como legenda." A IA acrescenta `audio.narration`, troca `captions.source` para `narration` e gera a prévia.
+Diga: "No `meu-video`, narra 'Bem-vindo ao DMaker' com a voz `narradora` desde 0,5 s e usa como legenda." A IA usa a receita `narrate_into_project`, que acrescenta `audio.narration`, troca `captions.source` para `narration` e devolve os avisos (voz inexistente, narração que passa do fim) em uma chamada só. Depois gera a prévia.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "edit_project", "arguments": {"name": "meu-video", "op": {"type": "set_field", "path": "audio.narration", "value": [{"text": "Bem-vindo ao DMaker.", "voice": "narradora", "start": 0.5, "seed": 1}]}}, "para": "pôr a narração no projeto"},
-  {"tool": "edit_project", "arguments": {"name": "meu-video", "op": {"type": "set_field", "path": "captions", "value": {"source": "narration"}}}, "para": "usar o texto falado como legenda"},
-  {"tool": "validate_project", "arguments": {"name_or_path": "meu-video"}, "para": "avisar de voz inexistente ou narração que passa do fim"},
+  {"tool": "narrate_into_project", "arguments": {"name_or_path": "meu-video", "text": "Bem-vindo ao DMaker.", "voice": "narradora", "start": 0.5, "seed": 1}, "para": "pôr a narração no projeto, usar o texto como legenda e avisar de voz inexistente"},
   {"tool": "render_project", "arguments": {"name_or_path": "meu-video", "preview": true}, "para": "gerar a prévia"}
 ]
 ```
@@ -2332,6 +2350,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-32 | Lote: um vídeo por linha de uma planilha, com validação, pausa e retomada; a tela **Lote** | "Fazer vários vídeos de uma planilha" |
 | DMK-33 | Legenda em caixa arredondada (`captions.style.mode: "rounded"`) e `box_shape: "rounded"` nos textos | "Deixar a legenda em caixa arredondada" |
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
+| DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
@@ -2350,12 +2369,6 @@ São 70 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
 
 #### Comandos avulsos
 
-- **`dmaker agent`**: Opera o DMaker por um modelo local do Ollama: tarefas mecânicas (template, render, QA, legendas).
-  - `--model` TEXTO: Modelo do Ollama. (padrão gpt-oss:20b)
-  - `--url` TEXTO: Endereço do servidor Ollama.
-  - `--num-ctx` NÚMERO: Tamanho do contexto (tokens). (padrão 16384)
-  - `--timeout` NÚMERO: Espera máxima por resposta do modelo (s); modelo em CPU demora. (padrão 1800.0)
-  - `--once` TEXTO: Executa um único pedido e sai.
 - **`dmaker ajuda PERGUNTA`**: Responde uma dúvida sobre o DMaker em português, com o modelo local e a busca no manual (sem internet).
   - `--model` TEXTO: Modelo do Ollama. (padrão gpt-oss:20b)
   - `--url` TEXTO: Endereço do servidor Ollama.
@@ -2391,8 +2404,9 @@ São 70 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
 - **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy) e formas de onda (cache/waveform).
   - `--jobs` / `--no-jobs`: Apaga também cache/jobs (grafos, ASS, áudio de transcrição).
 - **`dmaker cuts NAME`**: Lista o que o autocut removeu do projeto (tempo na gravação original e motivo).
-- **`dmaker doctor`**: Verifica FFmpeg, fontes, marcas e dependências opcionais.
+- **`dmaker doctor`**: Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet.
   - `--hw` / `--no-hw`: Testa encoders de hardware (nvenc/amf/qsv). (ligada por padrão)
+  - `--offline`: Confere se tudo que as funções usam já está baixado e mostra o que falha sem rede.
 - **`dmaker export SPEC PRESETS...`**: Exporta o mesmo projeto para vários formatos de uma vez. Por padrão abre a interface para acompanhar.
   - `--preview` / `--no-preview`: Versões rápidas de conferência.
   - `--no-ui`: Roda só no terminal; não usa a interface gráfica.
@@ -2458,6 +2472,22 @@ São 70 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
   - `--no-browser`: Não abre o navegador.
 - **`dmaker uncut NAME CUT_IDS...`**: Desfaz cortes do autocut: o trecho volta ao projeto e as legendas acompanham.
 - **`dmaker validate SPEC`**: Valida a spec, confere arquivos e mostra a duração final e avisos.
+
+#### dmaker agent
+
+Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina, sem internet. Sem subcomando, abre a conversa no terminal.
+
+- **`dmaker agent eval`**: Mede o agente com a bateria de pedidos reais: acerto, passos, tempo por pedido e memória do modelo.
+  - `--model` TEXTO: Modelo a medir (padrão: DMAKER_AGENT_MODEL).
+  - `--engine` TEXTO: Motor do modelo: ollama (padrão) ou openai (llama.cpp server, LM Studio).
+  - `--url` TEXTO: Endereço do servidor do modelo.
+  - `--num-ctx` NÚMERO: Tamanho do contexto (tokens), no Ollama.
+  - `--timeout` NÚMERO: Espera máxima por resposta do modelo (s).
+  - `--cases` CAMINHO: Arquivo da bateria (padrão: tests/data/agent_eval.json).
+  - `--only` TEXTO: Roda só estes pedidos (id); repita a opção. (pode repetir)
+  - `--real-tools` / `--stub-heavy`: Executa de verdade as ferramentas pesadas (render, Whisper, dublagem) em vez de simulá-las.
+  - `--fake`: Usa o modelo falso que segue o roteiro de cada pedido (valida a bateria).
+  - `--out` CAMINHO: Pasta do relatório (padrão: output/avaliacao-agente).
 
 #### dmaker audio
 
@@ -2697,7 +2727,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 59 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -2791,6 +2821,12 @@ São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `path`\* (texto), `check_audio` (sim ou não, padrão não).
 - **`pronunciation`**: Dicionário de pronúncia da narração: como a voz fala cada termo (ex.: DMaker -> Di-mêiker). action = list | add | remove.
   Parâmetros: `action`\* ("list" ou "add" ou "remove"), `term` (texto), `spoken` (texto), `brand` (texto), `language` (texto, padrão pt).
+- **`narrate_into_project`**: Receita: narra um roteiro e já o põe no projeto, em uma chamada (no lugar de edit_project para audio.narration, edit_project para as legendas e validate_project).
+  Parâmetros: `name_or_path`\* (texto), `text`\* (texto), `voice` (texto), `start` (número, padrão 0.0), `language` (texto, padrão pt), `speed` (número, padrão 1.0), `seed` (inteiro), `captions` (sim ou não, padrão sim).
+- **`cut_pauses_and_caption`**: Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts).
+  Parâmetros: `source`\* (texto), `name`\* (texto), `intensity` ("suave" ou "normal" ou "agressiva", padrão normal), `preset` (texto, padrão instagram/reels), `brand` (texto), `language` (texto, padrão pt), `model` (texto, padrão small), `overwrite` (sim ou não, padrão não), `wait_seconds` (número, padrão 1800).
+- **`build_explainer_video`**: Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' (segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem) e 'imagem' (caminho), todos opcionais menos o 'fim': se nenhum assunto trouxer 'fim', a gravação é dividida em partes iguais.
+  Parâmetros: `name`\* (texto), `recording`\* (texto), `subjects`\* (lista de objeto), `captions` (sim ou não, padrão sim), `caption_mode` (texto), `brand` (texto).
 - **`isolate_vocals`**: Isola a voz: separa a fala (voice) da música e do ruído de fundo (background) de um vídeo ou áudio, ou de um trecho dele (start/end em segundos no arquivo), com o Demucs local.
   Parâmetros: `path`\* (texto), `start` (número), `end` (número), `out_dir` (texto), `format` ("wav" ou "mp3", padrão wav), `wait_seconds` (número, padrão 0).
 - **`speech_words`**: Lista as palavras ditas num vídeo ou áudio com o tempo de cada uma (Whisper local), para escolher o trecho de fix_speech. start/end (segundos no arquivo) limitam a transcrição; em vídeos longos, sempre use.
@@ -3408,6 +3444,14 @@ Um layout fora do esperado é normalizado em silêncio (entradas inválidas desc
 | `DMAKER_FFMPEG_DIR` | Onde procurar `ffmpeg.exe` e `ffprobe.exe` antes de `bin/ffmpeg` e do PATH. | (nenhum) |
 | `DMAKER_UI_URL` | Onde a interface está ou deve subir, usado pela CLI e pelo MCP para mandar renders para lá. | `http://127.0.0.1:8765` |
 | `DMAKER_OLLAMA_URL` | Endereço do Ollama usado por `dmaker agent` e `dmaker ajuda`. | `http://127.0.0.1:11434` |
+| `DMAKER_AGENT_ENGINE` | Motor do agente local: `ollama` ou `openai` (llama.cpp server, LM Studio). | `ollama` |
+| `DMAKER_AGENT_MODEL` | Modelo do agente local (nada fixo no código além do padrão). | `gpt-oss:20b` |
+| `DMAKER_AGENT_URL` | Endereço do servidor do modelo do agente. | `http://127.0.0.1:11434` (Ollama) ou `http://127.0.0.1:8080` (openai) |
+| `DMAKER_AGENT_NUM_CTX` | Contexto (tokens) pedido ao Ollama pelo agente. | `16384` |
+| `DMAKER_AGENT_TIMEOUT` | Espera máxima, em segundos, por uma resposta do modelo. | `1800` |
+| `DMAKER_AGENT_THINK` | Esforço de raciocínio pedido ao modelo (`low`, `medium`, `high`); sem valor, vale o padrão do modelo. | (padrão do modelo) |
+| `DMAKER_AGENT_FREE_HTML` | `1` libera o HTML livre nas composições do agente (só com um modelo que a avaliação aprovou). | desligado |
+| `DMAKER_AGENT_EVAL` | `1` liga o teste lento da bateria de avaliação contra o modelo real. | desligado |
 | `DMAKER_TRANSLATE_MODEL` | Modelo do Ollama que traduz a dublagem. | `gpt-oss:20b` |
 | `DMAKER_DEFAULT_VOICE` | Voz usada quando a narração não escolhe uma (por exemplo `dora`, rápida, para rascunho). | (voz automática do OmniVoice) |
 | `DMAKER_WATERMARK` | `0` desliga a marca d'água e a etiqueta de procedência da voz gerada. | ligada |

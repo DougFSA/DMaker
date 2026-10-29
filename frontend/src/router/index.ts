@@ -50,6 +50,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         component: () => import('@/views/LooksView.vue'),
         meta: { title: 'Looks' },
       },
+      {
+        path: '/agente',
+        name: 'agent',
+        component: () => import('@/views/AgentView.vue'),
+        meta: { title: 'Agente' },
+      },
       // telas das próximas fases: a rota já existe, só o componente muda quando a fase chegar
       ...NAV_ITEMS.filter((item) => !item.ready).map((item) => ({
         path: item.to,

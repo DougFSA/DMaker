@@ -1,9 +1,8 @@
 """Ponte entre o `AgentLoop` e as ferramentas do servidor MCP do DMaker.
 
 `McpToolHost` chama `mcp_server.server` direto em processo (sem stdio): mesmas ferramentas que qualquer
-outra IA usa, só que num subconjunto curado (`AGENT_TOOLS`) para caber num modelo pequeno e sem abrir
-espaço para operações que exigem mais julgamento (cortes na mão, picture-in-picture). Multicâmera entra
-só pelo caminho automático (`plan_multicam` expande o bloco de um template).
+outra IA usa, só que as do kit que a triagem escolheu (`kits.py`), para caber num modelo pequeno. Nada de
+lógica de edição aqui: o agente nunca contorna o servidor.
 """
 
 from __future__ import annotations
@@ -11,34 +10,23 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import threading
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from .. import config
+from .kits import all_kit_tool_names
 
-# Subconjunto de ferramentas do servidor MCP liberado para o agente local: tarefas mecânicas só (ver
-# CLAUDE.md/skill). Fora daqui: cortes, ritmo, picture-in-picture e edição de marca na mão.
-AGENT_TOOLS: list[str] = [
-    "list_templates",
-    "new_from_template",
-    "plan_multicam",
-    "list_projects",
-    "get_project",
-    "validate_project",
-    "render_project",
-    "export_project",
-    "qa_report",
-    "edit_project",
-    "timeline_view",
-    "read_captions",
-    "fix_captions",
-    "probe_media",
-    "presets",
-    "brands",
-    "job_status",
-]
+# Tudo o que algum kit pode oferecer ao agente local; cada pedido vê só as ferramentas do seu kit.
+AGENT_TOOLS: list[str] = list(all_kit_tool_names())
+
+# Ferramentas longas devolvem um `job_id` e pedem consulta com `job_status`: para um modelo de CPU cada consulta é
+# uma volta de minutos. Por isso o agente espera a ferramenta terminar (até este limite) em vez de sondar.
+DEFAULT_WAIT_SECONDS = 1800.0
+PROGRESS_INTERVAL = 1.0
 
 
 def agent_images_dir() -> Path:
@@ -120,15 +108,29 @@ def _stringify_result(result: Any) -> str:
 
 
 class McpToolHost:
-    """Chama as ferramentas do servidor MCP direto em processo (sem subir um processo `dmaker mcp`)."""
+    """Chama as ferramentas do servidor MCP direto em processo (sem subir um processo `dmaker mcp`).
 
-    def __init__(self, server: Any = None, allowed: list[str] | None = None):
+    `argument_defaults` completa, nas ferramentas que têm o argumento no esquema, o que o modelo não disse
+    (`wait_seconds`, para esperar o fim da tarefa; `show_ui=False` quando o agente roda dentro da própria
+    interface). O que o modelo pediu explicitamente nunca é trocado.
+    """
+
+    def __init__(
+        self,
+        server: Any = None,
+        allowed: list[str] | None = None,
+        argument_defaults: Mapping[str, Any] | None = None,
+    ):
         if server is None:
             from .. import mcp_server
 
             server = mcp_server.server
         self._server = server
         self._allowed = list(AGENT_TOOLS) if allowed is None else list(allowed)
+        self._defaults = (
+            {"wait_seconds": DEFAULT_WAIT_SECONDS} if argument_defaults is None else dict(argument_defaults)
+        )
+        self._schemas: dict[str, dict] = {}
 
     def specs(self) -> list[ToolSpec]:
         tools = asyncio.run(self._server.list_tools())
@@ -138,16 +140,71 @@ class McpToolHost:
             tool = by_name.get(name)
             if tool is None:
                 continue  # ferramenta liberada para o agente mas não registrada neste servidor (teste)
+            self._schemas[name] = tool.input_schema
             specs.append(
                 ToolSpec(name=tool.name, description=tool.description or "", parameters=tool.input_schema)
             )
         return specs
 
+    def _with_defaults(self, name: str, arguments: dict) -> dict:
+        if not self._schemas:
+            self.specs()
+        properties = (self._schemas.get(name) or {}).get("properties") or {}
+        filled = dict(arguments)
+        for key, value in self._defaults.items():
+            if key in properties and key not in filled:
+                filled[key] = value
+        return filled
+
     def call(self, name: str, arguments: dict) -> str:
         if name not in self._allowed:
             return f"erro: ferramenta '{name}' não está disponível para o agente"
         try:
-            result = asyncio.run(self._server.call_tool(name, arguments))
+            result = asyncio.run(self._server.call_tool(name, self._with_defaults(name, arguments)))
         except Exception as exc:  # noqa: BLE001 - qualquer falha vira texto para o modelo se recuperar
             return f"erro: {_format_tool_error(exc)}"
         return _stringify_result(result)
+
+
+class ProgressReportingHost:
+    """Acompanha uma ferramenta longa: enquanto `inner.call` roda, uma segunda thread avisa o andamento.
+
+    `poll` devolve o que está rodando agora (os jobs do servidor MCP); só o que muda vira aviso, para a interface
+    mostrar a barra andando sem inundar o canal. A chamada em si continua síncrona e devolve o mesmo resultado.
+    """
+
+    def __init__(
+        self,
+        inner: ToolHost,
+        on_progress: Callable[[str, dict], None],
+        poll: Callable[[], list[dict]],
+        interval: float = PROGRESS_INTERVAL,
+    ) -> None:
+        self._inner = inner
+        self._on_progress = on_progress
+        self._poll = poll
+        self._interval = interval
+
+    def specs(self) -> list[ToolSpec]:
+        return self._inner.specs()
+
+    def call(self, name: str, arguments: dict) -> str:
+        stop = threading.Event()
+        watcher = threading.Thread(target=self._watch, args=(name, stop), daemon=True, name="dmaker-progress")
+        watcher.start()
+        try:
+            return self._inner.call(name, arguments)
+        finally:
+            stop.set()
+            watcher.join(timeout=self._interval * 2 + 1)
+
+    def _watch(self, name: str, stop: threading.Event) -> None:
+        last: dict[str, tuple] = {}
+        while not stop.is_set():
+            for snapshot in self._poll():
+                key = snapshot.get("job_id", "")
+                state = (snapshot.get("status"), json.dumps(snapshot.get("progress") or {}, sort_keys=True))
+                if last.get(key) != state:
+                    last[key] = state
+                    self._on_progress(name, snapshot)
+            stop.wait(self._interval)

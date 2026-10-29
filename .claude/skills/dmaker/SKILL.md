@@ -10,8 +10,8 @@ description: Editor de vídeos curtos por comando (Instagram Reels/Stories/Feed,
 Prefira o servidor MCP `dmaker` (`list_templates`, `new_from_template`, `save_project`, `validate_project`,
 `render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP, use a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se faltar
 ffmpeg). `dmaker ui` abre a interface gráfica; `render_project`/`export_project` já abrem sozinhos para o
-usuário acompanhar (`show_ui=false` só se ele pedir para não abrir). `dmaker agent` faz as tarefas
-mecânicas (template, render, QA, legendas) com um modelo local do Ollama.
+usuário acompanhar (`show_ui=false` só se ele pedir para não abrir). `dmaker agent` opera o editor por
+conversa com um modelo local, sem internet (`dmaker://guide`).
 
 ## Fluxo de trabalho (sempre nessa ordem)
 

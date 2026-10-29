@@ -6,9 +6,10 @@ import json
 
 import pytest
 
+from dmaker import config
 from dmaker.agent.llm import OllamaChat, Reply, ToolCall, _normalize_model_name
 from dmaker.agent.loop import GIVE_UP_WARNING, AgentLoop
-from dmaker.agent.prompt import system_prompt
+from dmaker.agent.prompt import ESSENTIAL_RULES, system_prompt, task_prompt
 from dmaker.agent.tools import AGENT_TOOLS, McpToolHost, ToolSpec, to_ollama_tools, truncate_result
 
 # ---------- OllamaChat ----------
@@ -136,7 +137,9 @@ def test_specs_only_include_agent_tools_and_have_valid_parameters():
     host = McpToolHost()
     specs = host.specs()
 
-    assert {s.name for s in specs} == set(AGENT_TOOLS)
+    # os kits podem citar ferramentas que o servidor ainda não tem: o host entrega só as que existem
+    assert {s.name for s in specs} <= set(AGENT_TOOLS)
+    assert {"quick_edit", "narrate_into_project", "dub_prepare", "autocut"} <= {s.name for s in specs}
     for spec in specs:
         assert isinstance(spec, ToolSpec)
         assert spec.description
@@ -162,9 +165,9 @@ def test_call_unknown_tool_becomes_error_text_not_exception():
 def test_call_tool_outside_allowed_list_is_blocked():
     host = McpToolHost()
 
-    text = host.call("quick_edit", {})
+    text = host.call("clean_cache", {})  # excluída dos kits: apagaria o cache de um render em andamento
 
-    assert text.startswith("erro:") and "quick_edit" in text
+    assert text.startswith("erro:") and "clean_cache" in text
 
 
 def test_call_get_project_missing_project_becomes_error_text():
@@ -216,44 +219,53 @@ def test_truncate_result_cuts_the_middle_with_warning():
 # ---------- system_prompt ----------
 
 
-def test_system_prompt_strips_frontmatter_and_has_rules(tmp_path):
-    skill = tmp_path / "SKILL.md"
-    skill.write_text(
-        "---\nname: dmaker\ndescription: teste\n---\n\n# Corpo\n\nTexto da skill.\n", encoding="utf-8"
-    )
+def test_system_prompt_is_the_essential_rules_plus_the_manual_of_each_kit():
+    manuals = {
+        "agente-editing": "# Kit Edição\n\nCorpo do kit de edição.",
+        "agente-voice": "# Kit Voz\n\nCorpo da voz.",
+    }
 
-    prompt = system_prompt(skill_path=skill)
+    prompt = system_prompt(["editing", "voice"], manual_loader=manuals.get)
 
-    assert "name: dmaker" not in prompt
-    assert "---" not in prompt
-    assert "# Corpo" in prompt and "Texto da skill." in prompt
-    assert "português do Brasil" in prompt
-    assert "uma ferramenta" in prompt
+    assert prompt.startswith(ESSENTIAL_RULES.strip())
+    assert prompt.index("Corpo do kit de edição.") < prompt.index("Corpo da voz.")
+    assert "português do Brasil" in prompt and "pergunte ao usuário" in prompt
 
 
-def test_system_prompt_accepts_custom_extra_rules(tmp_path):
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("# Corpo\n", encoding="utf-8")
+def test_system_prompt_without_the_kit_file_falls_back_to_the_kit_description():
+    prompt = system_prompt(["batch"], manual_loader=lambda name: None)
 
-    prompt = system_prompt(skill_path=skill, extra_rules="## Regra\n\nSó isso.")
+    assert "# Kit Lote" in prompt and "planilha" in prompt
+
+
+def test_system_prompt_accepts_custom_extra_rules():
+    prompt = system_prompt(["batch"], manual_loader=lambda name: None, extra_rules="## Regra\n\nSó isso.")
 
     assert "Só isso." in prompt
     assert "português do Brasil" not in prompt
 
 
-def test_default_system_prompt_uses_real_skill_and_is_dash_free():
-    prompt = system_prompt()
+def test_default_system_prompt_uses_the_generated_kit_manual_and_is_dash_free():
+    prompt = system_prompt(["multicam"])
 
     assert "—" not in prompt and "–" not in prompt
-    assert "DMaker" in prompt
-
-
-def test_default_system_prompt_has_pascom_wedding_rules():
-    prompt = system_prompt()
-
-    assert "casamento-pascom" in prompt
-    assert "plan_multicam" in prompt
+    assert "casamento-pascom" in prompt and "plan_multicam" in prompt
     assert "camera_altar" in prompt and "camera_lateral" in prompt
+
+
+def test_the_prompt_is_far_smaller_than_the_whole_skill():
+    from dmaker.manual.ia_docs import estimate_tokens
+
+    skill = (config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert estimate_tokens(system_prompt(["editing"])) < estimate_tokens(skill)
+
+
+def test_task_prompt_is_the_rules_plus_the_task_file():
+    prompt = task_prompt("# Tarefa X\n\nPasso a passo.")
+
+    assert prompt.startswith(ESSENTIAL_RULES.strip())
+    assert "## Manual da tarefa" in prompt and "Passo a passo." in prompt
 
 
 # ---------- AgentLoop ----------
@@ -320,8 +332,10 @@ def test_ask_runs_tool_call_then_answers_and_keeps_message_order():
     assert roles == ["system", "user", "assistant", "tool", "assistant"]
     assert loop._messages[3] == {"role": "tool", "tool_name": "presets", "content": "lista de presets"}
 
-    kinds = [kind for kind, _ in events]
+    kinds = [kind for kind, _ in events if kind != "model_reply"]
     assert kinds == ["tool_call", "tool_result", "answer"]
+    assert [kind for kind, _ in events].count("model_reply") == 2
+    assert loop.steps_taken == 2
 
 
 def test_tool_error_becomes_tool_message_content_not_exception():

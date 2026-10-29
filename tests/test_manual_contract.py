@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from dmaker import config
+from dmaker.agent.kits import KITS
 from dmaker.manual import files, live, service
 from dmaker.manual.build import GENERATED_BLOCKS, build_all, stale_files
 from dmaker.manual.examples import parse_calls
@@ -116,7 +117,8 @@ def test_where_a_path_does_not_exist_the_task_says_so_clearly(manual_text):
 def test_each_task_has_an_ia_file_within_the_token_limit_and_the_same_template():
     manual = parse_manual(files.read_manual())
     ia_files = files.read_ia_files()
-    assert set(ia_files) == {f"{t.id}.md" for t in manual.tasks} | {"llms.txt"}
+    kit_manuals = {f"agente-{kit.name}.md" for kit in KITS}  # o manual curto de cada kit do agente local
+    assert set(ia_files) == {f"{t.id}.md" for t in manual.tasks} | {"llms.txt"} | kit_manuals
     headings = [
         "## Quando usar",
         "## O que perguntar antes",

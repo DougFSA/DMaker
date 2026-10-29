@@ -861,12 +861,25 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 - Um vídeo só, corte e formato: `quick_edit(src, preset="reels", start=3, end=33, captions=true, hook="texto", cta="medlycare.com.br", brand="medlycare")`.
 - Só transcrever: `transcribe_media(path, language="pt", model="small")`.
 - Gravação falada com pausas e vícios: `autocut(source, name, intensity="normal")`, confira com `list_cuts`, devolva o que não quiser com `undo_cut` e renderize a prévia (nunca recorte clipe a clipe à mão).
+- Receitas (uma chamada no lugar de várias): `narrate_into_project(name_or_path, text, voice, start)` narra o roteiro e o põe no projeto com a legenda; `cut_pauses_and_caption(source, name)` corta pausas e vícios, deixa a legenda e espera o fim; `build_explainer_video(name, recording, subjects)` monta o vídeo explicativo (sem `fim` nos assuntos, divide a gravação em partes iguais).
 - Cartão avulso para ver o design: `render_card_preview(title, subtitle, brand="medlycare", preset="reels")`.
 - Limpar cache: `clean_cache()`.
 - Modelos de IA baixados (tamanho, licença, sobras): `models()` lista; `models("download", model_id)` baixa em
   segundo plano (`job_status`); `models("remove", model_id, confirm=true)` e `models("prune", confirm=true)`
   apagam, e só com `confirm=true` (sem ele o erro traz quais funções deixam de funcionar). Confira o espaço
   livre do disco que a listagem devolve antes de baixar os modelos grandes (OmniVoice ~3 GB).
+
+## Usar sem internet: o agente local
+
+Um modelo que roda na máquina (Ollama ou um servidor compatível com a OpenAI) opera o DMaker pelas mesmas ferramentas deste servidor MCP, sem nenhum serviço na nuvem. Para uma IA que está orientando alguém a configurar isso:
+
+- **Preparar com internet, uma vez**: `dmaker doctor --offline` lista cada peça (modelo de linguagem, Whisper, OmniVoice, Demucs, recorte de pessoa, AudioSeal, Chromium do Playwright, sons, fontes), onde procurou, o que falha sem ela e o comando de download. Rode de novo até aparecer "Tudo pronto: o DMaker funciona sem internet".
+- **Usar**: `dmaker agent` (conversa no terminal; `--once "pedido"` faz um só) ou a tela **Agente** de `dmaker ui`. O progresso das ferramentas aparece ao vivo.
+- **Configurar o motor**: `DMAKER_AGENT_ENGINE` (`ollama` ou `openai`), `DMAKER_AGENT_MODEL`, `DMAKER_AGENT_URL`, `DMAKER_AGENT_NUM_CTX`, `DMAKER_AGENT_TIMEOUT` e `DMAKER_AGENT_THINK` (`low` encurta o raciocínio de modelos como o `gpt-oss`). Os mesmos valores existem como opções de `dmaker agent` (`--engine`, `--model`, `--url`, `--num-ctx`, `--timeout`).
+- **Kits de ferramentas**: a triagem escolhe um kit pelo pedido (edição e render, legendas, voz e narração, dublagem, correção de fala e isolamento, multicâmera, composições e infográficos, lote) e o modelo só vê as ferramentas e o manual curto do kit (`docs/ia/agente-<kit>.md`, gerado pelo `dmaker manual build`). Fora dos kits ficam `dmaker_guide`, `spec_schema`, `save_project`, `clean_cache`, as ferramentas que devolvem imagem e `models`.
+- **Proteções**: o agente confere os argumentos contra o esquema da ferramenta, não usa caminho de arquivo que não existe (pergunta), pede confirmação antes de render final, exportar, dublar, rodar lote, apagar e sobrescrever, e só clona uma voz com a autorização explícita do dono.
+- **Composições**: com modelo pequeno, só os infográficos prontos com parâmetros; o HTML livre só com `DMAKER_AGENT_FREE_HTML=1`, para um modelo que a avaliação aprovou.
+- **Medir**: `dmaker agent eval --model NOME` roda a bateria de pedidos e relata acerto, passos, tempo e memória. Em 16 GB de RAM cabe o `gpt-oss:20b` (cerca de 14 GB); modelos de 30 bilhões de parâmetros não cabem.
 
 ## Depuração
 

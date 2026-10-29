@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1392,6 +1394,135 @@ def _voice_synthesizer():
     from .pipeline.voices import shared_synthesizer
 
     return shared_synthesizer()
+
+
+# ---------- receitas: várias ferramentas numa chamada só ----------
+
+
+@contextmanager
+def _recipe_errors() -> Iterator[None]:
+    """Erro de pedido que a receita antecipou (assunto sem fim, texto vazio) chega ao cliente com a mensagem."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.recipes import RecipeError
+
+    try:
+        yield
+    except RecipeError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Receita: narra um roteiro e já o põe no projeto, em uma chamada (no lugar de edit_project para "
+        "audio.narration, edit_project para as legendas e validate_project). Soma a fala às narrações que o "
+        "projeto já tinha, usa o texto falado como legenda (captions=true) e devolve o resumo com os avisos "
+        "(voz inexistente, narração que passa do fim do vídeo). Nada é sintetizado agora: a voz sai no render "
+        "e vai para o cache. voice = id de list_voices (dora, alex, santa ou uma sua); sem voice, a voz "
+        "automática. start = segundo do vídeo em que a fala começa."
+    )
+)
+def narrate_into_project(
+    name_or_path: str,
+    text: str,
+    voice: str | None = None,
+    start: float = 0.0,
+    language: str = "pt",
+    speed: float = 1.0,
+    seed: int | None = None,
+    captions: bool = True,
+) -> dict:
+    from .pipeline.projects import summarize
+    from .pipeline.recipes import NarrationRequest
+    from .pipeline.recipes import narrate_into_project as _narrate
+
+    request = NarrationRequest(
+        text=text, voice=voice, start=start, language=language, speed=speed, seed=seed, captions=captions
+    )
+    with _recipe_errors():
+        project, path = _narrate(name_or_path, request, check_voice=_voice_library().get)
+    return {
+        "spec_path": str(path),
+        "narrations": len(project.audio.narration),
+        **_summary_dict(summarize(project)),
+    }
+
+
+@server.tool(
+    description=(
+        "Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda "
+        "pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts). Cria o projeto "
+        "`name` com os clipes cortados e as legendas seguindo a fala cortada, e devolve o essencial: "
+        "duração antes e depois, quanto saiu e os cortes por motivo. intensity: suave (só pausas), normal "
+        "(pausas e vícios) ou agressiva (inclui falsos começos e frases repetidas). Transcreve com o "
+        "Whisper: cerca de 1 minuto por minuto de gravação na CPU. Confira os cortes com list_cuts e "
+        "desfaça um com undo_cut; gere a prévia com render_project."
+    )
+)
+def cut_pauses_and_caption(
+    source: str,
+    name: str,
+    intensity: Literal["suave", "normal", "agressiva"] = "normal",
+    preset: str = "instagram/reels",
+    brand: str | None = None,
+    language: str = "pt",
+    model: str = "small",
+    overwrite: bool = False,
+    wait_seconds: float = 1800,
+) -> dict:
+    from .pipeline.autocut import AutoCutRequest
+    from .pipeline.recipes import cut_summary
+    from .voice.cut_plan import CutOptions
+
+    request = AutoCutRequest(
+        source=Path(source),
+        name=name,
+        options=CutOptions(intensity=intensity),
+        preset=preset,
+        brand=brand,
+        captions=True,
+        language=language,
+        model=model,
+        overwrite=overwrite,
+    )
+    _autocut_service().validate(request)  # o erro de nome, arquivo ou formato aparece já, não só no job
+    job = jobs.start(f"cortar pausas e legendar {name}", lambda job: _autocut_work(job, request))
+    jobs.wait(job, wait_seconds)
+    if job.status == "done":
+        return cut_summary(job.result)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada "
+        "assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, "
+        "new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' "
+        "(segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem) e 'imagem' "
+        "(caminho), todos opcionais menos o 'fim': se nenhum assunto trouxer 'fim', a gravação é dividida em "
+        "partes iguais. Devolve o resumo do projeto (duração e avisos). caption_mode: rounded, karaoke, "
+        "classic ou boxed."
+    )
+)
+def build_explainer_video(
+    name: str,
+    recording: str,
+    subjects: list[dict],
+    captions: bool = True,
+    caption_mode: str | None = None,
+    brand: str | None = None,
+) -> dict:
+    from .pipeline.projects import project_path, summarize
+    from .pipeline.recipes import build_explainer
+
+    options: dict[str, Any] = {"legendas": captions}
+    if caption_mode:
+        options["legenda_modo"] = caption_mode
+    if brand:
+        options["marca"] = brand
+    with _recipe_errors():
+        project = build_explainer(name, recording, subjects, options)
+    return {"spec_path": str(project_path(name)), **_summary_dict(summarize(project))}
 
 
 # ---------- isolamento vocal ----------

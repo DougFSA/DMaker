@@ -18,7 +18,7 @@ Você gravou falando (entrevista, aula, depoimento) e quer o vídeo sem silênci
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
-1. `autocut`: criar o projeto cortado
+1. `cut_pauses_and_caption`: cortar as pausas e deixar a legenda pronta, esperando o fim
    Argumentos de exemplo: `{"source": "C:/videos/entrevista.mp4", "name": "entrevista-corte", "intensity": "normal"}`
 2. `list_cuts`: mostrar o que saiu, com tempo e motivo
    Argumentos de exemplo: `{"name_or_path": "entrevista-corte"}`

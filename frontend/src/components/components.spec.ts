@@ -96,6 +96,7 @@ describe('SidebarNav', () => {
       'Saídas',
       'Transições',
       'Looks',
+      'Agente',
     ])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
