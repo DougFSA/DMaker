@@ -14,12 +14,8 @@ describe('registro de painéis do editor', () => {
     expect(panelsIn('inspector').map((panel) => panel.id)).toEqual(['properties', 'json', 'captions', 'preview'])
   })
 
-  it('os painéis do inspetor, o player e a linha do tempo existem; Mídia e Filtros esperam ser plugados (load: null)', () => {
-    for (const panel of panelsIn('inspector')) expect(panel.load, panel.id).toBeTypeOf('function')
-    for (const panel of panelsIn('workbench')) {
-      if (panel.id === 'player' || panel.id === 'timeline') expect(panel.load, panel.id).toBeTypeOf('function')
-      else expect(panel.load, panel.id).toBeNull()
-    }
+  it('os oito painéis existem: nenhum encaixe espera mais por um componente (load: null)', () => {
+    for (const panel of EDITOR_PANELS) expect(panel.load, panel.id).toBeTypeOf('function')
   })
 
   it('só a aba Legendas depende de uma condição', () => {
@@ -27,9 +23,8 @@ describe('registro de painéis do editor', () => {
   })
 
   it('componentOf devolve null para painel sem componente e o mesmo componente em chamadas seguidas', () => {
-    const filters = EDITOR_PANELS.find((panel) => panel.id === 'filters')!
     const json = EDITOR_PANELS.find((panel) => panel.id === 'json')!
-    expect(componentOf(filters)).toBeNull()
+    expect(componentOf({ id: 'filters', title: 'Filtros', zone: 'workbench', load: null })).toBeNull()
     const first = componentOf(json)
     expect(first).not.toBeNull()
     expect(componentOf(json)).toBe(first)

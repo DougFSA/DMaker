@@ -64,6 +64,9 @@ const LABELS: Record<string, Record<string, string>> = {
   'ProgressBar.position': { top: 'Topo', bottom: 'Base' },
   'VideoOverlay.shape': { rect: 'Retângulo', rounded: 'Cantos arredondados', circle: 'Círculo' },
   'VideoOverlay.animation': { none: 'Nenhuma', fade: 'Fade', slide: 'Slide' },
+  'Reframe.variant': { light: 'Claro', dark: 'Escuro' },
+  'TextStyle.align': { left: 'Esquerda', center: 'Centro', right: 'Direita' },
+  'Captions.device': { cpu: 'CPU', cuda: 'GPU (CUDA)' },
   'CaptionStyle.mode': { karaoke: 'Karaokê', classic: 'Clássico', boxed: 'Caixa', rounded: 'Caixa arredondada' },
   'AudioSettings.normalize': { 'two-pass': 'Duas passadas', fast: 'Rápida', off: 'Desligada' },
   // o schema não lista os tipos de transição (são validados pelo catálogo): estes são os rótulos dos mais usados

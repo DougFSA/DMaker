@@ -4,6 +4,7 @@ import { defineComponent } from 'vue'
 import { projectSpec, timelineView } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useEditorStore } from '@/stores/editor'
+import { useEditorPanelsStore } from '@/stores/editorPanels'
 import { useKeymapStore } from '@/stores/keymap'
 import { usePlayerStore, useScheduler } from '@/stores/player'
 import { useTimelineStore } from '@/stores/timeline'
@@ -372,6 +373,14 @@ describe('teclas trocadas e comandos de fora', () => {
     press({ key: 'a' })
     press({ key: 'v' })
     expect(toastTitles().filter((title) => title === 'Selecione um arquivo no painel de mídia.')).toHaveLength(2)
+  })
+
+  it('com o painel Mídia oculto (botão M), o aviso do A e do V diz para mostrá-lo', async () => {
+    await mountShortcuts()
+    useEditorPanelsStore().setHidden('media', true)
+    press({ key: 'a' })
+    expect(toastTitles()).toContain('O painel Mídia está oculto: mostre-o com o botão M e selecione um arquivo.')
+    expect(toastTitles()).not.toContain('Selecione um arquivo no painel de mídia.')
   })
 
   it('o painel Mídia registra o comando e ele vale no lugar do aviso, até o painel sair', async () => {

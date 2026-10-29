@@ -298,6 +298,23 @@ export const useEditorStore = defineStore('editor', () => {
     afterChange()
   }
 
+  /* ---------- digitação em espera ---------- */
+
+  // os campos com atraso (o painel Filtros) guardam o que a pessoa digitou até ela parar; quem lê a spec de verdade
+  // (salvar, operar na linha do tempo, desfazer) pede antes para eles gravarem, senão perderia as últimas teclas
+  const pendingEdits = new Set<() => void>()
+
+  /** Registra como gravar a digitação que está esperando; devolve como desregistrar. */
+  function onPendingEdits(flush: () => void): () => void {
+    pendingEdits.add(flush)
+    return () => void pendingEdits.delete(flush)
+  }
+
+  /** Grava já tudo o que os campos com atraso ainda seguram. */
+  function flushPendingEdits(): void {
+    for (const flush of [...pendingEdits]) flush()
+  }
+
   /* ---------- a vista de linha do tempo ---------- */
 
   function applyView(next: TimelineView): void {
@@ -376,6 +393,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function enqueue(ops: EditOperation[]): Promise<boolean> {
+    flushPendingEdits()
     const run = opChain.then(
       () => runOperations(ops),
       () => runOperations(ops),
@@ -409,6 +427,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** Grava a spec no projeto (sem os campos vazios). Devolve se deu certo; o erro fica em `saveError`. */
   async function save(): Promise<boolean> {
+    flushPendingEdits()
     const target = name.value
     const current = spec.value
     if (!target || !current) return false
@@ -448,6 +467,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function undo(): boolean {
+    flushPendingEdits()
     if (!spec.value) return false
     const snapshot = history.undo(currentJson.value)
     if (snapshot === null) return false
@@ -456,6 +476,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function redo(): boolean {
+    flushPendingEdits()
     if (!spec.value) return false
     const snapshot = history.redo(currentJson.value)
     if (snapshot === null) return false
@@ -527,6 +548,8 @@ export const useEditorStore = defineStore('editor', () => {
     replaceSpec,
     applyOp,
     applyOps,
+    onPendingEdits,
+    flushPendingEdits,
     // vista
     view,
     viewError,

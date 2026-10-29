@@ -10,14 +10,16 @@ import {
   type ShortcutId,
 } from '@/lib/keymap'
 import { useEditorStore } from '@/stores/editor'
+import { useEditorPanelsStore } from '@/stores/editorPanels'
 import { useKeymapStore, type ShortcutHandler } from '@/stores/keymap'
 import { usePlayerStore } from '@/stores/player'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import { useEditorActions } from './useEditorActions'
 
-/** O mesmo A e V do painel Mídia quando ele não está na tela: dizem o que falta em vez de ficarem mudos. */
+/** O A e o V do painel Mídia quando ele não está na tela: dizem o que falta em vez de ficarem mudos. */
 const NEEDS_MEDIA_PANEL = 'Selecione um arquivo no painel de mídia.'
+const MEDIA_PANEL_HIDDEN = 'O painel Mídia está oculto: mostre-o com o botão M e selecione um arquivo.'
 
 export function useEditorShortcuts(): void {
   const editor = useEditorStore()
@@ -25,7 +27,11 @@ export function useEditorShortcuts(): void {
   const timeline = useTimelineStore()
   const keymap = useKeymapStore()
   const toasts = useToastsStore()
+  const panels = useEditorPanelsStore()
   const actions = useEditorActions()
+
+  const noMediaPanel = () =>
+    toasts.push({ tone: 'error', title: panels.isHidden('media') ? MEDIA_PANEL_HIDDEN : NEEDS_MEDIA_PANEL })
 
   const handlers: Record<ShortcutId, ShortcutHandler> = {
     play_pause: () => player.toggle(),
@@ -65,8 +71,8 @@ export function useEditorShortcuts(): void {
     toggle_ripple: () => void timeline.toggleRipple(),
     clear_selection: () => editor.clearSelection(),
     show_shortcuts: () => keymap.openDialog(),
-    media_append: () => toasts.push({ tone: 'error', title: NEEDS_MEDIA_PANEL }),
-    media_insert: () => toasts.push({ tone: 'error', title: NEEDS_MEDIA_PANEL }),
+    media_append: noMediaPanel,
+    media_insert: noMediaPanel,
     track_mute: () => void actions.toggleTrack('muted'),
     track_hide: () => void actions.toggleTrack('hidden'),
     track_lock: () => void actions.toggleTrack('locked'),

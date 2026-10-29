@@ -32,6 +32,8 @@ export interface FieldDef {
   values?: string[]
   /** O que o navegador de arquivos mostra para este campo. */
   media?: 'video' | 'image' | 'audio'
+  /** Lista que o servidor mantém fora do schema (as transições do catálogo, os formatos): quem desenha o campo a traz. */
+  choicesFrom?: 'transitions' | 'presets'
 }
 
 type Extra = Partial<Omit<FieldDef, 'key' | 'label' | 'kind' | 'def'>>

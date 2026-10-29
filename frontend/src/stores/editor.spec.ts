@@ -566,3 +566,48 @@ describe('fechar', () => {
     expect(fetch.to('POST /api/projects/demo/timeline')).toHaveLength(0)
   })
 })
+
+describe('digitação em espera (os campos com atraso do painel Filtros)', () => {
+  /** Um campo de mentira: guarda o que foi "digitado" e só grava quando pedem, como o SpecField com atraso. */
+  function laggingField(store: ReturnType<typeof useEditorStore>, path: string) {
+    let waiting: unknown
+    const flush = vi.fn(() => {
+      if (waiting !== undefined) store.setField(path, waiting)
+      waiting = undefined
+    })
+    const stop = store.onPendingEdits(flush)
+    return { type: (value: unknown) => (waiting = value), flush, stop }
+  }
+
+  it('salvar grava antes o que ainda esperava, e o servidor recebe o valor digitado', async () => {
+    serve()
+    const store = await opened()
+    const field = laggingField(store, 'timeline.0.speed')
+    field.type(3)
+    await store.save()
+    expect(store.get('timeline.0.speed')).toBe(3)
+    expect((fetch.to('PUT /api/projects/demo')[0]?.body as { timeline: Array<{ speed: number }> }).timeline[0]?.speed).toBe(3)
+  })
+
+  it('operar na linha do tempo e desfazer também gravam antes', async () => {
+    serve({ 'POST /api/projects/demo/edit': { spec: projectSpec(), timeline: timelineView() } })
+    const store = await opened()
+    const field = laggingField(store, 'timeline.0.volume')
+    field.type(2)
+    await store.applyOp({ type: 'duplicate', index: 0 })
+    expect((fetch.to('POST /api/projects/demo/edit')[0]?.body as { spec: { timeline: Array<{ volume: number }> } }).spec.timeline[0]?.volume).toBe(2)
+    expect(field.flush).toHaveBeenCalledTimes(1)
+    field.type(0.5)
+    store.undo()
+    expect(field.flush).toHaveBeenCalledTimes(2)
+  })
+
+  it('quem se desregistra deixa de ser chamado', async () => {
+    serve()
+    const store = await opened()
+    const field = laggingField(store, 'timeline.0.speed')
+    field.stop()
+    store.flushPendingEdits()
+    expect(field.flush).not.toHaveBeenCalled()
+  })
+})
