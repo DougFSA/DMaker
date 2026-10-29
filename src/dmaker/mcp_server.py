@@ -20,6 +20,7 @@ from .domain.brand import available_brands, load_theme
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
+from .pipeline.recipes import preview_notice
 from .pipeline.remote import RenderDispatcher, UIClient
 
 GUIDE_PATH = config.PACKAGE_DIR / "resources" / "guide.md"
@@ -621,7 +622,7 @@ def _render(
     )
     pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     result = pipeline.run()
-    payload = _result_dict(result)
+    payload = preview_notice(_result_dict(result), preview and not segments)
     if not preview and not segments:
         payload["qa"] = _qa_text_for_output(project, preset, result.output)
     return payload
@@ -785,7 +786,7 @@ def quick_edit(
             runner=SubprocessRunner(sink=job.sink()),
             log=job.log,
         )
-        return {"spec_path": str(spec_path), **_result_dict(pipeline.run())}
+        return {"spec_path": str(spec_path), **preview_notice(_result_dict(pipeline.run()), preview)}
 
     job = jobs.start(f"quick {src}", work)
     jobs.wait(job, wait_seconds)
@@ -2005,7 +2006,11 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
     project = _dubbing_service(job).prepare(
         Path(source_path), target, project_path=project_path, on_progress=_stage_progress(job), **options
     )
-    return project_summary(project, project_path)
+    return {
+        **project_summary(project, project_path),
+        # o pedido "dubla este vídeo" só termina com o vídeo dublado; a revisão das falas é opcional
+        "next": "Para entregar o vídeo dublado, chame dub_render com project igual ao campo project deste resultado.",
+    }
 
 
 @server.tool(

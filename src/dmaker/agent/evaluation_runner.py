@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .. import config
+from ..pipeline.recipes import preview_notice
 from .evaluation import (
+    ANY_PROJECT,
     HEAVY_TOOLS,
     BatteryReport,
     CaseResult,
@@ -31,7 +33,7 @@ from .evaluation import (
 )
 from .kits import DEFAULT_KIT
 from .llm import ChatModel, Reply, ToolCall
-from .safety import ConfirmationRequest
+from .safety import ConfirmationRequest, ConversationalConfirmation
 from .session import AgentSession, server_tool_names
 from .settings import AgentSettings, build_chat
 from .tools import DEFAULT_WAIT_SECONDS, McpToolHost, ToolHost, ToolSpec
@@ -65,12 +67,15 @@ def stub_result(name: str, arguments: Mapping[str, Any]) -> str:
     source = str(arguments.get("path") or arguments.get("src") or arguments.get("source") or "")
     stem = Path(source).stem or "gravacao"
     project = str(arguments.get("name") or arguments.get("name_or_path") or f"quick_{stem}")
-    video = {
-        "output": f"{output.as_posix()}/{stem}.mp4",
-        "duration_s": 4.0,
-        "warnings": [],
-        "resolution": "1080x1920",
-    }
+    video = preview_notice(
+        {
+            "output": f"{output.as_posix()}/{stem}.mp4",
+            "duration_s": 4.0,
+            "warnings": [],
+            "resolution": "1080x1920",
+        },
+        bool(arguments.get("preview")),
+    )
     flat: dict[str, Any] = {
         "clone_voice": {"id": str(arguments.get("name", "voz")), "kind": "clone", "engine": "omnivoice"},
         "plan_multicam": {"clips": 12, "warnings": [], "phases": [{"name": "abertura", "at_s": 0.0}]},
@@ -106,6 +111,7 @@ def stub_result(name: str, arguments: Mapping[str, Any]) -> str:
             "project": f"{output.as_posix()}/dublagem/{stem}.{arguments.get('target_language', 'en')}.dub.json",
             "source": source,
             "target_language": arguments.get("target_language", "en"),
+            "next": "Para entregar o vídeo dublado, chame dub_render com project igual ao campo project deste resultado.",
             "segments": [
                 {
                     "id": "s1",
@@ -367,7 +373,12 @@ def _observe(case: EvalCase, root: Path, before: Mapping[str, str | None]) -> di
     unchanged: dict[str, bool] = {}
     files: dict[str, bool] = {}
     for check in case.checks:
-        if check.kind == "project_field":
+        if check.kind == "project_field" and check.params["project"] == ANY_PROJECT:
+            projects[ANY_PROJECT] = [
+                json.loads(spec.read_text(encoding="utf-8"))
+                for spec in sorted((root / "projects").glob("*/spec.json"))
+            ]
+        elif check.kind == "project_field":
             spec = root / "projects" / check.params["project"] / "spec.json"
             projects[check.params["project"]] = (
                 json.loads(spec.read_text(encoding="utf-8")) if spec.exists() else None
@@ -419,7 +430,11 @@ def run_case(
         kits: list[str] = []
         replies: list[float] = []
         prompts: list[int] = []
-        policy = ScriptedPolicy(case.confirm, case.consent)
+        # Quem tem uma resposta da pessoa a dar (`follow_up`) confirma por conversa: a chamada fica pendente e o "sim"
+        # a executa. Os que recusam seguem com a política que responde na hora.
+        policy = (
+            ConversationalConfirmation() if case.follow_up else ScriptedPolicy(case.confirm, case.consent)
+        )
 
         def listen(kind: str, data: dict[str, Any]) -> None:
             if kind == "tool_call":

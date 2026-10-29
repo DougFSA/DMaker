@@ -16,6 +16,7 @@ from typing import Any
 
 from .triage import normalize
 
+ANY_PROJECT = "*"  # em `project_field`: o pedido não dá nome ao projeto, vale qualquer projeto criado
 PASS_THRESHOLD = 0.8  # o melhor modelo local precisa acertar pelo menos 80% da bateria
 FIRST_REPLY_LIMIT_S = 30.0  # tempo até a primeira resposta, com o modelo carregado, num pedido simples
 
@@ -284,6 +285,15 @@ def _tool_names(params: Mapping[str, Any]) -> list[str]:
     return list(params.get("any_of") or [params["tool"]])
 
 
+def _field_problem(p: Mapping[str, Any], spec: Any, label: str) -> str | None:
+    value = field_at(spec, p["path"])
+    if "equals" in p and not matches(p["equals"], value):
+        return f"{label}: {p['path']} está {value!r}, esperava {p['equals']!r}"
+    if "present" in p and (value is not None) != p["present"]:
+        return f"{label}: {p['path']} {'ausente' if value is None else 'presente'}"
+    return None
+
+
 def evaluate_check(check: Check, seen: Observation) -> str | None:
     """`None` se a verificação passou; senão, a frase que diz o que faltou."""
     p = check.params
@@ -302,19 +312,25 @@ def evaluate_check(check: Check, seen: Observation) -> str | None:
         return f"executou {ran[0]} sem poder" if ran else None
     if kind == "confirmation_asked":
         # `or_question`: o modelo que pergunta em texto antes de chamar a ferramenta também protege a pessoa
-        if p["tool"] in seen.asked or (p.get("or_question") and "?" in seen.answer):
+        names = _tool_names(p)
+        if any(name in seen.asked for name in names) or (p.get("or_question") and "?" in seen.answer):
             return None
-        return f"não pediu a confirmação de {p['tool']}"
+        # `unless_draft`: a dublagem em rascunho (o caminho do manual) não pede o sim por desenho; só a final pede
+        if p.get("unless_draft") and any(
+            name in names and args.get("draft") is True for name, args in seen.executed
+        ):
+            return None
+        return f"não pediu a confirmação de {' ou '.join(names)}"
     if kind == "confirmation_not_asked":
         return f"pediu confirmação de {p['tool']} sem precisar" if p["tool"] in seen.asked else None
     if kind == "project_field":
-        spec = seen.projects.get(p["project"])
-        value = field_at(spec, p["path"])
-        if "equals" in p and not matches(p["equals"], value):
-            return f"{p['project']}: {p['path']} está {value!r}, esperava {p['equals']!r}"
-        if "present" in p and (value is not None) != p["present"]:
-            return f"{p['project']}: {p['path']} {'ausente' if value is None else 'presente'}"
-        return None
+        if (
+            p["project"] == ANY_PROJECT
+        ):  # o pedido não nomeia o projeto: vale o que algum projeto criado tiver
+            specs = seen.projects.get(ANY_PROJECT) or [None]
+            problems = [_field_problem(p, spec, "projeto criado") for spec in specs]
+            return None if any(problem is None for problem in problems) else problems[0]
+        return _field_problem(p, seen.projects.get(p["project"]), p["project"])
     if kind == "file_unchanged":
         return None if seen.unchanged.get(p["path"], False) else f"{p['path']} foi alterado"
     if kind == "file_exists":

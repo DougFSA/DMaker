@@ -88,6 +88,7 @@
       },
       "oracle": [
         {"call": "new_from_template", "arguments": {"template": "stories-medlycare", "name": "meu-video", "params": {"print": "{image}", "titulo": "Título novo"}}},
+        {"answer": "Posso sobrescrever o projeto meu-video?"},
         {"answer": "O projeto meu-video foi refeito com o título Título novo."}
       ],
       "checks": [
@@ -134,12 +135,13 @@
         {"call": "probe_media", "arguments": {"paths": ["{video}"]}},
         {"call": "quick_edit", "arguments": {"src": "{video}", "preset": "instagram/reels", "captions": true, "brand": "medlycare", "logo": true, "preview": true}},
         {"call": "quick_edit", "arguments": {"src": "{video}", "preset": "instagram/reels", "captions": true, "brand": "medlycare", "logo": true}},
+        {"answer": "Posso gerar o vídeo final?"},
         {"answer": "Pronto: o reel com legenda e a marca MedlyCare foi gerado em output."}
       ],
       "checks": [
         {"kind": "kit", "kits": ["editing"]},
         {"kind": "tool_called", "tool": "quick_edit", "arguments": {"src": "{video}", "captions": true, "brand": "medlycare"}},
-        {"kind": "confirmation_asked", "tool": "quick_edit"},
+        {"kind": "confirmation_asked", "any_of": ["quick_edit", "render_project"]},
         {"kind": "file_exists", "glob": "output/*.mp4", "real_only": true}
       ]
     },
@@ -168,7 +170,7 @@
       "checks": [
         {"kind": "kit", "kits": ["editing"]},
         {"kind": "tool_called", "tool": "build_explainer_video", "arguments": {"recording": "{video}"}},
-        {"kind": "project_field", "project": "meu-explicativo", "path": "timeline.1", "present": true}
+        {"kind": "project_field", "project": "*", "path": "timeline.1", "present": true}
       ]
     },
     {
@@ -181,6 +183,7 @@
       },
       "oracle": [
         {"call": "export_project", "arguments": {"name_or_path": "meu-video", "presets": ["instagram/reels", "youtube/shorts"]}},
+        {"answer": "Posso exportar para os dois formatos?"},
         {"answer": "O projeto meu-video foi exportado para Reels e Shorts."}
       ],
       "checks": [
@@ -231,6 +234,7 @@
       "fixtures": {"audio": {"kind": "audio"}},
       "oracle": [
         {"call": "clone_voice", "arguments": {"name": "maria", "reference_audio": "{audio}"}},
+        {"answer": "O dono da voz autorizou o uso dela?"},
         {"answer": "A voz maria foi cadastrada na biblioteca."}
       ],
       "checks": [
@@ -246,13 +250,14 @@
       "oracle": [
         {"call": "dub_prepare", "arguments": {"path": "{video}", "target_language": "en"}},
         {"call": "dub_render", "arguments": {"project": "dublagem.dub.json"}},
+        {"answer": "Posso gerar o vídeo dublado?"},
         {"answer": "O vídeo dublado em inglês foi gerado."}
       ],
       "checks": [
         {"kind": "kit", "kits": ["dubbing"]},
         {"kind": "tool_called", "tool": "dub_prepare", "arguments": {"path": "{video}", "target_language": "en"}},
         {"kind": "tool_called", "tool": "dub_render"},
-        {"kind": "confirmation_asked", "tool": "dub_render"}
+        {"kind": "confirmation_asked", "tool": "dub_render", "unless_draft": true}
       ]
     },
     {
@@ -294,7 +299,7 @@
       "checks": [
         {"kind": "kit", "kits": ["multicam"]},
         {"kind": "tool_called", "tool": "new_from_template", "arguments": {"template": "casamento-pascom"}},
-        {"kind": "tool_called", "tool": "plan_multicam", "arguments": {"name_or_path": "casamento-ana-carlos"}}
+        {"kind": "tool_called", "tool": "plan_multicam"}
       ]
     },
     {

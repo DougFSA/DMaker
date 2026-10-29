@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -243,6 +244,98 @@ class DenyAll:
         return False
 
 
+class ConfirmationDeferred(Exception):  # noqa: N818 - não é um erro: é o aviso de que a resposta virá na próxima mensagem
+    """A política não responde na hora: a pergunta vai para a pessoa e a resposta vem na próxima mensagem."""
+
+
+class ConversationalConfirmation:
+    """A confirmação por conversa, para quem não tem botão nem terminal: adia a chamada até a pessoa responder.
+
+    Em vez de bloquear esperando um sim, devolve o controle ao laço, que guarda a chamada pendente
+    (`ToolGate.pending`) e deixa o modelo fazer a pergunta; só um "sim" claro na mensagem seguinte executa a
+    chamada guardada, exatamente como foi confirmada.
+    """
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def confirm(self, request: ConfirmationRequest) -> bool:
+        self.asked.append(request.tool)
+        raise ConfirmationDeferred(request.question)
+
+
+@dataclass(frozen=True)
+class PendingCall:
+    """A chamada que espera o sim da pessoa: a ferramenta, os argumentos e a pergunta que foi feita."""
+
+    tool: str
+    arguments: Mapping[str, Any]
+    question: str
+
+
+_AFFIRMATIVE_STARTS = frozenset(
+    {
+        "sim",
+        "confirmo",
+        "confirmado",
+        "pode",
+        "claro",
+        "ok",
+        "okay",
+        "isso",
+        "vai",
+        "manda",
+        "autorizo",
+        "autorizado",
+        "positivo",
+        "certo",
+        "combinado",
+        "fechado",
+        "bora",
+    }
+)
+# Palavras que fazem uma resposta deixar de ser um "sim" limpo: negação, ressalva ou mudança de pedido.
+_BLOCKERS = frozenset(
+    {
+        "nao",
+        "nunca",
+        "jamais",
+        "cancela",
+        "cancelar",
+        "pare",
+        "para",
+        "espera",
+        "aguarda",
+        "antes",
+        "mas",
+        "porem",
+        "so",
+        "somente",
+        "apenas",
+        "troca",
+        "trocar",
+        "muda",
+        "mudar",
+        "altera",
+        "alterar",
+        "depois",
+    }
+)
+MAX_AFFIRMATIVE_WORDS = 14  # um "sim" é curto; texto longo costuma trazer um pedido novo junto
+
+
+def is_affirmative(message: str) -> bool:
+    """Um sim claro: começa por uma palavra de concordância, é curto e não traz negação, ressalva nem pergunta."""
+    text = unicodedata.normalize("NFKD", message.casefold())
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    if "?" in text:
+        return False
+    words = re.findall(r"[a-z]+", text)
+    if not words or len(words) > MAX_AFFIRMATIVE_WORDS or words[0] not in _AFFIRMATIVE_STARTS:
+        return False
+    return not any(word in _BLOCKERS for word in words)
+
+
 class ApproveAll:
     """Só para a bateria de avaliação e testes: aprova tudo e registra o que foi perguntado."""
 
@@ -289,13 +382,14 @@ class ConfirmationRule:
     kind: ConfirmationKind = "action"
 
 
+# Preparar a dublagem (transcrever e traduzir) não está aqui: gera um projeto editável e só o `dub_render`, que
+# produz o vídeo, pede o sim. Pedir nos dois obrigaria a pessoa a confirmar duas vezes o mesmo pedido.
 CONFIRMATION_RULES: tuple[ConfirmationRule, ...] = (
     ConfirmationRule("render_project", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
     ConfirmationRule("quick_edit", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
     ConfirmationRule("export_project", "exportar o projeto em vários formatos (leva vários minutos)"),
     ConfirmationRule("run_batch", "gerar todos os vídeos da planilha (pode levar muito tempo)"),
     ConfirmationRule("resume_batch", "retomar o lote e gerar os vídeos que faltam (pode levar muito tempo)"),
-    ConfirmationRule("dub_prepare", "transcrever e traduzir o vídeo para dublar (leva vários minutos)"),
     ConfirmationRule("dub_render", "gerar o vídeo dublado (leva vários minutos)", _unless_draft),
     ConfirmationRule("dub_stems", "gerar as trilhas separadas da dublagem (leva vários minutos)"),
     ConfirmationRule(
@@ -356,6 +450,7 @@ class ToolGate:
     exists: Callable[[str], bool] = path_exists
     project_exists: Callable[[str], bool] = no_project
     rules: tuple[ConfirmationRule, ...] = CONFIRMATION_RULES
+    pending: PendingCall | None = None  # a chamada que a política adiou, à espera do sim da pessoa
 
     def check(self, tool: str, arguments: Mapping[str, Any]) -> str | None:
         schema = self.schemas.get(tool)
@@ -371,7 +466,15 @@ class ToolGate:
         if absent:
             return ask_user_about_paths(absent)
         for request in self.confirmations(tool, arguments):
-            if not self.policy.confirm(request):
+            try:
+                approved = self.policy.confirm(request)
+            except ConfirmationDeferred:
+                self.pending = PendingCall(tool, dict(arguments), request.question)
+                return (
+                    f"Aguardando o sim do usuário: {request.question} "
+                    "Faça essa pergunta a ele, curta, e espere a resposta; não chame a ferramenta de novo agora."
+                )
+            if not approved:
                 return (
                     f"O usuário não autorizou: {request.question} "
                     "Não execute esta ação nem tente de outro jeito; diga o que ficou sem fazer e pergunte como seguir."

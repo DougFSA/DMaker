@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import config
 from ..domain.edits import set_field
 from ..domain.spec import Project
 from ..media.probe import probe
@@ -143,3 +144,19 @@ def cut_summary(result: dict[str, Any]) -> dict[str, Any]:
 
 def project_exists(name: str) -> bool:
     return project_path(name).exists()
+
+
+def project_names() -> list[str]:
+    """Os nomes dos projetos que existem em `projects/`, lidos na hora (a pasta pode ser trocada)."""
+    return sorted(spec.parent.name for spec in config.PROJECTS_DIR.glob("*/spec.json"))
+
+
+PREVIEW_NEXT = "Isto é só a prévia em baixa resolução, não o vídeo final. Para entregar o vídeo final, chame de novo sem preview."
+
+
+def preview_notice(payload: dict[str, Any], preview: bool) -> dict[str, Any]:
+    """Marca a prévia como prévia: quem lê o resultado (uma IA pequena, principalmente) não a entrega como final."""
+    if preview:
+        payload["preview"] = True
+        payload["next"] = PREVIEW_NEXT
+    return payload

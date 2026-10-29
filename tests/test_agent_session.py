@@ -129,6 +129,71 @@ def test_an_approved_confirmation_lets_the_tool_run():
     assert hosts[0].calls == [("render_project", {"name_or_path": "x"})]
 
 
+def test_the_model_receives_what_the_request_already_says_after_the_request():
+    chat = Script([Reply("ok")])
+    events: list[tuple[str, dict]] = []
+    session, _ = make_session(
+        chat,
+        known_projects=lambda: ["meu-video", "outro"],
+        on_event=lambda kind, data: events.append((kind, data)),
+    )
+
+    session.ask("Valida o projeto meu-video")
+
+    sent = [m for m in chat.seen[0][0] if m["role"] == "user"][0]["content"]
+    assert sent.startswith("Valida o projeto meu-video\n\nO que o pedido já diz")
+    assert "- Projeto que já existe: meu-video (use este nome)." in sent
+    assert [data["text"] for kind, data in events if kind == "facts"] == [sent.split("\n\n", 1)[1]]
+
+
+def test_a_request_with_nothing_to_extract_is_sent_untouched():
+    chat = Script([Reply("ok")])
+    session, _ = make_session(chat, known_projects=lambda: [])
+
+    session.ask("Quais templates de vídeo existem?")
+
+    assert [m for m in chat.seen[0][0] if m["role"] == "user"][0][
+        "content"
+    ] == "Quais templates de vídeo existem?"
+
+
+def test_the_default_list_of_projects_comes_from_the_projects_folder():
+    from dmaker import config
+
+    (config.PROJECTS_DIR / "meu-reel").mkdir(parents=True)
+    (config.PROJECTS_DIR / "meu-reel" / "spec.json").write_text("{}", encoding="utf-8")
+    chat = Script([Reply("ok")])
+    session, _ = make_session(chat)
+
+    session.ask("Gera uma prévia do projeto meu-reel")
+
+    sent = [m for m in chat.seen[0][0] if m["role"] == "user"][0]["content"]
+    assert "Projeto que já existe: meu-reel" in sent
+
+
+def test_a_pending_confirmation_is_answered_by_a_yes_even_with_the_facts_block():
+    from dmaker.agent.safety import ConversationalConfirmation
+
+    chat = Script(
+        [
+            Reply("", [ToolCall("render_project", {"name_or_path": "meu-video"})]),
+            Reply("Posso gerar o vídeo final?"),
+            Reply("Pronto."),
+        ]
+    )
+    session, hosts = make_session(
+        chat, policy=ConversationalConfirmation(), known_projects=lambda: ["meu-video"]
+    )
+
+    session.ask("Renderiza o vídeo final do projeto meu-video")
+    assert hosts[0].calls == []
+    session.ask(
+        "Sim, pode gerar o meu-video"
+    )  # a pessoa cita o projeto: o bloco de dados é anexado, o sim vale
+
+    assert hosts[0].calls == [("render_project", {"name_or_path": "meu-video"})]
+
+
 def test_reset_forgets_the_kit_and_the_history():
     chat = Script([Reply("a"), Reply("b")])
     session, hosts = make_session(chat)

@@ -11,6 +11,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .extraction import extract_facts, render_facts
 from .kits import FREE_HTML_TOOLS, KITS, Kit, kit_by_name, tools_for_kits
 from .llm import ChatModel
 from .loop import AgentLoop
@@ -53,6 +54,9 @@ class AgentSession:
     manual_loader: ManualLoader | None = None
     free_html: bool = False
     project_exists: Callable[[str], bool] | None = None
+    known_projects: Callable[[], Sequence[str]] | None = (
+        None  # os projetos que existem, para achar o nome no pedido
+    )
     max_steps: int = 25
     current_kits: tuple[str, ...] = field(default=(), init=False)
     _loop: AgentLoop | None = field(default=None, init=False, repr=False)
@@ -96,7 +100,17 @@ class AgentSession:
             rebuilt = self._build_loop(chosen)
             self._loop.configure(rebuilt.system, rebuilt.tools)
         self.current_kits = tuple(chosen)
-        return self._loop.ask(message)
+        facts = render_facts(extract_facts(message, self._project_names()))
+        if facts:
+            self._emit("facts", {"text": facts})
+        return self._loop.ask(message, facts)
+
+    def _project_names(self) -> Sequence[str]:
+        if self.known_projects is not None:
+            return self.known_projects()
+        from ..pipeline.recipes import project_names
+
+        return project_names()
 
     @property
     def steps_taken(self) -> int:

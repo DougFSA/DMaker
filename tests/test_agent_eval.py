@@ -373,6 +373,73 @@ def test_a_model_that_asks_in_text_before_acting_still_protects_the_person_when_
     )  # sem pergunta e sem o sistema
 
 
+def test_a_request_that_names_no_project_accepts_any_created_project_for_the_field_check():
+    check = Check("project_field", {"project": "*", "path": "timeline.1", "present": True})
+
+    assert evaluate_check(check, seen(projects={"*": [{"timeline": [1]}, {"timeline": [1, 2]}]})) is None
+    assert evaluate_check(check, seen(projects={"*": [{"timeline": [1]}]})) == (
+        "projeto criado: timeline.1 ausente"
+    )
+    assert evaluate_check(check, seen(projects={"*": []})) == "projeto criado: timeline.1 ausente"
+
+
+def test_a_draft_dubbing_does_not_need_the_confirmation_the_final_one_does():
+    """O manual manda gerar a dublagem em rascunho primeiro, e o rascunho não pede o sim por desenho."""
+    check = Check("confirmation_asked", {"tool": "dub_render", "unless_draft": True})
+
+    assert evaluate_check(check, seen(executed=[("dub_render", {"project": "p", "draft": True})])) is None
+    assert evaluate_check(check, seen(executed=[("dub_render", {"project": "p"})])) is not None
+    assert (
+        evaluate_check(check, seen(asked=["dub_render"], executed=[("dub_render", {"project": "p"})])) is None
+    )
+
+
+def test_the_final_render_may_be_confirmed_through_either_route():
+    """O reel final sai de `quick_edit` sem prévia ou de `render_project` sobre o projeto que ele criou."""
+    check = Check("confirmation_asked", {"any_of": ["quick_edit", "render_project"]})
+
+    assert evaluate_check(check, seen(asked=["render_project"])) is None
+    assert evaluate_check(check, seen(asked=["quick_edit"])) is None
+    assert evaluate_check(check, seen(asked=["export_project"])) == (
+        "não pediu a confirmação de quick_edit ou render_project"
+    )
+
+
+@requires_ffmpeg
+def test_a_case_with_a_follow_up_confirms_by_conversation_and_the_confirmed_call_runs():
+    case = EvalCase(
+        "render-confirmado",
+        "Renderiza o vídeo final do projeto meu-video",
+        (
+            Check("tool_called", {"tool": "render_project", "arguments": {"name_or_path": "meu-video"}}),
+            Check("confirmation_asked", {"tool": "render_project"}),
+        ),
+        fixtures={
+            "image": {"kind": "image"},
+            "projects": [
+                {"name": "meu-video", "template": "stories-medlycare", "params": {"print": "{image}"}}
+            ],
+        },
+        follow_up="Sim, confirmo.",
+    )
+
+    class Script:
+        steps = [
+            Reply("", [ToolCall("render_project", {"name_or_path": "meu-video"})]),
+            Reply("Posso gerar o vídeo final?"),
+            Reply("Pronto, o vídeo final saiu."),
+        ]
+
+        def chat(self, messages, tools):
+            return self.steps.pop(0) if tools else Reply("editing")
+
+    report = runner_module.run_battery([case], SETTINGS, chat_factory=lambda c, names: Script())
+
+    result = report.results[0]
+    assert result.passed, result.failed
+    assert result.tools == ["render_project"] and result.answer == "Pronto, o vídeo final saiu."
+
+
 def test_the_person_of_the_case_answers_a_question_once_and_only_when_the_case_says_so():
     class Asker:
         def __init__(self):

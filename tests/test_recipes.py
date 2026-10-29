@@ -270,6 +270,25 @@ def test_cut_pauses_and_caption_waits_forces_captions_and_returns_the_compact_su
     assert seen["request"].overwrite is False
 
 
+def test_a_preview_render_says_it_is_only_a_preview_and_a_final_one_is_untouched():
+    from dmaker.pipeline.recipes import PREVIEW_NEXT, preview_notice
+
+    preview = preview_notice({"output": "a__preview.mp4"}, True)
+    final = preview_notice({"output": "a.mp4"}, False)
+
+    assert preview["preview"] is True and preview["next"] == PREVIEW_NEXT and "sem preview" in PREVIEW_NEXT
+    assert final == {"output": "a.mp4"}
+
+
+def test_the_dub_prepare_result_points_to_the_render_that_delivers_the_video():
+    """O pedido "dubla este vídeo" só termina com o vídeo dublado: o resultado do preparo diz o próximo passo."""
+    import inspect
+
+    source = inspect.getsource(mcp_server._dub_prepare_work)
+
+    assert '"next"' in source and "dub_render" in source
+
+
 def test_the_recipes_descriptions_say_what_calls_they_replace():
     tools = {tool.name: tool.description for tool in asyncio.run(mcp_server.server.list_tools())}
 
