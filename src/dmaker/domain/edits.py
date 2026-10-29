@@ -246,6 +246,16 @@ def set_overlay_span(project: Project, index: int, start: float, end: float | No
     return _clone(project, mutate)
 
 
+def add_overlay(project: Project, overlay: dict) -> Project:
+    """Acrescenta uma sobreposição (em forma de dict da spec, com `type`) ao fim da lista; a spec inteira é
+    revalidada, então um campo inválido ou uma região que o projeto não declara falha aqui."""
+
+    def mutate(data: dict) -> None:
+        data["overlays"].append(overlay)
+
+    return _clone(project, mutate)
+
+
 def remove_overlay(project: Project, index: int) -> Project:
     """Remove a sobreposição `index`."""
     _check_index(len(project.overlays), index, "sobreposição")

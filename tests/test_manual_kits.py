@@ -20,6 +20,7 @@ from dmaker.manual.kit_manuals import (
     oversize_kits,
 )
 from dmaker.manual.outline import parse_manual
+from dmaker.manual.reference_mcp import ToolDoc
 
 from .manual_support import SAMPLE_MANUAL, fake_cli_root, fake_tools
 
@@ -104,6 +105,17 @@ def test_build_kit_manuals_names_one_file_per_kit(parsed):
 
     assert set(built) == {"agente-editing.md", "agente-voice.md"}
     assert kit_file_name(sample_kit()) == f"{KIT_FILE_PREFIX}editing.md"
+
+
+def test_the_free_html_tools_never_appear_in_the_fixed_kit_manual(parsed):
+    """O HTML livre só chega ao modelo com `DMAKER_AGENT_FREE_HTML`: o manual fixo do kit não pode ensiná-lo."""
+    manual, calls, tools = parsed
+    html_tool = ToolDoc("render_html_frame", "Fotografa uma composição em HTML.", {"type": "object"})
+    with_html = {**tools, "render_html_frame": html_tool}
+
+    text = kit_manual(sample_kit(tools=("quick_edit", "render_html_frame")), {}, calls, with_html)
+
+    assert "render_html_frame" not in text and "`quick_edit`" in text
 
 
 def test_oversize_kits_only_looks_at_kit_files():

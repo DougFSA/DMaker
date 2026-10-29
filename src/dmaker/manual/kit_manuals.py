@@ -12,7 +12,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 
-from ..agent.kits import Kit, kit_tool_names
+from ..agent.kits import FREE_HTML_TOOLS, Kit, kit_tool_names
 from .examples import ToolCall
 from .ia_docs import estimate_tokens, plain_links
 from .outline import Task
@@ -61,7 +61,8 @@ def kit_manual(
     tools: Mapping[str, ToolDoc],
 ) -> str:
     """O manual de um kit: as ferramentas que ele tem neste servidor e até três pedidos com as chamadas certas."""
-    names = kit_tool_names(kit, available=tools)
+    # o HTML livre só chega ao modelo com configuração explícita, então o manual fixo do kit não o ensina
+    names = [name for name in kit_tool_names(kit, available=tools) if name not in FREE_HTML_TOOLS]
     lines = [f"# Kit {kit.title}", "", kit.description, "", "## Ferramentas deste kit", ""]
     if names:
         # só os nomes: a descrição e os argumentos de cada uma já chegam ao modelo junto da ferramenta

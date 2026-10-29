@@ -26,8 +26,12 @@ ROOT = _detect_root()
 DATA_DIR = Path(os.environ.get("DMAKER_DATA_DIR") or ROOT).expanduser().resolve()
 BIN_DIR = ROOT / "bin"
 FFMPEG_DIR = BIN_DIR / "ffmpeg"
+# Chromium do Playwright (composição em HTML, PDF do manual): mora dentro do clone, como o ffmpeg, para o DMaker
+# não guardar nada na pasta compartilhada `%LOCALAPPDATA%/ms-playwright` e não depender dela.
+PLAYWRIGHT_DIR = BIN_DIR / "playwright"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
+HTML_ASSETS_DIR = ASSETS_DIR / "html"  # three.js e lottie-web (MIT), servidos às composições em HTML
 BRANDS_DIR = ASSETS_DIR / "brands"
 SFX_DIR = ASSETS_DIR / "sfx"  # biblioteca de efeitos sonoros (WAV sintetizados pelo DMaker, versionados)
 VOICES_DIR = DATA_DIR / "assets" / "voices"

@@ -23,8 +23,10 @@ from ..domain.spec import (
     Transition,
 )
 from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
+from ..media.browser import browser_problem
 from ..media.probe import probe
 from .context import Prober
+from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
@@ -109,6 +111,7 @@ def summarize(
         known_voices=known_voices(project),
         voiceover_playtimes=voice_file_playtimes(project, prober),
     )
+    warnings += html_warnings(project, browser_problem)
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)

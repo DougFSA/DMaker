@@ -11,17 +11,13 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .kits import KITS, Kit, kit_by_name, tools_for_kits
+from .kits import FREE_HTML_TOOLS, KITS, Kit, kit_by_name, tools_for_kits
 from .llm import ChatModel
 from .loop import AgentLoop
 from .prompt import ManualLoader, system_prompt
 from .safety import ConfirmationPolicy, DenyAll, ToolGate
 from .tools import McpToolHost, ToolHost
 from .triage import Triage, triage
-
-# Só com configuração explícita (medida na avaliação) o modelo ganha HTML livre; com modelo pequeno, os
-# infográficos prontos com parâmetros bastam.
-FREE_HTML_TOOLS = frozenset({"render_html_frame", "add_html_overlay"})
 
 HostFactory = Callable[[list[str]], ToolHost]
 

@@ -8,8 +8,6 @@ Python entram atrás do protocolo `OfflineProbe`, e é o que o teste troca por u
 from __future__ import annotations
 
 import importlib.util
-import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -35,12 +33,12 @@ REQUIRED_MODELS: tuple[tuple[str, str], ...] = (
 REQUIRED_MODULES: tuple[tuple[str, str, str], ...] = (
     ("faster_whisper", "captions", "legendas e transcrição"),
     ("kokoro_onnx", "voice", "vozes prontas"),
-    ("playwright", "docs", "exportar o manual em PDF e composições em HTML"),
+    ("playwright", "html", "exportar o manual em PDF e as composições em HTML"),
 )
 SFX_SAMPLE = "whoosh.wav"
 FONT_SAMPLE = "Poppins-Regular.ttf"
-CHROMIUM_PREFIXES = ("chromium-", "chromium_headless_shell-")
-PLAYWRIGHT_INSTALL = "python -m playwright install chromium"
+CHROMIUM_PREFIX = "chromium"  # as pastas `chromium-<rev>` e `chromium_headless_shell-<rev>` do Playwright
+PLAYWRIGHT_INSTALL = "dmaker setup --html"
 
 
 @dataclass(frozen=True)
@@ -89,27 +87,6 @@ class OfflineProbe(Protocol):
     ) -> Literal["ready", "model_missing", "server_down"]: ...
 
 
-def chromium_search_paths(
-    env: dict[str, str] | None = None, platform: str | None = None, home: Path | None = None
-) -> list[Path]:
-    """Onde o Chromium do Playwright pode estar: `bin/playwright` do DMaker, a variável do Playwright e o padrão do sistema."""
-    source = os.environ if env is None else env
-    system = platform or sys.platform
-    base = home or Path.home()
-    paths = [config.BIN_DIR / "playwright"]
-    custom = source.get("PLAYWRIGHT_BROWSERS_PATH")
-    if custom and custom != "0":
-        paths.append(Path(custom))
-    if system.startswith("win"):
-        local = source.get("LOCALAPPDATA")
-        paths.append((Path(local) if local else base / "AppData" / "Local") / "ms-playwright")
-    elif system == "darwin":
-        paths.append(base / "Library" / "Caches" / "ms-playwright")
-    else:
-        paths.append(base / ".cache" / "ms-playwright")
-    return paths
-
-
 def _model_item(model_id: str, needed_by: str, probe: OfflineProbe) -> OfflineItem:
     state = probe.model_state(model_id)
     where = f"{config.MODELS_DIR} (modelo {model_id})"
@@ -132,12 +109,13 @@ def _module_item(module: str, extra: str, needed_by: str, probe: OfflineProbe) -
 
 
 def _chromium_item(probe: OfflineProbe) -> OfflineItem:
-    searched = chromium_search_paths()
-    found = any(name.startswith(CHROMIUM_PREFIXES) for folder in searched for name in probe.list_dir(folder))
-    where = "; ".join(str(path) for path in searched)
+    """O Chromium só vale na pasta do DMaker (`bin/playwright`): é lá que o render o abre, com o ambiente do
+    Playwright apontado para ela, então o do padrão do sistema não conta."""
+    folder = config.PLAYWRIGHT_DIR
+    found = any(name.startswith(CHROMIUM_PREFIX) for name in probe.list_dir(folder))
     needed = "exportar o manual em PDF, tirar capturas e as composições em HTML"
     return OfflineItem(
-        "Chromium do Playwright", "ok" if found else "missing", where, needed, PLAYWRIGHT_INSTALL
+        "Chromium do Playwright", "ok" if found else "missing", str(folder), needed, PLAYWRIGHT_INSTALL
     )
 
 

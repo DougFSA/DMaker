@@ -10,6 +10,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Column, Table
 from typer.core import TyperGroup
 
@@ -71,7 +72,7 @@ def _print_result(result) -> None:
     if result.captions_file:
         console.print(f"  legendas: {result.captions_file}")
     for w in result.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 def _print_qa_summary(spec: Path, project, preset: str | None, output: Path) -> None:
@@ -139,7 +140,7 @@ def _print_ui_result(result: dict) -> None:
     if result.get("captions_file"):
         console.print(f"  legendas: {result['captions_file']}")
     for w in result.get("warnings") or []:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 @app.callback()
@@ -206,6 +207,14 @@ def doctor(
         console.print("  faster-whisper: ok (legendas automáticas)")
     except ImportError:
         console.print("  faster-whisper: [yellow]não instalado[/yellow] (pip install -e .[captions])")
+    from .media.browser import browser_problem
+
+    problem = browser_problem()
+    console.print(
+        "  playwright e Chromium: ok (composição em HTML)"
+        if problem is None
+        else "  playwright e Chromium: [yellow]faltam[/yellow] (composição em HTML: dmaker setup --html)"
+    )
     try:
         import mcp  # noqa: F401
 
@@ -237,8 +246,25 @@ def _doctor_offline() -> None:
 
 
 @app.command()
-def setup(force: Annotated[bool, typer.Option(help="Baixa de novo mesmo se já existir.")] = False) -> None:
-    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa."""
+def setup(
+    force: Annotated[bool, typer.Option(help="Baixa de novo mesmo se já existir.")] = False,
+    html: Annotated[
+        bool,
+        typer.Option(
+            "--html",
+            help="Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).",
+        ),
+    ] = False,
+) -> None:
+    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium."""
+    from .setup_tools import install_chromium
+
+    if html:
+        try:
+            install_chromium()
+        except RuntimeError as exc:
+            _fail(escape(str(exc)))  # a mensagem traz `[html]`, que o Rich leria como marcação
+        return
     from .media.matting import ensure_model, model_path
     from .setup_tools import install_ffmpeg, install_fonts
 
@@ -385,7 +411,7 @@ def new_from_template_cmd(
         f"({s.total:.1f}s, {len(s.segments)} trechos)"
     )
     for w in s.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 def _coerce_param(template, key: str, value: str):
@@ -428,7 +454,7 @@ def plan(
     for label, at in result.phases:
         console.print(f"  {_format_mmss(at)}  {label}", markup=False, highlight=False)
     for w in result.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 def _format_clock(seconds: float) -> str:
@@ -519,7 +545,7 @@ def autocut(
         _fail(str(exc))
     _print_cut_report(result.report)
     for warning in result.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {warning}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
     console.print(f"Projeto: {result.spec_path}", markup=False, highlight=False)
     console.print(
         f"Confira com [bold]dmaker cuts {project_name}[/bold]; devolva um corte com "
@@ -575,7 +601,7 @@ def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")])
     for seg in s.segments:
         console.print(f"  [{seg.index}] {seg.type:5s} {seg.duration:6.2f}s  {seg.label}")
     for w in s.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 @app.command()
@@ -1007,6 +1033,67 @@ def looks_sheet(
         console.print(f"[green]Folha salva:[/green] {target}")
     if name == "all":
         console.print("Na folha dos todos, da esquerda para a direita: original, " + ", ".join(names) + ".")
+
+
+html_app = typer.Typer(
+    help="Composições em HTML: confere um quadro de uma composição antes de renderizar o vídeo.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(html_app, name="html")
+
+
+@html_app.command("frame")
+def html_frame(
+    src: Annotated[Path, typer.Argument(help="Arquivo .html ou pasta com index.html.")],
+    at: Annotated[float, typer.Option(help="Instante da composição, em segundos.")] = 0.0,
+    size: Annotated[
+        str,
+        typer.Option(help="Tamanho da página, LARGURAxALTURA em px na base 1080 (como a área da região)."),
+    ] = "1080x1920",
+    out: Annotated[
+        Path | None, typer.Option(help="PNG de saída (padrão: output/html/<nome>_<instante>s.png).")
+    ] = None,
+    duration: Annotated[
+        float, typer.Option(help="Duração da composição em segundos (a página lê dmaker.duration).")
+    ] = 5.0,
+    fps: Annotated[float, typer.Option(help="Quadros por segundo da composição.")] = 30.0,
+    scale: Annotated[float, typer.Option(help="Pixels de saída por px da página (0,5 gera a metade).")] = 1.0,
+    brand: Annotated[str | None, typer.Option(help="Marca cujas cores e fonte a página recebe.")] = None,
+    data: Annotated[str | None, typer.Option(help="Dados para a página (dmaker.data), em JSON.")] = None,
+    background: Annotated[
+        str | None, typer.Option(help="Cor lisa por baixo, para ver o transparente (ex.: #808080).")
+    ] = None,
+) -> None:
+    """Renderiza um quadro da composição, direto no instante pedido, em PNG com fundo transparente."""
+    from .pipeline.html_frame import default_frame_path, parse_size, render_html_frame
+
+    try:
+        page_size = parse_size(size)
+        page_data = json.loads(data) if data else {}
+        if not isinstance(page_data, dict):
+            raise ValueError('--data precisa ser um objeto JSON, como \'{"titulo": "Oi"}\'')
+        result = render_html_frame(
+            src,
+            out or default_frame_path(config.OUTPUT_DIR, src, at),
+            at=at,
+            size=page_size,
+            duration=duration,
+            fps=fps,
+            scale=scale,
+            data=page_data,
+            brand=brand,
+            background=background,
+        )
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except RENDER_ERRORS as exc:
+        _fail(escape(str(exc)))
+    console.print(
+        f"[green]Quadro salvo:[/green] {escape(str(result.path))}  ({result.size[0]}x{result.size[1]})"
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
 
 
 @app.command()

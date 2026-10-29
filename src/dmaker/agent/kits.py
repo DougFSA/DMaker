@@ -266,6 +266,10 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "list_jobs": "job_status com o número da tarefa já basta",
 }
 
+# Só com configuração explícita (`DMAKER_AGENT_FREE_HTML`, medida na avaliação) o modelo ganha HTML livre; com
+# modelo pequeno, os infográficos prontos com parâmetros bastam. Ficam fora do prompt e do manual do kit.
+FREE_HTML_TOOLS = frozenset({"render_html_frame", "add_html_overlay"})
+
 DEFAULT_KIT = "editing"
 MAX_KITS_PER_REQUEST = 2  # um pedido que cruza kits soma no máximo dois: mais que isso estoura o contexto
 

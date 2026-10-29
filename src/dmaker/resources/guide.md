@@ -143,6 +143,7 @@ Regras e valores:
 - **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`, `shape` (`rect`, padrão, ou `circle`, que recorta o maior quadrado central da imagem num círculo, como a foto do audiograma).
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
 - **audiogram** (`type: "audiogram"`): a onda ou as barras do áudio, animadas no ritmo dele, para divulgar um corte de podcast, entrevista ou áudio de WhatsApp. `style` wave, bars ou circle; `follow` auto, voice ou mix; `color`, `position`/`x`/`y`/`region`, `width`/`height`, `inner_radius`, `start`/`end`. Ver a seção "Audiograma" abaixo.
+- **Composição em HTML** (`type: "html"`): uma animação escrita em HTML, CSS e JavaScript (three.js, Lottie), desenhada quadro a quadro com fundo transparente por cima do vídeo. `src` (arquivo `.html` ou pasta com `index.html`), `region` ou `x`/`y`/`width`/`height`, `start`/`end`, `data` (chega à página como `dmaker.data`), `motion_blur`, `layer` (`front` ou `behind-person`), `sound`, `size`. Contrato, dois exemplos e boas práticas na seção "Composição animada em HTML" abaixo; confira com `render_html_frame`.
 - **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y` ou `region` (o quadro ocupa uma região nomeada); `width` (fração da largura, 0.18 a 0.3 para webcam); `focus` ([x, y], padrão o centro: onde cortar quando a proporção do quadro difere da fonte, como `reframe.focus`); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
 - **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha), `follow_background` (padrão true: a legenda acompanha o tom claro/escuro do cartão por baixo; false mantém o estilo de quem está sobre vídeo, como no quadro do rosto do `explicativo`). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
 - **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `sfx` (efeitos sonoros num instante marcado, ver "Efeitos sonoros"), `voiceover` (arquivos de áudio gravados como voz do vídeo, ver "Audiograma"), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
@@ -263,7 +264,128 @@ Para o título grande que fica atrás de quem fala e na frente da parede, como s
 - **Custo**: roda na CPU, perto de 0,5 s por quadro em 1080x1920 com o `resnet50` (num teste, 3 s de efeito somaram uns 50 s ao render e 6 s uns 105 s, contando 12 quadros de aquecimento do modelo por intervalo). O recorte fica em cache por conteúdo: um segundo render sem mudança não recorta de novo (4 s contra os 3,8 s do render sem o efeito), e mudar só a frase, a cor ou a posição do texto também reaproveita o recorte. Mudar o intervalo, o trecho, o enquadramento, o look ou o modelo recorta de novo.
 - **Rascunho**: no `--preview` o recorte usa o modelo `mobilenetv3` (2,5x mais rápido; 15 MB que baixam na primeira vez); o render final usa o `resnet50`, com a borda melhor em cabelo e mãos. O modelo entra na chave do cache, então rascunho e render final não se misturam.
 - **Avisos**: `dmaker validate` e `dmaker qa` avisam, em `overlays[N].layer`, quando o intervalo só cobre cartão ou foto: não há pessoa a recortar e o render gastaria o recorte à toa.
+- **Composição em HTML**: uma composição com `"layer": "behind-person"` entra na mesma pilha, logo acima do vídeo e abaixo dos textos `behind-person` (ver "Composição animada em HTML").
 - **Limites**: funciona melhor com a pessoa de frente e a câmera parada, como o `matte`; movimento muito rápido pode errar a borda. A borda vem do primeiro plano que o modelo prevê (sem a cor da parede nos fios de cabelo) e o corpo usa o pixel do próprio vídeo.
+
+### Composição animada em HTML (`type: "html"`)
+
+Para um título grande que cresce, um número que conta, um objeto em 3D girando, um mapa com fotos entrando, um gráfico animado: escreva a animação como código (HTML, CSS e JavaScript, inclusive three.js e Lottie) e o DMaker a desenha quadro a quadro, com fundo transparente, por cima do vídeo, na região que você escolher. A mesma composição sai sempre igual. Por dentro é o Chromium do Playwright, e a página **não tem rede**.
+
+**Instalação, uma vez:** `pip install -e ".[html]"` e `dmaker setup --html` (o Chromium, uns 120 MB, fica em `bin/playwright`, dentro do DMaker). Sem isso `validate_project` avisa e o render falha dizendo como instalar.
+
+**Fluxo:** 1) escreva a pasta `projects/<nome>/composicoes/<ideia>/index.html`; 2) `render_html_frame` (ou `dmaker html frame <pasta> --at 2 --size 1080x960`) mostra o quadro de qualquer instante, inclusive o do meio, com os avisos da página; ajuste até ficar bom; 3) `add_html_overlay` põe a composição no projeto; 4) `validate_project`, prévia, `qa_report`.
+
+```json
+{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6,
+ "data": {"titulo": "Cinco camadas", "valor": 87}, "motion_blur": false, "layer": "front"}
+```
+
+- **Onde e quando:** `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que ela usa, relativo à pasta da spec. `region` (uma região nomeada, ver "Regiões nomeadas") ou o centro `x`/`y` com `width`/`height` (frações do quadro; sem nada, o quadro todo). `start`/`end` em segundos. `sound` põe um som na entrada, como nas outras sobreposições.
+- **Tamanho:** a página é desenhada com o tamanho da área em px na base 1080, o mesmo no `--preview` e no render final (a prévia só usa menos pixels, e o desenho sai igual). `size` (`[largura, altura]`) desenha a página em outro tamanho e o DMaker a ajusta à área. `dmaker.width` e `dmaker.height` dizem o tamanho da página.
+- **`data`:** um dicionário livre, entregue à página como `dmaker.data` e parte da chave do cache (mudou, desenha de novo).
+- **`layer`:** `front` (padrão) ou `behind-person`: a composição fica entre o vídeo e a pessoa recortada, como o título de "Texto atrás da pessoa" (mesma pilha, mesmo custo de recorte; o `validate_project` avisa se o intervalo só cobre cartão ou foto).
+- **`motion_blur`:** `true`, ou `{"subframes": 8, "shutter": 0.5}`. O DMaker captura vários instantes dentro do tempo em que um obturador ficaria aberto e tira a média: o que se move rápido fica borrado na direção do movimento e o que está parado fica nítido. O tempo do render cresce na proporção dos subquadros; desligado por padrão.
+
+**O contrato com a página**
+
+- **Fundo transparente:** não pinte `html` nem `body`. O que a página não cobre deixa o vídeo aparecer.
+- **O tempo é do DMaker.** Animações CSS (`animation`, `transition`) e Web Animations (`element.animate`) já andam no instante certo sem você fazer nada, e o GSAP e o Lottie também, se a página os trouxer. Para o resto (three.js, canvas, SVG, DOM) defina `window.dmakerSeek = (segundos) => { ... }`: o DMaker a chama em cada quadro, em ordem, com o instante da composição, e espera o fim (pode ser `async`). Desenhe só o estado daquele instante, sem depender do quadro anterior: `render_html_frame` com `at: 2.5` vai direto a 2,5 s. Uma `Promise` em `window.dmakerReady` segura o primeiro quadro até a página terminar de carregar o que precisa.
+- **O relógio é virtual:** `performance.now`, `Date`, `setTimeout`, `setInterval` e `requestAnimationFrame` só andam quando o DMaker manda (o `requestAnimationFrame` roda uma vez por quadro, no instante dele), e `Math.random` tem semente fixa. Por isso a composição sai igual em toda renderização. Dentro de `dmakerSeek` não espere temporizadores.
+- **O objeto `dmaker`:** `time` (segundos), `frame`, `progress` (de 0 a 1), `duration`, `fps`, `width`, `height`, `data`, `brand` (as cores da marca), `fontFamily`, `noise2(x, y)` e `noise3(x, y, z)` (ruído simplex suave, de -1 a 1, para câmera na mão leve e partículas flutuando), `noiseSeed(n)` e `random(semente)`.
+- **A marca só por variáveis CSS:** `var(--dm-primary)`, `var(--dm-accent)`, `var(--dm-text)`, `var(--dm-bg)` e as demais cores do tema, e `var(--dm-font)` (a Poppins, pesos de 300 a 800, já carregada). Não escreva cor de marca na mão: trocar de marca troca a composição.
+- **Arquivos:** tudo relativo à pasta da composição (imagens, JSON por `fetch`, módulos ES, animações Lottie `.json`). O DMaker serve duas bibliotecas em `/_dmaker/`: `three.module.min.js` (declare um mapa de importação, como no exemplo) e `lottie.min.js` (define `lottie`). O GSAP não vem junto (licença própria): se quiser, ponha o arquivo na pasta.
+- **Sem rede:** um pedido a qualquer endereço de fora (CDN, imagem de um site) é bloqueado, vira um aviso no log e no resultado do render, e o render segue. Erro de JavaScript e `console.error` da página também viram aviso.
+
+**Exemplo 1: um número contando, só em CSS** (nenhum JavaScript; o DMaker posiciona a animação em cada quadro):
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+  /* o número é uma propriedade inteira animada pelo CSS */
+  @property --n { syntax: "<integer>"; initial-value: 0; inherits: false; }
+  html, body { margin: 0; }
+  .contador {
+    position: absolute; left: 0; right: 0; top: 120px;
+    text-align: center; color: var(--dm-text);
+    font: 800 260px/1 var(--dm-font);
+    counter-reset: n var(--n);
+    animation: conta 3s cubic-bezier(.2, .7, .2, 1) forwards;
+  }
+  .contador::after { content: counter(n) "%"; }
+  @keyframes conta { from { --n: 0; opacity: 0; transform: translateY(40px); } 15% { opacity: 1; transform: none; } to { --n: 87; opacity: 1; } }
+</style>
+</head>
+<body><div class="contador"></div></body>
+</html>
+```
+
+**Exemplo 2: um objeto three.js girando, com a busca de tempo** (a função `dmakerSeek` desenha o estado de cada instante):
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<script type="importmap">{ "imports": { "three": "/_dmaker/three.module.min.js" } }</script>
+<style>html, body { margin: 0; } canvas { display: block; }</style>
+</head>
+<body>
+<script type="module">
+  import * as THREE from "three";
+
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);          // 0,5 na prévia: o mesmo desenho, menos pixels
+  renderer.setSize(dmaker.width, dmaker.height);
+  renderer.setClearColor(0x000000, 0);               // fundo transparente
+  document.body.append(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, dmaker.width / dmaker.height, 0.1, 100);
+  camera.position.z = 6;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+  sun.position.set(3, 4, 5);
+  scene.add(sun);
+
+  const cor = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--dm-accent").trim());
+  const objeto = new THREE.Mesh(new THREE.IcosahedronGeometry(1.6, 1), new THREE.MeshStandardMaterial({ color: cor, flatShading: true }));
+  scene.add(objeto);
+
+  // o DMaker chama esta função em cada quadro, com o instante em segundos; desenhe só o estado desse instante
+  window.dmakerSeek = (t) => {
+    objeto.rotation.set(t * 0.6, t * 1.4, 0);
+    objeto.scale.setScalar(Math.min(t / 0.5, 1));    // entra em meio segundo
+    renderer.render(scene, camera);
+  };
+  window.dmakerSeek(0);
+</script>
+</body>
+</html>
+```
+
+**Lottie** (animações `.json`, como setas, ícones e confete): ponha o arquivo na pasta, carregue a biblioteca do DMaker e toque do jeito de sempre; o relógio é do DMaker, e pedir o quadro do meio mostra o quadro do meio. Confira a licença de cada animação que usar.
+
+```html
+<script src="/_dmaker/lottie.min.js"></script>
+<div id="seta" style="width: 400px; height: 400px"></div>
+<script>lottie.loadAnimation({ container: seta, renderer: "svg", loop: false, autoplay: true, path: "seta.json" });</script>
+```
+
+**Boas práticas ao escrever uma composição**
+
+- **Gráfico maior e mais simples que num site:** vídeo não é página, e quem vê está no celular. Texto grande (a partir de uns 80 px na base 1080), poucas peças, contraste forte; o que tem letra miúda ou muito detalhe some no feed.
+- **Toda sobreposição tem entrada e saída:** o DMaker corta no `end`, então a própria composição deve sumir um instante antes (um `fade` ou um deslize de meio segundo, lendo `dmaker.duration`), em vez de aparecer e desaparecer de repente.
+- **Anime as partes de dentro e deixe a posição para o DMaker:** o lugar na tela é da `region` (ou de `x`/`y`); dentro dela, anime as peças (entrar, crescer, girar), sem posicionar a composição inteira na página.
+- **Sem estilo global:** nada de `* { ... }` nem de `body { background }`; cor de texto sempre explícita (`color: var(--dm-text)`), porque o fundo é o vídeo e o texto herdado pode sair preto sobre preto.
+- **Marca só por variáveis CSS** (`--dm-*`), nunca cor de marca na mão.
+- **Tamanho de pixels honesto:** use `dmaker.width` e `dmaker.height` para o `canvas` e o WebGL, e `renderer.setPixelRatio(devicePixelRatio)` para a prévia sair com o mesmo desenho.
+- **Não dependa de rede:** imagens, JSON e módulos ficam na pasta da composição.
+- **Sem sorteio nem relógio solto:** use `dmaker.time` e `dmaker.noise3` em vez de `Date.now()` e de `Math.random()` sem controle.
+
+**Custo e cache:** o WebGL roda por software (CPU), perto de 70 ms por quadro em 1080x1920 (5 s de composição levaram uns 12 s, medido); a área menor custa menos. O vídeo com alfa de cada composição fica em `cache/mez` por conteúdo (o HTML, todos os arquivos da pasta, o tamanho, a duração, os dados, o borrão e a marca): um segundo render igual não abre a página de novo. O Chromium é aberto com WebGL por software e perfil de cor fixo, para a saída ser igual em qualquer máquina.
 
 ## Vídeos longos, multicâmera e áudio externo
 

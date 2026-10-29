@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import threading
 
-from dmaker.agent.kits import all_kit_tool_names, kit_by_name
+from dmaker.agent.kits import FREE_HTML_TOOLS, all_kit_tool_names, kit_by_name
 from dmaker.agent.llm import Reply, ToolCall
 from dmaker.agent.safety import ApproveAll
-from dmaker.agent.session import FREE_HTML_TOOLS, AgentSession, server_tool_names
+from dmaker.agent.session import AgentSession, server_tool_names
 from dmaker.agent.tools import DEFAULT_WAIT_SECONDS, McpToolHost, ProgressReportingHost, ToolSpec
 
 

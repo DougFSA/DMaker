@@ -15,7 +15,6 @@ from dmaker.agent.offline import (
     OfflineItem,
     OfflineReport,
     build_report,
-    chromium_search_paths,
     render_report,
 )
 from dmaker.agent.settings import AgentSettings
@@ -92,7 +91,7 @@ def test_every_item_says_where_it_looked_and_a_missing_one_says_what_fails_and_h
     assert omni.status == "missing" and omni.download == "dmaker models download omnivoice"
     assert "narração" in omni.needed_by
     chromium = by_name(report)["Chromium do Playwright"]
-    assert chromium.status == "missing" and chromium.download == "python -m playwright install chromium"
+    assert chromium.status == "missing" and chromium.download == "dmaker setup --html"
 
 
 def test_a_partial_download_counts_as_missing_and_is_called_that():
@@ -160,37 +159,37 @@ def test_the_report_has_no_dashes_in_its_screen_text():
     assert "—" not in text and "–" not in text
 
 
-# ---------- onde o Chromium pode estar ----------
+# ---------- onde o Chromium conta ----------
 
 
-def test_chromium_is_searched_in_the_dmaker_folder_first_and_then_the_playwright_default():
-    windows = chromium_search_paths(
-        env={"LOCALAPPDATA": "C:/Users/a/AppData/Local"}, platform="win32", home=Path("/h")
-    )
-    linux = chromium_search_paths(env={}, platform="linux", home=Path("/h"))
-    mac = chromium_search_paths(env={}, platform="darwin", home=Path("/h"))
-
-    assert windows[0] == config.BIN_DIR / "playwright"
-    assert windows[1] == Path("C:/Users/a/AppData/Local") / "ms-playwright"
-    assert linux[1] == Path("/h/.cache/ms-playwright") and mac[1] == Path("/h/Library/Caches/ms-playwright")
-
-
-def test_the_playwright_variable_adds_its_folder_unless_it_is_the_package_marker():
-    custom = chromium_search_paths(
-        env={"PLAYWRIGHT_BROWSERS_PATH": "D:/navegadores"}, platform="linux", home=Path("/h")
-    )
-    marker = chromium_search_paths(env={"PLAYWRIGHT_BROWSERS_PATH": "0"}, platform="linux", home=Path("/h"))
-
-    assert Path("D:/navegadores") in custom and len(marker) == 2
-
-
-def test_chromium_in_bin_playwright_is_found_before_the_playwright_default(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "BIN_DIR", tmp_path)
+def test_chromium_in_bin_playwright_is_found_there(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PLAYWRIGHT_DIR", tmp_path / "playwright")
     (tmp_path / "playwright" / "chromium-1169").mkdir(parents=True)
 
     item = offline._chromium_item(DiskOfflineProbe())
 
-    assert item.status == "ok" and str(tmp_path / "playwright") in item.where
+    assert item.status == "ok" and item.where == str(tmp_path / "playwright")
+
+
+def test_the_headless_shell_folder_also_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PLAYWRIGHT_DIR", tmp_path / "playwright")
+    (tmp_path / "playwright" / "chromium_headless_shell-1248").mkdir(parents=True)
+
+    assert offline._chromium_item(DiskOfflineProbe()).status == "ok"
+
+
+def test_a_chromium_outside_the_dmaker_folder_does_not_count(tmp_path, monkeypatch):
+    """O render abre o Chromium com o ambiente do Playwright apontado para `bin/playwright`: o que está na pasta
+    padrão do sistema não serve, e dizer "ok" aqui faria o render falhar sem rede."""
+    monkeypatch.setattr(config, "PLAYWRIGHT_DIR", tmp_path / "bin" / "playwright")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "padrao"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "padrao"))
+    (tmp_path / "padrao" / "ms-playwright" / "chromium-1169").mkdir(parents=True)
+    (tmp_path / "padrao" / "chromium-1169").mkdir(parents=True)
+
+    item = offline._chromium_item(DiskOfflineProbe())
+
+    assert item.status == "missing" and item.download == "dmaker setup --html"
 
 
 # ---------- a sonda de verdade ----------

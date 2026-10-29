@@ -26,7 +26,7 @@ from ..domain.batch_sheet import (
     row_params,
 )
 from ..domain.brand import load_theme
-from ..domain.spec import ClipSegment, ImageOverlay, ImageSegment, Project, VideoOverlay
+from ..domain.spec import ClipSegment, HtmlOverlay, ImageOverlay, ImageSegment, Project, VideoOverlay
 from ..domain.templates import Template, TemplateError, render_template
 from ..media.probe import probe
 from .context import Prober
@@ -183,7 +183,7 @@ def _missing_param_files(
 
 
 def media_references(project: Project) -> list[tuple[str, str]]:
-    """Os arquivos que o projeto aponta (trechos, imagens e vídeos sobrepostos, trilha), com a origem de cada um."""
+    """Os arquivos que o projeto aponta (trechos, imagens, vídeos e composições sobrepostos, trilha), com a origem de cada um."""
     refs: list[tuple[str, str]] = []
     for i, segment in enumerate(project.timeline):
         if isinstance(segment, (ClipSegment, ImageSegment)) and segment.src:
@@ -195,7 +195,7 @@ def media_references(project: Project) -> list[tuple[str, str]]:
             and not overlay.src.startswith("logo:")
         ):
             refs.append((f"overlays[{i}].src", overlay.src))
-        if isinstance(overlay, VideoOverlay) and overlay.src:
+        if isinstance(overlay, VideoOverlay | HtmlOverlay) and overlay.src:
             refs.append((f"overlays[{i}].src", overlay.src))
     if project.audio.music:
         refs.append(("audio.music.src", project.audio.music.src))

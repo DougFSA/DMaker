@@ -8,9 +8,9 @@ description: Editor de vídeos curtos por comando (Instagram Reels/Stories/Feed,
 ## Como rodar
 
 Prefira o servidor MCP `dmaker` (`list_templates`, `new_from_template`, `save_project`, `validate_project`,
-`render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP, use a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se faltar
+`render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP, a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se falta
 ffmpeg). `dmaker ui` abre a interface gráfica; `render_project`/`export_project` já abrem sozinhos para o
-usuário acompanhar (`show_ui=false` só se ele pedir para não abrir). `dmaker agent` opera o editor por
+usuário acompanhar (`show_ui=false` só se ele pedir). `dmaker agent` opera o editor por
 conversa com um modelo local, sem internet (`dmaker://guide`).
 
 ## Fluxo de trabalho (sempre nessa ordem)
@@ -22,7 +22,7 @@ conversa com um modelo local, sem internet (`dmaker://guide`).
    (duas câmeras, corte automático) seguido de `plan_multicam` (ver `dmaker://guide`).
 3. **Criar o projeto**: `new_from_template(template, name, params)` é o caminho preferido; erro nomeia o
    parâmetro que falta. Sem template que sirva, inspecione as fontes (`probe_media`, nunca chute duração)
-   e escreva a spec com `save_project` (referência completa em `dmaker://guide`).
+   e escreva a spec com `save_project` (`dmaker://guide`).
 4. **Validar**: `validate_project` (duração final, avisos de limite e de marca).
 5. **Preview**: `render_project(preview=true)`.
 6. **Conferir com `qa_report`**: checagens automáticas (zona segura, ritmo, contraste, legendas, e com
@@ -36,15 +36,15 @@ conversa com um modelo local, sem internet (`dmaker://guide`).
 
 ## O que continua sendo decisão da IA
 
-O software não decide sozinho: os cortes, o ritmo, qual câmera aparece em cada momento (multicâmera) e
-quais tomadas usar são chamadas de edição. Peça os instantes ao usuário ou avalie com
+O software não decide sozinho os cortes, o ritmo, a câmera de cada momento (multicâmera) nem as tomadas:
+são chamadas de edição. Peça os instantes ao usuário ou avalie com
 `contact_sheet`/`frames` nas fontes antes de montar a timeline. Exceções: gravação falada (`autocut`
 corta pausas, vícios e repetições; `list_cuts`, `undo_cut`; nunca à mão com o Whisper) e cerimônia (bloco
 `multicam` + `plan_multicam`: ritmo plausível por fase da fala; o ajuste fino é `edit_project`, pelos avisos).
 
 ## Regras da marca MedlyCare (`"brand": "medlycare"`)
 
-Cores, fonte e logos vêm do tema da marca automaticamente, não escreva valores na mão. Nunca travessão
+Cores, fonte e logos vêm do tema, não escreva valores na mão. Nunca travessão
 nem meia-risca em texto na tela (vírgula, ponto ou dois-pontos no lugar); `validate_project` avisa. CTA
 sempre `medlycare.com.br`; oferta atual: teste grátis de 3 meses sem cartão. Vocabulário e nomes próprios
 da marca (para a transcrição acertar) já vêm no tema; `captions.vocabulary`/`replacements` somam com os
@@ -65,11 +65,13 @@ Dublar para outro idioma (uma voz clonada por pessoa, fundo mantido): `dub_prepa
 
 ## Quando ler `dmaker://guide`
 
-O manual completo (recurso MCP `dmaker://guide`, ou ferramenta `dmaker_guide`) tem a referência inteira da
-spec (todos os campos de trecho, sobreposição, reenquadramento, cor), a tabela de presets, multicâmera e
-áudio externo, picture-in-picture, o formato de `edit_project`/`timeline_view`, legendas automáticas e
-receitas prontas. Leia quando for escrever uma spec na mão, usar multicâmera, picture-in-picture ou uma
-operação de `edit_project` que não lembra o formato.
+O manual completo (recurso MCP `dmaker://guide`, ou ferramenta `dmaker_guide`) traz a referência inteira da
+spec (trecho, sobreposição, reenquadramento, cor), presets, multicâmera e áudio externo, picture-in-picture,
+o formato de `edit_project`/`timeline_view`, legendas e receitas. Leia ao escrever uma spec na mão, usar
+multicâmera, picture-in-picture ou uma operação de `edit_project` que não lembra o formato.
+
+Animação em código (HTML, three.js, Lottie) sobre o vídeo: `render_html_frame`, `add_html_overlay`;
+contrato no guia ("Composição animada em HTML").
 
 ## Depuração
 
@@ -77,6 +79,6 @@ operação de `edit_project` que não lembra o formato.
 - Grafos em `cache/jobs/<nome>/graph.pretty.txt`, ASS (texto/legendas) em `overlay.ass`.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status`/`list_jobs` acompanham um render em segundo plano, local ou na interface.
-- Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade, uns 2 min).
-- Trilha muda/oculta na interface (campo `tracks` da spec) some também do render final: se áudio ou
-  sobreposição não aparece no vídeo, confira `tracks`.
+- Testes: `.venv\Scripts\python -m pytest` (a integração renderiza de verdade).
+- Trilha muda/oculta na interface (campo `tracks`) some também do render final: áudio ou sobreposição
+  ausente? Confira `tracks`.
