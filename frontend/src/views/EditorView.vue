@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /* O editor de um projeto (/editor/:name). A tela só monta as peças: a barra de ações, a bancada com os encaixes do
-   player, da linha do tempo, dos filtros e da mídia, e as abas do inspetor. Todo o estado mora no store do editor. */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+   player, da linha do tempo, dos filtros e da mídia, e as abas do inspetor. Todo o estado mora no store do editor, e
+   o teclado, no `useEditorShortcuts`. */
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import type { RenderResult } from '@/api'
 import EditorInspector from '@/components/editor/EditorInspector.vue'
 import EditorProjectPicker from '@/components/editor/EditorProjectPicker.vue'
 import EditorToolbar from '@/components/editor/EditorToolbar.vue'
 import EditorWorkbench from '@/components/editor/EditorWorkbench.vue'
+import ShortcutsDialog from '@/components/editor/ShortcutsDialog.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import FileBrowserDialog from '@/components/projects/FileBrowserDialog.vue'
 import JobProgressCard from '@/components/projects/JobProgressCard.vue'
@@ -18,6 +20,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { provideEditorFilePicker } from '@/composables/useEditorFilePicker'
 import { useConfirm } from '@/composables/useConfirm'
+import { useEditorShortcuts } from '@/composables/useEditorShortcuts'
 import { renderResultsFromJob } from '@/lib/outputs'
 import { readStored, writeStored } from '@/lib/storage'
 import { CLASSIC_UI_PATH } from '@/navigation'
@@ -71,18 +74,8 @@ async function confirmLeave(): Promise<boolean> {
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate((to, from) => (to.params.name === from.params.name ? true : confirmLeave()))
 
-function warnBeforeUnload(event: BeforeUnloadEvent): void {
-  if (!editor.dirty) return
-  event.preventDefault()
-  event.returnValue = ''
-}
-
-// Ctrl+S salva o projeto; os demais atalhos do editor chegam com a linha do tempo
-function onKeydown(event: KeyboardEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
-  event.preventDefault()
-  if (editor.status === 'ready') void editor.save()
-}
+// o teclado do editor (Ctrl+S, a linha do tempo, o player) e o aviso ao fechar a aba com mudança não salva
+useEditorShortcuts()
 
 // um render deste projeto terminou: as saídas se atualizam e, se saiu vídeo, a aba Preview abre nele
 const stopListening = jobs.onJobEnd(async (job) => {
@@ -91,16 +84,7 @@ const stopListening = jobs.onJobEnd(async (job) => {
   if (job.status === 'done' && renderResultsFromJob(job.result).length > 0) tab.value = 'preview'
 })
 
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
-  window.addEventListener('beforeunload', warnBeforeUnload)
-})
-
-onBeforeUnmount(() => {
-  stopListening()
-  window.removeEventListener('keydown', onKeydown)
-  window.removeEventListener('beforeunload', warnBeforeUnload)
-})
+onBeforeUnmount(stopListening)
 
 function showRendered(_result: RenderResult): void {
   tab.value = 'preview'
@@ -155,6 +139,7 @@ function showRendered(_result: RenderResult): void {
       <EditorInspector :model-value="tab" @update:model-value="chooseTab" />
     </div>
 
+    <ShortcutsDialog />
     <FileBrowserDialog
       v-model:open="picker.open.value"
       mode="file"

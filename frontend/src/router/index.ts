@@ -3,6 +3,8 @@ import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 declare module 'vue-router' {
   interface RouteMeta {
     title: string
+    /** A tela usa a largura toda da janela, sem o limite de leitura do conteúdo (o editor, por causa da linha do tempo). */
+    wide?: boolean
   }
 }
 
@@ -128,7 +130,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         name: 'editor',
         component: () => import('@/views/EditorView.vue'),
         props: true,
-        meta: { title: 'Editor' },
+        meta: { title: 'Editor', wide: true },
       },
       {
         path: '/:rest(.*)*',

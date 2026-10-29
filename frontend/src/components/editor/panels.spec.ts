@@ -14,10 +14,10 @@ describe('registro de painéis do editor', () => {
     expect(panelsIn('inspector').map((panel) => panel.id)).toEqual(['properties', 'json', 'captions', 'preview'])
   })
 
-  it('os painéis do inspetor e o player existem; os outros da bancada esperam ser plugados (load: null)', () => {
+  it('os painéis do inspetor, o player e a linha do tempo existem; Mídia e Filtros esperam ser plugados (load: null)', () => {
     for (const panel of panelsIn('inspector')) expect(panel.load, panel.id).toBeTypeOf('function')
     for (const panel of panelsIn('workbench')) {
-      if (panel.id === 'player') expect(panel.load, panel.id).toBeTypeOf('function')
+      if (panel.id === 'player' || panel.id === 'timeline') expect(panel.load, panel.id).toBeTypeOf('function')
       else expect(panel.load, panel.id).toBeNull()
     }
   })
@@ -27,9 +27,9 @@ describe('registro de painéis do editor', () => {
   })
 
   it('componentOf devolve null para painel sem componente e o mesmo componente em chamadas seguidas', () => {
-    const timeline = EDITOR_PANELS.find((panel) => panel.id === 'timeline')!
+    const filters = EDITOR_PANELS.find((panel) => panel.id === 'filters')!
     const json = EDITOR_PANELS.find((panel) => panel.id === 'json')!
-    expect(componentOf(timeline)).toBeNull()
+    expect(componentOf(filters)).toBeNull()
     const first = componentOf(json)
     expect(first).not.toBeNull()
     expect(componentOf(json)).toBe(first)

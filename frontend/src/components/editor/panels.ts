@@ -30,7 +30,7 @@ export const EDITOR_PANELS: EditorPanelDef[] = [
   { id: 'media', title: 'Mídia', zone: 'workbench', load: null },
   { id: 'player', title: 'Player', zone: 'workbench', load: () => import('./PlayerPanel.vue') },
   { id: 'filters', title: 'Filtros', zone: 'workbench', load: null },
-  { id: 'timeline', title: 'Linha do tempo', zone: 'workbench', load: null },
+  { id: 'timeline', title: 'Linha do tempo', zone: 'workbench', load: () => import('./TimelinePanel.vue') },
   // inspetor
   { id: 'properties', title: 'Propriedades', zone: 'inspector', load: () => import('./PropertiesPanel.vue') },
   { id: 'json', title: 'JSON', zone: 'inspector', load: () => import('./JsonPanel.vue') },

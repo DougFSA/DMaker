@@ -8,11 +8,15 @@ import { reply, routedFetch } from '@/test/routedFetch'
 import { useConfirmStore } from '@/stores/confirm'
 import { useEditorStore } from '@/stores/editor'
 import { useJobsStore } from '@/stores/jobs'
+import { useKeymapStore } from '@/stores/keymap'
+import { usePlayerStore, useScheduler } from '@/stores/player'
 // os painéis carregam sob demanda; já importados, o teste não espera a compilação deles
 import '@/components/editor/CaptionsPanel.vue'
 import '@/components/editor/JsonPanel.vue'
+import '@/components/editor/PlayerPanel.vue'
 import '@/components/editor/PreviewPanel.vue'
 import '@/components/editor/PropertiesPanel.vue'
+import '@/components/editor/TimelinePanel.vue'
 
 let mountedView: VueWrapper | null = null
 
@@ -20,11 +24,14 @@ beforeEach(() => {
   window.localStorage.clear()
   FakeEventSource.reset()
   vi.stubGlobal('EventSource', FakeEventSource)
+  // o relógio do player não anda sozinho: os testes só conferem a velocidade pedida
+  useScheduler({ now: () => 0, request: () => 1, cancel: () => undefined })
 })
 afterEach(() => {
   // a tela escuta o teclado e o fechamento da aba na janela: sem desmontar, o teste seguinte a ouviria também
   mountedView?.unmount()
   mountedView = null
+  useScheduler()
   vi.unstubAllGlobals()
 })
 
@@ -199,5 +206,57 @@ describe('EditorView (/editor/:name)', () => {
     expect(useEditorStore().outputs).toHaveLength(1)
     expect(wrapper.find('[role="tab"][data-state="active"]').text()).toBe('Preview')
     expect(wrapper.find('video[src="/api/file?path=C%3A%2Fout%2Fdemo__instagram-reels.mp4"]').exists()).toBe(true)
+  })
+
+  it('a linha do tempo ocupa o encaixe dela, com a barra de ferramentas e as trilhas', async () => {
+    const { wrapper } = await openRoute('/editor/demo')
+    const slot = wrapper.find('[data-panel="timeline"]')
+    expect(slot.find('.timeline').exists()).toBe(true)
+    expect(slot.find('[role="toolbar"][aria-label="Ferramentas da linha do tempo"]').exists()).toBe(true)
+    expect(slot.findAll('.row').map((row) => row.attributes('data-track-id'))).toEqual(['V1'])
+    expect(slot.text()).not.toContain('ainda não está disponível')
+  })
+
+  it('a rota do editor usa a largura toda da janela, e as outras telas continuam com o limite de leitura', async () => {
+    const { router } = await openRoute('/editor/demo')
+    expect(router.currentRoute.value.meta.wide).toBe(true)
+    await router.push('/projetos')
+    expect(router.currentRoute.value.meta.wide).toBeUndefined()
+  })
+
+  it('os botões F e M escondem e mostram os painéis Filtros e Mídia da bancada', async () => {
+    const { wrapper } = await openRoute('/editor/demo')
+    expect(wrapper.find('[data-panel="filters"]').exists()).toBe(true)
+    await buttonOf(wrapper, 'Filtros')?.trigger('click')
+    expect(wrapper.find('[data-panel="filters"]').exists()).toBe(false)
+    expect(wrapper.find('.workbench--no-filters').exists()).toBe(true)
+    await buttonOf(wrapper, 'Mídia')?.trigger('click')
+    expect(wrapper.find('.workbench--no-media.workbench--no-filters').exists()).toBe(true)
+    await buttonOf(wrapper, 'Filtros')?.trigger('click')
+    await buttonOf(wrapper, 'Mídia')?.trigger('click')
+    expect(wrapper.find('[data-panel="media"]').exists()).toBe(true)
+    expect(wrapper.find('.workbench--no-media').exists()).toBe(false)
+  })
+
+  it('J, K e L agem uma vez só: o teclado é do editor, e o painel do player não tem ouvinte próprio', async () => {
+    // o jsdom não toca mídia: sem isto, tocar escreve "not implemented" no terminal
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    await openRoute('/editor/demo')
+    const player = usePlayerStore()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true }))
+    await settle()
+    expect(player.rate).toBe(1)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))
+    expect(player.rate).toBe(0)
+    play.mockRestore()
+  })
+
+  it('a tecla ? abre a janela de atalhos', async () => {
+    await openRoute('/editor/demo')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true, bubbles: true, cancelable: true }))
+    await settle()
+    expect(useKeymapStore().dialogOpen).toBe(true)
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Atalhos de teclado')
   })
 })

@@ -92,20 +92,6 @@ watch(
   },
 )
 
-/** J, K e L no teclado, como numa ilha de edição: voltar, parar e avançar (repetir dobra a velocidade). Fora de
- * campos de texto, e sem Ctrl/Alt/Cmd, que são dos atalhos do navegador e do editor. */
-function onKeydown(event: KeyboardEvent): void {
-  if (event.ctrlKey || event.metaKey || event.altKey || editor.status !== 'ready') return
-  const target = event.target
-  if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
-  const key = event.key.toLowerCase()
-  if (key === 'j') player.bump(-1)
-  else if (key === 'k') player.pause()
-  else if (key === 'l') player.bump(1)
-  else return
-  event.preventDefault()
-}
-
 onMounted(() => {
   audio = new PlayerAudio(
     () => document.createElement('audio'),
@@ -117,12 +103,10 @@ onMounted(() => {
     audioHost.value,
   )
   media.start()
-  window.addEventListener('keydown', onKeydown)
   syncAudio()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeydown)
   player.pause()
   audio?.dispose()
   audio = null
