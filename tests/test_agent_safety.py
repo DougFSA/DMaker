@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from dmaker.agent.llm import Reply, ToolCall
 from dmaker.agent.loop import AgentLoop
@@ -14,12 +15,14 @@ from dmaker.agent.safety import (
     KnownPaths,
     ToolGate,
     ask_user_about_paths,
+    dub_project_target,
     input_paths,
     looks_like_file_path,
     missing_paths,
     validate_arguments,
 )
 from dmaker.agent.tools import ToolSpec
+from dmaker.pipeline.dubbing import default_project_path
 
 SCHEMA = {
     "type": "object",
@@ -203,6 +206,90 @@ def test_autocut_asks_only_when_it_will_overwrite():
     g.check("autocut", {"source": "a.mp4", "name": "x", "overwrite": True})
 
     assert len(asked.asked) == 1
+
+
+VIDEO = "C:/v/aula.mp4"
+
+
+def default_dub_project(language: str = "en") -> str:
+    """Onde o servidor MCP grava a dublagem de `VIDEO` quando a chamada não diz (a pasta de saída é a do teste)."""
+    return str(default_project_path(Path(VIDEO), language))
+
+
+def test_preparing_the_dubbing_of_a_video_that_already_has_one_asks_before_replacing_it():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project()})
+
+    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en"}) is None
+
+    (request,) = asked.asked
+    assert request.tool == "dub_prepare" and request.kind == "action"
+    assert default_dub_project() in request.question and "para en" in request.question
+    assert "apaga as traduções revisadas" in request.question and request.question.endswith("por cima?")
+    assert "—" not in request.question  # regra da marca: sem travessão no texto que a pessoa lê
+
+
+def test_an_explicit_dubbing_project_that_already_exists_asks_before_replacing_it():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, "C:/dub/minha.dub.json"})
+
+    g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/minha.dub.json"})
+
+    assert [r.question for r in asked.asked] == [
+        "Já existe uma dublagem deste vídeo para en (C:/dub/minha.dub.json), e refazê-la apaga as traduções "
+        "revisadas. Posso refazê-la por cima?"
+    ]
+
+
+def test_the_explicit_project_is_the_destination_even_when_the_default_one_exists():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project()})
+
+    g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/outra.dub.json"})
+
+    assert asked.asked == []  # o padrão não será tocado: o destino é o outro arquivo
+
+
+def test_preparing_a_dubbing_with_no_project_on_disk_asks_nothing():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project("es")})  # há uma dublagem, mas para outro idioma
+
+    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en"}) is None
+    assert (
+        g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/nova.json"})
+        is None
+    )
+
+    assert asked.asked == []
+
+
+def test_the_dubbing_destination_comes_from_the_same_function_the_mcp_server_uses():
+    """O gate não repete a regra do caminho: se o servidor mudar a pasta ou o nome, a pergunta acompanha."""
+    arguments = {"path": VIDEO, "target_language": "en"}
+
+    assert dub_project_target(arguments) == str(default_project_path(Path(VIDEO), "en"))
+    assert dub_project_target({**arguments, "project": "x.dub.json"}) == "x.dub.json"
+    assert dub_project_target({**arguments, "project": ""}) == str(default_project_path(Path(VIDEO), "en"))
+    assert dub_project_target({"path": VIDEO}) is None  # sem idioma a chamada nem chega a gravar
+
+
+def test_a_refused_dubbing_replacement_blocks_the_call_and_tells_the_model_not_to_retry():
+    g = gate(DenyAll(), existing={VIDEO, default_dub_project()})
+
+    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en"})
+
+    assert text is not None and "não autorizou" in text and "Já existe uma dublagem" in text
+    assert "Não execute esta ação" in text
+
+
+def test_other_dubbing_tools_keep_their_own_rules():
+    asked = ApproveAll()
+    g = gate(asked, existing={default_dub_project()})
+
+    g.check("dub_get", {"project": default_dub_project()})
+    g.check("dub_update_segment", {"project": default_dub_project(), "segment_id": "s1", "text": "Hi"})
+
+    assert asked.asked == []  # editar uma fala do projeto que existe não o refaz
 
 
 def test_cloning_a_voice_needs_the_explicit_authorization_of_the_owner():
