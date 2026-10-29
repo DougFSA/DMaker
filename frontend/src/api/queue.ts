@@ -1,5 +1,5 @@
 /* Cliente da fila de narrações longas (queue_routes.py). O andamento chega por SSE em `eventsUrl`:
-   a fila inteira a cada mudança (use `subscribeSse`). */
+   a fila inteira a cada mudança (use `subscribeJson`). */
 import { http } from './http'
 import type {
   QueueAdded,
@@ -34,7 +34,7 @@ export const queueApi = {
     if (request.format) form.append('format', request.format)
     return http.postForm<QueueAdded>(`${base}/upload`, form)
   },
-  /** Tira da fila os itens concluídos, cancelados e que falharam. */
+  /** Tira da fila os itens concluídos e cancelados; os que falharam ficam, para se ler o erro. */
   clearFinished: () => http.post<QueueCleared>(`${base}/clear-finished`),
   pause: (id: string) => http.post<QueueView>(action(id, 'pause')),
   resume: (id: string) => http.post<QueueView>(action(id, 'resume')),
