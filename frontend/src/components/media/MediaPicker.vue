@@ -41,10 +41,16 @@ const toasts = useToastsStore()
 const projectName = computed(() => (props.project === undefined ? workspace.currentProject : props.project))
 const { options, loading, error: loadError } = useProjectMedia(projectName)
 
-const uploaded = ref<{ path: string; name: string } | null>(null)
+// ao voltar à aba, a tela monta o seletor de novo: a escolha que ela guardou no v-model volta como estava
+const restored = picked.value
+const uploaded = ref<{ path: string; name: string } | null>(
+  restored?.origin === 'upload' ? { path: restored.path, name: restored.name } : null,
+)
 const files = ref<File[]>([])
 const uploading = ref(false)
-const choice = ref('')
+const choice = ref(uploaded.value ? UPLOADED_CHOICE : '')
+// a mídia do projeto só aparece depois que a lista chega; até lá a escolha de antes fica esperando (pelo id da entrada)
+let remembered: string | null = restored?.origin === 'project' ? (restored.entry?.id ?? null) : null
 
 const selectOptions = computed<SelectOption[]>(() => {
   const list: SelectOption[] = options.value.map((option) => ({ value: option.value, label: option.label }))
@@ -69,10 +75,19 @@ function choose(value: string): void {
   choice.value = value
 }
 
-/** Mantém a escolha enquanto ela existir; senão cai na primeira mídia do projeto ou no envio. */
+/** Devolve a escolha de antes quando a lista chega; senão mantém a escolha enquanto ela existir ou cai na primeira. */
 watch(
-  selectOptions,
-  (list) => {
+  [selectOptions, loading],
+  ([list]) => {
+    if (remembered !== null) {
+      if (loading.value) return
+      const back = options.value.find((option) => option.entry.id === remembered)
+      remembered = null
+      if (back) {
+        choice.value = back.value
+        return
+      }
+    }
     const stillThere = list.some((option) => option.value === choice.value)
     const projectArrived = !chosenByUser && choice.value === UPLOAD_CHOICE && list.length > 1
     if (stillThere && !projectArrived) return
@@ -81,15 +96,31 @@ watch(
   { immediate: true },
 )
 
+/** Avisa a tela só quando a escolha mudou de verdade: refazer a lista do projeto não deve trocar o objeto guardado. */
+function assign(next: PickedMedia | null): void {
+  const current = picked.value
+  const same =
+    current === next ||
+    (!!current &&
+      !!next &&
+      current.path === next.path &&
+      current.name === next.name &&
+      current.origin === next.origin &&
+      current.entry?.id === next.entry?.id)
+  if (!same) picked.value = next
+}
+
 watch(
-  [choice, options, uploaded],
+  [choice, options, uploaded, loading],
   () => {
+    // a escolha guardada só é revista depois que a lista do projeto chegar
+    if (remembered !== null) return
     if (choice.value === UPLOADED_CHOICE && uploaded.value) {
-      picked.value = { path: uploaded.value.path, name: uploaded.value.name, origin: 'upload', entry: null }
+      assign({ path: uploaded.value.path, name: uploaded.value.name, origin: 'upload', entry: null })
       return
     }
     const option = options.value.find((candidate) => candidate.value === choice.value)
-    picked.value = option ? { path: option.path, name: option.label, origin: 'project', entry: option.entry } : null
+    assign(option ? { path: option.path, name: option.label, origin: 'project', entry: option.entry } : null)
   },
   { immediate: true },
 )

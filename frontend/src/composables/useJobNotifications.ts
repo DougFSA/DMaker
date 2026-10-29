@@ -34,6 +34,9 @@ export function useJobNotifications(router: Router): void {
         description: job.description,
         action: { label: 'Ver saídas', run: () => void router.push({ name: 'outputs' }) },
       })
+    } else if (job.status === 'cancelled') {
+      // parar a pedido (a narração, por exemplo) não é falha: o que já saiu ficou guardado
+      toasts.push({ tone: 'info', title: 'Parado', description: job.description })
     } else {
       toasts.push({
         tone: 'error',

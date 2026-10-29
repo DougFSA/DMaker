@@ -149,6 +149,24 @@ describe('IsolateView (/voz/isolar)', () => {
     expect(wrapper.findAll('audio')).toHaveLength(2)
   })
 
+  it('o arquivo escolhido não volta ao primeiro do projeto ao mudar de aba e voltar', async () => {
+    const SECOND = 'D:/m/aula.mp4'
+    calls = stubSpeechServer({ spec: { name: PROJECT, timeline: [{ type: 'clip', src: CLIP }, { type: 'clip', src: SECOND }] } })
+    const { wrapper, router } = await mountView()
+    await wrapper.findAll('select')[0]!.setValue('project:1')
+
+    await router.push('/voz/trocar')
+    await flushPromises()
+    await router.push('/voz/isolar')
+    await flushPromises()
+    expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('project:1')
+
+    await press(wrapper, 'Isolar voz')
+    await flushPromises()
+    expect(callsTo(calls, 'POST', '/api/speech/isolate')[0]!.body).toMatchObject({ path: SECOND })
+    await finish(wrapper)
+  })
+
   it('sem projeto aberto oferece o envio do arquivo', async () => {
     localStorage.clear()
     const { wrapper } = await mountView()
