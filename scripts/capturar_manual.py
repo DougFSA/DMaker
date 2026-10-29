@@ -71,6 +71,12 @@ def _wait_images(page: Any) -> None:
     _settle(page, 9000)  # as folhas de contato nascem na primeira visita (ffmpeg) e depois ficam em cache
 
 
+def _fill_clone_voice(page: Any) -> None:
+    page.get_by_label("Nome da voz").first.fill("Locutora da clínica")
+    page.get_by_label("Tenho permissão do dono desta voz para cloná-la").scroll_into_view_if_needed()
+    _settle(page, 600)
+
+
 def _open_tab(tab: str, scroll_to: str | None = None) -> Callable[[Any], None]:
     def prepare(page: Any) -> None:
         page.locator(f'button[data-tab="{tab}"]').click()
@@ -91,6 +97,7 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-lote.png", "/lote", height=1000, prepare=_fill_batch(sheet)),
         Shot("ui-transicoes.png", "/transicoes", prepare=_wait_images),
         Shot("ui-looks.png", "/looks", prepare=_wait_images),
+        Shot("ui-voz-vozes.png", "/voz", height=1250, prepare=_fill_clone_voice),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),
         Shot("classica-dublar.png", "/classica", height=900, prepare=_open_tab("voice", "#dub-source")),
