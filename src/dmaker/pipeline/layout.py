@@ -18,6 +18,7 @@ from ..domain.timeline import segment_duration, timeline_spans, transitions_of
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
 from .context import Prober
+from .missing import MissingMedia
 from .sources import Source, expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 
@@ -40,19 +41,23 @@ class ProjectLayout:
 
 
 def project_layout(
-    project: Project, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+    project: Project,
+    prober: Prober = probe,
+    offset_finder: OffsetFinder | None = None,
+    missing: MissingMedia | None = None,
 ) -> ProjectLayout:
     """Resolve fontes (sincronizando as que forem `sync: "auto"`, encadeando as fontes com `parts`),
     parte a linha do tempo nas fronteiras dos arquivos e calcula duração/intervalo de cada trecho
-    físico, já descontando transições."""
+    físico, já descontando transições. Com `missing`, um arquivo ausente vira um substituto em vez de
+    derrubar o cálculo: é como o editor abre um projeto cuja fonte foi movida."""
     theme = load_theme(project.brand, project.theme)
     preset = get_preset(project.output.preset)
     finder = offset_finder or ffmpeg_offset_finder(SubprocessRunner(quiet=True))
     store = (project.base_dir / "sync.json") if project.base_dir else None
-    resolution = SyncResolver(finder, prober=prober).resolve(project, store)
-    session = resolve_session(project, prober, resolution.offsets, resolution.parts)
+    resolution = SyncResolver(finder, prober=prober, missing=missing).resolve(project, store)
+    session = resolve_session(project, prober, resolution.offsets, resolution.parts, missing)
     physical, origin = expand_parts(project, session, resolution.parts)
-    sources = resolve_sources(physical, prober, session)
+    sources = resolve_sources(physical, prober, session, missing)
     durations = [
         segment_duration(seg, s.info, s.offset) for seg, s in zip(physical.timeline, sources, strict=True)
     ]

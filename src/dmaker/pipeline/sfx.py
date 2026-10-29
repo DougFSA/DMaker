@@ -6,10 +6,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.sfx import SfxItem
+from ..domain.sfx import SfxItem, plan_sfx
 from ..domain.spec import Project
-from ..filtergraph.sfx import FALLBACK_VOICE_PEAK_DB, sfx_gain_db
+from ..filtergraph.sfx import FALLBACK_VOICE_PEAK_DB, sfx_gain_db, voice_reference_db
 from ..sfx import SfxNotFound, resolve_sound
+from .context import RenderContext
 
 
 @dataclass(frozen=True)
@@ -41,3 +42,43 @@ def level_tracks(resolved: Sequence[tuple[SfxItem, Path]], reference_db: float |
     return [
         SfxTrack(path, item.at, sfx_gain_db(item.volume, reference), item.origin) for item, path in resolved
     ]
+
+
+def leveled_effects(
+    ctx: RenderContext,
+    voice_level_meter,
+    prepared,
+    transitions,
+    spans,
+    total: float,
+    voiceovers,
+    video_overlays=(),
+    voice_files=(),
+) -> list[SfxTrack]:
+    """Efeitos sonoros do projeto (`audio.sfx` e os de entrada), com o nível acertado contra a voz.
+
+    A voz é medida sozinha (barato, só áudio) e só quando há efeitos; na simulação não se mede nada. É a mesma
+    conta para o render e para a prévia da linha do tempo.
+    """
+    items = plan_sfx(ctx.project, spans)
+    if not items:
+        return []
+    resolved = resolve_files(ctx.project, items)
+    reference = None
+    if not ctx.options.dry_run:
+        voice = voice_level_meter.measure(
+            ctx, prepared, transitions, total, voiceovers, video_overlays, voice_files
+        )
+        if voice is not None:
+            audio = ctx.project.audio
+            target = None if audio.normalize == "off" else audio.target_lufs
+            reference = voice_reference_db(voice.loudness, voice.true_peak, target)
+    ctx.log(
+        f"efeitos sonoros: {len(items)}"
+        + (
+            f" (pico de referência da voz {reference:.1f} dBFS)"
+            if reference is not None
+            else " (sem voz medida)"
+        )
+    )
+    return level_tracks(resolved, reference)

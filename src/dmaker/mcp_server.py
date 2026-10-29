@@ -265,15 +265,13 @@ def edit_project(name: str, op: dict) -> dict:
     )
 )
 def timeline_view(name: str) -> dict:
-    from .pipeline.layout import project_layout
     from .pipeline.projects import load_project
-    from .pipeline.timeline_view import build_timeline_view
+    from .pipeline.timeline_service import project_timeline_view
     from .pipeline.voiceover import view_narration_durations
 
     project = load_project(name)
-    layout = project_layout(project)
     durations = view_narration_durations(project)
-    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
+    return project_timeline_view(project, durations).to_dict()
 
 
 @server.tool(

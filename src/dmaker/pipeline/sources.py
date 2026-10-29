@@ -9,6 +9,7 @@ from pathlib import Path
 from ..domain.spec import CardSegment, ClipSegment, Project, VideoOverlay
 from ..media.probe import MediaInfo
 from .context import Prober
+from .missing import MissingMedia
 from .partsync import PartOffsets
 
 EPS = 1e-6  # tolerância de ponto flutuante ao conferir cobertura contínua entre partes
@@ -51,14 +52,26 @@ def physical_source_names(project: Project, name: str) -> list[str]:
     return [name]
 
 
+def _probe_present(path: Path, prober: Prober, missing: MissingMedia | None, error: str) -> MediaInfo:
+    """Mede o arquivo. Se ele não existe: falha com `error`, ou, quando o editor tolera arquivo ausente
+    (`missing`), devolve o substituto dele."""
+    if path.exists():
+        return prober(path)
+    if missing is None or not missing.covers(path):
+        raise FileNotFoundError(error)
+    return missing.stand_in(path)
+
+
 def resolve_session(
     project: Project,
     prober: Prober,
     offsets: dict[str, float],
     part_offsets: PartOffsets | None = None,
+    missing: MissingMedia | None = None,
 ) -> dict[str, Source]:
     """Fontes nomeadas (câmeras e gravadores) com seus deslocamentos. Fonte com `parts` vira uma
-    entrada por parte, com nome interno `nome#k` (o início de cada uma vem de `part_offsets`)."""
+    entrada por parte, com nome interno `nome#k` (o início de cada uma vem de `part_offsets`).
+    `missing` deixa o editor abrir o projeto com um arquivo ausente (ver `pipeline/missing.py`)."""
     part_offsets = part_offsets or {}
     session: dict[str, Source] = {}
     for name, ref in project.sources.items():
@@ -68,24 +81,28 @@ def resolve_session(
                 raise ValueError(f"sources.{name}: sincronização das partes não foi calculada")
             for k, (filename, start) in enumerate(zip(ref.parts, starts, strict=True)):
                 path = project.resolve(filename)
-                if not path.exists():
-                    raise FileNotFoundError(
-                        f"sources.{name}: parte {k} não encontrada: {filename} (procurado em {path})"
-                    )
+                info = _probe_present(
+                    path,
+                    prober,
+                    missing,
+                    f"sources.{name}: parte {k} não encontrada: {filename} (procurado em {path})",
+                )
                 key = part_name(name, k)
-                session[key] = Source(path, prober(path), start, ref.audio_stream, key)
+                session[key] = Source(path, info, start, ref.audio_stream, key)
             continue
         path = project.resolve(ref.src)
-        if not path.exists():
-            raise FileNotFoundError(
-                f"sources.{name}: arquivo não encontrado: {ref.src} (procurado em {path})"
-            )
-        session[name] = Source(path, prober(path), offsets.get(name, 0.0), ref.audio_stream, name)
+        info = _probe_present(
+            path, prober, missing, f"sources.{name}: arquivo não encontrado: {ref.src} (procurado em {path})"
+        )
+        session[name] = Source(path, info, offsets.get(name, 0.0), ref.audio_stream, name)
     return session
 
 
 def resolve_sources(
-    project: Project, prober: Prober, session: dict[str, Source] | None = None
+    project: Project,
+    prober: Prober,
+    session: dict[str, Source] | None = None,
+    missing: MissingMedia | None = None,
 ) -> list[Source]:
     session = session or {}
     sources: list[Source] = []
@@ -102,9 +119,9 @@ def resolve_sources(
             sources.append(source)
             continue
         path = project.resolve(seg.src)
-        if not path.exists():
-            raise FileNotFoundError(f"timeline[{i}]: fonte não encontrada: {seg.src} (procurado em {path})")
-        info = prober(path)
+        info = _probe_present(
+            path, prober, missing, f"timeline[{i}]: fonte não encontrada: {seg.src} (procurado em {path})"
+        )
         if isinstance(seg, ClipSegment):
             if info.is_image:
                 raise ValueError(f'timeline[{i}]: {seg.src} é uma imagem; use "type": "image".')

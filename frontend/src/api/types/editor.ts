@@ -64,6 +64,8 @@ export interface TimelineItem {
   extra: Record<string, unknown>
   /** Caminho absoluto resolvido pelo servidor; nulo em cartão, texto e logo. */
   path: string | null
+  /** O arquivo do item não está no disco: o item abre marcado "fonte não encontrada". */
+  missing?: boolean
 }
 
 export interface TimelineTrack {
@@ -83,6 +85,8 @@ export interface TimelineSource {
   offset: number
   in_point: number
   path: string
+  /** Algum arquivo da fonte não está no disco. */
+  missing?: boolean
 }
 
 /** POST /api/projects/{nome}/timeline e o campo `timeline` da resposta de editar. */
@@ -140,8 +144,11 @@ export interface CardPreviewParams {
 
 export interface ProxyEntry {
   src: string
-  proxy: string
+  /** Onde o proxy fica; nulo quando o original sumiu do disco (não há o que gerar). */
+  proxy: string | null
   ready: boolean
+  /** O vídeo original não está no disco. */
+  missing?: boolean
   url: string | null
 }
 
@@ -149,6 +156,26 @@ export interface ProxyEntry {
 export interface ProxiesBuild {
   job: JobSnapshot | null
   proxies: ProxyEntry[]
+}
+
+/* ---------- áudio da prévia ---------- */
+
+/** Em que pé está a mixagem de áudio de uma versão da spec: pronta (com a URL), sendo feita ou falhou. */
+export type PreviewAudioState = 'ready' | 'building' | 'failed'
+
+/** POST e GET /api/projects/{nome}/preview-audio. */
+export interface PreviewAudioStatus {
+  state: PreviewAudioState
+  /** Identifica a parte de áudio da spec: a mesma chave é a mesma mixagem. */
+  key: string
+  url: string | null
+  duration_s: number | null
+  /** O que ficou fora da mixagem (uma narração ainda não sintetizada, por exemplo). */
+  warnings: string[]
+  error: string | null
+  /** A etapa em andamento e o percentual do comando atual. */
+  label: string
+  percent: number
 }
 
 /* ---------- sondagem, forma de onda e sincronização ---------- */

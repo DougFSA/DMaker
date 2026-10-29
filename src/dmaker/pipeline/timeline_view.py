@@ -26,6 +26,7 @@ from ..domain.spec import (
 from ..domain.timeline import stack_lanes as _lane_of
 from ..filtergraph.audio import resolve_span
 from .layout import ProjectLayout, to_presentation
+from .missing import MissingMedia
 from .sources import physical_source_names
 from .track_slices import track_slice, track_window
 from .voiceover import estimate_narration_duration, narration_label
@@ -47,6 +48,7 @@ class TrackItem:
     muted: bool
     extra: dict = field(default_factory=dict)
     path: str | None = None  # caminho absoluto resolvido (project.resolve); None para cartão/texto
+    missing: bool = False  # o arquivo não está no disco: o item abre marcado "fonte não encontrada"
 
 
 @dataclass
@@ -492,11 +494,20 @@ def _captions_track(project: Project, layout: ProjectLayout) -> Track | None:
     return Track(id="CC", kind="captions", label="CC", items=[item], hidden=hidden, locked=locked)
 
 
+def _flag_missing(tracks: list[Track], missing: MissingMedia) -> None:
+    """Marca os itens cujo arquivo (ou algum dos arquivos das partes) está ausente do disco."""
+    for track in tracks:
+        for item in track.items:
+            pieces = [piece["path"] for piece in item.extra.get("pieces", [])]
+            item.missing = missing.covers(item.path, *pieces)
+
+
 def build_timeline_view(
     project: Project,
     layout: ProjectLayout,
     music_duration: float | None = None,
     narration_durations: Sequence[float | None] = (),
+    missing: MissingMedia | None = None,
 ) -> TimelineView:
     """Monta a vista multitrilha: uma faixa por PiP que se sobrepõe, texto, gráficos, a linha do
     tempo principal, o áudio de cada clipe, cada faixa de áudio externa, a música e as legendas.
@@ -506,7 +517,8 @@ def build_timeline_view(
     estimativa pela duração real das narrações já sintetizadas. Cada item
     ganha `path` (caminho absoluto já resolvido pela spec) e cada trilha carrega o mudo/oculto/
     bloqueio salvo em `project.tracks` (`domain.tracks.apply_track_state` aplica o mesmo estado no
-    render, para a prévia e o vídeo final nunca discordarem)."""
+    render, para a prévia e o vídeo final nunca discordarem). `missing` (ver `pipeline/missing.py`) marca
+    os itens de arquivos que sumiram do disco e traz um aviso por arquivo."""
     physical = layout  # com as `parts` já partidas: de onde vêm o arquivo e o ponto de cada som
     layout = to_presentation(project, layout)
     total = layout.total
@@ -596,6 +608,8 @@ def build_timeline_view(
     if captions_track is not None:
         tracks.append(captions_track)
 
+    missing = missing or MissingMedia()
+    _flag_missing(tracks, missing)
     sources = {
         name: {
             "src": ref.src or ref.parts[0],
@@ -603,6 +617,7 @@ def build_timeline_view(
             "offset": layout.offsets.get(name, 0.0),
             "in_point": 0.0,
             "path": str(project.resolve(ref.src or ref.parts[0])),
+            "missing": missing.covers(*(project.resolve(raw) for raw in ref.files)),
         }
         for name, ref in project.sources.items()
     }
@@ -614,5 +629,5 @@ def build_timeline_view(
         height=layout.preset.height,
         tracks=tracks,
         sources=sources,
-        warnings=[],
+        warnings=[f"Fonte não encontrada: {path}" for path in sorted(missing.paths, key=str)],
     )

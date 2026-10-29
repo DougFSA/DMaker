@@ -29,6 +29,7 @@ from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
 from ..pipeline.batch_files import SHEET_SUFFIXES
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
+from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
 from .agent_routes import build_agent_router
 from .autocut_routes import build_autocut_router
@@ -65,6 +66,7 @@ SHUTDOWN_DELAY_S = 0.3
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
+preview_audio_tasks = PreviewAudioTasks()
 app.include_router(build_voice_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
@@ -149,6 +151,10 @@ class EditRequest(BaseModel):
     op: dict
 
 
+class PreviewAudioRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
+
+
 class LayoutModel(BaseModel):
     """Layout salvo da interface: onde cada painel fica, o tamanho dos divisores e o que está oculto."""
 
@@ -218,8 +224,9 @@ def _summary_dict(summary: Any) -> dict:
 def _proxy_entry(status: Any) -> dict:
     return {
         "src": str(status.src),
-        "proxy": str(status.proxy),
+        "proxy": str(status.proxy) if status.proxy else None,
         "ready": status.ready,
+        "missing": status.missing,
         "url": _file_url(status.proxy) if status.ready else None,
     }
 
@@ -528,11 +535,21 @@ def _narration_durations(project: Project, services: VoiceServices) -> list[floa
     return view_narration_durations(project, services.library, services.synthesizer, services.lexicons)
 
 
+def _timeline_view_dict(project: Project, services: VoiceServices) -> dict:
+    """Vista multitrilha do projeto. Arquivo ausente não derruba: o item abre marcado; o que a spec não
+    deixa calcular de jeito nenhum (ex.: um clipe fora da cobertura da fonte) vira 422 com o motivo."""
+    from ..pipeline.timeline_service import project_timeline_view
+
+    durations = _narration_durations(project, services)
+    try:
+        return project_timeline_view(project, durations).to_dict()
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise _error(422, str(exc)) from exc
+
+
 @app.post("/api/projects/{name}/timeline")
 def project_timeline(name: str, req: TimelineRequest, services: Services) -> dict:
-    from ..pipeline.layout import project_layout
     from ..pipeline.projects import load_project
-    from ..pipeline.timeline_view import build_timeline_view
 
     if req.spec is not None:
         project = _project_from_body(name, req.spec)
@@ -541,30 +558,99 @@ def project_timeline(name: str, req: TimelineRequest, services: Services) -> dic
             project = load_project(name)
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
-    layout = project_layout(project)
-    durations = _narration_durations(project, services)
-    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
+    return _timeline_view_dict(project, services)
 
 
 @app.post("/api/projects/{name}/edit")
 def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
     from ..pipeline.edits import apply_edit
-    from ..pipeline.layout import project_layout
-    from ..pipeline.timeline_view import build_timeline_view
 
     project = _project_from_body(name, req.spec)
     try:
         new_project = apply_edit(project, req.op)
     except EditError as exc:
         raise _error(400, str(exc)) from exc
-    layout = project_layout(new_project)
-    durations = _narration_durations(new_project, services)
-    view = build_timeline_view(new_project, layout, narration_durations=durations)
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
-        "timeline": view.to_dict(),
+        "timeline": _timeline_view_dict(new_project, services),
     }
+
+
+def _preview_audio_builder(services: VoiceServices):
+    """Fábrica do construtor da mixagem da prévia, com os serviços da requisição (ffmpeg, probe, vozes e
+    isolamento) que os testes trocam por dublês; a síntese de voz só é lida do cache, nunca executada."""
+    from ..media.probe import probe
+    from ..pipeline.narration import NarrationService
+    from ..pipeline.preview_audio import PreviewAudioBuilder
+    from ..pipeline.voices import shared_synthesizer
+    from ..voice.lexicon_store import LexiconStore
+
+    def narrator(runner):
+        return NarrationService(
+            services.synthesizer or shared_synthesizer(),
+            runner,
+            lexicons=(services.lexicons or LexiconStore()).for_brand,
+        )
+
+    def make(runner, log):
+        return PreviewAudioBuilder(
+            runner=services.runner or runner,
+            prober=services.prober or probe,
+            library=services.library,
+            narrator=narrator,
+            isolator=services.isolation,
+            log=log,
+        )
+
+    return make
+
+
+def _preview_audio_dict(status: PreviewAudioStatus) -> dict:
+    audio = status.audio
+    return {
+        "state": status.state,
+        "key": status.key,
+        "url": _file_url(audio.path) if audio else None,
+        "duration_s": round(audio.duration, 3) if audio else None,
+        "warnings": status.warnings,
+        "error": status.error,
+        "label": status.label,
+        "percent": status.percent,
+    }
+
+
+@app.post("/api/projects/{name}/preview-audio")
+def request_preview_audio(name: str, req: PreviewAudioRequest, services: Services) -> dict:
+    """Pede o áudio da prévia da linha do tempo: a mixagem do projeto (a spec do corpo, ou a do disco) como o
+    render a faz, num AAC leve. Já pronta no cache, responde `ready` com a URL; senão começa em segundo plano
+    e responde `building` com a chave, que `GET .../preview-audio?key=` acompanha."""
+    from ..pipeline.projects import load_project
+
+    if req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+    try:
+        status = preview_audio_tasks.request(project, _preview_audio_builder(services))
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise _error(422, str(exc)) from exc
+    return _preview_audio_dict(status)
+
+
+@app.get("/api/projects/{name}/preview-audio")
+def get_preview_audio(name: str, key: str, services: Services) -> dict:
+    """Estado da mixagem de uma chave pedida antes (a página consulta isto enquanto ela é feita)."""
+    from ..media.ffmpeg import SubprocessRunner
+
+    builder = _preview_audio_builder(services)(SubprocessRunner(quiet=True), lambda message: None)
+    status = preview_audio_tasks.status(name, key, builder)
+    if status is None:
+        raise _error(404, "mixagem desconhecida: peça de novo com POST")
+    return _preview_audio_dict(status)
 
 
 @app.get("/api/projects/{name}/theme")
@@ -805,7 +891,7 @@ def build_proxies(name: str) -> dict:
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
     status = ProxyBuilder(SubprocessRunner(quiet=True)).status(project)
-    if all(s.ready for s in status):
+    if all(s.ready or s.missing for s in status):
         return {"job": None, "proxies": [_proxy_entry(s) for s in status]}
 
     # a página pode chamar isto duas vezes para o mesmo projeto (hash da URL + clique ao mesmo tempo,

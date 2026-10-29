@@ -14,9 +14,12 @@ describe('registro de painéis do editor', () => {
     expect(panelsIn('inspector').map((panel) => panel.id)).toEqual(['properties', 'json', 'captions', 'preview'])
   })
 
-  it('os painéis do inspetor existem; os da bancada esperam ser plugados (load: null)', () => {
+  it('os painéis do inspetor e o player existem; os outros da bancada esperam ser plugados (load: null)', () => {
     for (const panel of panelsIn('inspector')) expect(panel.load, panel.id).toBeTypeOf('function')
-    for (const panel of panelsIn('workbench')) expect(panel.load, panel.id).toBeNull()
+    for (const panel of panelsIn('workbench')) {
+      if (panel.id === 'player') expect(panel.load, panel.id).toBeTypeOf('function')
+      else expect(panel.load, panel.id).toBeNull()
+    }
   })
 
   it('só a aba Legendas depende de uma condição', () => {
@@ -24,9 +27,9 @@ describe('registro de painéis do editor', () => {
   })
 
   it('componentOf devolve null para painel sem componente e o mesmo componente em chamadas seguidas', () => {
-    const player = EDITOR_PANELS.find((panel) => panel.id === 'player')!
+    const timeline = EDITOR_PANELS.find((panel) => panel.id === 'timeline')!
     const json = EDITOR_PANELS.find((panel) => panel.id === 'json')!
-    expect(componentOf(player)).toBeNull()
+    expect(componentOf(timeline)).toBeNull()
     const first = componentOf(json)
     expect(first).not.toBeNull()
     expect(componentOf(json)).toBe(first)
