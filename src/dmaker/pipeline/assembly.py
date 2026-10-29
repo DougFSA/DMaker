@@ -16,6 +16,7 @@ from ..filtergraph.audiogram import audiogram_graph
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
+from ..filtergraph.html_layer import HtmlBehindLayer, ResolvedHtmlLayer, html_overlay_graph
 from ..filtergraph.overlays import image_overlay_graph
 from ..filtergraph.pip import ResolvedVideoOverlay, pip_audio_graph, video_overlay_graph
 from ..filtergraph.provenance import inherited_provenance_args
@@ -216,11 +217,14 @@ def build_assembly(
     voice_files: Sequence[PreparedVoiceFile] = (),
     visual_gain_db: float = 0.0,
     person_layers: Sequence[ResolvedPersonLayer] = (),
+    html_layers: Sequence[ResolvedHtmlLayer] = (),
 ) -> Assembly:
     """Comando final. O grafo vai em arquivo (graph.txt) e o ASS é referenciado por caminho relativo
     ao diretório do job, o que evita a escapada de `C:` nos filtros. `visual_gain_db` é o ganho que a
     normalização aplica à saída, repetido na cópia do áudio que os audiogramas leem. `person_layers` são os
-    vídeos da pessoa recortada que passam por cima do texto `behind-person` (ver `pipeline/person_layer.py`)."""
+    vídeos da pessoa recortada que passam por cima do texto `behind-person` (ver `pipeline/person_layer.py`).
+    `html_layers` são os vídeos com alfa das composições em HTML (ver `pipeline/html_layer.py`): as da frente entram
+    logo depois das imagens, e as `behind-person` na pilha de trás da pessoa, antes do texto dela."""
     p, o = ctx.project, ctx.options
     inputs = Inputs()
     for item in prepared:
@@ -236,8 +240,8 @@ def build_assembly(
     lines = list(graph.lines)
     cur_v = graph.video or ""
     # a pilha de profundidade vem logo depois da linha do tempo: o que fica atrás da pessoa, depois a pessoa; as
-    # imagens, o PiP, os audiogramas e o ASS da frente entram por cima de tudo isso
-    behind: list[BehindLayer] = []
+    # imagens, as composições da frente, o PiP, os audiogramas e o ASS da frente entram por cima de tudo isso
+    behind: list[BehindLayer] = [HtmlBehindLayer(item, ctx.fps) for item in html_layers if item.behind]
     if layer.has_behind_text:
         behind.append(AssBehindLayer("overlay_behind.ass", _relpath(FONTS_DIR, ctx.job_dir)))
     if behind or person_layers:
@@ -253,6 +257,9 @@ def build_assembly(
         total,
         ctx.scale,
         ctx.preset.safe,
+    )
+    cur_v = html_overlay_graph(
+        lines, inputs, cur_v, [item for item in html_layers if not item.behind], ctx.fps
     )
     cur_v, pip_audio = video_overlay_graph(
         lines,

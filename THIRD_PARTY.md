@@ -43,3 +43,28 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 - **Onde:** `src/dmaker/voice/third_party/openvoice/` (conversor de timbre).
 - **Projeto:** https://github.com/myshell-ai/OpenVoice
 - **Licença:** MIT, texto no arquivo `LICENSE` ao lado do código. Origem e o que foi copiado em `ORIGEM.md`.
+
+## three.js
+
+- **Onde:** `assets/html/three.module.min.js` e `assets/html/three.core.min.js` (a versão minificada em módulo, que
+  importa o núcleo), servidos às composições em HTML em `/_dmaker/` (o DMaker não roda JavaScript de terceiros
+  fora do navegador da composição).
+- **Projeto:** https://github.com/mrdoob/three.js, pacote `three` do npm, versão **0.185.1**, baixada do registro
+  oficial do npm (`npm pack three@0.185.1`); só os dois arquivos de `build/` e o `LICENSE` foram copiados.
+- **Licença:** MIT (Copyright 2010-2026 three.js authors), texto em `assets/html/LICENSE-three.txt`.
+
+## lottie-web
+
+- **Onde:** `assets/html/lottie.min.js` (o player completo, minificado), servido às composições em HTML em
+  `/_dmaker/lottie.min.js`, para tocar animações Lottie (`.json`) com o relógio controlado pelo DMaker.
+- **Projeto:** https://github.com/airbnb/lottie-web, pacote `lottie-web` do npm, versão **5.13.0**, baixada do
+  registro oficial do npm (`npm pack lottie-web@5.13.0`); só `build/player/lottie.min.js` e o `LICENSE.md` foram
+  copiados.
+- **Licença:** MIT (Copyright 2015 Bodymovin), texto em `assets/html/LICENSE-lottie-web.txt`. A licença de cada
+  animação Lottie que alguém usar numa composição é da animação, não da biblioteca: confira antes de publicar.
+
+## GSAP
+
+- **Não vendorizado.** A licença do GSAP é própria (não é MIT) e o DMaker não a distribui. Se uma composição trouxer
+  o GSAP junto dos arquivos dela, o relógio virtual do DMaker o controla; a decisão de usá-lo e a licença são de
+  quem o traz.

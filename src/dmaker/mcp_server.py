@@ -1010,6 +1010,102 @@ def frames(video: str, times: list[float], width: int = 540) -> list:
 
 
 @server.tool(
+    description=(
+        "Renderiza um quadro de uma composição HTML (a animação que você escreveu em HTML, CSS e JavaScript, "
+        "inclusive three.js e Lottie) no instante `at`, direto nele, e devolve a imagem. Use antes de pôr a "
+        "composição no projeto, para conferir o desenho, o tamanho e os avisos (rede bloqueada, erro de "
+        "JavaScript). `src` é o arquivo .html ou a pasta com index.html (relativo à pasta do projeto, se "
+        "`project` vier); `size` é LARGURAxALTURA em px na base 1080 (a área onde a composição entra); `data` "
+        "chega à página como dmaker.data; `background` é a cor por baixo, para ver o transparente. Custa tokens "
+        "de imagem."
+    ),
+    structured_output=False,
+)
+def render_html_frame(
+    src: str,
+    at: float = 0.0,
+    size: str = "1080x1920",
+    duration: float = 5.0,
+    data: dict | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    background: str = "#808080",
+) -> list:
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.html_frame import render_html_frame as _render_frame
+    from .pipeline.projects import load_project
+
+    source = load_project(project).resolve(src) if project else Path(src)
+    result = _render_frame(
+        source,
+        default_frame_path(config.OUTPUT_DIR, source, at),
+        at=at,
+        size=parse_size(size),
+        duration=duration,
+        data=data,
+        brand=brand,
+        background=background,
+    )
+    return [
+        {
+            "image": str(result.path),
+            "at_s": at,
+            "size": f"{result.size[0]}x{result.size[1]}",
+            "warnings": result.warnings,
+        },
+        Image(path=result.path),
+    ]
+
+
+@server.tool(
+    description=(
+        "Põe uma composição HTML (type html) nas sobreposições do projeto e salva. `src` é o arquivo .html ou a "
+        "pasta com index.html, relativo à pasta do projeto. O lugar é uma `region` do projeto ou o centro "
+        "`x`/`y` com `width`/`height` (frações do quadro; sem nada, o quadro todo). `layer` é `front` ou "
+        "`behind-person` (atrás da pessoa); `data` chega à página como dmaker.data; `motion_blur` liga o "
+        "borrão de movimento. Confira o desenho com render_html_frame antes e rode validate_project depois."
+    )
+)
+def add_html_overlay(
+    name: str,
+    src: str,
+    start: float = 0.0,
+    end: float | None = None,
+    region: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    layer: Literal["front", "behind-person"] = "front",
+    data: dict | None = None,
+    motion_blur: bool = False,
+) -> dict:
+    from .pipeline.html_frame import insert_html_overlay
+    from .pipeline.projects import load_project, summarize
+    from .pipeline.projects import save_project as _save
+
+    overlay: dict[str, Any] = {"src": src, "start": start, "layer": layer, "motion_blur": motion_blur}
+    for field_name, value in (
+        ("end", end),
+        ("region", region),
+        ("x", x),
+        ("y", y),
+        ("width", width),
+        ("height", height),
+        ("data", data),
+    ):
+        if value is not None:
+            overlay[field_name] = value
+    project = insert_html_overlay(load_project(name), overlay)
+    path = _save(project)
+    return {
+        "spec_path": str(path),
+        "overlay_index": len(project.overlays) - 1,
+        **_summary_dict(summarize(project)),
+    }
+
+
+@server.tool(
     description="Gera um cartão (PNG) com o visual da marca, para aprovar o design antes do render.",
     structured_output=False,
 )

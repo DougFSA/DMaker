@@ -1,16 +1,23 @@
-"""Instalação das dependências externas dentro da pasta do projeto: FFmpeg (bin/ffmpeg) e Poppins (assets/fonts)."""
+"""Instalação das dependências externas dentro da pasta do projeto: FFmpeg (bin/ffmpeg), Poppins (assets/fonts) e,
+a pedido (`dmaker setup --html`), o Chromium do Playwright (bin/playwright)."""
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
+import subprocess
+import sys
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 
+from . import config
 from .config import BIN_DIR, FFMPEG_DIR, FONTS_DIR, find_tool
+from .media.browser import BROWSERS_PATH_VAR, browser_problem, playwright_env
 
 console = Console()
 
@@ -102,3 +109,21 @@ def install_fonts(force: bool = False) -> list[Path]:
         download(POPPINS_BASE + "OFL.txt", license_file, "OFL.txt")
     console.print(f"[green]Poppins pronta em[/green] {FONTS_DIR} ({len(done)} arquivos)")
     return done
+
+
+def install_chromium(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Path:
+    """Instala o Chromium do Playwright em `bin/playwright`, dentro do clone: a pasta compartilhada
+    `%LOCALAPPDATA%/ms-playwright` não é do DMaker, e apagar o clone leva o navegador junto. Exige o extra
+    `html` (que traz o pacote `playwright`). `run` entra por injeção para o teste não baixar 120 MB."""
+    if importlib.util.find_spec("playwright") is None:
+        raise RuntimeError(browser_problem() or "O Playwright não está instalado.")
+    target = config.PLAYWRIGHT_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    console.print(f"Baixando o Chromium (cerca de 120 MB) para {target}")
+    result = run([sys.executable, "-m", "playwright", "install", "chromium"], env=playwright_env())
+    if result.returncode != 0:
+        raise RuntimeError(f"O playwright não conseguiu instalar o Chromium (código {result.returncode}).")
+    if browser_problem() is not None:
+        raise RuntimeError(f"O Chromium foi baixado, mas não está em {target} ({BROWSERS_PATH_VAR}).")
+    console.print(f"[green]Chromium pronto em[/green] {target}")
+    return target
