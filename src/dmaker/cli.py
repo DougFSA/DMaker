@@ -1116,7 +1116,7 @@ def agent(
 
     Cortes na mão, ritmo e textos da marca continuam sendo trabalho de uma IA maior ou de uma pessoa;
     multicâmera entra só pelo caminho automático (template com bloco `multicam` + `plan_multicam`).
-    Veja a seção "Operador local com Ollama" do README.
+    Veja o capítulo "Usando com LLM local (Ollama)" do manual (docs/MANUAL.md).
     """
     import os
 
@@ -1172,6 +1172,181 @@ def agent(
         answer = _ask(message)
         if answer is not None:
             console.print(answer, markup=False)
+
+
+# ---------- manual: partes geradas, exportação e ajuda ----------
+
+manual_app = typer.Typer(
+    help="Manual: regenera as partes automáticas (referência, docs/ia) e exporta em PDF e HTML.",
+    no_args_is_help=True,
+)
+app.add_typer(manual_app, name="manual")
+
+
+@manual_app.command("build")
+def manual_build(
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Só confere: sai com erro se `build` mudaria algum arquivo."),
+    ] = False,
+) -> None:
+    """Regenera o que o manual tira do código (comandos, ferramentas MCP, campos da spec, índice) e `docs/ia`."""
+    from rich.markup import escape
+
+    from .manual import service
+    from .manual.build import ManualBuildError
+
+    try:
+        names = service.check() if check else service.build()
+    except ManualBuildError as exc:
+        _fail(escape("O manual não fecha com o código:\n" + "\n".join(f"  - {p}" for p in exc.problems)))
+    except (FileNotFoundError, service.NotACheckout) as exc:
+        _fail(escape(str(exc)))
+    if check:
+        if names:
+            _fail(
+                "O manual está desatualizado; rode `dmaker manual build`:\n"
+                + "\n".join(f"  - {n}" for n in names)
+            )
+        console.print("[green]O manual está em dia com o código.[/green]")
+        return
+    if not names:
+        console.print("[green]Nada mudou:[/green] o manual já estava em dia.")
+        return
+    console.print(f"[green]{len(names)} arquivo(s) atualizado(s):[/green]")
+    for name in names:
+        console.print(f"  {name}", markup=False)
+
+
+@manual_app.command("export")
+def manual_export(
+    pdf: Annotated[bool, typer.Option("--pdf", help="Só o PDF (sem nenhuma opção, gera os dois).")] = False,
+    html: Annotated[bool, typer.Option("--html", help="Só o HTML de página única.")] = False,
+    out: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/manual).")] = None,
+) -> None:
+    """Exporta o manual em HTML de página única e PDF, com as imagens e o sumário navegável."""
+    from rich.markup import escape
+
+    from .manual import service
+    from .media.browser import BrowserUnavailable
+
+    both = not pdf and not html
+    try:
+        report = service.export_manual(out, html=html or both, pdf=pdf or both)
+    except (FileNotFoundError, BrowserUnavailable) as exc:
+        _fail(escape(str(exc)))  # a mensagem traz ".[docs]", que o Rich leria como marcação
+    for path in (report.html_path, report.pdf_path):
+        if path:
+            console.print(
+                f"[green]Pronto:[/green] {path}  ({path.stat().st_size / 1e6:.1f} MB)", highlight=False
+            )
+    if report.pages:
+        console.print(f"  PDF com {report.pages} páginas")
+    if report.missing_images:
+        console.print(f"[yellow]Imagens não encontradas:[/yellow] {', '.join(report.missing_images)}")
+
+
+@app.command()
+def ajuda(
+    pergunta: Annotated[str, typer.Argument(help="Sua dúvida, em português.")],
+    model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
+    num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    timeout: Annotated[float, typer.Option(help="Espera máxima pela resposta do modelo (s).")] = 900.0,
+    no_model: Annotated[
+        bool,
+        typer.Option("--no-model", help="Só mostra os trechos do manual, sem pedir a resposta ao modelo."),
+    ] = False,
+    offer: Annotated[
+        bool,
+        typer.Option(
+            "--offer/--no-offer", help="Depois da resposta, oferece executar a tarefa pelo agente local."
+        ),
+    ] = True,
+) -> None:
+    """Responde uma dúvida sobre o DMaker em português, com o modelo local e a busca no manual (sem internet).
+
+    A resposta cita a seção do manual. Se a dúvida é uma tarefa que o agente local já sabe fazer, oferece executá-la.
+    """
+    import os
+
+    from .agent.llm import OLLAMA_URL_ENV, OllamaChat
+    from .manual import files, service
+    from .manual.ask import answer_question, search_only, thinking_level
+    from .manual.search import cached_index
+
+    try:
+        index = cached_index(files.read_manual())
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
+    chat = OllamaChat(
+        model=model, base_url=base_url, num_ctx=num_ctx, timeout=timeout, think=thinking_level(model)
+    )
+    usable = not no_model and chat.is_alive() and chat.has_model()
+    if not no_model and not usable:
+        console.print(
+            f"[yellow]O Ollama não está no ar em {base_url} ou falta o modelo '{model}' "
+            f"(`ollama pull {model}`); mostro só os trechos do manual.[/yellow]"
+        )
+    try:
+        if usable:
+            with console.status("lendo o manual...", spinner="dots"):
+                answer = answer_question(pergunta, index, chat, ia_doc=files.read_ia_doc)
+        else:
+            answer = search_only(pergunta, index, ia_doc=files.read_ia_doc)
+    except (OSError, ValueError) as exc:
+        _fail(f"Erro de comunicação com o Ollama: {exc}")
+    console.print(answer.text, markup=False, highlight=False)
+    invented = service.invented_commands(answer.text) if usable else []
+    if invented:
+        console.print(
+            "\n[yellow]Atenção: o modelo citou comando(s) que a CLI não tem. Confira com "
+            "`dmaker COMANDO --help` ou na seção do manual:[/yellow]"
+        )
+        for command in invented:
+            console.print(f"  {command}", markup=False, highlight=False)
+    if answer.sources:
+        console.print("\n[bold]Seções do manual:[/bold]")
+        for source in answer.sources:
+            console.print(f"  {source.section}", markup=False, highlight=False)
+    if offer and usable and answer.task_id and sys.stdin.isatty():
+        _offer_agent(answer.task_id, pergunta, chat)
+
+
+def _offer_agent(task_id: str, question: str, chat) -> None:
+    """Pergunta se o agente local deve executar a tarefa do manual e, se a pessoa aceitar, abre a conversa."""
+    from .agent import AgentLoop, McpToolHost, system_prompt
+    from .agent.prompt import EXTRA_RULES
+    from .manual import service
+
+    offer = service.agent_offer(task_id)
+    if offer is None:
+        return
+    if not offer.runnable:
+        missing = ", ".join(offer.missing_tools)
+        console.print(
+            f"\nO agente local ainda não enxerga estas ferramentas da tarefa '{offer.title}': {missing}. "
+            "Siga o passo a passo do manual ou peça ao Claude."
+        )
+        return
+    if not typer.confirm(f"\nQuer que o agente local execute '{offer.title}' agora?", default=False):
+        return
+    system = system_prompt(extra_rules=f"{EXTRA_RULES}\n## Manual da tarefa\n\n{offer.manual}")
+    loop = AgentLoop(model=chat, tools=McpToolHost(), system=system, on_event=_agent_on_event)
+    message = f"Pedido do usuário: {question}\nSiga o manual da tarefa e pergunte o que faltar."
+    while message:
+        try:
+            with console.status("pensando...", spinner="dots"):
+                console.print(loop.ask(message), markup=False)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Erro de comunicação com o Ollama: {exc}[/red]")
+            return
+        try:
+            message = console.input("[bold]você>[/bold] (vazio encerra) ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            return
 
 
 # ---------- lote: vários vídeos de uma planilha ----------
@@ -1411,9 +1586,10 @@ def voice_say(
         ),
     ] = True,
 ) -> None:
-    """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo
-    com uma etiqueta de procedência (confira com `dmaker voice verify`)."""
+    """Narra um texto. Sem --voice usa a voz automática do OmniVoice (ou a de DMAKER_DEFAULT_VOICE); as vozes
+    prontas (dora, alex, santa) usam o Kokoro, rápido; clones e vozes projetadas usam o OmniVoice (lento na CPU).
+    O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo com uma etiqueta
+    de procedência (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak

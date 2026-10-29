@@ -1,321 +1,48 @@
 # DMaker
 
-Manual completo: [docs/MANUAL.md](docs/MANUAL.md)
+Editor de vídeos curtos **por comando**: você descreve a edição (para uma IA, pela interface ou pela linha de comando) e o DMaker monta, legenda, narra, dubla e renderiza no formato certo de cada plataforma: Instagram (Reels, Stories, Feed), Facebook, YouTube (Shorts e vídeo longo, 1080p ou 4K), TikTok, WhatsApp Status e LinkedIn.
 
-Editor de vídeos curtos **por comando**: você descreve a edição (para o Claude ou direto num JSON), o DMaker monta e renderiza no formato certo de cada plataforma: Instagram (Reels, Stories, Feed), Facebook (Reels, Stories, Feed), YouTube (Shorts, vídeo 1080p/4K), TikTok, WhatsApp Status e LinkedIn.
-
-Base open source: [FFmpeg](https://ffmpeg.org) (corte, transições, áudio, codificação), [libass](https://github.com/libass/libass) (texto e legendas animadas), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (legendas automáticas, roda local) e [Pillow](https://python-pillow.org) (cartões e fundos gerados). Tudo fica dentro desta pasta: FFmpeg em `bin/`, fontes em `assets/`, modelos e cache em `cache/`, renders em `output/`.
+**Manual completo, organizado por tarefa: [docs/MANUAL.md](docs/MANUAL.md).** Procure ali "Quero fazer X, onde está?". Cada tarefa mostra os três caminhos (pela IA, pela interface e pela CLI). Para modelo local pequeno, sem internet, há a versão em arquivos curtos em [docs/ia](docs/ia/llms.txt), a busca `search_manual` e o comando `dmaker ajuda "sua pergunta"`.
 
 ## O que ele faz
 
-- Corta, junta e acelera trechos; transições (fade, wipe, slide, zoom...) entre eles.
-- Reenquadra para qualquer formato: corte com ponto de foco, barras, fundo desfocado ou **fundo da marca** com sombra e cantos redondos (ótimo para prints de tela).
-- Cartões de abertura/encerramento gerados no visual da marca (MedlyCare: blobs, rede, brilhos, Poppins, lockup).
-- Texto na tela com papéis prontos: gancho, título, apoio, CTA em pílula, lower-third, com animações (pop, fade, slide, máquina de escrever). Zonas cobertas pela interface de cada app são respeitadas.
-- **Legendas automáticas** em português com destaque palavra a palavra (estilo Reels), a partir de transcrição local; ou de um `.srt`.
-- Trilha sonora com **ducking** (abaixa quando há voz) e normalização de loudness em duas passadas (-14 LUFS, padrão das redes).
-- Logo/marca d'água, barra de progresso, fotos com movimento (Ken Burns).
-- **Picture-in-picture**: webcam ou segunda câmera sobre o vídeo, em retângulo, cantos redondos ou círculo, com borda, sombra e entrada deslizando (como o Size & Position + Crop Circle do Shotcut). Ideal para mostrar o sistema e aparecer ao mesmo tempo.
-- **Troca de fundo sem chroma key**: recorta a pessoa com uma rede neural de matting de vídeo (RVM, local, na CPU) e põe um fundo liso, branco ou na cor da marca. `"matte": {"background": "#FFFFFF"}` no trecho; o modelo (ResNet50, 100 MB; ou MobileNetV3, 15 MB e mais rápido) é baixado no `setup` ou no primeiro uso.
-- Codificação otimizada por plataforma (H.264 High, faststart, bitrate máximo por formato), preview rápido em baixa resolução, cache de trechos para reedições em segundos.
+- Corta, junta e acelera trechos; transições (inclusive de movimento), looks de cinema e efeitos sonoros.
+- Reenquadra para qualquer formato; cartões, textos com papéis prontos, logo e barra de progresso.
+- **Legendas automáticas** palavra a palavra (também em caixa arredondada, estilo TikTok), a partir de transcrição local.
+- **Cortar pausas e vícios** de uma gravação falada; **vídeo explicativo**; **lote** de vídeos a partir de uma planilha.
+- **Voz local**: narrar um roteiro com a sua voz (clonada com autorização), corrigir uma palavra dita errada sem regravar, trocar a voz, separar voz e fundo, **dublar** para outro idioma. Toda voz gerada sai com marca d'água inaudível e etiqueta de procedência.
+- Multicâmera sincronizada pelo áudio, picture-in-picture e troca de fundo sem tela verde.
+- Operado por **Claude** (servidor MCP), por um **modelo local** (Ollama), pela **interface** (`dmaker ui`) ou pela **CLI**.
 
-## Instalação (passo a passo)
+Base aberta e local: [FFmpeg](https://ffmpeg.org), [libass](https://github.com/libass/libass), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), Pillow, OmniVoice, Kokoro, Demucs e Ollama. Nada é enviado para a internet depois do primeiro download dos modelos.
 
-O DMaker roda no Windows e não instala nada fora da própria pasta. Você vai precisar de:
+## Instalação rápida (Windows)
 
-1. **Python 3.11 ou mais novo.** Abra o PowerShell e digite `py --version`. Se não aparecer uma versão, instale em <https://www.python.org/downloads/> marcando a opção *Add python.exe to PATH*.
-2. **Git** (só para baixar o projeto): <https://git-scm.com/download/win>. Alternativa: baixe o ZIP do repositório no GitHub e descompacte.
-3. **Internet na primeira vez**: o instalador baixa o FFmpeg (~110 MB) e a fonte Poppins. O modelo de legendas (~470 MB) só é baixado no primeiro uso das legendas automáticas.
-
-Depois, no PowerShell:
+Precisa de Python 3.11 ou mais novo e de internet na primeira vez (FFmpeg, ~110 MB, e a fonte). No PowerShell:
 
 ```powershell
-# 1. baixe o projeto (ou descompacte o ZIP) numa pasta, por exemplo D:\DMaker
 git clone https://github.com/DougFSA/DMaker.git D:\DMaker
 cd D:\DMaker
-
-# 2. rode o instalador: cria o ambiente Python, instala as dependências, baixa FFmpeg e fontes
 .\scripts\setup.ps1
-
-# 3. confira se está tudo certo
-.\.venv\Scripts\dmaker.exe doctor
+.\.venv\Scripts\Activate.ps1
+dmaker doctor
 ```
 
-O `doctor` mostra a versão do FFmpeg, se o libass está presente (texto e legendas), fontes, marcas, se o faster-whisper e o MCP estão instalados e qual encoder de hardware existe na máquina. Se o PowerShell bloquear o script (`execution policy`), rode antes: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+Passo a passo, extras (voz, lote, PDF) e atualização: capítulo "Instalação" do [manual](docs/MANUAL.md).
 
-Dica: para não digitar `.\.venv\Scripts\dmaker.exe` toda vez, ative o ambiente com `.\.venv\Scripts\Activate.ps1`; a partir daí basta `dmaker`.
-
-## Interface gráfica (o jeito mais fácil de usar)
+## Primeiros passos
 
 ```powershell
-cd D:\DMaker
-.\.venv\Scripts\dmaker.exe ui
+dmaker ui                                   # a interface, em http://127.0.0.1:8765
+dmaker quick gravacao.mp4 --captions --hook "Três erros ao gravar em casa"
+dmaker ajuda "como dublo um vídeo para inglês?"
+dmaker manual export                        # o manual em PDF e HTML de página única, em output/manual
 ```
 
-O navegador abre em <http://127.0.0.1:8765> (se não abrir, cole o endereço). Deixe a janela do PowerShell aberta enquanto usa; `Ctrl+C` encerra. Na interface você:
+Com o Claude Code aberto nesta pasta, basta pedir em português: "faz um reel de 30 segundos desse vídeo, com legenda e logo". O servidor MCP (`dmaker mcp`) já vem ligado pelo `.mcp.json`.
 
-1. Cria um projeto em **Novo projeto**: nome, formato (Reels, Shorts, YouTube...), marca e os vídeos/fotos, escolhidos no navegador de arquivos.
-2. Ao abrir um projeto, a interface já entra na aba **Linha do tempo**: um editor multitrilha no estilo Shotcut, com um player em cima e as trilhas embaixo (arraste a alça entre os dois para redimensionar). De cima para baixo: `V2`, `V3`... (vídeos em picture-in-picture), `TX` (textos), `GR` (imagens e barra de progresso), `V1` (os trechos principais: vídeo, imagem ou cartão), `A1` (áudio de cada trecho da V1), `A2`... (faixas de áudio externas sincronizadas), `MUS` (música) e `CC` (legendas). Clique ou arraste na régua para mover o cursor; clique num item para selecioná-lo (Ctrl para selecionar vários); arraste o meio de um item para movê-lo (reordena na V1, desloca no tempo nas sobreposições) e as bordas para aparar, com encaixe (snap) nas bordas de outros itens. A barra de ferramentas acima tem cortar, remover, lift, duplicar, aparar até o cursor, snap e zoom; a tabela de atalhos (tecla `?`) tem a lista completa, resumida abaixo.
-3. O player mostra uma **prévia ao vivo aproximada** (sem precisar renderizar): toca o trecho sob o cursor, as sobreposições de texto e imagem, e o picture-in-picture, mas não mostra transições, Ken Burns, legendas nem correção de cor (isso só sai no render). Vídeos em formatos que o navegador não decodifica (HEVC, ProRes...) tocam por um proxy leve em 540p H.264 que a interface gera em segundo plano (`cache/proxy`) só para essa prévia, sem afetar o render final; enquanto o proxy não fica pronto, aparece um aviso na barra de ferramentas. As trilhas de áudio (`A1`, `A2`..., `MUS` e os PiPs com som) mostram a forma de onda, calculada e guardada em cache (`cache/waveform`) na primeira vez que cada arquivo aparece na linha do tempo.
-4. Os campos "clássicos" (preset, fontes sincronizadas, cartões, sobreposições, legendas, áudio) continuam na aba **Propriedades**, como cartões e formulários. A aba **JSON** mostra a mesma spec como texto, para quem prefere.
-5. Clica em **Validar** para ver duração final e avisos, e em **Preview** para gerar uma versão rápida em baixa resolução. O painel **Andamento** mostra cada etapa e a barra de progresso em tempo real; ao terminar, o vídeo aparece na aba **Preview** para assistir, com grade de quadros e captura de quadro.
-6. Quando estiver bom, **Render final** (qualidade de entrega) e, se quiser outros formatos, **Exportar**. Os arquivos ficam em `D:\DMaker\output`.
-7. Se o projeto tem legendas automáticas, a aba **Legendas** deixa corrigir palavras; gere o preview de novo para ver.
+## Para quem desenvolve
 
-Um indicador **não salvo** aparece ao lado do nome do projeto sempre que a linha do tempo, o formulário ou o JSON mudam; `Salvar` (ou `Ctrl+S`) grava a spec em disco. Cortar, mover, aparar, duplicar e remover são "ripple": a V1 nunca fica com buracos.
-
-A aba Linha do tempo tem dois painéis laterais ocultáveis (botões `F`/`M` na barra de ferramentas, estado lembrado entre sessões):
-
-- **Filtros** (esquerda): mostra os grupos de campos do item selecionado (ou do projeto, se nada estiver selecionado) que já saem do padrão, prontos para editar; o botão `+` lista os grupos ainda não aplicados (reenquadrar, cor, velocidade, transição, posição, forma, estilo do texto...) e `Remover` devolve o grupo ao padrão. Edição em campo de texto/número tem um pequeno atraso antes de salvar; select e checkbox aplicam na hora.
-- **Mídia** (direita): lista as fontes sincronizadas e os arquivos já usados na linha do tempo, com miniatura e duração. Arraste um item para a V1 para inserir um trecho na posição solta, ou para uma trilha de vídeo acima da V1/TX/GR para criar uma sobreposição (picture-in-picture ou imagem) começando naquele instante; duplo clique acrescenta no fim da V1. Os botões **Texto**, **Cartão**, **Logo** e **Música** criam cada um no cursor (cartão vai para o fim da V1; música substitui a música de fundo do projeto).
-
-### Atalhos de teclado (aba Linha do tempo)
-
-Inspirados no Shotcut; a lista completa está sempre disponível pela tecla `?`, onde também dá para clicar numa tecla e trocá-la (a próxima combinação apertada vira o novo atalho; um botão **Restaurar padrões** desfaz tudo). As trocas ficam salvas no navegador (localStorage), não na spec do projeto.
-
-| Tecla | Ação |
-| --- | --- |
-| Espaço | Reproduzir / pausar |
-| `K` | Pausar |
-| `J` / `L` | Voltar / avançar (repetir acelera 2x, 4x, 8x) |
-| Setas esquerda/direita | Um quadro para trás/frente |
-| `Alt` + seta esquerda/direita | Edição anterior/seguinte |
-| `Home` / `End` | Ir ao início/fim |
-| `Page Up` / `Page Down` | Voltar/avançar 1 segundo |
-| `S` | Cortar no cursor |
-| `X` ou `Delete` | Remover (ripple) |
-| `Z` | Lift (remove; na V1 avisa que não há lacunas) |
-| `I` / `O` | Aparar entrada/saída até o cursor |
-| `A` | Acrescentar a mídia selecionada (painel Mídia) no fim da V1 |
-| `V` | Inserir a mídia selecionada no cursor |
-| `Ctrl+Z` / `Ctrl+Y` (ou `Ctrl+Shift+Z`) | Desfazer / refazer |
-| `Ctrl+S` | Salvar |
-| `Ctrl+D` | Duplicar |
-| `+` / `-` | Zoom |
-| `0` | Ajustar à janela |
-| `Ctrl+P` | Alternar encaixe (snap) |
-| `Ctrl+M` | Mudo na trilha atual (a do item selecionado, ou a que o mouse está sobre) |
-| `Ctrl+H` | Ocultar a trilha atual |
-| `Ctrl+L` | Bloquear a trilha atual |
-| `Escape` | Limpar seleção |
-| `?` | Mostrar esta lista (clique numa tecla para trocar) |
-
-### Mudo, oculto e bloqueio por trilha
-
-Como no Shotcut, o cabeçalho de cada trilha tem botões `M` (mudo, nas trilhas de áudio: `A1`, `A2`...,
-`MUS`), `H` (ocultar, em `V2`, `V3`..., `TX`, `GR` e `CC`; a `V1` não pode ser ocultada, é a linha do
-tempo principal) e um cadeado (bloqueia seleção e arraste dos itens da trilha, em qualquer uma). O
-estado fica salvo na spec (campo `tracks`, por id de trilha) e vale tanto para a prévia ao vivo quanto
-para o **render final**: uma trilha muda ou oculta na interface não aparece no vídeo exportado. O
-bloqueio só existe na interface, o render ignora.
-
-### Organizando a tela
-
-Como no menu **Layout** do Shotcut, dá para reorganizar a aba Linha do tempo:
-
-- **Arrastar**: segure a barra de título de um painel (Player, Filtros, Linha do tempo ou Mídia) e solte sobre outro para trocar os dois de lugar.
-- **Redimensionar**: arraste os divisores entre o player e a linha do tempo, entre os painéis laterais e o centro, ou entre a barra lateral e o resto da tela.
-- **Ocultar**: o `×` na barra de título de cada painel oculta e mostra (os atalhos `F`/`M` continuam funcionando para Filtros/Mídia).
-- **Trocar de layout**: o seletor **Tela**, na barra superior, tem os layouts embutidos (Edição, Efeitos, Áudio, Player e Revisão) e os que você salvar. **Salvar layout como...** guarda a organização atual com um nome; **Excluir layout atual** remove um layout salvo; **Restaurar padrão** volta para Edição.
-
-O layout em uso fica no navegador (localStorage) e é aplicado ao abrir a página de novo; os layouts salvos com nome ficam no servidor, em `layouts.json` na raiz do projeto (arquivo de dados da pessoa usando, fora do controle de versão).
-
-## Uso
-
-```powershell
-.\.venv\Scripts\dmaker.exe presets                                # formatos disponíveis
-.\.venv\Scripts\dmaker.exe probe video.mp4 foto.jpg                # informações das fontes
-.\.venv\Scripts\dmaker.exe new meu-reel --preset instagram/reels --src a.mp4 b.mp4 --brand medlycare
-.\.venv\Scripts\dmaker.exe validate projects\meu-reel\spec.json
-.\.venv\Scripts\dmaker.exe render projects\meu-reel\spec.json --preview   # rápido, para conferir
-.\.venv\Scripts\dmaker.exe sheet output\meu-reel__instagram-reels__preview.mp4   # grade de quadros
-.\.venv\Scripts\dmaker.exe render projects\meu-reel\spec.json             # final
-.\.venv\Scripts\dmaker.exe export projects\meu-reel\spec.json youtube/shorts facebook/reels
-```
-
-Edição rápida de um único vídeo, sem escrever spec:
-
-```powershell
-.\.venv\Scripts\dmaker.exe quick video.mp4 --preset reels --start 3 --end 33 --captions --logo --brand medlycare --hook "Chega de agenda no papel" --cta "medlycare.com.br"
-```
-
-Outros: `ui` (interface gráfica), `mcp` (servidor para IAs), `sync` (sincronizar câmeras pelo áudio), `captions` (só transcrever), `thumbnail`, `frames`, `card`, `clean`, `setup`, `doctor`.
-
-## Relatório de QA
-
-Antes de gastar tokens olhando imagens (`sheet`/`frames`), `dmaker qa` confere em texto o que dá para checar sem olho humano: zona segura, contraste, ritmo de leitura, sobreposições, legendas e, com `--output`, a saída renderizada (duração, resolução, quadros pretos, silêncio, loudness).
-
-```powershell
-.\.venv\Scripts\dmaker.exe qa projects\meu-reel\spec.json
-.\.venv\Scripts\dmaker.exe qa projects\meu-reel\spec.json --output output\meu-reel__instagram-reels.mp4
-```
-
-`dmaker render` já imprime um resumo desse relatório ao final; pelo MCP, `render_project`/`export_project` devolvem o relatório completo no campo `qa`, e a ferramenta `qa_report` roda a checagem isolada a qualquer momento. Só vale a pena chamar `contact_sheet`/`frames` (que custam tokens de imagem) quando o relatório apontar algo ou o usuário pedir para olhar.
-
-## Templates parametrizados
-
-Em vez de escrever a spec inteira, dá para montar um projeto a partir de um template pronto (`templates/*.json`) passando só o que muda de vídeo para vídeo:
-
-```powershell
-.\.venv\Scripts\dmaker.exe templates                                              # lista os templates e os parâmetros de cada um
-.\.venv\Scripts\dmaker.exe new-from-template reel-medlycare-produto meu-reel `
-    --param titulo="Sua agenda organizada em um clique" `
-    --param prints="C:\prints\1.png,C:\prints\2.png,C:\prints\3.png" `
-    --param cta_titulo="Teste grátis por 3 meses"
-```
-
-Parâmetros também aceitam um JSON só com `--params-json`. Cada template documenta seus parâmetros (tipo, obrigatório, valor padrão); veja o formato completo e a lista de templates em [`templates/README.md`](templates/README.md).
-
-## Falando com o editor
-
-Numa sessão do Claude Code em `D:\DMaker` (ou com a skill `dmaker` instalada), basta pedir:
-
-> "Faz um reel de 30 s desse vídeo, legenda automática, logo do MedlyCare no canto, gancho 'Chega de agenda no papel' e CTA no final. Depois exporta para Shorts."
-
-O Claude inspeciona as fontes, escreve a spec em `projects/<nome>/spec.json`, valida, gera um preview, confere os quadros e renderiza a versão final. O manual completo desse fluxo está em [`.claude/skills/dmaker/SKILL.md`](.claude/skills/dmaker/SKILL.md), com a referência da spec.
-
-## Servidor MCP (qualquer IA)
-
-O DMaker expõe tudo isso como ferramentas MCP, então Claude Desktop, Claude Code, Cursor, Windsurf ou qualquer cliente MCP pode operar o editor:
-
-```powershell
-.\.venv\Scripts\dmaker.exe mcp        # servidor por stdio
-```
-
-Configuração para o cliente (o projeto já traz `.mcp.json` para o Claude Code; para o Claude Desktop, adicione em `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "dmaker": { "command": "D:\\DMaker\\.venv\\Scripts\\dmaker.exe", "args": ["mcp"] }
-  }
-}
-```
-
-Ferramentas: `dmaker_guide` (manual), `spec_schema`, `presets`, `brands`, `probe_media`, `save_project`, `list_templates` e `new_from_template` (criar projeto a partir de um template + parâmetros, o caminho preferido: veja [`templates/README.md`](templates/README.md)), `get_project`, `validate_project`, `edit_project` e `timeline_view` (edições pontuais sem reescrever a spec), `list_projects`, `render_project` (com `job_id` para renders longos), `export_project`, `job_status`, `quick_edit`, `sync_sources`, `transcribe_media`, `read_captions`, `fix_captions`, `qa_report`, `contact_sheet` e `frames` (devolvem **imagens**, para a IA ver o resultado), `render_card_preview`, `clean_cache`. Recursos `dmaker://guide` e `dmaker://schema`; prompt `editar-video`.
-
-`read_captions` e `transcribe_media` devolvem por padrão um modo compacto: um resumo (`digest`, com contagem de cues, palavras e confiança média) e só as cues suspeitas (baixa confiança, termo da marca ouvido errado, cue longa/curta, substituição pendente), em vez das centenas de cues com tempo por palavra de um vídeo longo; use `mode="full"`/`full=true` quando precisar mesmo de tudo.
-
-## Operador local com Ollama
-
-Para tarefas mecânicas (criar projeto por template, renderizar, ler o relatório de QA, corrigir legendas, exportar) dá para usar um modelo pequeno rodando na própria máquina, sem depender de nenhuma sessão de IA em nuvem: `dmaker agent` liga um modelo do [Ollama](https://ollama.com) às mesmas ferramentas do servidor MCP.
-
-Requisitos:
-
-- Ollama instalado e no ar (`ollama serve`, ou o app do Ollama aberto).
-- O modelo baixado: `ollama pull gpt-oss:20b`.
-- 16 GB ou mais de RAM livres; sem GPU a inferência roda na CPU e é lenta (minutos por resposta num pedido com várias ferramentas).
-
-Como usar:
-
-```powershell
-.\.venv\Scripts\dmaker.exe agent                              # conversa no terminal
-.\.venv\Scripts\dmaker.exe agent --once "liste os templates disponíveis"  # um pedido só
-.\.venv\Scripts\dmaker.exe agent --model gpt-oss:20b --url http://127.0.0.1:11434 --num-ctx 16384
-```
-
-No modo de conversa: `/sair` encerra, `/limpar` reinicia o histórico, `/ferramentas` lista o que o agente pode usar. Cada chamada de ferramenta aparece numa linha discreta (`-> render_project(...)`) com o resultado resumido logo abaixo.
-
-O que funciona bem com um modelo pequeno: criar projeto a partir de um template, validar, renderizar (prévia e final), ler `qa_report`, corrigir legendas com `fix_captions` e exportar. Também funciona o casamento padrão da PASCOM: template `casamento-pascom` (duas pastas de câmera, nomes dos casais e data) seguido de `plan_multicam`, que transcreve a câmera do altar, reconhece as fases do rito e monta o corte alternando as câmeras. O que deixar para um modelo maior (Claude, por exemplo) ou para uma pessoa: decidir cortes e ritmo na mão, escolher qual casal fica de frente para qual câmera, escrever spec do zero e aplicar as regras finas de texto da marca; o agente local não tem julgamento para essas decisões.
-
-## Acompanhando renders
-
-Por padrão, **todo render** (pela CLI, pelo MCP ou pela própria interface) aparece na interface gráfica, com barra de progresso, etapa em execução e log: se ela não estiver aberta, sobe sozinha em segundo plano e o navegador abre direto no projeto e no job.
-
-- `dmaker render`/`dmaker export`: some com `--no-ui` para rodar só no terminal, sem tocar na interface.
-- `render_project`/`export_project` (MCP): têm o parâmetro `show_ui` (padrão `true`); a IA só deve usar `show_ui=false` se o usuário pedir para não abrir a interface. Com a interface indisponível (não conseguiu subir), o render cai sozinho no caminho local de sempre.
-- `job_status`/`list_jobs` (MCP) também consultam a interface, então a IA continua acompanhando um job que foi para lá.
-- A variável `DMAKER_UI_URL` (padrão `http://127.0.0.1:8765`) diz onde a interface está ou deve subir; útil se a porta padrão estiver ocupada ou a interface já estiver rodando em outro lugar.
-- Se a interface já estiver aberta com uma versão antiga do código (ex.: subiu antes de uma mudança na spec), o próximo render a detecta e a reinicia sozinha, desde que não haja nenhum job em andamento nela; com um job rodando, ela avisa e segue usando a versão antiga em vez de derrubar o render. Na barra lateral, o botão "Limpar concluídos" da seção Jobs remove da lista os jobs já terminados (feitos ou com erro).
-
-## Vídeos longos, multicâmera e áudio externo
-
-Para um casamento ou evento com duas ou três câmeras e um gravador, declare as fontes e deixe o DMaker sincronizar pelo áudio:
-
-```json
-{
-  "name": "casamento",
-  "output": { "preset": "youtube/video" },
-  "sources": {
-    "cam1": { "src": "D:/casamento/cam1.mp4" },
-    "cam2": { "src": "D:/casamento/cam2.mp4", "sync": "auto" },
-    "gravador": { "src": "D:/casamento/altar.wav", "sync": "auto" }
-  },
-  "timeline": [
-    { "type": "clip", "source": "cam1", "start": 120, "end": 150 },
-    { "type": "clip", "source": "cam2", "start": 150, "end": 200, "transition": { "type": "cut" } }
-  ],
-  "audio": { "tracks": [{ "source": "gravador" }] }
-}
-```
-
-- `sync: "auto"` descobre, por correlação de áudio, em que instante do relógio da câmera principal cada fonte começa (precisão de milissegundos, funciona em horas de gravação). O resultado fica em `sync.json` no projeto. `dmaker sync cam1.mp4 cam2.mp4 altar.wav` mostra os valores e a confiança.
-- Clipes com `source` usam **tempos da sessão** (o relógio da câmera principal), então cortar entre câmeras é só trocar o nome da fonte: os pontos de entrada em cada arquivo são calculados.
-- `audio.tracks` são faixas externas que seguem os cortes e são misturadas ao áudio das câmeras (ajuste o da câmera com `volume` ou `mute` no clipe).
-- Para revisar um trecho de um vídeo longo sem renderizar tudo: `dmaker render spec.json --preview --segments 12-20`.
-- Picture-in-picture (tela + webcam): sobreposição `{"type": "video", "source": "webcam", "shape": "circle", "position": "bottom-right", "width": 0.18, "border": 6}`; exemplo em [`templates/tutorial-tela-webcam.json`](templates/tutorial-tela-webcam.json).
-- Exemplo completo: [`templates/casamento-multicam.json`](templates/casamento-multicam.json). Tempo estimado: cerca de 2x a duração do vídeo em 1080p (mezaninos + render final).
-
-## Estrutura da spec (resumo)
-
-```json
-{
-  "name": "meu-reel",
-  "output": { "preset": "instagram/reels" },
-  "brand": "medlycare",
-  "timeline": [
-    { "type": "card", "title": "Sua agenda em um clique", "duration": 3 },
-    { "type": "clip", "src": "D:/videos/take1.mp4", "start": 2, "end": 14, "transition": { "type": "fade", "duration": 0.5 } },
-    { "type": "image", "src": "print.png", "duration": 4, "motion": "zoom-in" }
-  ],
-  "overlays": [
-    { "type": "image", "src": "logo:symbol", "position": "top-right", "width": 0.11 },
-    { "type": "text", "text": "Chega de agenda no papel", "role": "hook", "start": 3, "end": 7 },
-    { "type": "text", "text": "medlycare.com.br", "role": "cta", "start": 14, "end": 18 },
-    { "type": "progress-bar" }
-  ],
-  "captions": { "source": "auto", "language": "pt" },
-  "audio": { "music": { "src": "trilha.mp3", "volume": 0.18, "ducking": true }, "normalize": "two-pass" }
-}
-```
-
-Exemplos completos em [`templates/`](templates/). Marcas em `assets/brands/<nome>/brand.json` (cores, fonte, logos, vocabulário para o Whisper, regras de texto).
-
-## Estrutura do projeto
-
-```
-DMaker/
-  src/dmaker/
-    domain/       spec (modelo Pydantic), presets, brand, timeline (contas puras)
-    media/        ffmpeg (comando + runner injetável), probe, fonts, matting (recorte de pessoa via ONNX)
-    text/         ass, overlays (texto e legendas), captions (cues/SRT), transcribe (Whisper)
-    visuals/      cards, motion (Ken Burns sub-pixel), reframe_image, geometry
-    filtergraph/  grafos ffmpeg como funções puras (reframe, timeline, overlays, audio, encode, mezzanine)
-    pipeline/     etapas do render (sources, segments, captions, textlayer, assembly, renderer), serviços (projects, jobs, qa)
-    ui/           API FastAPI + página estática (interface gráfica)
-    cli.py        adaptador Typer        mcp_server.py   adaptador MCP
-  tests/          unitários (funções puras, pipeline com ffmpeg/Whisper falsos), integração (ffmpeg real), MCP (stdio)
-  assets/         fonts/ (Poppins, OFL) e brands/medlycare/ (brand.json + logos)
-  templates/      specs de exemplo
-  projects/       seus projetos: <nome>/spec.json (+ captions.auto.json/.srt gerados)
-  output/         renders finais e thumbnails (ignorado pelo git)
-  cache/          mezaninos, grafos, modelos do Whisper (ignorado pelo git)
-  bin/ffmpeg/     FFmpeg baixado pelo setup (ignorado pelo git)
-  scripts/setup.ps1  bootstrap
-```
-
-## Como funciona por dentro
-
-1. Cada trecho vira um **mezanino** (intermediário já no tamanho/fps de saída), guardado em `cache/mez` com chave por conteúdo. Vídeo: corte, velocidade, enquadramento e cor no FFmpeg. Imagens e cartões: reenquadramento no Pillow e **movimento de câmera calculado em ponto flutuante**, quadro a quadro, com easing e reamostragem LANCZOS (o `zoompan` do FFmpeg recorta em pixels inteiros e faz a imagem tremer; há um teste numérico que garante movimento monotônico e suave). Os quadros entram no ffmpeg pelo stdin.
-2. A **montagem** concatena os mezaninos (`concat`/`xfade`/`acrossfade`), aplica sobreposições de imagem, queima um ASS com todo o texto (títulos, legendas, barra de progresso), mistura a música com `sidechaincompress` e normaliza com `loudnorm` (medição em passada separada; silêncio é detectado e pulado).
-3. Codifica no preset da plataforma (libx264 `slow`, CRF 18, `maxrate` por formato, AAC 48 kHz, `+faststart`) e extrai a thumbnail.
-
-As dependências externas (ffmpeg, Whisper, probe) entram por protocolo e injeção, então o pipeline inteiro roda em testes sem ffmpeg. Padrões de código em [`CLAUDE.md`](CLAUDE.md).
-
-## Limites conhecidos
-
-- Whisper roda na CPU por padrão (`captions.device: "cpu"`); com GPU NVIDIA e CUDA instalado, use `"cuda"`.
-- Os limites de duração por plataforma são avisos (as redes mudam esses números).
-- Renders finais em 1080x1920 levam ~1 a 2 min por 20 s de vídeo com x264 `slow`; use `--preview` para iterar.
-- Fontes de baixa resolução (prints de 1000 px) perdem nitidez em 1080p; o `validate` avisa.
-- Encoders de hardware (QSV/NVENC/AMF) são detectados por `dmaker doctor` e usados com `"encoder": "auto"`. O padrão x264 `medium` é o de melhor qualidade (medido: QSV da UHD 620 perde ~7 dB de PSNR); `"quality": "max"` usa x264 `slow`. Placas GeForce MX (130/150/250) não têm NVENC.
+- Regras e arquitetura: [CLAUDE.md](CLAUDE.md). Testes: `.venv\Scripts\python -m pytest`; lint: `ruff check src tests` e `ruff format src tests`.
+- O manual é a única parte escrita à mão da documentação. A referência dos comandos, das ferramentas MCP e dos campos da spec, o índice de tarefas e a pasta `docs/ia` são **gerados** do código: depois de mudar algo que o usuário vê, atualize a tarefa em `docs/MANUAL.md` e rode `dmaker manual build` (um teste reprova se o manual está desatualizado).
+- Referência da spec para a IA: `src/dmaker/resources/guide.md` (ferramenta MCP `dmaker_guide`).

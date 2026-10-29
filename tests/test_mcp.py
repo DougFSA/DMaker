@@ -84,6 +84,7 @@ def test_lists_tools_and_prompt():
         "resume_batch",
         "pause_batch",
         "batch_status",
+        "search_manual",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -100,6 +101,34 @@ def test_presets_and_schema_tools():
     assert "youtube/shorts" in presets and "instagram" not in presets
     assert "timeline" in json.loads(schema)["properties"]
     assert "spec" in guide.lower()
+
+
+def test_search_manual_answers_over_stdio_with_the_section_and_the_task_file():
+    """A busca no manual, pelo servidor de verdade (stdio): sem internet, sem modelo, com a tarefa sugerida."""
+
+    async def go(session):
+        found = await session.call_tool(
+            "search_manual", {"question": "como dublo um vídeo para inglês?", "limit": 3}
+        )
+        nothing = await session.call_tool("search_manual", {"question": "xyzzy qwerty plugh"})
+        return json.loads(_text(found)), json.loads(_text(nothing))
+
+    found, nothing = asyncio.run(_session(go))
+    assert found["question"] == "como dublo um vídeo para inglês?"
+    assert 1 <= len(found["results"]) <= 3
+    first = found["results"][0]
+    assert (
+        "Dublar um vídeo para outro idioma" in first["section"]
+        and first["task"] == "dublar"
+        and first["score"] > 0
+    )
+    assert len(first["text"]) <= 1203  # cada trecho é cortado para caber num modelo pequeno
+    assert found["suggested_task"] == {
+        "id": "dublar",
+        "title": "Dublar um vídeo para outro idioma",
+        "file": "docs/ia/dublar.md",
+    }
+    assert nothing["results"] == [] and nothing["suggested_task"] is None
 
 
 def test_save_and_validate_project_via_mcp(tmp_path):

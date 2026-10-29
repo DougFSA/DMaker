@@ -1,0 +1,43 @@
+# DMaker
+
+> Editor de vídeos curtos por comando, com narração, dublagem e correção de fala locais. Cada arquivo abaixo ensina uma tarefa: quando usar, o que perguntar antes, as ferramentas MCP na ordem com um exemplo de argumentos, o equivalente na CLI, como conferir e os erros comuns.
+
+## Tarefas de vídeo
+
+- [Fazer um Reel a partir de uma gravação](reel.md): Transforma uma gravação sua em um vídeo vertical para o Instagram, com legenda automática palavra a palavra, gancho no começo e barra de progresso.
+- [Criar um projeto a partir de um modelo pronto](modelo.md): Cria um projeto completo de um modelo pronto (produto, depoimento, stories, vlog, tutorial, YouTube, explicativo, casamento), passando só o que muda de vídeo para vídeo.
+- [Cortar as pausas de uma gravação falada](cortar-pausas.md): Tira as pausas, os vícios de fala e as frases repetidas de uma gravação falada e entrega um projeto de clipes já cortados, com a lista do que saiu.
+- [Deixar a legenda em caixa arredondada](legenda-caixa.md): Põe uma caixa de fundo arredondada atrás de cada linha da legenda, no estilo do TikTok, mantendo o destaque da palavra que está sendo falada.
+- [Corrigir uma palavra errada na legenda](corrigir-legenda.md): Troca uma palavra que o Whisper ouviu errado nas legendas automáticas (um nome próprio, um termo técnico) sem transcrever tudo de novo.
+- [Fazer um vídeo explicativo](explicativo.md): Monta um vídeo de reel em que a gravação de quem explica fica num quadro arredondado embaixo, a área de cima mostra a imagem de cada assunto e o fundo troca a cada assunto.
+- [Fazer um audiograma de um áudio](audiograma.md): Transforma um áudio (corte de podcast, entrevista, áudio de WhatsApp) em um vídeo vertical com a capa num círculo, a onda ou as barras animadas no ritmo da fala e a legenda automática.
+- [Escolher a transição entre os trechos](transicoes.md): Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola).
+- [Dar um acabamento de cinema ao vídeo](looks.md): Aplica um acabamento visual pronto, por nome (cinema, quente, frio, preto e branco, vintage), com vinheta, grão, brilho e vazamento de luz.
+- [Pôr efeitos sonoros num instante do vídeo](efeitos-sonoros.md): Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição.
+- [Trocar o fundo atrás da pessoa](trocar-fundo.md): Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural.
+- [Pôr o texto atrás da pessoa](texto-atras.md): Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece.
+- [Fazer o vídeo do casamento com duas câmeras](multicam.md): Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento.
+- [Fazer vários vídeos de uma planilha](lote.md): Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada.
+- [Exportar o vídeo para outras plataformas](exportar.md): Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma.
+- [Conferir o vídeo antes de publicar](conferir-video.md): Roda as checagens automáticas em texto (duração, zona segura, ritmo de leitura, contraste, legendas e o arquivo renderizado) sem gastar tempo olhando imagem.
+
+## Tarefas de voz e áudio
+
+- [Narrar um roteiro com a minha voz](narrar.md): Transforma um texto em áudio falado com a sua voz (clonada de uma gravação sua, com a sua autorização) ou com uma voz pronta, e gera a legenda com o tempo de cada fala.
+- [Clonar uma voz](clonar-voz.md): Cria uma voz da biblioteca a partir de uma gravação limpa de quem fala, para usar na narração, na troca de voz e na correção de fala.
+- [Criar uma voz descrevendo como ela soa](desenhar-voz.md): Cria uma voz sem gravação nenhuma, só descrevendo gênero, idade, tom e sotaque.
+- [Ensinar o DMaker a pronunciar um nome](pronuncia.md): Cadastra como a voz deve falar um termo (uma marca, um nome estrangeiro, uma sigla) sem mudar o que está escrito na legenda.
+- [Narrar um roteiro longo em segundo plano (fila)](fila-narracao.md): Põe um roteiro longo (audiobook, manual narrado, vários roteiros) numa fila que narra um item por vez, retoma de onde parou e separa por capítulos.
+- [Pôr a narração dentro de um vídeo](narracao-no-projeto.md): Coloca a fala sintetizada como voz do vídeo, direto na spec, e usa o texto falado como legenda, sem gerar o áudio antes.
+- [Separar a voz da música e do ruído](isolar-voz.md): Separa a fala da música e do ruído de fundo de um vídeo ou áudio, em dois arquivos: a voz limpa e o fundo.
+- [Corrigir uma palavra errada sem regravar](corrigir-fala.md): Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada.
+- [Trocar a voz de uma gravação inteira](trocar-voz.md): Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo.
+- [Verificar se um áudio foi gerado pelo DMaker](verificar-audio.md): Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio.
+
+## Tarefas de dublagem e modelos
+
+- [Dublar um vídeo para outro idioma](dublar.md): Traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma escolhido, mantendo o fundo; você revisa a tradução antes de gerar.
+- [Dublar com mais de uma pessoa falando](dublar-varias-pessoas.md): Descobre quem fala em cada trecho e dubla cada pessoa com a sua própria voz clonada.
+- [Dublar esticando o vídeo onde a fala não cabe](dublar-esticar.md): Quando a tradução é mais longa que a fala original, estica o vídeo só naquele trecho em vez de acelerar ou cortar a voz.
+- [Exportar as trilhas separadas da dublagem](dublar-trilhas.md): Exporta a voz dublada, o fundo e a voz original em arquivos separados, para refazer a mixagem em outro editor (Premiere, DaVinci, CapCut).
+- [Ver, baixar e apagar os modelos de IA](modelos.md): Mostra cada modelo de IA que o DMaker baixa (tamanho no disco, licença, para que serve), baixa antes de precisar, apaga o que não usa e limpa as sobras.

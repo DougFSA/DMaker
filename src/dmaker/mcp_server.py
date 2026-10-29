@@ -84,6 +84,19 @@ def spec_schema() -> dict:
     return Project.model_json_schema()
 
 
+@server.tool(
+    description=(
+        "Busca no manual do DMaker, sem internet e por palavras: devolve os trechos que mais combinam com a "
+        "pergunta, cada um com a seção, a nota e o texto, e a tarefa do manual que mais combina (o arquivo "
+        "docs/ia dela traz o passo a passo). Use antes de adivinhar como se faz algo."
+    )
+)
+def search_manual(question: str, limit: int = 5) -> dict:
+    from .manual.service import search_manual as run_search
+
+    return run_search(question, limit)
+
+
 @server.tool(description="Formatos de saída por plataforma, com tamanho, limite de duração e zonas seguras.")
 def presets(platform: str | None = None) -> list[dict]:
     return [

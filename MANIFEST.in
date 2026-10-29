@@ -1,0 +1,3 @@
+# o manual entra no pacote pelo setup.py; no sdist ele precisa estar junto para o build_py achá-lo
+include docs/MANUAL.md
+recursive-include docs/ia *.md *.txt
