@@ -31,7 +31,7 @@ dmaker agent --once "Dubla este vídeo D:\videos\aula.mp4 para inglês"
 - **Motor e modelo por configuração**: `DMAKER_AGENT_ENGINE` (`ollama` ou `openai`, para llama.cpp server e LM Studio), `DMAKER_AGENT_MODEL`, `DMAKER_AGENT_URL`. Nada de nome de modelo fixo no código.
 - **Kits de ferramentas**: cada pedido cai num kit (edição, legendas, voz, dublagem, correção de fala, multicâmera, composições, lote) e o modelo só vê as ferramentas e o manual curto daquele kit.
 - **Proteções**: argumentos conferidos contra o esquema da ferramenta; nenhum caminho de arquivo inventado; confirmação sua antes de render final, apagar e sobrescrever; clonar voz só com a autorização do dono da voz.
-- **Medir**: `dmaker agent eval` roda uma bateria de pedidos em português e mostra acerto, passos, tempo e memória por modelo. Máquina de 16 GB de RAM roda o `gpt-oss:20b` (cerca de 14 GB, na CPU cada resposta leva minutos); modelos de 30 bilhões de parâmetros não cabem.
+- **Medir**: `dmaker agent eval` roda uma bateria de pedidos em português e mostra acerto, passos, tempo e memória por modelo. Máquina de 16 GB de RAM roda o `gpt-oss:20b` (cerca de 14 GB, na CPU cada resposta leva minutos): na bateria de 22 pedidos ele acertou 82%, sem nenhuma ação insegura; modelos de 30 bilhões de parâmetros não cabem.
 
 Detalhes no capítulo "Usando com LLM local (Ollama)" do [manual](docs/MANUAL.md).
 
