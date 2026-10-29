@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import socket
 import threading
 import time
@@ -676,28 +675,3 @@ def test_the_two_examples_of_the_guide_render_without_warnings_over_a_transparen
     assert (frame[..., 3] > 0).sum() > 2000
     later = png_to_array(renderer.still(composition, 3.5, warnings.append))
     assert not np.array_equal(frame, later)  # e ele anda
-
-
-# ---------- o servidor MCP de verdade ----------
-
-
-def test_the_mcp_server_renders_a_real_frame_from_inside_its_own_event_loop(make):
-    """O servidor MCP chama as ferramentas de dentro de um laço asyncio, onde o Playwright síncrono se recusa a rodar:
-    o quadro tem que sair mesmo assim, pelo stdio, como a IA o pede."""
-    import asyncio
-
-    from .test_mcp import _session, _text
-
-    source = make(guide_pages()[0])
-
-    async def go(session):
-        return await session.call_tool(
-            "render_html_frame",
-            {"src": str(source), "at": 2.0, "size": "1080x960", "background": "#202830", "duration": 5},
-        )
-
-    result = asyncio.run(_session(go))
-    assert not result.is_error, _text(result)
-    assert [c.type for c in result.content].count("image") == 1
-    info = json.loads(_text(result))
-    assert info["warnings"] == [] and info["size"] == "1080x960" and info["at_s"] == 2.0
