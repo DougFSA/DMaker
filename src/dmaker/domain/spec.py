@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -471,8 +471,68 @@ class AudiogramOverlay(Strict):
         return self
 
 
+class MotionBlur(Strict):
+    """Borrão de movimento da composição em HTML: o DMaker captura `subframes` instantes dentro do tempo em que o
+    "obturador" fica aberto e tira a média, como a câmera faz. `shutter` é a fração do intervalo entre dois
+    quadros em que ele fica aberto (0,5 é o obturador de 180 graus do cinema; 1 borra de um quadro ao seguinte).
+    O custo do render cresce na proporção de `subframes`."""
+
+    subframes: int = Field(5, ge=2, le=16)
+    shutter: float = Field(0.5, gt=0, le=1)
+
+
+PageSize = Annotated[int, Field(ge=16, le=8192)]
+
+
+class HtmlOverlay(Strict):
+    """Composição animada escrita em HTML, CSS e JavaScript (inclusive three.js e Lottie), renderizada quadro a
+    quadro com fundo transparente por cima do vídeo: títulos animados, gráficos, mapas, objetos em 3D.
+
+    `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que a página usa.
+    O lugar vem de `region` (uma região nomeada) ou do centro `x`/`y` com `width`/`height` (frações do quadro; sem
+    nada, o quadro todo). A página é desenhada com o tamanho da área em px na base 1080 (`size` muda isso: o
+    resultado é então ajustado à área). `data` é entregue à página como `dmaker.data`. A página não acessa a
+    internet: só os arquivos locais dela. `layer: "behind-person"` põe a composição atrás da pessoa."""
+
+    type: Literal["html"] = "html"
+    src: str = Field(min_length=1)
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+    region: str | None = None  # nome em `regions`: a composição ocupa a região (no lugar de x/y/width/height)
+    x: float | None = Field(None, ge=0, le=1)  # centro da área, fração do quadro (x e y juntos)
+    y: float | None = Field(None, ge=0, le=1)
+    width: float = Field(1.0, gt=0, le=1)  # fração da largura do quadro
+    height: float = Field(1.0, gt=0, le=1)  # fração da altura do quadro
+    size: tuple[PageSize, PageSize] | None = None  # largura e altura da página, em px na base 1080
+    data: dict[str, Any] = {}  # entregue à página como `dmaker.data` (entra na chave do cache)
+    motion_blur: MotionBlur | None = None
+    layer: OverlayLayer = "front"
+    sound: SoundSpec | None = None  # som na entrada da composição (em `start`)
+
+    @field_validator("motion_blur", mode="before")
+    @classmethod
+    def _blur_shorthand(cls, value: object) -> object:
+        """`true` liga o borrão com os valores padrão e `false` o desliga, para o pedido em uma palavra."""
+        if value is True:
+            return {}
+        if value is False:
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _place(self) -> HtmlOverlay:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("composição html: informe `x` e `y` juntos (o centro da área)")
+        if self.region and self.x is not None:
+            raise ValueError("composição html com `region` não leva `x` nem `y`: a região já define o lugar")
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start na composição html")
+        return self
+
+
 Overlay = Annotated[
-    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay, Field(discriminator="type")
+    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay | HtmlOverlay,
+    Field(discriminator="type"),
 ]
 
 

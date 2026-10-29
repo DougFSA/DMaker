@@ -11,11 +11,12 @@ from ..domain.audiogram import project_has_voice
 from ..domain.brand import load_theme
 from ..domain.presets import Preset, get_preset
 from ..domain.sfx import plan_sfx
-from ..domain.spec import Project
+from ..domain.spec import HtmlOverlay, Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
 from ..domain.tracks import apply_track_state
 from ..filtergraph.audiogram import normalization_gain_db
 from ..filtergraph.sfx import voice_reference_db
+from ..media.browser import BrowserUnavailable
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
@@ -23,6 +24,7 @@ from ..voice.library import VoiceLibrary
 from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
+from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
 from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
@@ -49,6 +51,7 @@ class RenderPipeline:
         transcriber_factory: TranscriberFactory = default_transcriber_factory,
         mezzanines: MezzanineBuilder | None = None,
         person_layers: PersonLayerBuilder | None = None,
+        html_layers: HtmlLayerBuilder | None = None,
         cache_dir: Path | None = None,
         jobs_dir: Path | None = None,
         output_dir: Path | None = None,
@@ -68,6 +71,7 @@ class RenderPipeline:
         self.matter = matter or RvmMatter()
         self.mezzanines = mezzanines or MezzanineBuilder()
         self.person_layers = person_layers or PersonLayerBuilder()
+        self.html_layers = html_layers or HtmlLayerBuilder()
         self.narrator = narrator
         self.isolator = isolator
         self.voiceover = VoiceoverPreparer(voice_library)
@@ -160,8 +164,9 @@ class RenderPipeline:
             )
         )
 
-        # um som que não existe falha agora, e não depois de minutos de mezaninos
+        # um som que não existe falha agora, e não depois de minutos de mezaninos; a composição em HTML também
         resolve_files(p, plan_sfx(p, timeline_spans(durations, transitions)))
+        self._check_html(ctx)
 
         prepared = self.mezzanines.prepare(ctx, sources)
         pending = sum(1 for item in prepared if item.command is not None)
@@ -207,6 +212,7 @@ class RenderPipeline:
         )
         out_path = self._output_path(ctx.preset)
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        html = self._html_layers(ctx, layer.html_overlays)
         people = self._person_layers(ctx, prepared, transitions, layer.behind_intervals)
         assembly = build_assembly(
             ctx,
@@ -224,6 +230,7 @@ class RenderPipeline:
             voice_files=voice_files,
             visual_gain_db=visual_gain,
             person_layers=[item.layer for item in people],
+            html_layers=[item.layer for item in html],
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")
@@ -245,6 +252,29 @@ class RenderPipeline:
             job_dir=ctx.job_dir,
             size_bytes=out_path.stat().st_size if out_path.exists() and not o.dry_run else 0,
         )
+
+    def _check_html(self, ctx: RenderContext) -> None:
+        """Composição que não existe, ou navegador que não está instalado, falha agora e não depois dos mezaninos.
+        No dry-run nada é renderizado, então o navegador não faz falta."""
+        if not has_html_overlays(ctx.project):
+            return
+        for overlay in ctx.project.overlays:
+            if isinstance(overlay, HtmlOverlay):
+                resolve_html_source(ctx.project, overlay.src)
+        reason = None if ctx.options.dry_run else self.html_layers.unavailable_reason()
+        if reason:
+            raise BrowserUnavailable(f"O projeto tem composição HTML e o navegador não está pronto. {reason}")
+
+    def _html_layers(self, ctx, overlays):
+        """Renderiza (ou pega do cache) o vídeo com alfa de cada composição em HTML."""
+        layers = self.html_layers.prepare(ctx, overlays)
+        if layers:
+            pending = sum(1 for item in layers if item.commands)
+            ctx.log(
+                f"composições html: {len(layers)} ({pending} a renderizar, {len(layers) - pending} em cache)"
+            )
+            self.html_layers.build(ctx, layers)
+        return layers
 
     def _person_layers(self, ctx, prepared, transitions, intervals):
         """Recorta a pessoa só nos intervalos de texto `behind-person` (a camada que passa por cima do texto)."""

@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 32 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -42,6 +42,7 @@ São 31 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Pôr efeitos sonoros num instante do vídeo](#pôr-efeitos-sonoros-num-instante-do-vídeo) | Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição. | sim |
 | [Trocar o fundo atrás da pessoa](#trocar-o-fundo-atrás-da-pessoa) | Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural. | sim |
 | [Pôr o texto atrás da pessoa](#pôr-o-texto-atrás-da-pessoa) | Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece. | sim |
+| [Pôr uma animação em HTML sobre o vídeo](#pôr-uma-animação-em-html-sobre-o-vídeo) | Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS e JavaScript, com três dimensões e Lottie): um título grande, um número que conta, um objeto em 3D girando, um mapa com fotos entrando. | ainda não: `render_html_frame`, `add_html_overlay` |
 | [Fazer o vídeo do casamento com duas câmeras](#fazer-o-vídeo-do-casamento-com-duas-câmeras) | Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento. | sim |
 | [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | ainda não: `validate_batch`, `run_batch`, `batch_status`, `resume_batch` |
 | [Exportar o vídeo para outras plataformas](#exportar-o-vídeo-para-outras-plataformas) | Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma. | sim |
@@ -121,7 +122,7 @@ cd D:\DMaker
 
 O `scripts/setup.ps1` cria o `.venv`, instala o pacote com os extras `dev` e `captions` (`pip install -e ".[dev,captions]"`), roda `dmaker setup` (baixa FFmpeg e Poppins) e termina com `dmaker doctor`. Se o PowerShell recusar rodar o script (política de execução), rode antes, uma vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-O `dmaker doctor` confere o FFmpeg e o libass (sem ele não há texto nem legendas), os filtros necessários, os encoders de hardware (NVENC, AMF, QSV) e qual seria usado com `"encoder": "auto"`, as fontes, as marcas instaladas e se o `faster-whisper` e o `mcp` estão presentes.
+O `dmaker doctor` confere o FFmpeg e o libass (sem ele não há texto nem legendas), os filtros necessários, os encoders de hardware (NVENC, AMF, QSV) e qual seria usado com `"encoder": "auto"`, as fontes, as marcas instaladas e se o `faster-whisper`, o Playwright com o Chromium (animação em HTML) e o `mcp` estão presentes.
 
 Para não digitar `.\.venv\Scripts\dmaker.exe` toda vez, ative o ambiente uma vez por janela do PowerShell:
 
@@ -139,7 +140,7 @@ Cada função pesada tem o seu extra do pip, para quem não a usa não pagar o d
 | --- | --- |
 | Voz, dublagem, isolamento de voz, marca d'água | Primeiro o PyTorch (versão CPU): `pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu`; depois `pip install -e ".[voice]"` |
 | Ler planilha `.xlsx` no lote | `pip install -e ".[lote]"` |
-| Exportar o manual em PDF | `pip install -e ".[docs]"` e depois `python -m playwright install chromium` |
+| Animação em HTML sobre o vídeo, e exportar o manual em PDF | `pip install -e ".[html]"` (o `.[docs]` traz o mesmo pacote) e depois `dmaker setup --html`, que baixa o Chromium (cerca de 120 MB) para `bin/playwright`, dentro do DMaker |
 | Interface nova (Vue) | Node.js instalado e, uma vez, `cd frontend; npm ci; npm run build` |
 | Operador local | O [Ollama](https://ollama.com) instalado e `ollama pull gpt-oss:20b` |
 
@@ -150,7 +151,9 @@ Rodar `.\scripts\setup.ps1` de novo é seguro e atualiza as dependências. Para 
 | Pasta | Conteúdo | No controle de versão? |
 | --- | --- | --- |
 | `bin/ffmpeg/` | FFmpeg e ffprobe baixados pelo `setup` | Não |
+| `bin/playwright/` | O Chromium da animação em HTML e do PDF do manual, baixado por `dmaker setup --html` | Não |
 | `assets/fonts/` | Fonte Poppins (licença OFL) | Sim |
+| `assets/html/` | three.js e lottie-web (MIT) que as animações em HTML usam, com a licença de cada um | Sim |
 | `assets/brands/<nome>/` | `brand.json` de cada marca (cores, fontes, logos, vocabulário, looks) | Sim |
 | `assets/sfx/` | Biblioteca de efeitos sonoros, sintetizada pelo DMaker | Sim |
 | `assets/voices/` | Suas vozes clonadas e desenhadas (dado pessoal) | Não |
@@ -242,7 +245,7 @@ Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do anter
 
 ### Sobreposições (overlays)
 
-Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra), **barra de progresso** e **audiograma** (a onda ou as barras de um áudio, animadas no ritmo dele). Uma imagem com `shape: "circle"` aparece recortada num círculo, e um texto com `layer: "behind-person"` passa atrás da pessoa. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
+Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra), **barra de progresso**, **audiograma** (a onda ou as barras de um áudio, animadas no ritmo dele) e **composição em HTML** (`type: "html"`: uma animação escrita em HTML, CSS e JavaScript, inclusive três dimensões e Lottie, que o DMaker desenha quadro a quadro, com fundo transparente, por cima do vídeo). Uma imagem com `shape: "circle"` aparece recortada num círculo, e um texto ou uma composição em HTML com `layer: "behind-person"` passa atrás da pessoa. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
 
 ### Legendas
 
@@ -266,7 +269,7 @@ Vídeos em formatos que o navegador não decodifica (HEVC, ProRes, alguns MOV de
 
 ### Cache
 
-O DMaker guarda resultados intermediários para reeditar rápido: **mezaninos** (`cache/mez/`: um trecho já cortado, reenquadrado e codificado no tamanho final, por hash de conteúdo, então mudar um campo que não afeta aquele trecho não o invalida), proxies, formas de onda, falas sintetizadas, vozes separadas do fundo e, por job, o grafo de filtros e os comandos usados. `dmaker clean` limpa mezaninos, proxies e formas de onda; `dmaker clean --jobs` limpa também o histórico de jobs.
+O DMaker guarda resultados intermediários para reeditar rápido: **mezaninos** (`cache/mez/`: um trecho já cortado, reenquadrado e codificado no tamanho final, por hash de conteúdo, então mudar um campo que não afeta aquele trecho não o invalida), as animações em HTML já desenhadas (também em `cache/mez/`, por hash do HTML, dos arquivos da pasta, do tamanho, da duração e dos dados), proxies, formas de onda, falas sintetizadas, vozes separadas do fundo e, por job, o grafo de filtros e os comandos usados. `dmaker clean` limpa mezaninos, proxies e formas de onda; `dmaker clean --jobs` limpa também o histórico de jobs.
 
 ### Jobs e saídas
 
@@ -1225,6 +1228,66 @@ A ordem das camadas, de baixo para cima, é: o vídeo, os textos atrás da pesso
 - **Aviso em `overlays[N].layer`**: o intervalo do texto só cobre cartão ou foto; não há pessoa a recortar.
 - **A borda piscou**: movimento rápido ou câmera em movimento; o efeito pede a pessoa de frente e a câmera parada.
 - **Render lento**: o recorte pesa na CPU; reduza o intervalo do texto ou confira só a prévia.
+
+### Pôr uma animação em HTML sobre o vídeo
+<!-- tarefa: animacao-html -->
+Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS e JavaScript, com três dimensões e Lottie): um título grande, um número que conta, um objeto em 3D girando, um mapa com fotos entrando.
+
+#### Quando usar
+
+Você quer um gráfico ou uma animação que o DMaker não tem pronta: a Terra em corte com rótulos, uma planta baixa em 3D, quadros inclinados. A IA escreve a animação, você confere um quadro dela e o DMaker a desenha quadro a quadro, com fundo transparente, na região do vídeo que você escolher. A mesma animação sai sempre igual.
+
+**Pedidos que levam a esta tarefa:**
+- "Põe na parte de cima um número que conta até 87% e um cubo 3D girando"
+- "Faz uma animação em HTML com o título entrando e deixa atrás da pessoa"
+
+#### Antes de começar
+
+- O navegador da animação, instalado uma vez: `pip install -e ".[html]"` e `dmaker setup --html` (Chromium de uns 120 MB em `bin/playwright`). Sem ele o `validate` avisa e o render falha com essa instrução.
+- Onde ela entra: uma região do projeto (`regions`) ou o quadro todo, e de que instante a qual.
+- A animação mora numa pasta do projeto (`composicoes/titulo/index.html` e os arquivos dela) e **não acessa a internet**: só usa a pasta, three.js, lottie-web, a Poppins e as cores da marca, que o DMaker já traz.
+- Custo: uns 70 ms por quadro em 1080x1920 (5 s levam uns 12 s), em cache no segundo render.
+
+#### Pela IA
+
+Diga: "No `meu-reel`, põe na região `topo`, dos 1 aos 6 segundos, uma animação com o título 'Cinco camadas' entrando e um cubo 3D girando, nas cores da marca." A IA escreve a animação numa pasta do projeto, confere um quadro dela com `render_html_frame` (inclusive o do meio, sem desenhar os de antes), põe no projeto com `add_html_overlay`, valida, gera a prévia e lê o relatório. O contrato que ela segue, os dois exemplos e o guia de boas práticas estão no `dmaker://guide`, seção "Composição animada em HTML".
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "render_html_frame", "arguments": {"src": "composicoes/titulo", "project": "meu-reel", "at": 2.0, "size": "1080x960"}, "para": "ver o quadro do meio, com os avisos da página"},
+  {"tool": "add_html_overlay", "arguments": {"name": "meu-reel", "src": "composicoes/titulo", "start": 1, "end": 6, "region": "topo"}, "para": "pôr a animação na região de cima"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "meu-reel"}, "para": "avisar de pasta ausente ou navegador não instalado"},
+  {"tool": "render_project", "arguments": {"name_or_path": "meu-reel", "preview": true}, "para": "gerar a prévia"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "meu-reel", "output": false}, "para": "conferir o projeto"}
+]
+```
+
+#### Pela interface
+
+Não existe uma faixa nem um botão para a animação: a edição na linha do tempo fica para a fase 4 da interface nova (DMK-20). O render funciona igual pela interface (**Renderizar**, **Prévia**). Para pôr ou ajustar a animação à mão, use a aba **JSON** da interface clássica e acrescente a sobreposição `{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6}`; o campo `data` e os demais são preservados ao salvar.
+
+#### Pela CLI
+
+```powershell
+dmaker html frame projects\meu-reel\composicoes\titulo --at 2 --size 1080x960 --background "#3a4a5a"
+dmaker validate projects\meu-reel\spec.json
+dmaker render projects\meu-reel\spec.json --preview
+```
+
+O `dmaker html frame` grava o quadro em `output/html/`; `--data` entrega um JSON à página e `--brand` escolhe a marca dela. Na spec: `{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6, "data": {"titulo": "Cinco camadas"}, "motion_blur": true, "layer": "behind-person"}`. `data` chega à página como `dmaker.data`, `motion_blur` borra o que se move rápido e `layer: "behind-person"` põe a animação atrás da pessoa.
+
+#### Como conferir
+
+Veja um quadro antes de renderizar o vídeo: os avisos da página (internet bloqueada, erro de JavaScript, arquivo que não existe nela) saem junto. No vídeo, a animação entra no quadro do início pedido e some no do fim; duas renderizações do mesmo projeto saem idênticas.
+
+#### Se der errado
+
+- **"O Chromium não está em bin/playwright"**: rode `dmaker setup --html`.
+- **Aviso "tentou acessar ... na internet"**: a página pediu algo de fora (CDN, imagem de um site). Copie o arquivo para a pasta da animação; o render segue sem a requisição.
+- **A animação não se mexe**: use `animation` em CSS, animações Web, GSAP, Lottie ou uma função `window.dmakerSeek(segundos)`; `setTimeout` anda só quando o DMaker manda.
+- **Fundo opaco**: a página pintou o `body`; deixe-o sem fundo.
 
 ### Fazer o vídeo do casamento com duas câmeras
 <!-- tarefa: multicam -->
@@ -2322,6 +2385,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 
 | Chamado | O que você ganhou | Onde está |
 | --- | --- | --- |
+| DMK-26 | Animação em HTML sobre o vídeo (`type: "html"`): HTML, CSS e JavaScript, com three.js e Lottie, desenhados quadro a quadro com fundo transparente; `dmaker html frame`, `render_html_frame`, `add_html_overlay` e `dmaker setup --html` | "Pôr uma animação em HTML sobre o vídeo" |
 | DMK-28 | Texto atrás da pessoa (`layer: "behind-person"`): o título grande passa entre a parede e quem fala, recortando a pessoa só enquanto o texto aparece | "Pôr o texto atrás da pessoa" |
 | DMK-34 | Audiograma: a onda ou as barras de um áudio animadas no ritmo dele, com capa num círculo e legenda; `audio.voiceover` e o modelo `audiograma` | "Fazer um audiograma de um áudio" |
 | DMK-23 | Vídeo explicativo: o rosto num quadro embaixo, a imagem de cada assunto em cima, o fundo trocando a cada assunto; regiões nomeadas (`regions`) na spec | "Fazer um vídeo explicativo" |
@@ -2346,7 +2410,7 @@ Esta seção é **gerada**: os três blocos abaixo são reescritos por `dmaker m
 
 <!-- dmaker:gerado cli -->
 
-São 70 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 71 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -2439,8 +2503,9 @@ São 70 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
   - `--quiet` / `--no-quiet`: Sem barra de progresso.
   - `--segments` TEXTO: Render parcial só destes trechos, ex.: 12-20 (para revisar vídeos longos).
   - `--no-ui`: Roda só no terminal; não usa a interface gráfica.
-- **`dmaker setup`**: Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa.
+- **`dmaker setup`**: Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium.
   - `--force` / `--no-force`: Baixa de novo mesmo se já existir.
+  - `--html`: Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).
 - **`dmaker sheet VIDEO`**: Grade de quadros do vídeo inteiro (para revisar de uma vez).
   - `--out` CAMINHO
   - `--cols` NÚMERO: (padrão 3)
@@ -2537,6 +2602,21 @@ Dublagem: traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de q
   - `--steps` NÚMERO: Passos de síntese do OmniVoice (padrão 16).
   - `--draft` / `--no-draft`: Rascunho: 8 passos no OmniVoice (metade do tempo).
   - `--device` TEXTO: auto | cpu | cuda (padrão auto)
+
+#### dmaker html
+
+Composições em HTML: confere um quadro de uma composição antes de renderizar o vídeo.
+
+- **`dmaker html frame SRC`**: Renderiza um quadro da composição, direto no instante pedido, em PNG com fundo transparente.
+  - `--at` NÚMERO: Instante da composição, em segundos. (padrão 0.0)
+  - `--size` TEXTO: Tamanho da página, LARGURAxALTURA em px na base 1080 (como a área da região). (padrão 1080x1920)
+  - `--out` CAMINHO: PNG de saída (padrão: output/html/<nome>_<instante>s.png).
+  - `--duration` NÚMERO: Duração da composição em segundos (a página lê dmaker.duration). (padrão 5.0)
+  - `--fps` NÚMERO: Quadros por segundo da composição. (padrão 30.0)
+  - `--scale` NÚMERO: Pixels de saída por px da página (0,5 gera a metade). (padrão 1.0)
+  - `--brand` TEXTO: Marca cujas cores e fonte a página recebe.
+  - `--data` TEXTO: Dados para a página (dmaker.data), em JSON.
+  - `--background` TEXTO: Cor lisa por baixo, para ver o transparente (ex.: #808080).
 
 #### dmaker looks
 
@@ -2697,7 +2777,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 58 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -2769,6 +2849,10 @@ São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto), `output` (sim ou não, padrão sim).
 - **`frames`**: Quadros em instantes específicos do vídeo (segundos), devolvidos como imagens.
   Parâmetros: `video`\* (texto), `times`\* (lista de número), `width` (inteiro, padrão 540).
+- **`render_html_frame`**: Renderiza um quadro de uma composição HTML (a animação que você escreveu em HTML, CSS e JavaScript, inclusive three.js e Lottie) no instante `at`, direto nele, e devolve a imagem.
+  Parâmetros: `src`\* (texto), `at` (número, padrão 0.0), `size` (texto, padrão 1080x1920), `duration` (número, padrão 5.0), `data` (objeto), `brand` (texto), `project` (texto), `background` (texto, padrão #808080).
+- **`add_html_overlay`**: Põe uma composição HTML (type html) nas sobreposições do projeto e salva.
+  Parâmetros: `name`\* (texto), `src`\* (texto), `start` (número, padrão 0.0), `end` (número), `region` (texto), `x` (número), `y` (número), `width` (número), `height` (número), `layer` ("front" ou "behind-person", padrão front), `data` (objeto), `motion_blur` (sim ou não, padrão não).
 - **`render_card_preview`**: Gera um cartão (PNG) com o visual da marca, para aprovar o design antes do render.
   Parâmetros: `title`\* (texto), `subtitle` (texto), `brand` (texto, padrão medlycare), `preset` (texto, padrão instagram/reels), `variant` (texto).
 - **`clean_cache`**: Limpa o cache de trechos intermediários (força regerar tudo no próximo render).
@@ -2818,7 +2902,7 @@ São 56 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 30 blocos e 296 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 32 blocos e 312 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -2835,7 +2919,7 @@ A raiz do `spec.json`.
 | `master` | texto | nenhum | Fonte que é o relógio principal da sessão (a primeira, se vazio). |
 | `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` (pelo menos 1) | obrigatório | Os trechos do vídeo, em ordem (clipe, imagem ou cartão). |
 | `look` | texto | nenhum | Acabamento visual pronto, por nome, para todos os trechos. |
-| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture) e barra de progresso por cima da linha do tempo. |
+| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` ou `HtmlOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture), barra de progresso, audiograma e animação em HTML por cima da linha do tempo. |
 | `captions` | `Captions` | nenhum | Legendas: automáticas, de um .srt ou da narração. |
 | `audio` | `AudioSettings` | os valores padrão do bloco | Música, faixas externas, narração, efeitos, volume e normalização. |
 | `multicam` | `MulticamBlock` | nenhum | Bloco de corte automático de cerimônia, expandido por `dmaker plan`. |
@@ -3003,13 +3087,34 @@ Usado em `CardSegment.color`, `ClipSegment.color`, `ImageSegment.color`.
 
 #### EntrySound
 
-Usado em `ImageOverlay.sound`, `TextOverlay.sound`, `Transition.sound`, `VideoOverlay.sound`.
+Usado em `HtmlOverlay.sound`, `ImageOverlay.sound`, `TextOverlay.sound`, `Transition.sound`, `VideoOverlay.sound`.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
 | `sound` | texto | nenhum | Nome do efeito; vazio usa o som padrão do tipo. |
 | `volume` | número, de 0 a 1.5 | 1.0 | Volume do efeito. |
 | `offset` | número, de -2 a 2 | 0.0 | Antecipa (negativo) ou atrasa o som, em segundos. |
+
+#### HtmlOverlay
+
+Usado em `Project.overlays`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"html"` | `html` | Tipo do item: escolhe qual dos blocos vale. |
+| `src` | texto | obrigatório | Arquivo `.html` (a página inteira nele) ou pasta com `index.html` e os arquivos que a página usa, relativo à pasta da spec. |
+| `start` | número, mínimo 0 | 0.0 | Quando a animação entra, em segundos. |
+| `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
+| `region` | texto | nenhum | Nome de uma região declarada em `regions`: o item se encaixa nela no lugar de `position`, `x` e `y`. |
+| `x` | número, de 0 a 1 | nenhum | Posição horizontal do centro, de 0 a 1 (use junto de `y`). |
+| `y` | número, de 0 a 1 | nenhum | Posição vertical do centro, de 0 a 1 (use junto de `x`). |
+| `width` | número, maior que 0, até 1 | 1.0 | Largura da área, em fração da largura do quadro (sem `region`). |
+| `height` | número, maior que 0, até 1 | 1.0 | Altura da área, em fração da altura do quadro (sem `region`). |
+| `size` | lista de qualquer valor (pelo menos 2) | nenhum | Largura e altura da página, em px na base 1080; vazio desenha no tamanho da área, sem escala. |
+| `data` | objeto | vazio | Dicionário livre entregue à página como `dmaker.data`; entra na chave do cache. |
+| `motion_blur` | `MotionBlur` | nenhum | Borrão de movimento por subquadros: `true` liga com os valores padrão, um objeto ajusta, vazio desliga. |
+| `layer` | `"front"` ou `"behind-person"` | `front` | `front` (padrão, na frente de tudo) ou `behind-person`, que passa a animação atrás da pessoa recortada. |
+| `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
 
 #### ImageOverlay
 
@@ -3061,6 +3166,15 @@ Usado em `ClipSegment.matte`.
 | `background` | texto | `#FFFFFF` | Cor do fundo novo: hex ou chave do tema (`primary`, `accent`, `mint`, `white`). |
 | `model` | `"resnet50"` ou `"mobilenetv3"` | `resnet50` | `resnet50` separa melhor; `mobilenetv3` é mais leve e rápido (bom para rascunho). |
 | `downsample` | número, maior que 0, até 1 | nenhum | Reduz a resolução do recorte para acelerar; vazio escolhe sozinho. |
+
+#### MotionBlur
+
+Usado em `HtmlOverlay.motion_blur`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `subframes` | inteiro, de 2 a 16 | 5 | Quantos instantes são capturados por quadro (de 2 a 16); o tempo do render cresce na mesma proporção. |
+| `shutter` | número, maior que 0, até 1 | 0.5 | Fração do intervalo entre quadros em que o obturador fica aberto: 0,5 é o de 180 graus do cinema, 1 borra de um quadro ao seguinte. |
 
 #### MulticamBlock
 
@@ -3346,7 +3460,9 @@ Usado em `AudioSettings.voiceover`.
 | Cache grande, ou um trecho preso numa versão antiga | `dmaker clean` (mezaninos, proxies, formas de onda); `dmaker clean --jobs` limpa também o histórico; `dmaker render --force` ignora o cache só naquele render. |
 | Disco cheio por causa dos modelos de IA | Veja "Ver, baixar e apagar os modelos de IA". |
 | O Ollama não responde (`dmaker agent`, `dmaker ajuda`, dublagem) | Abra o aplicativo do Ollama ou rode `ollama serve`; confira o modelo com `ollama list`. O endereço vem de `DMAKER_OLLAMA_URL`. |
-| O PDF não sai (`dmaker manual export`) | Faltam o Playwright ou o Chromium: `pip install -e ".[docs]"` e `python -m playwright install chromium`. O HTML sai sem eles (`--html`). |
+| O PDF não sai (`dmaker manual export`) | Faltam o Playwright ou o Chromium: `pip install -e ".[html]"` e `dmaker setup --html`. O HTML sai sem eles (`--html`). |
+| A animação em HTML não renderiza ("O Chromium não está em bin/playwright") | Rode `pip install -e ".[html]"` e `dmaker setup --html`; `dmaker validate` avisa antes do render. |
+| Aviso "a composição tentou acessar ... na internet" | A animação em HTML não tem rede: só os arquivos dela. Ponha o arquivo (imagem, JSON, biblioteca) na pasta da composição e aponte para ele. O render segue sem a requisição. |
 | Não acho como fazer algo | `dmaker ajuda "sua pergunta"`, ou peça à IA que use `search_manual`. |
 
 ---
@@ -3359,7 +3475,7 @@ Usado em `AudioSettings.voiceover`.
 DMaker/
   src/dmaker/
     domain/       spec (modelo Pydantic), presets, brand, timeline, templates, multicam, tracks, looks, transitions
-    media/        ffmpeg (comando + runner injetável), probe, fonts, audiosync, matting, separation, browser
+    media/        ffmpeg (comando + runner injetável), probe, fonts, audiosync, matting, separation, browser, html_render, html_site
     text/         ass, overlays, captions, transcribe (Whisper), translate (Ollama)
     visuals/      cards, motion, reframe_image, geometry, pip
     filtergraph/  grafos ffmpeg como funções puras
@@ -3371,7 +3487,7 @@ DMaker/
     cli.py        adaptador Typer         mcp_server.py   adaptador MCP
   frontend/       a interface nova (Vue 3 + Vite + TypeScript)
   tests/          unitários, integração (ffmpeg real) e MCP (stdio)
-  assets/         fonts/, brands/<nome>/, sfx/ e voices/ (as suas vozes)
+  assets/         fonts/, brands/<nome>/, sfx/, html/ (three.js e lottie-web) e voices/ (as suas vozes)
   templates/      modelos de projeto parametrizados
   docs/           este manual, img/ (capturas) e ia/ (a versão para IA local)
   projects/       seus projetos; output/ renders, narrações, dublagens; cache/ intermediários e modelos
@@ -3432,6 +3548,7 @@ As dependências externas (ffmpeg, Whisper, a sondagem de mídia, o Ollama, o na
 - Um render final em 1080x1920 leva de 1 a 2 minutos por 20 s de vídeo com x264 `slow`; use `--preview` para iterar.
 - Fontes de baixa resolução (prints de 1000 px) perdem nitidez em 1080p; o `dmaker validate` avisa.
 - Encoders de hardware (QSV, NVENC, AMF) são detectados pelo `dmaker doctor` e usados com `"encoder": "auto"`. O padrão x264 é o de melhor qualidade (medido: o QSV de uma UHD 620 perde cerca de 7 dB de PSNR); `"quality": "max"` usa x264 `slow`. Placas GeForce MX (130, 150, 250) não têm NVENC.
+- A animação em HTML é desenhada na CPU (o WebGL roda por software): perto de 70 ms por quadro em 1080x1920, e o borrão de movimento multiplica isso pelo número de subquadros. A página não acessa a internet.
 - Voz e dublagem em CPU são lentas (dezenas de segundos por segundo de áudio); o rascunho (`--draft`) usa metade do tempo.
 
 ### Mantendo este manual em dia

@@ -8,7 +8,7 @@ from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
 from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
-from ..domain.spec import AudiogramOverlay, ClipSegment, Project, TextOverlay
+from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, TextOverlay
 from ..domain.timeline import TIME_EPSILON, timeline_spans, transitions_of
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
@@ -144,12 +144,12 @@ def _audiogram_warnings(project: Project, infos: list[MediaInfo | None]) -> list
 
 
 def _behind_person_warnings(project: Project, total: float, durations: list[float]) -> list[str]:
-    """Texto atrás da pessoa num intervalo que só cobre cartão ou foto: não há pessoa a recortar e o render
-    pagaria o recorte (minutos de CPU) para não mudar nada na imagem."""
+    """Texto ou composição em HTML atrás da pessoa num intervalo que só cobre cartão ou foto: não há pessoa a
+    recortar e o render pagaria o recorte (minutos de CPU) para não mudar nada na imagem."""
     behind = [
         (i, ov)
         for i, ov in enumerate(project.overlays)
-        if isinstance(ov, TextOverlay) and ov.layer == "behind-person"
+        if isinstance(ov, TextOverlay | HtmlOverlay) and ov.layer == "behind-person"
     ]
     if not behind:
         return []
@@ -168,7 +168,7 @@ def _behind_person_warnings(project: Project, total: float, durations: list[floa
             warnings.append(
                 f'overlays[{i}].layer: "behind-person" entre {start:.1f}s e {end:.1f}s só cobre cartão ou foto, '
                 'onde não há pessoa a recortar; o render gastaria o recorte à toa. Use "front" ou ponha o '
-                "texto sobre um trecho de vídeo."
+                f"{'texto' if isinstance(ov, TextOverlay) else 'a composição'} sobre um trecho de vídeo."
             )
     return warnings
 

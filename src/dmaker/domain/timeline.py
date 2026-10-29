@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from ..media.probe import MediaInfo
-from .spec import ClipSegment, Segment, TextOverlay, Transition
+from .spec import ClipSegment, HtmlOverlay, Segment, TextOverlay, Transition
 
 # folga das contas em segundos e quadros: 0.1 * 30 dá 3.0000000000000004, e sem ela o `ceil` pularia um quadro
 TIME_EPSILON = 1e-6
@@ -115,11 +115,11 @@ def merge_intervals(intervals: Iterable[tuple[float, float]]) -> list[tuple[floa
 
 
 def behind_person_intervals(overlays: Sequence[object], total: float) -> list[tuple[float, float]]:
-    """Onde a pessoa recortada precisa aparecer por cima: o intervalo de cada texto `behind-person`, cortado
-    no vídeo e já juntado. Só esses intervalos pagam o custo do recorte."""
+    """Onde a pessoa recortada precisa aparecer por cima: o intervalo de cada texto ou composição em HTML
+    `behind-person`, cortado no vídeo e já juntado. Só esses intervalos pagam o custo do recorte."""
     spans: list[tuple[float, float]] = []
     for overlay in overlays:
-        if isinstance(overlay, TextOverlay) and overlay.layer == "behind-person":
+        if isinstance(overlay, TextOverlay | HtmlOverlay) and overlay.layer == "behind-person":
             end = min(overlay.end if overlay.end is not None else total, total)
             if end > overlay.start:
                 spans.append((overlay.start, end))

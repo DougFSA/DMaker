@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TypeVar
 
-from .spec import AudiogramOverlay, ImageOverlay, Region, TextOverlay, VideoOverlay, parse_aspect
+from .spec import AudiogramOverlay, HtmlOverlay, ImageOverlay, Region, TextOverlay, VideoOverlay, parse_aspect
 
 # folga em px na largura devolvida: o ffmpeg trunca `largura * fração` para par, e sem ela uma divisão
 # que desse 971.9999 viraria 970 e deixaria uma fresta entre o quadro e a borda da região
@@ -32,12 +32,26 @@ class Fit:
     width: float
 
 
+def box_pixels(
+    x: float, y: float, box_width: float, box_height: float, width: int, height: int
+) -> tuple[int, int, int, int]:
+    """(esquerda, topo, largura, altura) de uma caixa de centro (x, y) e tamanho em fração do quadro, em pixels de
+    um quadro `width` x `height`. A conta é uma só para as regiões e para a área de uma composição em HTML."""
+    box_w, box_h = box_width * width, box_height * height
+    return round(x * width - box_w / 2), round(y * height - box_h / 2), round(box_w), round(box_h)
+
+
 def region_pixels(region: Region, width: int, height: int) -> tuple[int, int, int, int]:
     """(esquerda, topo, largura, altura) da região, em pixels de um quadro `width` x `height`."""
-    box_w, box_h = region.width * width, region.height * height
-    left = region.x * width - box_w / 2
-    top = region.y * height - box_h / 2
-    return round(left), round(top), round(box_w), round(box_h)
+    return box_pixels(region.x, region.y, region.width, region.height, width, height)
+
+
+def html_box(overlay: HtmlOverlay, width: int, height: int) -> tuple[int, int, int, int]:
+    """Área da composição em HTML, em pixels (esquerda, topo, largura, altura), com a região já resolvida. Sem
+    `x`/`y` a composição fica no centro, e sem `width`/`height` ocupa o quadro todo."""
+    x = 0.5 if overlay.x is None else overlay.x
+    y = 0.5 if overlay.y is None else overlay.y
+    return box_pixels(x, y, overlay.width, overlay.height, width, height)
 
 
 def fit_in_region(region: Region, content_aspect: float, width: int, height: int) -> Fit:
@@ -108,6 +122,19 @@ def _resolve_audiogram(
     )
 
 
+def _resolve_html(overlay: HtmlOverlay, region: Region, width: int, height: int, aspect: float | None):
+    """A composição ocupa a região inteira: a página é desenhada no tamanho dela, sem escala."""
+    return overlay.model_copy(
+        update={
+            "x": region.x,
+            "y": region.y,
+            "width": region.width,
+            "height": region.height,
+            "region": None,
+        }
+    )
+
+
 Resolver = Callable[..., object]
 Overlay = TypeVar("Overlay")
 
@@ -117,6 +144,7 @@ RESOLVERS: dict[type, Resolver] = {
     ImageOverlay: _resolve_image,
     VideoOverlay: _resolve_video,
     AudiogramOverlay: _resolve_audiogram,
+    HtmlOverlay: _resolve_html,
 }
 
 

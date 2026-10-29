@@ -15,6 +15,7 @@ ENTRY_SOUND_DEFAULTS: dict[str, str] = {
     "text": "pop",
     "image": "pop",
     "video": "whoosh",
+    "html": "whoosh",
     "transition": "whoosh",
 }
 FALLBACK_ENTRY_SOUND = "pop"

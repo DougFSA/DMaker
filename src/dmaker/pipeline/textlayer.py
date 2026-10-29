@@ -10,6 +10,7 @@ from ..domain.brand import Theme
 from ..domain.regions import resolve_region
 from ..domain.spec import (
     AudiogramOverlay,
+    HtmlOverlay,
     ImageOverlay,
     ProgressBar,
     Project,
@@ -28,6 +29,7 @@ from ..text.overlays import Canvas, add_captions, add_guides, add_progress_bar, 
 from ..visuals.audiogram import style_assets
 from ..visuals.pip import pip_mask, render_pip_assets
 from .context import RenderContext
+from .html_layer import ResolvedHtmlOverlay, resolve_html_overlay, resolve_html_source
 
 # `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
 FRAME_SLACK_PX = 1e-6
@@ -45,6 +47,7 @@ class TextLayer:
     image_overlays: list[ResolvedImageOverlay] = field(default_factory=list)
     video_overlays: list[ResolvedVideoOverlay] = field(default_factory=list)
     audiograms: list[ResolvedAudiogram] = field(default_factory=list)
+    html_overlays: list[ResolvedHtmlOverlay] = field(default_factory=list)
     behind_intervals: list[tuple[float, float]] = field(default_factory=list)
 
     @property
@@ -201,7 +204,7 @@ def build_text_layer(
         behind_intervals=behind_person_intervals(project.overlays, total),
     )
     text_index = 0
-    for overlay in project.overlays:
+    for overlay_index, overlay in enumerate(project.overlays):
         if isinstance(overlay, TextOverlay):
             overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             end = min(overlay.end if overlay.end is not None else total, total)
@@ -230,6 +233,12 @@ def build_text_layer(
             audiogram = resolve_audiogram(ctx, overlay, total, len(layer.audiograms), has_voice)
             if audiogram is not None:
                 layer.audiograms.append(audiogram)
+        elif isinstance(overlay, HtmlOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
+            source = resolve_html_source(project, overlay.src)
+            composition = resolve_html_overlay(ctx, overlay, source, total, overlay_index)
+            if composition is not None:
+                layer.html_overlays.append(composition)
     if cues and project.captions:
         style = project.captions.style
         tone_fn = (lambda a, b: tone_for(a, b, spans, tones)) if style.follow_background else None

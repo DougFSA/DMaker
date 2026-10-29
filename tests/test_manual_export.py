@@ -143,9 +143,9 @@ def test_playwright_browser_explains_how_to_install_when_the_package_is_missing(
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(BrowserUnavailable, match=r'pip install -e "\.\[docs\]"'):
+    with pytest.raises(BrowserUnavailable, match=r'pip install -e "\.\[html\]"'):
         PlaywrightBrowser().html_to_pdf("<p>oi</p>", tmp_path / "a.pdf")
-    assert "playwright install chromium" in browser_module.INSTALL_HINT
+    assert "dmaker setup --html" in browser_module.INSTALL_HINT
 
 
 def test_playwright_prints_a_real_pdf_with_internal_links(tmp_path):
