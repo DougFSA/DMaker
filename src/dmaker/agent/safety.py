@@ -382,8 +382,10 @@ class ConfirmationRule:
     kind: ConfirmationKind = "action"
 
 
-# Preparar a dublagem (transcrever e traduzir) não está aqui: gera um projeto editável e só o `dub_render`, que
-# produz o vídeo, pede o sim. Pedir nos dois obrigaria a pessoa a confirmar duas vezes o mesmo pedido.
+# Preparar a dublagem (transcrever e traduzir) não está aqui: gera um projeto editável e, num vídeo novo, só o
+# `dub_render`, que produz o vídeo, pede o sim; pedir nos dois obrigaria a pessoa a confirmar duas vezes o mesmo
+# pedido. O caso que muda é refazer a dublagem de um vídeo que já tem projeto: aí o `dub_prepare` escreve por cima
+# e perde as traduções revisadas, e quem pergunta é `REPLACES_EXISTING_DUB_PROJECT` (abaixo), não esta lista.
 CONFIRMATION_RULES: tuple[ConfirmationRule, ...] = (
     ConfirmationRule("render_project", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
     ConfirmationRule("quick_edit", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
@@ -418,6 +420,32 @@ OVERWRITES_EXISTING_OUTPUT = (
     "dub_render",
     "dub_stems",
 )
+# Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, se ele já existe, o substituem inteiro, com as
+# traduções que a pessoa revisou: confirmam só nesse caso.
+REPLACES_EXISTING_DUB_PROJECT = frozenset({"dub_prepare"})
+
+
+def dub_project_target(arguments: Mapping[str, Any]) -> str | None:
+    """Onde `dub_prepare` grava o projeto: o `project` da chamada ou o padrão do servidor (`None` se a chamada não diz)."""
+    project = arguments.get("project")
+    if isinstance(project, str) and project:
+        return project
+    path, language = arguments.get("path"), arguments.get("target_language")
+    if isinstance(path, str) and path and isinstance(language, str) and language:
+        # Importado aqui para o gate continuar leve; é a mesma função do servidor MCP, que lê o `config` na hora.
+        from ..pipeline.dubbing import default_project_path
+
+        return str(default_project_path(Path(path), language))
+    return None
+
+
+def dub_overwrite_question(target: str, arguments: Mapping[str, Any]) -> str:
+    language = arguments.get("target_language")
+    for_language = f" para {language}" if isinstance(language, str) and language else ""
+    return (
+        f"Já existe uma dublagem deste vídeo{for_language} ({target}), e refazê-la apaga as traduções "
+        "revisadas. Posso refazê-la por cima?"
+    )
 
 
 def consent_question(tool: str, arguments: Mapping[str, Any]) -> str:
@@ -502,4 +530,10 @@ class ToolGate:
                 if isinstance(target, str) and target and self.exists(target):
                     question = f"O arquivo '{target}' já existe. Posso sobrescrevê-lo?"
                     requests.append(ConfirmationRequest(tool, arguments, question))
+        if tool in REPLACES_EXISTING_DUB_PROJECT:
+            target = dub_project_target(arguments)
+            if target and self.exists(target):
+                requests.append(
+                    ConfirmationRequest(tool, arguments, dub_overwrite_question(target, arguments))
+                )
         return requests

@@ -29,6 +29,7 @@ from dmaker.agent.evaluation import (
     write_report,
 )
 from dmaker.agent.llm import Reply, ToolCall
+from dmaker.agent.safety import ConversationalConfirmation
 from dmaker.agent.settings import AgentSettings
 
 from .conftest import requires_ffmpeg
@@ -503,6 +504,26 @@ def test_a_refused_overwrite_leaves_the_project_file_untouched():
     rep = runner_module.run_battery(cases, SETTINGS, fake=True)
 
     assert all(r.passed for r in rep.ran) and all(r.tools == [] for r in rep.ran)
+
+
+@requires_ffmpeg
+def test_dubbing_a_new_video_in_the_battery_asks_only_before_the_final_render(monkeypatch):
+    """Na pasta virgem do pedido a dublagem não existe, então a regra de refazê-la não dispara: o acerto medido vale."""
+    case = next(c for c in load_cases(DATA) if c.id == "dublar-para-ingles")
+    asked: list[str] = []
+
+    class Spy(ConversationalConfirmation):
+        def confirm(self, request):
+            asked.append(request.tool)
+            return super().confirm(request)
+
+    monkeypatch.setattr(runner_module, "ConversationalConfirmation", Spy)
+
+    rep = runner_module.run_battery([case], SETTINGS, fake=True)
+
+    result = rep.results[0]
+    assert result.passed, result.failed
+    assert asked == ["dub_render"] and result.tools == ["dub_prepare", "dub_render"]
 
 
 @requires_ffmpeg

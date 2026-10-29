@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from dmaker.agent.llm import Reply, ToolCall
@@ -14,6 +16,7 @@ from dmaker.agent.safety import (
     is_affirmative,
 )
 from dmaker.agent.tools import ToolSpec
+from dmaker.pipeline.dubbing import default_project_path
 
 RENDER = {"name_or_path": "meu-video"}
 
@@ -168,6 +171,79 @@ def test_a_confirmation_the_person_answered_is_not_asked_again_in_the_same_call(
     loop.ask("Sim")
 
     assert policy.asked == ["render_project"] and len(host.calls) == 1
+
+
+# ---------- refazer uma dublagem que já existe ----------
+
+VIDEO = "C:/v/aula.mp4"
+DUB = {"path": VIDEO, "target_language": "en"}
+
+
+class DubHost(Host):
+    def specs(self):
+        schema = {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "target_language": {"type": "string"}},
+            "required": ["path", "target_language"],
+        }
+        return [ToolSpec("dub_prepare", "d", schema)]
+
+    def call(self, name, arguments):
+        self.calls.append((name, dict(arguments)))
+        return '{"status": "done"}'
+
+
+def make_dub_loop(replies, project_on_disk: bool):
+    """O agente com um disco falso: o vídeo existe e, conforme o caso, a dublagem dele para inglês também."""
+    existing = {VIDEO}
+    if project_on_disk:
+        existing.add(str(default_project_path(Path(VIDEO), "en")))
+    host = DubHost()
+    loop = AgentLoop(
+        model=Script(replies),
+        tools=host,
+        system="s",
+        gate=ToolGate(schemas={}, policy=ConversationalConfirmation(), exists=existing.__contains__),
+    )
+    return loop, host
+
+
+def dub_call_then_question():
+    return [
+        Reply("", [ToolCall("dub_prepare", DUB)]),
+        Reply("Já existe uma dublagem deste vídeo. Posso refazê-la por cima?"),
+    ]
+
+
+def test_redoing_an_existing_dubbing_waits_for_the_yes_and_a_clear_yes_runs_the_same_call():
+    loop, host = make_dub_loop([*dub_call_then_question(), Reply("Refiz a dublagem.")], project_on_disk=True)
+    loop.ask("dubla o vídeo da aula para inglês")
+
+    assert host.calls == []  # a pergunta foi feita e nada foi escrito por cima
+    assert loop.gate.pending is not None and "apaga as traduções revisadas" in loop.gate.pending.question
+
+    answer = loop.ask("Sim, pode refazer.")
+
+    assert host.calls == [("dub_prepare", DUB)] and answer == "Refiz a dublagem."
+
+
+def test_redoing_an_existing_dubbing_with_a_no_keeps_the_revised_translations():
+    loop, host = make_dub_loop(
+        [*dub_call_then_question(), Reply("Mantive a dublagem.")], project_on_disk=True
+    )
+    loop.ask("dubla o vídeo da aula para inglês")
+
+    loop.ask("Não, deixa como está.")
+
+    assert host.calls == [] and loop.gate.pending is None
+
+
+def test_a_dubbing_of_a_new_video_runs_at_once_without_a_question_to_the_person():
+    loop, host = make_dub_loop([Reply("", [ToolCall("dub_prepare", DUB)]), Reply("Preparei.")], False)
+
+    loop.ask("dubla o vídeo da aula para inglês")
+
+    assert host.calls == [("dub_prepare", DUB)] and loop.gate.pending is None
 
 
 # ---------- o que conta como sim ----------
