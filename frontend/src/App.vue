@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppShell from '@/components/layout/AppShell.vue'
+import ConfirmHost from '@/components/ui/ConfirmHost.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
 import { useClientHeartbeat } from '@/composables/useClientHeartbeat'
 import { useJobNotifications } from '@/composables/useJobNotifications'
@@ -29,4 +30,5 @@ onBeforeUnmount(() => jobs.stopPolling())
     <RouterView />
   </AppShell>
   <ToastHost />
+  <ConfirmHost />
 </template>

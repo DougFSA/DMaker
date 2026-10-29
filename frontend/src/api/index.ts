@@ -1,5 +1,13 @@
-/* Cliente tipado da API do DMaker: uma função por rota usada pela interface. */
+/* Cliente tipado da API do DMaker: uma função por rota usada pela interface. As áreas grandes (voz, fala,
+   dublagem, fila, modelos e editor) vivem num arquivo cada e entram aqui só para compor o `api`. */
+import { dubApi } from './dub'
+import { editorApi } from './editor'
 import { http } from './http'
+import { jobsApi } from './jobs'
+import { modelsApi } from './models'
+import { queueApi } from './queue'
+import { speechApi } from './speech'
+import { voiceApi } from './voice'
 import type {
   AgentMessageResponse,
   AgentStatus,
@@ -16,7 +24,6 @@ import type {
   CutReport,
   InfographicFrameRequest,
   InfographicInfo,
-  JobSnapshot,
   JobStartResponse,
   LookCatalog,
   NewProjectRequest,
@@ -121,11 +128,7 @@ export const api = {
       http.postBlob(`/api/infographics/${enc(name)}/frame`, request),
   },
 
-  jobs: {
-    list: () => http.get<JobSnapshot[]>('/api/jobs'),
-    clearFinished: () => http.delete<{ removed: number }>('/api/jobs/finished'),
-    eventsUrl: (jobId: string) => `/api/jobs/${enc(jobId)}/events`,
-  },
+  jobs: jobsApi,
 
   files: {
     /** `kind: 'sheet'` mostra as planilhas de lote (.csv, .xlsx, .json) no lugar da mídia. */
@@ -139,7 +142,24 @@ export const api = {
     /** Avisa o servidor que há uma interface aberta (evita abrir outra aba em renders pela CLI/MCP). */
     ping: () => http.post<{ ok: boolean }>('/api/clients/ping'),
   },
+
+  voice: voiceApi,
+  speech: speechApi,
+  dub: dubApi,
+  queue: queueApi,
+  models: modelsApi,
+  editor: editorApi,
 }
 
 export { ApiError, errorMessage } from './http'
+export { followJob, isJobCancelled, jobErrorMessage, JobCancelledError } from './follow'
+export type { FollowedJob, FollowJobHandlers } from './follow'
+export { subscribeJson, subscribeSse } from './sse'
+export type { SseOptions, SseStatus, SseSubscription } from './sse'
 export type * from './types'
+export type * from './types/dub'
+export type * from './types/editor'
+export type * from './types/models'
+export type * from './types/queue'
+export type * from './types/speech'
+export type * from './types/voice'

@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
-import { NAV_ITEMS } from '@/navigation'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -62,14 +61,75 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         component: () => import('@/views/AgentView.vue'),
         meta: { title: 'Agente' },
       },
-      // telas das próximas fases: a rota já existe, só o componente muda quando a fase chegar
-      ...NAV_ITEMS.filter((item) => !item.ready).map((item) => ({
-        path: item.to,
-        name: `soon-${item.key}`,
-        component: () => import('@/views/ComingSoonView.vue'),
-        props: { itemKey: item.key },
-        meta: { title: item.label },
-      })),
+      // as áreas do DMK-38: cada rota já tem a view própria ("em construção" até a frente dela chegar)
+      {
+        path: '/voz',
+        component: () => import('@/views/voice/VoiceShellView.vue'),
+        children: [
+          {
+            path: '',
+            name: 'voice',
+            component: () => import('@/views/voice/VoicesView.vue'),
+            meta: { title: 'Vozes' },
+          },
+          {
+            path: 'narracao',
+            name: 'voice-narration',
+            component: () => import('@/views/voice/NarrationView.vue'),
+            meta: { title: 'Narração' },
+          },
+          {
+            path: 'pronuncia',
+            name: 'voice-pronunciation',
+            component: () => import('@/views/voice/PronunciationView.vue'),
+            meta: { title: 'Pronúncia' },
+          },
+          {
+            path: 'isolar',
+            name: 'voice-isolate',
+            component: () => import('@/views/voice/IsolateView.vue'),
+            meta: { title: 'Isolar voz' },
+          },
+          {
+            path: 'corrigir',
+            name: 'voice-fix',
+            component: () => import('@/views/voice/FixSpeechView.vue'),
+            meta: { title: 'Corrigir fala' },
+          },
+          {
+            path: 'trocar',
+            name: 'voice-swap',
+            component: () => import('@/views/voice/SwapVoiceView.vue'),
+            meta: { title: 'Trocar voz' },
+          },
+        ],
+      },
+      {
+        path: '/dublagem',
+        name: 'dubbing',
+        component: () => import('@/views/DubbingView.vue'),
+        meta: { title: 'Dublagem' },
+      },
+      {
+        path: '/fila',
+        name: 'queue',
+        component: () => import('@/views/QueueView.vue'),
+        meta: { title: 'Fila' },
+      },
+      {
+        path: '/modelos',
+        name: 'models',
+        component: () => import('@/views/ModelsView.vue'),
+        meta: { title: 'Modelos' },
+      },
+      {
+        // sem nome (/editor) é o item do menu lateral; com nome é o editor daquele projeto
+        path: '/editor/:name?',
+        name: 'editor',
+        component: () => import('@/views/EditorView.vue'),
+        props: true,
+        meta: { title: 'Editor' },
+      },
       {
         path: '/:rest(.*)*',
         name: 'not-found',

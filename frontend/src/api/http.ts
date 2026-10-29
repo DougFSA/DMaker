@@ -32,7 +32,10 @@ export function messageFromDetail(detail: unknown, fallback: string): string {
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method }
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    // sem Content-Type de propósito: o navegador o monta com o limite (boundary) do multipart
+    init.body = body
+  } else if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' }
     init.body = JSON.stringify(body)
   }
@@ -98,10 +101,24 @@ async function postForBlob(path: string, body: unknown): Promise<Blob> {
 
 export const http = {
   postBlob: postForBlob,
+  /** Envio de arquivo (multipart): clonar voz, roteiro da fila e arquivo da aba Voz. */
+  postForm: <T>(path: string, form: FormData) => request<T>('POST', path, form),
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body ?? {}),
   delete: <T>(path: string) => request<T>('DELETE', path),
+}
+
+export type QueryValue = string | number | boolean | null | undefined
+
+/** Acrescenta `?a=1&b=2` ao caminho, pulando o que não tem valor, para os clientes não montarem query na mão. */
+export function withQuery(path: string, params: Record<string, QueryValue>): string {
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === '') continue
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+  }
+  return parts.length ? `${path}?${parts.join('&')}` : path
 }
 
 /** Mensagem para mostrar ao usuário a partir de qualquer coisa lançada. */
