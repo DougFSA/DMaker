@@ -137,13 +137,9 @@ def _sfnt_table(file: Path, tag: bytes) -> bytes | None:
 
 
 @lru_cache(maxsize=64)
-def _libass_cell_ratio(file: str) -> float:
-    """(winAscent+winDescent)/unitsPerEm: o libass dimensiona o Fontsize pela célula do OS/2, como o VSFilter.
-
-    Na Poppins isso dá 1,76 (a hhea que o Pillow expõe dá 1,40), então o corpo real é 20% menor do que
-    `em_px` supõe e a largura que `measure` devolve sai 26% maior que a desenhada. Sem a tabela OS/2 o
-    libass cai na hhea, e nós também.
-    """
+def _libass_metrics(file: str) -> tuple[float, float]:
+    """(winAscent, winDescent) em frações do em, que o libass usa para dimensionar a célula da linha (como o
+    VSFilter); sem a tabela OS/2 ele cai na hhea, e nós também."""
     try:
         os2 = _sfnt_table(Path(file), b"OS/2")
         head = _sfnt_table(Path(file), b"head")
@@ -151,10 +147,23 @@ def _libass_cell_ratio(file: str) -> float:
             (units_per_em,) = struct.unpack(">H", head[18:20])
             win_ascent, win_descent = struct.unpack(">HH", os2[74:78])
             if units_per_em and win_ascent + win_descent:
-                return (win_ascent + win_descent) / units_per_em
+                return win_ascent / units_per_em, win_descent / units_per_em
     except (OSError, struct.error):
         pass
-    return _cell_ratio(file)
+    ascent, descent = ImageFont.truetype(file, 1000).getmetrics()
+    return ascent / 1000.0, descent / 1000.0
+
+
+@lru_cache(maxsize=64)
+def _libass_cell_ratio(file: str) -> float:
+    """(winAscent+winDescent)/unitsPerEm: o libass dimensiona o Fontsize pela célula do OS/2, como o VSFilter.
+
+    Na Poppins isso dá 1,76 (a hhea que o Pillow expõe dá 1,40), então o corpo real é 20% menor do que
+    `em_px` supõe e a largura que `measure` devolve sai 26% maior que a desenhada. Sem a tabela OS/2 o
+    libass cai na hhea, e nós também.
+    """
+    ascent, descent = _libass_metrics(file)
+    return ascent + descent
 
 
 @lru_cache(maxsize=64)
@@ -171,6 +180,23 @@ def measure_rendered(text: str, ref: FontRef, ass_size: float, spacing: float = 
     em = ass_size / _libass_cell_ratio(str(ref.file))
     width = _reference_font(str(ref.file)).getlength(text) * em / _REFERENCE_EM + spacing * len(text)
     return width, ass_size
+
+
+def ink_box(text: str, ref: FontRef, ass_size: float) -> tuple[float, float, float, float]:
+    """(esquerda, topo, direita, base) da tinta do texto como o libass o desenha, em px, com a origem no começo do
+    texto e na linha de base (o topo é negativo: fica acima dela). É o que um círculo ou um sublinhado precisa
+    para abraçar a palavra, e não a célula inteira da linha, que é bem mais alta que as letras."""
+    em = ass_size / _libass_cell_ratio(str(ref.file))
+    left, top, right, bottom = _reference_font(str(ref.file)).getbbox(text, anchor="ls")
+    scale = em / _REFERENCE_EM
+    return left * scale, top * scale, right * scale, bottom * scale
+
+
+def baseline_offset(ref: FontRef, ass_size: float) -> float:
+    """Distância, em px, do topo da célula da linha até a linha de base: a fração da célula que o libass reserva
+    acima da base (winAscent sobre winAscent+winDescent)."""
+    ascent, descent = _libass_metrics(str(ref.file))
+    return ass_size * ascent / (ascent + descent)
 
 
 def fontsdir() -> Path:

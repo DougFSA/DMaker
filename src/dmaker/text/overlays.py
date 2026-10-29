@@ -519,7 +519,7 @@ def add_captions(
         words = [w for w in cue.words if w.text.strip()]
         if cs.mode == "karaoke" and words:
             plain = " ".join(fmt(w.text) for w in words)
-            for t0, t1, active in _highlight_windows(cue, words):
+            for t0, t1, active in highlight_windows(cue, words):
                 if active is None:
                     doc.add(Event(t0, t1, style_name, pos + plain, layer=5))
                     continue
@@ -532,7 +532,7 @@ def add_captions(
             doc.add(Event(cue.start, cue.end, style_name, pos + fmt(cue.text), layer=5))
 
 
-def _highlight_windows(cue: Cue, words: list[Word]) -> list[tuple[float, float, int | None]]:
+def highlight_windows(cue: Cue, words: list[Word]) -> list[tuple[float, float, int | None]]:
     """Janelas do karaokê: (início, fim, índice da palavra ativa); None é o trecho antes da primeira palavra."""
     windows: list[tuple[float, float, int | None]] = []
     first_start = max(words[0].start, cue.start)
@@ -633,7 +633,7 @@ def _add_rounded_captions(
         escaped = [escape_text(token) for token in tokens]
         sizes = [len(row) for row in rows]
         if words:
-            for t0, t1, active in _highlight_windows(cue, words):
+            for t0, t1, active in highlight_windows(cue, words):
                 text = _highlighted_rows(escaped, sizes, active, hl_on, hl_off)
                 doc.add(Event(t0, t1, style_name, pos + text, layer=5))
         else:

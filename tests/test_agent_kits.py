@@ -50,6 +50,11 @@ def test_excluded_tools_have_a_reason_exist_and_are_not_also_in_a_kit():
     assert not set(EXCLUDED_TOOLS) & set(all_kit_tool_names())
 
 
+def test_the_tool_that_returns_an_image_of_an_infographic_stays_out_of_the_kits():
+    assert "render_infographic_frame" in EXCLUDED_TOOLS
+    assert "render_infographic_frame" not in all_kit_tool_names()
+
+
 def test_kits_are_well_formed():
     names = [kit.name for kit in KITS]
     assert len(names) == len(set(names))
@@ -60,7 +65,7 @@ def test_kits_are_well_formed():
         assert not set(BASE_TOOLS) & set(kit.tools), f"{kit.name} repete uma ferramenta comum"
 
 
-def test_kits_name_the_tools_that_running_cards_will_create():
+def test_the_compositions_kit_holds_the_html_and_infographic_tools():
     compositions = kit_by_name("compositions").tools
     assert {"render_html_frame", "add_html_overlay", "list_infographics", "add_infographic"} <= set(
         compositions
@@ -70,11 +75,13 @@ def test_kits_name_the_tools_that_running_cards_will_create():
 def test_kit_tool_names_filter_by_what_the_server_exposes_and_keep_the_common_ones_first():
     kit = kit_by_name("compositions")
 
-    exposed = kit_tool_names(kit, available=server_tools())
+    # um servidor sem as ferramentas de infográfico (o kit pode citar o que o servidor ainda não tem)
+    exposed = kit_tool_names(kit, available={"probe_media", "job_status", "search_manual", "edit_project"})
 
     assert exposed[: len(BASE_TOOLS)] == list(BASE_TOOLS)
     assert "add_infographic" not in exposed and "edit_project" in exposed
     assert "add_infographic" in kit_tool_names(kit)
+    assert "add_infographic" in kit_tool_names(kit, available=server_tools())
 
 
 def test_tools_for_kits_merges_without_repeating():

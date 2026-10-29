@@ -192,11 +192,13 @@ def test_libass_cell_comes_from_the_os2_table_and_falls_back_to_the_hhea(monkeyp
     assert fonts._libass_cell_ratio(str(ref.file)) == pytest.approx(1.762)
     assert fonts.measure_rendered("agenda", ref, 72)[0] < 0.85 * fonts.measure("agenda", ref, 72)[0]
     fonts._libass_cell_ratio.cache_clear()
+    fonts._libass_metrics.cache_clear()  # as medidas da tabela OS/2 também ficam em cache
     monkeypatch.setattr(fonts, "_sfnt_table", lambda file, tag: None)
     try:
         assert fonts._libass_cell_ratio(str(ref.file)) == pytest.approx(1.4)
     finally:
         fonts._libass_cell_ratio.cache_clear()
+        fonts._libass_metrics.cache_clear()
 
 
 def test_boxed_caption_is_byte_for_byte_what_it_was(canvas):

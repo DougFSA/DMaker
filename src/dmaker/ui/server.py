@@ -34,6 +34,7 @@ from .agent_routes import build_agent_router
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
+from .infographic_routes import build_infographics_router
 from .look_routes import build_looks_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
@@ -73,6 +74,7 @@ app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
 app.include_router(build_transitions_router())
 app.include_router(build_looks_router())
+app.include_router(build_infographics_router())
 app.include_router(build_agent_router(jobs))
 
 

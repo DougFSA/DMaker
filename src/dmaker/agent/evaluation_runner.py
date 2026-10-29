@@ -47,18 +47,41 @@ _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 # ---------- pasta de dados isolada ----------
 
 
+# O que mora no repositório (código, modelos baixados, ferramentas, assets e modelos de projeto): nunca vai para a
+# pasta temporária, nem quando `DATA_DIR` é a própria raiz (o padrão de quem usa o editor).
+CODE_PATHS = frozenset(
+    {
+        "ROOT",
+        "PACKAGE_DIR",
+        "BIN_DIR",
+        "FFMPEG_DIR",
+        "PLAYWRIGHT_DIR",
+        "ASSETS_DIR",
+        "FONTS_DIR",
+        "HTML_ASSETS_DIR",
+        "BRANDS_DIR",
+        "SFX_DIR",
+        "TEMPLATES_DIR",
+        "INFOGRAPHICS_DIR",
+        "MODELS_DIR",
+        "WINDOWS_FONTS_DIR",
+    }
+)
+
+
 @contextmanager
 def isolated_workspace(root: Path) -> Iterator[Path]:
-    """Aponta os caminhos de dados do `config` para `root` e devolve tudo ao fim (os modelos baixados ficam)."""
+    """Aponta os caminhos de dados do `config` (cache, saída, projetos, vozes, léxico, layouts) para `root` e
+    devolve tudo ao fim. Os modelos baixados e tudo que é do repositório ficam onde estão."""
     old_data = config.DATA_DIR
     moved = {
         name: value
         for name, value in vars(config).items()
         if name.isupper()
         and isinstance(value, Path)
+        and name not in CODE_PATHS
         and value != old_data
         and value.is_relative_to(old_data)
-        and name != "MODELS_DIR"
     }
     originals = {name: getattr(config, name) for name in (*moved, "DATA_DIR")}
     for name, value in moved.items():
@@ -102,7 +125,7 @@ def _make_audio(path: Path, seconds: float = 4.0) -> None:
     )
 
 
-def _make_image(path: Path) -> None:
+def _make_image(path: Path, seconds: float = 0.0) -> None:
     from PIL import Image
 
     Image.new("RGB", (600, 400), (30, 110, 160)).save(path)
@@ -135,7 +158,7 @@ def build_media(fixtures: Mapping[str, Any], folder: Path) -> dict[str, str]:
         kind = spec.get("kind")
         if kind in makers:
             target = folder / f"{name}{suffixes[kind]}"
-            makers[kind](target)
+            makers[kind](target, float(spec.get("seconds", 4.0)))  # a foto ignora a duração
             names[name] = target.as_posix()
         elif kind == "folder":
             target = folder / name

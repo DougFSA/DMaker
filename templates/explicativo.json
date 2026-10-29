@@ -8,13 +8,13 @@
       "required": true
     },
     "assuntos": {
-      "description": "Os assuntos em ordem, emendados (o início de cada um é o fim do anterior): fim em segundos; fundo opcional (escuro, claro, bege, uma cor #RRGGBB ou o caminho de uma imagem; sem ele os fundos se alternam); imagem opcional, que entra na região topo durante o assunto. O fim do último assunto é a duração do vídeo.",
+      "description": "Os assuntos em ordem, emendados (o início de cada um é o fim do anterior): fim em segundos; fundo opcional (escuro, claro, bege, uma cor #RRGGBB ou o caminho de uma imagem; sem ele os fundos se alternam); imagem opcional, que entra na região topo durante o assunto; infografico opcional ({nome, parametros}: um modelo de list_infographics, como o contador ou a barra, que anima na região topo durante o assunto). O fim do último assunto é a duração do vídeo.",
       "type": "list",
       "required": true,
       "example": [
-        { "fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png" },
+        { "fim": 20, "fundo": "escuro", "infografico": { "nome": "contador", "parametros": { "ate": 10000, "prefixo": "+ de R$" } } },
         { "fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png" },
-        { "fim": 60, "fundo": "claro" }
+        { "fim": 60, "fundo": "claro", "infografico": { "nome": "barra", "parametros": { "valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400 } } }
       ]
     },
     "legendas": {
@@ -69,6 +69,19 @@
         "$if": "{{assunto.imagem}}",
         "type": "image",
         "src": "{{assunto.imagem}}",
+        "region": "topo",
+        "start": "{{assunto.inicio}}",
+        "end": "{{assunto.fim}}"
+      }
+    },
+    {
+      "$for": "assuntos",
+      "as": "assunto",
+      "item": {
+        "$if": "{{assunto.infografico}}",
+        "type": "html",
+        "infographic": "{{assunto.infografico.nome}}",
+        "data": "{{assunto.infografico.parametros}}",
         "region": "topo",
         "start": "{{assunto.inicio}}",
         "end": "{{assunto.fim}}"

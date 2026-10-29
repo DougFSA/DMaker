@@ -231,9 +231,10 @@ KITS: tuple[Kit, ...] = (
             "edit_project",
             "timeline_view",
             "render_project",
+            "qa_report",
         ),
         keywords=("infograf", "grafico", "contador", "html", "composic", "overlay", "sobreposic", "animac"),
-        tasks=(),
+        tasks=("infograficos",),
     ),
     Kit(
         name="batch",
@@ -262,6 +263,7 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "contact_sheet": "devolve imagem e o modelo local de texto não enxerga; a conferência é o qa_report",
     "frames": "devolve imagem e o modelo local de texto não enxerga; a conferência é o qa_report",
     "render_card_preview": "devolve imagem e o modelo local de texto não enxerga",
+    "render_infographic_frame": "devolve imagem e o modelo local de texto não enxerga; confere-se com validate_project",
     "models": "baixa e apaga modelos grandes pela rede; é decisão de quem usa, em `dmaker models`",
     "list_jobs": "job_status com o número da tarefa já basta",
 }

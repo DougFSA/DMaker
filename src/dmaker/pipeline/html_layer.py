@@ -9,25 +9,41 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+from ..domain.brand import Theme
 from ..domain.regions import html_box
 from ..domain.spec import HtmlOverlay, Project
 from ..domain.timeline import frame_range
 from ..filtergraph.html_layer import ResolvedHtmlLayer, html_layer_command
+from ..media import fonts
 from ..media.ffmpeg import FFmpegCommand, FFmpegError
 from ..media.html_render import HtmlComposition, HtmlRenderer, PlaywrightHtmlRenderer
-from ..media.html_site import composition_files, entry_file
+from ..media.html_site import FontFace, composition_files, entry_file
 from ..visuals.motion_blur import blend_stream, blur_sample_times
 from .context import RenderContext
 from .segments import cache_key
 
-# Muda quando a receita da camada muda (o jeito de capturar, o relógio, o codec): invalida o cache só das
-# composições. Não é o MEZZ_VERSION nem o MATTE_VERSION, cujas receitas continuam as mesmas.
-HTML_LAYER_VERSION = "h1"
+# Muda quando a receita da camada muda (o jeito de capturar, o relógio, o codec, o que a página recebe da marca):
+# invalida o cache só das composições. Não é o MEZZ_VERSION nem o MATTE_VERSION, cujas receitas continuam as mesmas.
+# h2: a página passou a receber o raio dos cantos da marca, a fonte dela de verdade (não só a Poppins) e os arquivos
+# do projeto declarados pela composição.
+HTML_LAYER_VERSION = "h2"
+
+# Peso CSS de cada papel de peso da marca (`fonts.title`, `body`...): as `@font-face` da família cobrem os seis.
+_CSS_WEIGHTS = (
+    ("light", 300, "normal"),
+    ("regular", 400, "normal"),
+    ("medium", 500, "normal"),
+    ("semibold", 600, "normal"),
+    ("bold", 700, "normal"),
+    ("extrabold", 800, "normal"),
+    ("italic", 400, "italic"),
+)
 
 
 class HtmlRenderFailed(RuntimeError):
@@ -45,6 +61,40 @@ class ResolvedHtmlOverlay:
     end: float
     box: tuple[int, int, int, int]
     index: int
+    files: dict[str, Path] = field(
+        default_factory=dict
+    )  # arquivos do projeto que a página lê, por nome servido
+
+
+def brand_font_faces(theme: Theme) -> tuple[FontFace, ...]:
+    """As fontes da marca que a página precisa por `@font-face` além da Poppins de `assets/fonts`: os arquivos da
+    família do `brand.json` quando ela não é a Poppins (Arial, Bahnschrift) e as fontes por papel (`fonts.files`:
+    script, date, serif...), que viram `--dm-font-<papel>`. Fonte que não está no disco fica de fora (o texto cai
+    na família da marca)."""
+    faces: list[FontFace] = []
+    family = theme.font_family
+    if family != "Poppins" and family in fonts.FAMILIES:
+        for role, weight, style in _CSS_WEIGHTS:
+            ref = fonts.resolve(family, role)
+            if ref.family == family:
+                faces.append(FontFace(family, weight, style, ref.file))
+    for role in sorted(theme.fonts.get("files", {})):
+        try:
+            path = fonts.resolve_file(theme.fonts["files"], role)
+        except FileNotFoundError:
+            continue
+        faces.append(FontFace(f"dm-{role}", 400, "normal", path))
+    return tuple(faces)
+
+
+def brand_page_fields(theme: Theme) -> dict[str, Any]:
+    """O que a marca entrega à página: cores, família, raio dos cantos e arquivos de fonte (ver `HtmlComposition`)."""
+    return {
+        "colors": dict(theme.colors),
+        "font_family": theme.font_family,
+        "radius": theme.rounded_box_radius,
+        "fonts": brand_font_faces(theme),
+    }
 
 
 def has_html_overlays(project: Project) -> bool:
@@ -66,7 +116,23 @@ def resolve_html_overlay(
     if end <= overlay.start:
         return None
     box = html_box(overlay, ctx.width, ctx.height)
-    return ResolvedHtmlOverlay(overlay, source, overlay.start, end, box, index)
+    files = {name: ctx.project.resolve(path) for name, path in overlay.files.items()}
+    return ResolvedHtmlOverlay(overlay, source, overlay.start, end, box, index, files)
+
+
+def files_digest(files: Mapping[str, Path], faces: tuple[FontFace, ...]) -> str:
+    """Impressão digital dos arquivos de fora da pasta que a página lê (imagens do projeto, fontes da marca): trocar
+    o conteúdo de um deles renderiza de novo."""
+    digest = hashlib.sha1()
+    entries = [(name, path) for name, path in sorted(files.items())]
+    entries += [(f"{face.family}/{face.weight}/{face.style}", face.path) for face in faces]
+    for name, path in entries:
+        digest.update(name.encode("utf-8"))
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"?")  # arquivo sumido: a página recebe 404 e avisa; a chave só precisa mudar
+    return digest.hexdigest()
 
 
 def content_digest(source: Path) -> str:
@@ -151,8 +217,8 @@ class HtmlLayerBuilder:
             fps=fps,
             duration=item.end - item.start,
             data=overlay.data,
-            colors=dict(ctx.theme.colors),
-            font_family=ctx.theme.font_family,
+            files=item.files,
+            **brand_page_fields(ctx.theme),
         )
         output_size = composition.output_size
         # o instante da página no primeiro quadro: 0 quando o início cai na grade de quadros, uma fração dele
@@ -174,6 +240,8 @@ class HtmlLayerBuilder:
             blur.model_dump(mode="json") if blur else None,
             composition.colors,  # a marca chega à página por variáveis CSS
             composition.font_family,
+            composition.radius,
+            files_digest(composition.files, composition.fonts),
         )
         out = ctx.cache_dir / f"{key}_html.mov"
         partial = ctx.cache_dir / f"{key}_html.part.mov"
@@ -253,7 +321,7 @@ def html_warnings(project: Project, problem: Callable[[], str | None]) -> list[s
         return []
     warnings = []
     for index, overlay in enumerate(project.overlays):
-        if isinstance(overlay, HtmlOverlay):
+        if isinstance(overlay, HtmlOverlay) and overlay.src is not None:  # os modelos prontos: ver `lint`
             try:
                 resolve_html_source(project, overlay.src)
             except (FileNotFoundError, ValueError) as exc:

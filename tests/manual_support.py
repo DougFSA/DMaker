@@ -121,6 +121,10 @@ Ouça.
 <!-- dmaker:gerado spec -->
 
 <!-- dmaker:fim-gerado spec -->
+
+<!-- dmaker:gerado infograficos -->
+
+<!-- dmaker:fim-gerado infograficos -->
 """
 
 

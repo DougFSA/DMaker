@@ -289,6 +289,40 @@ def test_isolated_workspace_points_the_data_folders_away_and_restores_them(tmp_p
     assert (config.PROJECTS_DIR, config.OUTPUT_DIR, config.DATA_DIR, config.MODELS_DIR) == before
 
 
+def test_isolated_workspace_leaves_the_repository_folders_alone_when_data_is_the_root(tmp_path, monkeypatch):
+    """Quem usa o editor tem `DATA_DIR` igual à raiz: templates, assets e `bin` ficam sob ela e não podem sumir."""
+    root = config.ROOT
+    for name, path in {
+        "DATA_DIR": root,
+        "PROJECTS_DIR": root / "projects",
+        "OUTPUT_DIR": root / "output",
+        "CACHE_DIR": root / "cache",
+        "MODELS_DIR": root / "cache" / "models",
+        "VOICES_DIR": root / "assets" / "voices",
+        "LEXICON_DIR": root / "assets",
+    }.items():
+        monkeypatch.setattr(config, name, path)
+    code = (config.TEMPLATES_DIR, config.ASSETS_DIR, config.BIN_DIR, config.PLAYWRIGHT_DIR, config.BRANDS_DIR)
+
+    with runner_module.isolated_workspace(tmp_path / "ws") as workspace:
+        now = (
+            config.TEMPLATES_DIR,
+            config.ASSETS_DIR,
+            config.BIN_DIR,
+            config.PLAYWRIGHT_DIR,
+            config.BRANDS_DIR,
+        )
+        assert now == code
+        assert config.PROJECTS_DIR == workspace / "projects" and config.OUTPUT_DIR == workspace / "output"
+        assert (
+            config.VOICES_DIR == workspace / "assets" / "voices"
+            and config.LEXICON_DIR == workspace / "assets"
+        )
+        assert config.MODELS_DIR == root / "cache" / "models"  # os modelos baixados continuam visíveis
+
+    assert config.PROJECTS_DIR == root / "projects" and config.DATA_DIR == root
+
+
 def test_substitute_replaces_known_markers_deeply_and_leaves_braces_alone():
     names = {"video": "C:/m/video.mp4"}
 

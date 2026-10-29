@@ -4,7 +4,7 @@ Tarefa `animacao-html` do manual do DMaker. Põe por cima do vídeo uma animaç�
 
 ## Quando usar
 
-Você quer um gráfico ou uma animação que o DMaker não tem pronta: a Terra em corte com rótulos, uma planta baixa em 3D, quadros inclinados. A IA escreve a animação, você confere um quadro dela e o DMaker a desenha quadro a quadro, com fundo transparente, na região do vídeo que você escolher. A mesma animação sai sempre igual.
+Você quer um gráfico ou uma animação que o DMaker não tem pronta (para um contador, uma barra ou uma linha, use antes os infográficos prontos, na tarefa "Pôr um infográfico animado no vídeo"): a Terra em corte com rótulos, uma planta baixa em 3D, quadros inclinados. A IA escreve a animação, você confere um quadro dela e o DMaker a desenha quadro a quadro, com fundo transparente, na região do vídeo que você escolher. A mesma animação sai sempre igual.
 
 **Pedidos que levam a esta tarefa:**
 - "Põe na parte de cima um número que conta até 87% e um cubo 3D girando"

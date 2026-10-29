@@ -68,3 +68,30 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 - **Não vendorizado.** A licença do GSAP é própria (não é MIT) e o DMaker não a distribui. Se uma composição trouxer
   o GSAP junto dos arquivos dela, o relógio virtual do DMaker o controla; a decisão de usá-lo e a licença são de
   quem o traz.
+
+## rough-notation
+
+- **Onde:** `assets/html/rough-notation.js` (a versão `iife` da biblioteca, com o rough.js embutido, 11 KB), servida às
+  composições em HTML em `/_dmaker/rough-notation.js` e usada pelo infográfico `grifo` (círculo, sublinhado,
+  marca-texto e risco desenhados à mão).
+- **Projeto:** https://github.com/rough-stuff/rough-notation (Preet Shihn), pacote `rough-notation` do npm, versão
+  **0.5.1**, baixada do registro oficial do npm (`npm pack rough-notation@0.5.1`); só `lib/rough-notation.iife.js` e
+  o `LICENSE` foram copiados.
+- **Licença:** MIT (Copyright 2020 Preet Shihn), texto em `assets/html/LICENSE-rough-notation.txt`. O rough.js
+  embutido no arquivo também é MIT.
+
+## Animated Noto Emoji (Google)
+
+- **Onde:** `assets/html/emoji/*.json` (dez animações Lottie: joinha, check, coração, fogo, festa, lâmpada, café,
+  gráfico, surpresa e risada), servidas em `/_dmaker/emoji/<nome>.json` e tocadas pelo infográfico `emoji` com o
+  lottie-web.
+- **Projeto:** Noto Emoji Animation, https://googlefonts.github.io/noto-emoji-animation/ (Google). Os arquivos foram
+  baixados da fonte oficial, sem alteração, de
+  `https://fonts.gstatic.com/s/e/notoemoji/latest/<codepoint>/lottie.json` (1f44d, 2705, 2764_fe0f, 1f525, 1f389,
+  1f4a1, 2615, 1f4c8, 1f632 e 1f602) e só foram renomeados.
+- **Licença:** Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/.
+  A página oficial do projeto, na pergunta "Can I use these animated assets commercially: for a video, for
+  broadcast, apps, etc.?", responde: "Animated Noto Emoji is licensed under CC BY 4.0". O uso comercial é permitido
+  e a licença pede **atribuição**: crédito ao autor, link da licença e aviso de que houve alteração. O texto de
+  crédito está em `assets/html/emoji/ATRIBUICAO.md` e a documentação do modelo `emoji` o repete; quem publicar um
+  vídeo com esses emojis deve manter o crédito "Animated Noto Emoji, Google, CC BY 4.0".

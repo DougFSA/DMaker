@@ -7,9 +7,9 @@ description: Editor de vídeos curtos por comando (Instagram Reels/Stories/Feed,
 
 ## Como rodar
 
-Prefira o servidor MCP `dmaker` (`list_templates`, `new_from_template`, `save_project`, `validate_project`,
-`render_project`, `qa_report`, `edit_project`, `fix_captions`...). Sem MCP, a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se falta
-ffmpeg). `dmaker ui` abre a interface gráfica; `render_project`/`export_project` já abrem sozinhos para o
+Prefira o servidor MCP `dmaker` (`list_templates`, `new_from_template`, `validate_project`,
+`render_project`, `qa_report`...). Sem MCP, a CLI: `D:\DMaker\.venv\Scripts\dmaker.exe <comando>` (nunca o Python global; `dmaker setup` se falta
+ffmpeg). `dmaker ui` abre a interface; `render_project`/`export_project` já a abrem para o
 usuário acompanhar (`show_ui=false` só se ele pedir). `dmaker agent` opera o editor por
 conversa com um modelo local, sem internet (`dmaker://guide`).
 
@@ -23,11 +23,11 @@ conversa com um modelo local, sem internet (`dmaker://guide`).
 3. **Criar o projeto**: `new_from_template(template, name, params)` é o caminho preferido; erro nomeia o
    parâmetro que falta. Sem template que sirva, inspecione as fontes (`probe_media`, nunca chute duração)
    e escreva a spec com `save_project` (`dmaker://guide`).
-4. **Validar**: `validate_project` (duração final, avisos de limite e de marca).
+4. **Validar**: `validate_project` (duração final e avisos).
 5. **Preview**: `render_project(preview=true)`.
 6. **Conferir com `qa_report`**: checagens automáticas (zona segura, ritmo, contraste, legendas, e com
    `output=true` a saída renderizada). Só chame `contact_sheet`/`frames` (gastam tokens de imagem) se o
-   relatório apontar algo ou o usuário pedir para olhar.
+   relatório apontar algo ou o usuário pedir.
 7. **Corrigir e repetir**: `edit_project` para ajustes pontuais (cortar, remover, mover, aparar, mudar um
    campo; `timeline_view` mostra os índices) e `fix_captions` para palavras erradas nas legendas. Volte ao
    passo 5.
@@ -38,7 +38,7 @@ conversa com um modelo local, sem internet (`dmaker://guide`).
 
 O software não decide sozinho os cortes, o ritmo, a câmera de cada momento (multicâmera) nem as tomadas:
 são chamadas de edição. Peça os instantes ao usuário ou avalie com
-`contact_sheet`/`frames` nas fontes antes de montar a timeline. Exceções: gravação falada (`autocut`
+`contact_sheet`/`frames` antes de montar a timeline. Exceções: gravação falada (`autocut`
 corta pausas, vícios e repetições; `list_cuts`, `undo_cut`; nunca à mão com o Whisper) e cerimônia (bloco
 `multicam` + `plan_multicam`: ritmo plausível por fase da fala; o ajuste fino é `edit_project`, pelos avisos).
 
@@ -65,13 +65,14 @@ Dublar para outro idioma (uma voz clonada por pessoa, fundo mantido): `dub_prepa
 
 ## Quando ler `dmaker://guide`
 
-O manual completo (recurso MCP `dmaker://guide`, ou ferramenta `dmaker_guide`) traz a referência inteira da
+O manual completo (`dmaker://guide` ou `dmaker_guide`) traz a referência inteira da
 spec (trecho, sobreposição, reenquadramento, cor), presets, multicâmera e áudio externo, picture-in-picture,
 o formato de `edit_project`/`timeline_view`, legendas e receitas. Leia ao escrever uma spec na mão, usar
 multicâmera, picture-in-picture ou uma operação de `edit_project` que não lembra o formato.
 
 Animação em código (HTML, three.js, Lottie) sobre o vídeo: `render_html_frame`, `add_html_overlay`;
-contrato no guia ("Composição animada em HTML").
+contrato no guia ("Composição animada em HTML"). Infográfico pronto (contador, barra, linha, imagem, etiqueta,
+grifo, emoji): `list_infographics`, `add_infographic` ("use o contador para 95 mg").
 
 ## Depuração
 

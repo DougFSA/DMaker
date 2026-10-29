@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Literal
 
 from ..domain.brand import Theme
+from ..domain.infographic_schema import SchemaError
+from ..domain.infographics import InfographicError, resolve_infographic
 from ..domain.presets import Preset
-from ..domain.regions import resolve_region
-from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Project, TextOverlay
+from ..domain.regions import html_box, resolve_region
+from ..domain.spec import CardSegment, ClipSegment, HtmlOverlay, ImageSegment, Project, TextOverlay
 from ..domain.timeline import tone_for
 from ..filtergraph.reframe import resolve_reframe_mode
 from ..media import fonts
@@ -249,6 +251,39 @@ def check_text_safe_zone(project: Project, layout: ProjectLayout) -> list[Findin
     for i, seg in enumerate(project.timeline):
         if isinstance(seg, CardSegment):
             findings.extend(_check_card_text(i, seg, layout))
+    return findings
+
+
+def check_html_safe_zone(project: Project, layout: ProjectLayout) -> list[Finding]:
+    """composição em HTML cuja área invade a zona coberta pela interface do app"""
+    findings: list[Finding] = []
+    W, H, safe = layout.preset.width, layout.preset.height, layout.preset.safe
+    for i, ov in enumerate(project.overlays):
+        if not isinstance(ov, HtmlOverlay) or ov.anchor is not None:
+            continue  # a presa a uma palavra só tem lugar depois da legenda existir
+        try:
+            ov = resolve_infographic(ov, project)  # o modelo pronto tem a área que o esquema dá
+        except (InfographicError, SchemaError):
+            continue  # o `lint` já diz o que está errado com o modelo
+        ov = resolve_region(ov, project.regions, W, H)
+        left, top, width, height = html_box(ov, W, H)
+        if width >= W - 1 and height >= H - 1:
+            continue  # a página inteira: o que ela desenha dentro é decisão dela, a caixa não diz nada
+        right, bottom = left + width, top + height
+        if (
+            left < safe.left - 1
+            or right > W - safe.right + 1
+            or top < safe.top - 1
+            or bottom > H - safe.bottom + 1
+        ):
+            findings.append(
+                Finding(
+                    "aviso",
+                    f"overlays[{i}]",
+                    "a área da composição HTML pode invadir a região coberta pela interface do app",
+                    ov.start,
+                )
+            )
     return findings
 
 
@@ -507,6 +542,7 @@ def check_sources(project: Project, layout: ProjectLayout) -> list[Finding]:
 STATIC_CHECKS = [
     check_lint,
     check_text_safe_zone,
+    check_html_safe_zone,
     check_text_pacing,
     check_overlap,
     check_contrast,

@@ -72,17 +72,20 @@
       "request": "Põe um contador de 0 a 95 mg em cima entre 10 e 14 s no projeto meu-video",
       "requires_tools": ["add_infographic"],
       "fixtures": {
-        "image": {"kind": "image"},
-        "projects": [{"name": "meu-video", "template": "stories-medlycare", "params": {"print": "{image}"}}]
+        "video": {"kind": "video", "seconds": 16},
+        "projects": [{"name": "meu-video", "template": "explicativo", "params": {"gravacao": "{video}", "assuntos": [{"fim": 8, "fundo": "escuro"}, {"fim": 16, "fundo": "claro"}]}}]
       },
       "oracle": [
         {"call": "list_infographics", "arguments": {}},
-        {"call": "add_infographic", "arguments": {"project": "meu-video", "infographic": "contador", "params": {"from": 0, "to": 95, "unit": "mg"}, "start": 10, "end": 14, "region": "topo"}},
-        {"answer": "O contador de 0 a 95 mg entra de 10 a 14 s, em cima."}
+        {"call": "add_infographic", "arguments": {"project": "meu-video", "name": "contador", "params": {"de": 0, "ate": 95, "sufixo": "mg"}, "start": 10, "end": 14, "region": "topo"}},
+        {"answer": "O contador de 0 a 95 mg entra de 10 a 14 s, na região de cima."}
       ],
       "checks": [
         {"kind": "kit", "kits": ["compositions"]},
-        {"kind": "tool_called", "tool": "add_infographic", "arguments": {"project": "meu-video"}}
+        {"kind": "tool_called", "tool": "add_infographic", "arguments": {"project": "meu-video", "name": "contador", "start": 10, "end": 14, "params": {"ate": 95, "sufixo": "mg"}}},
+        {"kind": "project_field", "project": "meu-video", "path": "overlays.1.infographic", "equals": "contador"},
+        {"kind": "project_field", "project": "meu-video", "path": "overlays.1.data.ate", "equals": 95},
+        {"kind": "project_field", "project": "meu-video", "path": "overlays.1.start", "equals": 10}
       ]
     },
     {

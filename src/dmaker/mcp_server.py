@@ -1108,6 +1108,111 @@ def add_html_overlay(
 
 
 @server.tool(
+    description=(
+        "Os infográficos animados prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): para cada "
+        "um, o nome, a descrição e o esquema dos parâmetros (nome, tipo, padrão, limites e rótulo em "
+        "português), para você usar sem ler o HTML. Ponha um no projeto com `add_infographic`; confira o "
+        "desenho com `render_infographic_frame`."
+    )
+)
+def list_infographics() -> list[dict]:
+    from .pipeline.infographics import describe_infographics
+
+    return describe_infographics()
+
+
+@server.tool(
+    description=(
+        "Põe um infográfico pronto (ver `list_infographics`) nas sobreposições do projeto e salva. `name` é o "
+        'nome do modelo, como `contador`; `params` são os parâmetros dele (ex.: {"ate": 10000, "prefixo": '
+        '"+ de R$"}); `start`/`end` em segundos (`end` vazio vai até o fim do vídeo); `region` é uma região '
+        "do projeto (ex.: `topo`), ou `x`/`y` com `width`/`height` em fração do quadro; sem lugar dito o modelo "
+        "entra na área própria dele. Valor fora do esquema falha dizendo qual. Rode validate_project depois."
+    )
+)
+def add_infographic(
+    project: str,
+    name: str,
+    params: dict | None = None,
+    start: float = 0.0,
+    end: float | None = None,
+    region: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    layer: Literal["front", "behind-person"] = "front",
+) -> dict:
+    from .pipeline.infographics import add_infographic as _add
+    from .pipeline.projects import load_project, summarize
+    from .pipeline.projects import save_project as _save
+
+    loaded = load_project(project)
+    updated = _add(
+        loaded,
+        name,
+        params,
+        start=start,
+        end=end,
+        region=region,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        layer=layer,
+    )
+    path = _save(updated)
+    return {
+        "spec_path": str(path),
+        "overlay_index": len(updated.overlays) - 1,
+        **_summary_dict(summarize(updated)),
+    }
+
+
+@server.tool(
+    description=(
+        "Renderiza um quadro de um infográfico pronto com os parâmetros pedidos e devolve a imagem, para "
+        "conferir antes de pôr no projeto. `at` é o instante (padrão: o modelo já desenhado), `size` é "
+        "LARGURAxALTURA em px na base 1080 (padrão: o tamanho do modelo), `brand` a marca (cores, fonte e "
+        "cantos), `background` a cor por baixo, para ver o transparente. Custa tokens de imagem."
+    ),
+    structured_output=False,
+)
+def render_infographic_frame(
+    name: str,
+    params: dict | None = None,
+    at: float | None = None,
+    size: str | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    background: str = "#0F172A",
+) -> list:
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.infographics import infographic_frame
+    from .pipeline.projects import load_project
+
+    loaded = load_project(project) if project else None
+    result = infographic_frame(
+        name,
+        default_frame_path(config.OUTPUT_DIR, Path(name), at or 0.0),
+        params=params,
+        at=at,
+        size=parse_size(size) if size else None,
+        brand=brand or (loaded.brand if loaded else None),
+        background=background,
+        project=loaded,
+    )
+    return [
+        {
+            "image": str(result.path),
+            "size": f"{result.size[0]}x{result.size[1]}",
+            "warnings": result.warnings,
+        },
+        Image(path=result.path),
+    ]
+
+
+@server.tool(
     description="Gera um cartão (PNG) com o visual da marca, para aprovar o design antes do render.",
     structured_output=False,
 )
@@ -1594,9 +1699,10 @@ def cut_pauses_and_caption(
         "Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada "
         "assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, "
         "new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' "
-        "(segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem) e 'imagem' "
-        "(caminho), todos opcionais menos o 'fim': se nenhum assunto trouxer 'fim', a gravação é dividida em "
-        "partes iguais. Devolve o resumo do projeto (duração e avisos). caption_mode: rounded, karaoke, "
+        "(segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' "
+        '(caminho) e \'infografico\' ({"nome": "contador", "parametros": {...}}, ver list_infographics): '
+        "'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os "
+        "outros são opcionais. Devolve o resumo do projeto (duração e avisos). caption_mode: rounded, karaoke, "
         "classic ou boxed."
     )
 )

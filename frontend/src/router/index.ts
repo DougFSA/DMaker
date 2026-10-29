@@ -51,6 +51,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         meta: { title: 'Looks' },
       },
       {
+        path: '/infograficos',
+        name: 'infographics',
+        component: () => import('@/views/InfographicsView.vue'),
+        meta: { title: 'Infográficos' },
+      },
+      {
         path: '/agente',
         name: 'agent',
         component: () => import('@/views/AgentView.vue'),

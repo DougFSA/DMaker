@@ -1096,6 +1096,159 @@ def html_frame(
         console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
 
 
+infographics_app = typer.Typer(
+    help="Infográficos prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): lista, vê um quadro e põe no projeto.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(infographics_app, name="infographics")
+
+
+def _infographic_values(name: str, data: str | None, params: list[str] | None) -> dict:
+    """Os parâmetros do pedido: o JSON de `--data` e os `--param nome=valor` (estes, convertidos pelo tipo do esquema)."""
+    from .domain.infographics import find_infographic
+    from .pipeline.infographics import coerce_assignments
+
+    values = json.loads(data) if data else {}
+    if not isinstance(values, dict):
+        raise ValueError("--data precisa ser um objeto JSON, como '{\"ate\": 10000}'")
+    schema = find_infographic(name).schema
+    return {**values, **coerce_assignments(schema, params or [])}
+
+
+@infographics_app.command("list")
+def infographics_list(
+    name: Annotated[
+        str | None, typer.Argument(help="Mostra os parâmetros de um modelo (sem ele, a lista dos modelos).")
+    ] = None,
+) -> None:
+    """Lista os infográficos prontos e, dado um nome, os parâmetros que ele aceita."""
+    from .domain.infographics import InfographicError, find_infographic, load_infographics
+
+    try:
+        if name is None:
+            table = Table(Column("nome", no_wrap=True), "o que faz", "parâmetros", title="Infográficos")
+            for model in load_infographics().values():
+                table.add_row(model.name, model.schema.description, ", ".join(model.schema.params))
+            console.print(table)
+            console.print(
+                'No projeto: {"type": "html", "infographic": "contador", "data": {"ate": 10000}, "region": "topo"}. '
+                "Veja um modelo com `dmaker infographics list <nome>`."
+            )
+            return
+        schema = find_infographic(name).schema
+    except (InfographicError, ValueError) as exc:
+        _fail(escape(str(exc)))
+    table = Table(
+        Column("parâmetro", no_wrap=True),
+        Column("tipo", no_wrap=True),
+        "padrão ou limites",
+        "o que é",
+        title=f"{schema.title} ({schema.name})",
+    )
+    for param in schema.params.values():
+        limits = "obrigatório" if param.required else ""
+        if param.default is not None:
+            limits = f"padrão {param.default!r}"
+        if param.minimum is not None:
+            limits += f" ({param.minimum:.15g} a {param.maximum:.15g})"
+        if param.options:
+            limits += f" [{', '.join(param.options)}]"
+        table.add_row(param.name, param.type, limits.strip(), param.label)
+    console.print(table)
+    console.print(f"{escape(schema.description)}")
+
+
+@infographics_app.command("frame")
+def infographics_frame(
+    name: Annotated[str, typer.Argument(help="Nome do modelo (veja `dmaker infographics list`).")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Um parâmetro, como ate=10000 (repita para vários)."),
+    ] = None,
+    data: Annotated[
+        str | None, typer.Option(help="Os parâmetros em JSON (os --param valem por cima).")
+    ] = None,
+    at: Annotated[
+        float | None, typer.Option(help="Instante, em segundos (padrão: o modelo já desenhado).")
+    ] = None,
+    size: Annotated[
+        str | None, typer.Option(help="LARGURAxALTURA da página, em px na base 1080 (padrão: o do modelo).")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="PNG de saída (padrão: output/html/<nome>_<instante>s.png).")
+    ] = None,
+    brand: Annotated[
+        str | None, typer.Option(help="Marca cujas cores, fonte e cantos o modelo recebe.")
+    ] = None,
+    background: Annotated[
+        str | None, typer.Option(help="Cor lisa por baixo, para ver o transparente.")
+    ] = "#0F172A",
+) -> None:
+    """Renderiza um quadro do infográfico com os valores pedidos, em PNG, pelo mesmo renderizador do vídeo."""
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.infographics import infographic_frame
+
+    try:
+        values = _infographic_values(name, data, param)
+        at_value = at if at is not None else None
+        target = out or default_frame_path(config.OUTPUT_DIR, Path(name), at_value or 0.0)
+        result = infographic_frame(
+            name,
+            target,
+            params=values,
+            at=at_value,
+            size=parse_size(size) if size else None,
+            brand=brand,
+            background=background,
+        )
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except RENDER_ERRORS as exc:
+        _fail(escape(str(exc)))
+    console.print(
+        f"[green]Quadro salvo:[/green] {escape(str(result.path))}  ({result.size[0]}x{result.size[1]})"
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@infographics_app.command("add")
+def infographics_add(
+    project_name: Annotated[str, typer.Argument(help="Projeto (nome em projects/ ou caminho do spec.json).")],
+    name: Annotated[str, typer.Argument(help="Nome do modelo (veja `dmaker infographics list`).")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Um parâmetro, como ate=10000 (repita para vários)."),
+    ] = None,
+    data: Annotated[
+        str | None, typer.Option(help="Os parâmetros em JSON (os --param valem por cima).")
+    ] = None,
+    start: Annotated[float, typer.Option(help="Quando entra, em segundos.")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Quando sai (padrão: o fim do vídeo).")] = None,
+    region: Annotated[
+        str | None, typer.Option(help="Região do projeto onde o modelo entra (ex.: topo).")
+    ] = None,
+) -> None:
+    """Põe o infográfico nas sobreposições do projeto e salva. Sem região, ele entra na área própria do modelo."""
+    from .pipeline.infographics import add_infographic
+    from .pipeline.projects import load_project, save_project, summarize
+
+    try:
+        values = _infographic_values(name, data, param)
+        loaded = load_project(project_name)
+        project = add_infographic(loaded, name, values, start=start, end=end, region=region)
+        path = save_project(project, loaded.base_dir)
+        summary = summarize(project)
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(escape(str(exc)))
+    console.print(f"[green]Infográfico {escape(name)} no projeto:[/green] {escape(str(path))}")
+    for warning in summary.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
 @app.command()
 def quick(
     src: Annotated[Path, typer.Argument(help="Vídeo fonte.")],

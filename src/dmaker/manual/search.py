@@ -21,7 +21,7 @@ CHUNK_LIMIT = 1400  # caracteres por trecho de texto corrido
 ENTRY_LIMIT = 700  # caracteres por trecho de referência (agrupa algumas entradas seguidas)
 TITLE_WEIGHT = 3  # quantas vezes o caminho dos títulos conta no índice
 REFERENCE_WEIGHT = 0.6  # a referência gerada vale menos que o texto que ensina a tarefa
-REFERENCE_BLOCKS = ("cli", "mcp", "spec")
+REFERENCE_BLOCKS = ("cli", "mcp", "spec", "infograficos")
 
 KIND_TASK = "tarefa"
 KIND_TEXT = "texto"

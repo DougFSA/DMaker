@@ -181,6 +181,10 @@ def test_the_acceptance_requests_have_the_right_calls_in_the_kit_manuals():
     assert "`cut_pauses_and_caption`" in ia_files["agente-editing.md"]
     assert "`dub_prepare`" in ia_files["agente-dubbing.md"]
     assert "`quick_edit`" in ia_files["agente-editing.md"]
+    assert "`add_infographic`" in ia_files["agente-compositions.md"]
+    assert (
+        "render_infographic_frame" not in ia_files["agente-compositions.md"]
+    )  # devolve imagem: o kit não a oferece
 
 
 def test_the_kit_manuals_are_in_sync_with_the_task_files_they_come_from():

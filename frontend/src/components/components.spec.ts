@@ -96,6 +96,7 @@ describe('SidebarNav', () => {
       'Saídas',
       'Transições',
       'Looks',
+      'Infográficos',
       'Agente',
     ])
     expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
@@ -105,7 +106,7 @@ describe('SidebarNav', () => {
   it('recolhida, esconde os rótulos mas mantém o texto para leitor de tela', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: true })
     expect(wrapper.find('.nav__label').exists()).toBe(false)
-    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(10)
+    expect(wrapper.findAll('.visually-hidden').length).toBeGreaterThanOrEqual(11)
   })
 })
 

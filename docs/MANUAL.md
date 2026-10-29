@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 32 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 33 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -43,6 +43,7 @@ São 32 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Trocar o fundo atrás da pessoa](#trocar-o-fundo-atrás-da-pessoa) | Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural. | sim |
 | [Pôr o texto atrás da pessoa](#pôr-o-texto-atrás-da-pessoa) | Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece. | sim |
 | [Pôr uma animação em HTML sobre o vídeo](#pôr-uma-animação-em-html-sobre-o-vídeo) | Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS e JavaScript, com três dimensões e Lottie): um título grande, um número que conta, um objeto em 3D girando, um mapa com fotos entrando. | sim |
+| [Pôr um infográfico animado no vídeo](#pôr-um-infográfico-animado-no-vídeo) | Põe por cima do vídeo um infográfico pronto que se mexe (um contador, uma barra, uma linha entre dois pontos, uma imagem entrando, uma etiqueta, um grifo à mão ou um emoji animado), escolhido pelo nome e com os valores que você quiser, nas cores e na fonte da marca. | ainda não: `render_infographic_frame` |
 | [Fazer o vídeo do casamento com duas câmeras](#fazer-o-vídeo-do-casamento-com-duas-câmeras) | Monta o vídeo de uma cerimônia com duas câmeras sincronizadas pelo áudio, cortando entre elas pelas fases do rito reconhecidas na fala, com cartões de abertura e encerramento. | sim |
 | [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | sim |
 | [Exportar o vídeo para outras plataformas](#exportar-o-vídeo-para-outras-plataformas) | Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma. | sim |
@@ -245,7 +246,7 @@ Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do anter
 
 ### Sobreposições (overlays)
 
-Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra), **barra de progresso**, **audiograma** (a onda ou as barras de um áudio, animadas no ritmo dele) e **composição em HTML** (`type: "html"`: uma animação escrita em HTML, CSS e JavaScript, inclusive três dimensões e Lottie, que o DMaker desenha quadro a quadro, com fundo transparente, por cima do vídeo). Uma imagem com `shape: "circle"` aparece recortada num círculo, e um texto ou uma composição em HTML com `layer: "behind-person"` passa atrás da pessoa. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
+Ficam por cima da linha do tempo principal, cada uma com o seu intervalo (`start` e `end`): **texto** (com um `role` que define aparência e posição: `hook`, `title`, `subtitle`, `cta`, `lower-third`, `custom`), **imagem** (logo ou PNG), **vídeo** (picture-in-picture: uma segunda fonte em retângulo, cantos redondos ou círculo, com borda e sombra), **barra de progresso**, **audiograma** (a onda ou as barras de um áudio, animadas no ritmo dele) e **composição em HTML** (`type: "html"`: uma animação escrita em HTML, CSS e JavaScript, inclusive três dimensões e Lottie, que o DMaker desenha quadro a quadro, com fundo transparente, por cima do vídeo; no lugar do `src`, `infographic` usa um dos infográficos prontos pelo nome). Uma imagem com `shape: "circle"` aparece recortada num círculo, e um texto ou uma composição em HTML com `layer: "behind-person"` passa atrás da pessoa. Um texto ou uma imagem também pode se encaixar numa **região** nomeada do quadro (`regions`), em vez de uma posição em pixels.
 
 ### Legendas
 
@@ -432,7 +433,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve" e levam à interface clássica.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve" e levam à interface clássica.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -441,7 +442,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Lote**: o passo a passo de vários vídeos de uma planilha (veja a tarefa "Fazer vários vídeos de uma planilha").
 - **Saídas**: os vídeos já gerados, com busca e filtro; assista ali ou baixe.
 - **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
-- **Transições** e **Looks**: catálogos com a prévia de cada uma (veja as tarefas "Escolher a transição entre os trechos" e "Dar um acabamento de cinema ao vídeo").
+- **Transições**, **Looks** e **Infográficos**: catálogos com a prévia de cada um (veja as tarefas "Escolher a transição entre os trechos", "Dar um acabamento de cinema ao vídeo" e "Pôr um infográfico animado no vídeo"); no de infográficos, o formulário monta os campos do esquema do modelo e mostra o quadro com o que você digitou.
 
 Um aviso de **jobs** na barra superior mostra o que está rodando e leva ao andamento.
 
@@ -869,17 +870,17 @@ Você grava uma explicação de frente para a câmera e tem uma imagem ou infogr
 #### Antes de começar
 
 - A gravação (vertical ou horizontal) e a duração dela.
-- Os assuntos, em ordem: o segundo em que cada um termina (`fim`), o fundo (`escuro`, `claro`, `bege`, uma cor `#RRGGBB` ou uma imagem) e a imagem de cada um, se houver. O fim do último assunto é a duração da gravação.
+- Os assuntos, em ordem: o segundo em que cada um termina (`fim`), o fundo (`escuro`, `claro`, `bege`, uma cor `#RRGGBB` ou uma imagem), a imagem de cada um, se houver, e o infográfico, se houver (`infografico`: `{"nome": "contador", "parametros": {"ate": 10000}}`, um dos modelos da tarefa "Pôr um infográfico animado no vídeo"). O fim do último assunto é a duração da gravação.
 
 #### Pela IA
 
-Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com `assunto2.png`, assunto 3 até 60 s." A IA usa a receita `build_explainer_video`, que cria o projeto pelo modelo `explicativo` e já devolve a duração e os avisos; sem o `fim` dos assuntos, ela divide a gravação em partes iguais. Depois gera a prévia.
+Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com um contador até 10.000, assunto 3 até 60 s com uma barra até 95 de 400." A IA usa a receita `build_explainer_video`, que cria o projeto pelo modelo `explicativo` e já devolve a duração e os avisos; sem o `fim` dos assuntos, ela divide a gravação em partes iguais. Depois gera a prévia.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "build_explainer_video", "arguments": {"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png"}, {"fim": 60, "fundo": "claro"}]}, "para": "criar o projeto e conferir duração e avisos"},
+  {"tool": "build_explainer_video", "arguments": {"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "infografico": {"nome": "contador", "parametros": {"ate": 10000, "prefixo": "+ de R$"}}}, {"fim": 60, "fundo": "claro", "infografico": {"nome": "barra", "parametros": {"valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400}}}]}, "para": "criar o projeto e conferir duração e avisos"},
   {"tool": "render_project", "arguments": {"name_or_path": "meu-explicativo", "preview": true}, "para": "gerar a prévia"}
 ]
 ```
@@ -907,6 +908,7 @@ O quadro do rosto e a área de cima ficam dentro da zona segura do Reels. `dmake
 - **Aviso de gravação mais curta**: o `fim` do último assunto passa da duração do arquivo; corrija o número.
 - **Rosto cortado**: ajuste `foco` (em gravação vertical o rosto fica no terço de cima).
 - **Imagem fora do lugar**: ela entra inteira e centrada na região `topo`, sem distorcer; use uma imagem com a proporção da área de cima.
+- **Aviso `overlays[N].data...` no `validate`**: um parâmetro do infográfico de um assunto está fora do esquema do modelo; a mensagem diz qual e o que é aceito.
 
 ### Fazer um audiograma de um áudio
 <!-- tarefa: audiograma -->
@@ -1255,7 +1257,7 @@ Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS 
 
 #### Quando usar
 
-Você quer um gráfico ou uma animação que o DMaker não tem pronta: a Terra em corte com rótulos, uma planta baixa em 3D, quadros inclinados. A IA escreve a animação, você confere um quadro dela e o DMaker a desenha quadro a quadro, com fundo transparente, na região do vídeo que você escolher. A mesma animação sai sempre igual.
+Você quer um gráfico ou uma animação que o DMaker não tem pronta (para um contador, uma barra ou uma linha, use antes os infográficos prontos, na tarefa "Pôr um infográfico animado no vídeo"): a Terra em corte com rótulos, uma planta baixa em 3D, quadros inclinados. A IA escreve a animação, você confere um quadro dela e o DMaker a desenha quadro a quadro, com fundo transparente, na região do vídeo que você escolher. A mesma animação sai sempre igual.
 
 **Pedidos que levam a esta tarefa:**
 - "Põe na parte de cima um número que conta até 87% e um cubo 3D girando"
@@ -1308,6 +1310,70 @@ Veja um quadro antes de renderizar o vídeo: os avisos da página (internet bloq
 - **Aviso "tentou acessar ... na internet"**: a página pediu algo de fora (CDN, imagem de um site). Copie o arquivo para a pasta da animação; o render segue sem a requisição.
 - **A animação não se mexe**: use `animation` em CSS, animações Web, GSAP, Lottie ou uma função `window.dmakerSeek(segundos)`; `setTimeout` anda só quando o DMaker manda.
 - **Fundo opaco**: a página pintou o `body`; deixe-o sem fundo.
+
+### Pôr um infográfico animado no vídeo
+<!-- tarefa: infograficos -->
+Põe por cima do vídeo um infográfico pronto que se mexe (um contador, uma barra, uma linha entre dois pontos, uma imagem entrando, uma etiqueta, um grifo à mão ou um emoji animado), escolhido pelo nome e com os valores que você quiser, nas cores e na fonte da marca.
+
+#### Quando usar
+
+Você quer o número que conta até 10.000, a barra que enche até 95 mg com o limite em 400, a linha que liga o prédio ao mapa, a etiqueta "QUARTO", o círculo na palavra da legenda. Cada modelo faz uma coisa só e não traz fundo: combine vários no mesmo assunto. Para outra animação, veja "Pôr uma animação em HTML sobre o vídeo".
+
+**Pedidos que levam a esta tarefa:**
+- "Põe um contador de 0 a 10 mil na parte de cima, com 'mais de R$' antes"
+- "Faz uma barra até 95 mg com o limite de 400 e circula a palavra 'frio' na legenda"
+
+#### Antes de começar
+
+- O navegador da animação, instalado uma vez: `pip install -e ".[html]"` e `dmaker setup --html`.
+- Onde ele entra: uma região do projeto (a `topo` do `explicativo`) e de que instante a qual; sem região, a área própria do modelo.
+- Os parâmetros de cada modelo estão na tabela "Infográficos prontos" da referência. Valor fora dela aparece no `validate`, com o caminho do campo.
+- Os emojis animados são do Google (CC BY 4.0): ao publicar, dê o crédito "Animated Noto Emoji, Google, CC BY 4.0".
+
+#### Pela IA
+
+Diga: "No `meu-reel`, põe na região `topo`, dos 1 aos 6 segundos, um contador até 10.000 com 'mais de R$' antes." A IA lista os modelos, confere um quadro, põe no projeto, valida e gera a prévia. Para grifar uma palavra da legenda: o modelo `grifo` com `palavra`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "list_infographics", "arguments": {}, "para": "ver os modelos e os parâmetros de cada um"},
+  {"tool": "render_infographic_frame", "arguments": {"name": "contador", "params": {"ate": 10000, "prefixo": "+ de R$"}, "brand": "medlycare", "at": 1.5}, "para": "ver o quadro antes de pôr no projeto"},
+  {"tool": "add_infographic", "arguments": {"project": "meu-reel", "name": "contador", "params": {"ate": 10000, "prefixo": "+ de R$"}, "start": 1, "end": 6, "region": "topo"}, "para": "pôr o contador na região de cima"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "meu-reel"}, "para": "apontar valor fora do esquema, arquivo ausente ou navegador não instalado"},
+  {"tool": "render_project", "arguments": {"name_or_path": "meu-reel", "preview": true}, "para": "gerar a prévia"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "meu-reel", "output": false}, "para": "conferir a zona segura e o resto"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Infográficos**: cada modelo tem um quadro de exemplo; **Ajustar os valores** abre o formulário do esquema (rótulos, limites e erros no campo) e mostra o quadro com o que você digitou, no instante e na marca que escolher. **Copiar trecho da spec** copia a composição. Pôr pela linha do tempo fica para a fase 4 da interface nova (DMK-20): por enquanto, cole o trecho em `overlays`, na aba **JSON** da interface clássica.
+
+#### Pela CLI
+
+```powershell
+dmaker infographics list
+dmaker infographics list contador
+dmaker infographics frame contador --param ate=10000 --param "prefixo=+ de R$" --brand medlycare --at 1.5
+dmaker infographics add meu-reel contador --param ate=10000 --param "prefixo=+ de R$" --region topo --start 1 --end 6
+dmaker validate projects\meu-reel\spec.json
+```
+
+O `frame` grava o quadro em `output/html/`. Na spec: `{"type": "html", "infographic": "contador", "region": "topo", "start": 1, "end": 6, "data": {"ate": 10000}}`. No `explicativo`, cada assunto aceita `infografico` (`{"nome": "contador", "parametros": {"ate": 10000}}`).
+
+#### Como conferir
+
+O quadro do `frame` é o que o vídeo mostra. No `validate`, `overlays[N].data.ate: precisa ser um número` aponta o valor errado, e o `qa` avisa se a área invade a região coberta pelo app. No vídeo, o contador termina exatamente no valor e para, a barra enche até a conta (95 de 400 é 23,75% do trilho) e o grifo se desenha como traço na palavra da legenda, quando ela é dita.
+
+#### Se der errado
+
+- **"`ate` precisa ser um número"**: o valor está fora do esquema; a mensagem diz o limite ou as opções.
+- **"a palavra ... não aparece na legenda"**: o `grifo` não achou a palavra; confira `palavra`, `ocorrencia` e se o projeto tem legendas.
+- **O grifo some atrás da caixa da legenda**: a legenda fica sempre na frente; no modo `rounded` aumente a folga (`recuo`).
+- **Cor ou fonte inesperadas**: vêm da marca do projeto (`brand`); trocar a marca as troca, sem mexer no modelo.
+- **"O Chromium não está em bin/playwright"**: rode `dmaker setup --html`.
 
 ### Fazer o vídeo do casamento com duas câmeras
 <!-- tarefa: multicam -->
@@ -2403,6 +2469,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 
 | Chamado | O que você ganhou | Onde está |
 | --- | --- | --- |
+| DMK-24 | Infográficos animados prontos (`contador`, `barra`, `linha`, `imagem`, `etiqueta`, `grifo`, `emoji`), com a marca por variáveis, esquema de parâmetros validado no projeto, o atalho `infographic` na composição em HTML, `dmaker infographics`, `list_infographics`, `add_infographic` e a tela **Infográficos**; o modelo `explicativo` aceita um infográfico por assunto | "Pôr um infográfico animado no vídeo" |
 | DMK-26 | Animação em HTML sobre o vídeo (`type: "html"`): HTML, CSS e JavaScript, com three.js e Lottie, desenhados quadro a quadro com fundo transparente; `dmaker html frame`, `render_html_frame`, `add_html_overlay` e `dmaker setup --html` | "Pôr uma animação em HTML sobre o vídeo" |
 | DMK-28 | Texto atrás da pessoa (`layer: "behind-person"`): o título grande passa entre a parede e quem fala, recortando a pessoa só enquanto o texto aparece | "Pôr o texto atrás da pessoa" |
 | DMK-34 | Audiograma: a onda ou as barras de um áudio animadas no ritmo dele, com capa num círculo e legenda; `audio.voiceover` e o modelo `audiograma` | "Fazer um audiograma de um áudio" |
@@ -2423,13 +2490,13 @@ Já estavam na versão anterior e agora têm tarefas próprias: a interface nova
 
 ## Referência gerada do código
 
-Esta seção é **gerada**: os três blocos abaixo são reescritos por `dmaker manual build` a partir da CLI, do servidor MCP e do modelo da spec. Nunca edite entre os marcadores; mude o código (ou o texto de ajuda) e regenere. Um teste reprova o projeto se um comando, uma ferramenta ou um campo novo não aparecer aqui.
+Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker manual build` a partir da CLI, do servidor MCP, do modelo da spec e dos esquemas dos infográficos. Nunca edite entre os marcadores; mude o código (ou o texto de ajuda) e regenere. Um teste reprova o projeto se um comando, uma ferramenta ou um campo novo não aparecer aqui.
 
 ### Comandos da CLI
 
 <!-- dmaker:gerado cli -->
 
-São 71 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 74 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -2648,6 +2715,26 @@ Composições em HTML: confere um quadro de uma composição antes de renderizar
   - `--data` TEXTO: Dados para a página (dmaker.data), em JSON.
   - `--background` TEXTO: Cor lisa por baixo, para ver o transparente (ex.: #808080).
 
+#### dmaker infographics
+
+Infográficos prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): lista, vê um quadro e põe no projeto.
+
+- **`dmaker infographics add PROJECT_NAME NAME`**: Põe o infográfico nas sobreposições do projeto e salva. Sem região, ele entra na área própria do modelo.
+  - `--param` / `-p` TEXTO: Um parâmetro, como ate=10000 (repita para vários). (pode repetir)
+  - `--data` TEXTO: Os parâmetros em JSON (os --param valem por cima).
+  - `--start` NÚMERO: Quando entra, em segundos. (padrão 0.0)
+  - `--end` NÚMERO: Quando sai (padrão: o fim do vídeo).
+  - `--region` TEXTO: Região do projeto onde o modelo entra (ex.: topo).
+- **`dmaker infographics frame NAME`**: Renderiza um quadro do infográfico com os valores pedidos, em PNG, pelo mesmo renderizador do vídeo.
+  - `--param` / `-p` TEXTO: Um parâmetro, como ate=10000 (repita para vários). (pode repetir)
+  - `--data` TEXTO: Os parâmetros em JSON (os --param valem por cima).
+  - `--at` NÚMERO: Instante, em segundos (padrão: o modelo já desenhado).
+  - `--size` TEXTO: LARGURAxALTURA da página, em px na base 1080 (padrão: o do modelo).
+  - `--out` CAMINHO: PNG de saída (padrão: output/html/<nome>_<instante>s.png).
+  - `--brand` TEXTO: Marca cujas cores, fonte e cantos o modelo recebe.
+  - `--background` TEXTO: Cor lisa por baixo, para ver o transparente. (padrão #0F172A)
+- **`dmaker infographics list [NAME]`**: Lista os infográficos prontos e, dado um nome, os parâmetros que ele aceita.
+
 #### dmaker looks
 
 Looks: acabamentos visuais prontos por nome (cinema, quente, frio...) e a folha de contato de cada um.
@@ -2807,7 +2894,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 61 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 64 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -2883,6 +2970,12 @@ São 61 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `src`\* (texto), `at` (número, padrão 0.0), `size` (texto, padrão 1080x1920), `duration` (número, padrão 5.0), `data` (objeto), `brand` (texto), `project` (texto), `background` (texto, padrão #808080).
 - **`add_html_overlay`**: Põe uma composição HTML (type html) nas sobreposições do projeto e salva.
   Parâmetros: `name`\* (texto), `src`\* (texto), `start` (número, padrão 0.0), `end` (número), `region` (texto), `x` (número), `y` (número), `width` (número), `height` (número), `layer` ("front" ou "behind-person", padrão front), `data` (objeto), `motion_blur` (sim ou não, padrão não).
+- **`list_infographics`**: Os infográficos animados prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): para cada um, o nome, a descrição e o esquema dos parâmetros (nome, tipo, padrão, limites e rótulo em português), para você usar sem ler o HTML.
+  Sem parâmetros.
+- **`add_infographic`**: Põe um infográfico pronto (ver `list_infographics`) nas sobreposições do projeto e salva.
+  Parâmetros: `project`\* (texto), `name`\* (texto), `params` (objeto), `start` (número, padrão 0.0), `end` (número), `region` (texto), `x` (número), `y` (número), `width` (número), `height` (número), `layer` ("front" ou "behind-person", padrão front).
+- **`render_infographic_frame`**: Renderiza um quadro de um infográfico pronto com os parâmetros pedidos e devolve a imagem, para conferir antes de pôr no projeto.
+  Parâmetros: `name`\* (texto), `params` (objeto), `at` (número), `size` (texto), `brand` (texto), `project` (texto), `background` (texto, padrão #0F172A).
 - **`render_card_preview`**: Gera um cartão (PNG) com o visual da marca, para aprovar o design antes do render.
   Parâmetros: `title`\* (texto), `subtitle` (texto), `brand` (texto, padrão medlycare), `preset` (texto, padrão instagram/reels), `variant` (texto).
 - **`clean_cache`**: Limpa o cache de trechos intermediários (força regerar tudo no próximo render).
@@ -2909,7 +3002,7 @@ São 61 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto), `text`\* (texto), `voice` (texto), `start` (número, padrão 0.0), `language` (texto, padrão pt), `speed` (número, padrão 1.0), `seed` (inteiro), `captions` (sim ou não, padrão sim).
 - **`cut_pauses_and_caption`**: Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts).
   Parâmetros: `source`\* (texto), `name`\* (texto), `intensity` ("suave" ou "normal" ou "agressiva", padrão normal), `preset` (texto, padrão instagram/reels), `brand` (texto), `language` (texto, padrão pt), `model` (texto, padrão small), `overwrite` (sim ou não, padrão não), `wait_seconds` (número, padrão 1800).
-- **`build_explainer_video`**: Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' (segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem) e 'imagem' (caminho), todos opcionais menos o 'fim': se nenhum assunto trouxer 'fim', a gravação é dividida em partes iguais.
+- **`build_explainer_video`**: Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' (segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' (caminho) e 'infografico' ({"nome": "contador", "parametros": {...}}, ver list_infographics): 'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os outros são opcionais.
   Parâmetros: `name`\* (texto), `recording`\* (texto), `subjects`\* (lista de objeto), `captions` (sim ou não, padrão sim), `caption_mode` (texto), `brand` (texto).
 - **`isolate_vocals`**: Isola a voz: separa a fala (voice) da música e do ruído de fundo (background) de um vídeo ou áudio, ou de um trecho dele (start/end em segundos no arquivo), com o Demucs local.
   Parâmetros: `path`\* (texto), `start` (número), `end` (número), `out_dir` (texto), `format` ("wav" ou "mp3", padrão wav), `wait_seconds` (número, padrão 0).
@@ -2938,7 +3031,7 @@ São 61 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 32 blocos e 312 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 33 blocos e 319 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -3009,6 +3102,17 @@ Usado em `Project.overlays`.
 | `safe_zone` | sim ou não | sim | Respeita a área que a interface do app cobre. |
 | `start` | número, mínimo 0 | 0.0 | Quando o desenho aparece, em segundos. |
 | `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
+
+#### CaptionAnchor
+
+Usado em `HtmlOverlay.anchor`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `word` | texto | obrigatório |  |
+| `occurrence` | inteiro, de 1 a 50 | 1 |  |
+| `hold` | `"word"` ou `"line"` | `line` |  |
+| `margin` | número, de 0 a 400 | 24.0 |  |
 
 #### CaptionStyle
 
@@ -3138,7 +3242,8 @@ Usado em `Project.overlays`.
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
 | `type` | `"html"` | `html` | Tipo do item: escolhe qual dos blocos vale. |
-| `src` | texto | obrigatório | Arquivo `.html` (a página inteira nele) ou pasta com `index.html` e os arquivos que a página usa, relativo à pasta da spec. |
+| `src` | texto | nenhum | Arquivo `.html` (a página inteira nele) ou pasta com `index.html` e os arquivos que a página usa, relativo à pasta da spec. |
+| `infographic` | texto | nenhum |  |
 | `start` | número, mínimo 0 | 0.0 | Quando a animação entra, em segundos. |
 | `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
 | `region` | texto | nenhum | Nome de uma região declarada em `regions`: o item se encaixa nela no lugar de `position`, `x` e `y`. |
@@ -3148,6 +3253,8 @@ Usado em `Project.overlays`.
 | `height` | número, maior que 0, até 1 | 1.0 | Altura da área, em fração da altura do quadro (sem `region`). |
 | `size` | lista de qualquer valor (pelo menos 2) | nenhum | Largura e altura da página, em px na base 1080; vazio desenha no tamanho da área, sem escala. |
 | `data` | objeto | vazio | Dicionário livre entregue à página como `dmaker.data`; entra na chave do cache. |
+| `files` | mapa de texto | vazio |  |
+| `anchor` | `CaptionAnchor` | nenhum |  |
 | `motion_blur` | `MotionBlur` | nenhum | Borrão de movimento por subquadros: `true` liga com os valores padrão, um objeto ajusta, vazio desliga. |
 | `layer` | `"front"` ou `"behind-person"` | `front` | `front` (padrão, na frente de tudo) ou `behind-person`, que passa a animação atrás da pessoa recortada. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
@@ -3477,6 +3584,144 @@ Usado em `AudioSettings.voiceover`.
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 
 <!-- dmaker:fim-gerado spec -->
+
+### Infográficos prontos
+
+<!-- dmaker:gerado infograficos -->
+
+São 7 modelos: `barra`, `contador`, `emoji`, `etiqueta`, `grifo`, `imagem`, `linha`. Na spec, `{"type": "html", "infographic": "contador", "region": "topo", "start": 1, "end": 6, "data": {"ate": 10000}}`: o nome troca o `src`, e `data` leva os parâmetros da tabela do modelo. Valor fora da tabela é apontado no `validate_project`, com o caminho do campo (`overlays[2].data.ate`).
+
+#### `barra`: Barra
+
+Uma barra que enche até um valor, com marcas de divisão e, se quiser, a marca de um limite com o seu rótulo (por exemplo 95 mg de cafeína numa barra até 400 mg).
+
+Tamanho natural da página: 900x300 px (base 1080); duração sugerida: 4 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `valor` | número | obrigatório | de 0 a 1000000000 | Valor. Até onde a barra enche. É o número que aparece contando junto. |
+| `maximo` | número | `100` | de 1 a 1000000000 | Valor da barra cheia. O valor que corresponde ao fim da barra (400 numa barra de 0 a 400). |
+| `limite` | número | vazio | de 0 a 1000000000 | Limite. Onde fica a marca do limite. Sem ele, não há marca. |
+| `rotulo_limite` | texto | `limite` | até 30 caracteres | Nome do limite. O que está escrito junto da marca do limite, como "limite" ou "máximo por dia". |
+| `rotulo` | texto | vazio | até 40 caracteres | Descrição do valor. Texto pequeno ao lado do número, como "de cafeína". |
+| `sufixo` | texto | vazio | até 12 caracteres | Unidade. A unidade depois dos números, como "mg" ou "%". |
+| `marcas` | inteiro | `4` | de 0 a 10 | Divisões da barra. Em quantas partes iguais a barra é dividida (4 em 400 marca 100, 200 e 300). 0 não marca. |
+| `duracao` | número | `1.4` | de 0.1 a 30 | Tempo enchendo (s). Quantos segundos a barra leva para encher; depois disso ela fica parada. |
+| `easing` | uma opção | `suave` | `suave`, `entrada-saida`, `linear` | Ritmo |
+| `cor` | cor | `accent` | `#RRGGBB` ou uma cor da marca | Cor da barra |
+| `cor_texto` | cor | `white` | `#RRGGBB` ou uma cor da marca | Cor dos textos |
+| `sombra` | sim ou não | `sim` |  | Sombra suave |
+
+#### `contador`: Contador
+
+Um número que conta de um valor até outro, com prefixo e sufixo e formatação brasileira (10.000, 1.234,5). Termina exatamente no valor e fica parado.
+
+Tamanho natural da página: 900x300 px (base 1080); duração sugerida: 4 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `de` | número | `0` | de -1000000000 a 1000000000 | Começa em. O número com que a contagem começa. |
+| `ate` | número | obrigatório | de -1000000000 a 1000000000 | Termina em. O número em que a contagem para. É o valor que fica na tela. |
+| `prefixo` | texto | vazio | até 30 caracteres | Antes do número. Texto pequeno antes do número, como "+ de R$". |
+| `sufixo` | texto | vazio | até 30 caracteres | Depois do número. Texto pequeno depois do número, como "mg" ou "%". |
+| `casas` | inteiro | `0` | de 0 a 4 | Casas decimais. Quantas casas depois da vírgula (0 mostra só inteiros). |
+| `duracao` | número | `1.2` | de 0.1 a 30 | Tempo contando (s). Quantos segundos a contagem leva; depois disso o número fica parado. |
+| `easing` | uma opção | `suave` | `suave`, `entrada-saida`, `linear` | Ritmo da contagem. suave começa rápido e desacelera até o valor; entrada-saida acelera e desacelera; linear mantém a velocidade. |
+| `cor` | cor | `accent` | `#RRGGBB` ou uma cor da marca | Cor do número. Uma cor da marca (accent, primary, white...) ou um hexadecimal #RRGGBB. |
+| `cor_texto` | cor | `white` | `#RRGGBB` ou uma cor da marca | Cor do prefixo e do sufixo |
+| `sombra` | sim ou não | `sim` |  | Sombra suave. Uma sombra leve atrás das letras, para ler sobre qualquer fundo. |
+
+#### `emoji`: Emoji animado
+
+Um emoji animado do Google Noto (joinha, check, coração, fogo, festa, lâmpada, café, gráfico subindo, surpresa, risada). Licença CC BY 4.0: dê o crédito "Animated Noto Emoji, Google, CC BY 4.0" na descrição do vídeo.
+
+Tamanho natural da página: 400x400 px (base 1080); duração sugerida: 3 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `emoji` | uma opção | obrigatório | `joinha`, `check`, `coracao`, `fogo`, `festa`, `lampada`, `cafe`, `grafico`, `surpresa`, `risada` | Emoji |
+| `repetir` | sim ou não | `não` |  | Repetir enquanto fica. Desligado, o emoji toca uma vez e para na pose de repouso. Ligado, repete até a composição sair. |
+| `entrada` | uma opção | `pop` | `pop`, `fade`, `nenhuma` | Como surge |
+| `duracao` | número | `0.35` | de 0.05 a 5 | Tempo para surgir (s) |
+
+#### `etiqueta`: Etiqueta
+
+Um rótulo pequeno de borda arredondada que surge num ponto (como "QUARTO" ou "conteúdo ilustrativo"). O arredondado vem da marca.
+
+Tamanho natural da página: 700x240 px (base 1080); duração sugerida: 3 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `texto` | texto | obrigatório | até 40 caracteres | Texto |
+| `x` | número | `0.5` | de 0 a 1 | Posição horizontal. Onde fica o centro da etiqueta, de 0 (borda esquerda da área) a 1 (borda direita). |
+| `y` | número | `0.5` | de 0 a 1 | Posição vertical. De 0 (topo da área) a 1 (base). |
+| `estilo` | uma opção | `cheia` | `cheia`, `contorno` | Estilo. cheia pinta o fundo da etiqueta; contorno deixa só a borda, sobre um fundo escuro suave. |
+| `entrada` | uma opção | `pop` | `pop`, `fade`, `deslizar` | Como surge |
+| `tamanho` | número | `56` | de 16 a 240 | Tamanho da letra (px) |
+| `duracao` | número | `0.35` | de 0.05 a 5 | Tempo para surgir (s) |
+| `cor` | cor | `accent` | `#RRGGBB` ou uma cor da marca | Cor da etiqueta |
+| `cor_texto` | cor | vazio | `#RRGGBB` ou uma cor da marca | Cor do texto. Sem escolher, o modelo usa a cor da marca (ou o branco) que contrasta mais com a etiqueta. |
+| `sombra` | sim ou não | `sim` |  | Sombra suave |
+
+#### `grifo`: Grifo à mão
+
+Um traço feito à mão que se desenha em volta de uma palavra ou de uma área: círculo, sublinhado, marca-texto ou risco. Com `palavra`, circula essa palavra da legenda no momento em que ela é dita.
+
+Tamanho natural da página: 600x220 px (base 1080); duração sugerida: 3 s. Prende-se a uma palavra da legenda (`palavra`).
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `tipo` | uma opção | `circulo` | `circulo`, `sublinhado`, `marca-texto`, `risco` | Tipo de grifo |
+| `palavra` | texto | vazio | até 40 caracteres | Palavra da legenda. A palavra a grifar. O grifo aparece quando ela é dita e ocupa o lugar dela na legenda. Vazio, o grifo ocupa a área do modelo. |
+| `ocorrencia` | inteiro | `1` | de 1 a 50 | Qual vez que a palavra aparece. 1 é a primeira vez que a palavra é dita (depois do início da composição), 2 é a segunda, e assim por diante. |
+| `permanencia` | uma opção | `linha` | `linha`, `palavra` | Até quando fica. linha deixa o grifo enquanto a linha da legenda está na tela; palavra o tira quando a palavra termina. |
+| `recuo` | número | `32` | de 0 a 400 | Folga em volta (px). O espaço entre a palavra e a borda da área do modelo, para o traço caber. |
+| `espessura` | número | `6` | de 1 a 30 | Espessura do traço (px) |
+| `passadas` | inteiro | `2` | de 1 a 4 | Passadas do traço. Quantas vezes o traço passa sobre si mesmo (2 dá o jeito de caneta rabiscando). |
+| `duracao` | número | `0.7` | de 0.1 a 10 | Tempo desenhando (s) |
+| `cor` | cor | `accent` | `#RRGGBB` ou uma cor da marca | Cor do traço |
+
+#### `imagem`: Imagem animada
+
+Uma imagem (PNG com transparência, foto) que entra com slide, pop ou zoom e ganha um leve movimento de câmera (Ken Burns) enquanto fica na tela.
+
+Tamanho natural da página: 800x600 px (base 1080); duração sugerida: 4 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `arquivo` | arquivo | obrigatório |  | Imagem. O caminho do arquivo PNG, JPG ou WEBP (relativo à pasta do projeto, ou absoluto). O exemplo.png que vem junto do modelo serve para testar. |
+| `entrada` | uma opção | `slide` | `slide`, `pop`, `zoom` | Como entra. slide desliza de um lado; pop cresce com um pequeno quique; zoom chega de perto e assenta. |
+| `direcao` | uma opção | `esquerda` | `esquerda`, `direita`, `cima`, `baixo` | De onde vem o slide |
+| `duracao` | número | `0.7` | de 0.1 a 5 | Tempo para entrar (s) |
+| `ken_burns` | número | `0.06` | de 0 a 0.5 | Movimento de câmera. Quanto a imagem cresce devagar enquanto fica na tela (0,06 é 6%). 0 deixa a imagem parada. |
+| `ajuste` | uma opção | `conter` | `conter`, `cobrir` | Encaixe na área. conter mostra a imagem inteira; cobrir preenche a área e corta o que sobra. |
+| `cantos` | sim ou não | `não` |  | Cantos arredondados. Arredonda os cantos com o raio da marca. Em PNG com transparência, deixe desligado. |
+| `sombra` | sim ou não | `sim` |  | Sombra suave |
+
+#### `linha`: Linha
+
+Uma linha que se desenha de um ponto até outro, com um rótulo na ponta (por exemplo, ligando o prédio ao mapa com "2 quadras da praia"). Os pontos são frações da área do modelo.
+
+Tamanho natural da página: 900x500 px (base 1080); duração sugerida: 4 s.
+
+| Parâmetro | Tipo | Padrão | Valores aceitos | O que é |
+| --- | --- | --- | --- | --- |
+| `de_x` | número | `0.12` | de 0 a 1 | Ponto de partida, posição horizontal. De 0 (borda esquerda da área) a 1 (borda direita). |
+| `de_y` | número | `0.75` | de 0 a 1 | Ponto de partida, posição vertical. De 0 (topo da área) a 1 (base). |
+| `ate_x` | número | `0.88` | de 0 a 1 | Ponto de chegada, posição horizontal |
+| `ate_y` | número | `0.25` | de 0 a 1 | Ponto de chegada, posição vertical |
+| `rotulo` | texto | vazio | até 40 caracteres | Rótulo na ponta. Texto que aparece na chegada da linha, quando ela termina de se desenhar. |
+| `rotulo_inicio` | texto | vazio | até 40 caracteres | Rótulo na partida. Texto junto ao ponto de partida (opcional). |
+| `pontas` | uma opção | `bolinha` | `bolinha`, `seta`, `nenhuma` | Pontas. bolinha põe uma bolinha em cada ponta; seta põe uma seta na chegada; nenhuma deixa a linha limpa. |
+| `espessura` | número | `8` | de 2 a 40 | Espessura (px) |
+| `tracejada` | sim ou não | `não` |  | Linha tracejada |
+| `duracao` | número | `1` | de 0.1 a 30 | Tempo desenhando (s) |
+| `easing` | uma opção | `entrada-saida` | `suave`, `entrada-saida`, `linear` | Ritmo |
+| `cor` | cor | `accent` | `#RRGGBB` ou uma cor da marca | Cor da linha |
+| `cor_texto` | cor | `white` | `#RRGGBB` ou uma cor da marca | Cor dos rótulos |
+| `sombra` | sim ou não | `sim` |  | Sombra suave |
+
+<!-- dmaker:fim-gerado infograficos -->
 
 ---
 
