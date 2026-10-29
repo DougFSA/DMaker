@@ -22,7 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Editor',
     to: '/editor',
     icon: 'film',
-    ready: false,
+    ready: true,
   },
   {
     key: 'voice',

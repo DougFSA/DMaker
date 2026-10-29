@@ -139,7 +139,9 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     ],
   })
 
-  router.afterEach((to) => {
+  router.afterEach((to, _from, failure) => {
+    // uma navegação recusada (o editor perguntou se descarta e a pessoa ficou) não troca o título da aba
+    if (failure) return
     document.title = `${to.meta.title} · DMaker`
   })
 

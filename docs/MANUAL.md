@@ -428,7 +428,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 
 ## Usando pela interface gráfica
 
-Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o editor de linha do tempo, a aba Voz (narração) e a aba Modelos. A biblioteca de vozes e a criação de voz (clonar e desenhar) já funcionam na nova.
+Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova) e a aba Voz (narração) e a aba Modelos. A biblioteca de vozes e a criação de voz (clonar e desenhar) já funcionam na nova.
 
 ```powershell
 cd D:\DMaker
@@ -439,12 +439,13 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Dublagem**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz), e a primeira (**Vozes**) e as três últimas já funcionam por inteiro; Narração e Pronúncia mostram a tela "em construção" até chegarem. Escolha a aba depois de abrir **Voz** na barra lateral.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Dublagem**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Voz, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz), e a primeira (**Vozes**) e as três últimas já funcionam por inteiro; Narração e Pronúncia mostram a tela "em construção" até chegarem. Escolha a aba depois de abrir **Voz** na barra lateral.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
 - **Projetos**: a lista dos seus projetos (cartões ou tabela, com busca). **Novo projeto** cria a partir de um modelo pronto ou do zero, escolhendo os arquivos. **Cortar gravação** corta pausas e vícios de uma gravação falada. Abrir um projeto leva à tela dele.
-- **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Editar na clássica** (abre o editor de linha do tempo) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. O andamento aparece ao vivo.
+- **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Abrir no editor** (abre o projeto no editor da interface nova; **Abrir na clássica** é o caminho secundário) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. Um projeto com spec inválida mostra o motivo e o botão **Abrir no editor para corrigir**. O andamento aparece ao vivo.
+- **Editor**: o projeto aberto para edição, com a barra de ações (**Salvar**, **Desfazer**, **Refazer**, **Validar**, **Prévia**, **Render final**, **Exportar**) e abas embaixo. **Propriedades** é o formulário da spec em blocos recolhíveis (**Saída**, **Fontes sincronizadas**, **Trechos**, **Sobreposições**, **Legendas** e **Áudio**). **JSON** mostra a spec inteira como texto, a saída para tudo que não tem formulário (look, efeitos sonoros, recorte de pessoa, composições). **Legendas** (aparece quando o projeto tem legendas automáticas) edita o texto de cada frase. **Preview** mostra o vídeo já renderizado, o relatório de QA, a grade de quadros e um quadro num instante. **Salvar** (ou `Ctrl+S`) grava; o selo **Não salvo** avisa quando há mudança, e sair da tela pergunta se descarta. **Validar** e os renders salvam antes. As caixas do player, da linha do tempo, dos filtros e da mídia aparecem com um aviso de que ainda não estão disponíveis: por enquanto, estão na interface clássica.
 - **Lote**: o passo a passo de vários vídeos de uma planilha (veja a tarefa "Fazer vários vídeos de uma planilha").
 - **Saídas**: os vídeos já gerados, com busca e filtro; assista ali ou baixe.
 - **Voz, aba Vozes**: a **Biblioteca** lista as vozes prontas, clonadas e desenhadas, com filtro por marca. Em cada voz, **Ouvir** gera uma amostra curta (um job; a primeira vez carrega o modelo e demora) e toca, **Usar** a escolhe para o roteiro da Narração (a escolha fica guardada) e **Remover** apaga, depois de perguntar (as vozes prontas não saem). O cartão **Nova voz** tem **Clonar** (nome, arquivo de áudio ou microfone, o que é dito, idioma, marca e a caixa de permissão do dono da voz) e **Desenhar** (gênero, faixa etária, tom, sotaque, idioma, marca, voz sussurrada e descrição livre). Veja as tarefas "Clonar uma voz" e "Criar uma voz descrevendo como ela soa".
@@ -791,7 +792,7 @@ Diga: "Deixa a legenda do projeto `meu-reel` em caixa arredondada." A IA muda o 
 
 #### Pela interface
 
-Interface clássica, projeto aberto, aba **Propriedades**, seção **Legendas**: em **Estilo** escolha **Caixa arredondada** (as outras são Karaokê, Clássico e Caixa). **Salvar**, depois **Preview**. Para um texto (gancho, título, CTA), o painel **Filtros**, grupo **Estilo**, só liga a **Caixa de fundo** retangular; o formato arredondado do texto (`"box_shape": "rounded"`) se põe na aba **JSON**. Na interface nova não há essa edição ainda.
+Interface nova, **Editor**, aba **Propriedades**, bloco **Legendas**: em **Estilo** escolha **Caixa arredondada** (as outras são Karaokê, Clássico e Caixa). **Salvar**, depois **Prévia**. Para um texto (gancho, título, CTA), o painel **Filtros** da interface clássica, grupo **Estilo**, só liga a **Caixa de fundo** retangular; o formato arredondado do texto (`"box_shape": "rounded"`) se põe na aba **JSON** do **Editor**.
 
 #### Pela CLI
 
@@ -846,7 +847,7 @@ Diga: "No projeto `meu-reel`, a legenda trocou MedlyCare por 'medly care'; corri
 
 #### Pela interface
 
-Interface clássica, aba **Legendas** (aparece quando o projeto tem legendas automáticas): corrija o texto na tabela (Início, Fim, Texto) e **Salvar legendas**; gere a **Preview** de novo. Na interface nova não há essa tela ainda.
+Interface nova, **Editor**, aba **Legendas** (aparece quando o projeto tem legendas automáticas): corrija o texto na tabela (Início, Fim, Texto) e **Salvar legendas**; o tempo das palavras da frase é refeito sozinho. Gere a **Prévia** de novo.
 
 #### Pela CLI
 
@@ -958,7 +959,7 @@ Diga: "Faz um audiograma de `ep12.mp3` com a capa `capa.jpg`, título 'Episódio
 
 #### Pela interface
 
-Interface nova, **Projetos**, **Novo projeto**, **Modelo** `audiograma`: preencha o **audio** e a **capa** (os obrigatórios) e, se quiser, o título, o desenho (**estilo**), o que o desenho acompanha (**seguir**) e o **fundo**. **Criar projeto**, **Validar** e **Renderizar** (**Prévia**). O ajuste fino do desenho (tamanho, posição, raio do círculo) se faz na aba **JSON** da interface clássica.
+Interface nova, **Projetos**, **Novo projeto**, **Modelo** `audiograma`: preencha o **audio** e a **capa** (os obrigatórios) e, se quiser, o título, o desenho (**estilo**), o que o desenho acompanha (**seguir**) e o **fundo**. **Criar projeto**, **Validar** e **Renderizar** (**Prévia**). O ajuste fino do desenho (tamanho, posição, raio do círculo) se faz na aba **JSON** do **Editor** (interface nova).
 
 #### Pela CLI
 
@@ -1073,7 +1074,7 @@ Diga: "Põe o look cinema no `meu-reel`." A IA muda o campo `look` do projeto, g
 
 #### Pela interface
 
-Interface nova, **Looks**: cada look aparece ao lado da mesma cena de teste sem acabamento, com o trecho de spec pronto para copiar; o seletor de origem soma os looks de uma marca. Para aplicar, interface clássica, aba **JSON**: acrescente `"look": "cinema"` na raiz e **Aplicar**.
+Interface nova, **Looks**: cada look aparece ao lado da mesma cena de teste sem acabamento, com o trecho de spec pronto para copiar; o seletor de origem soma os looks de uma marca. Para aplicar, interface nova, **Editor**, aba **JSON**: acrescente `"look": "cinema"` na raiz, **Aplicar** e **Salvar**.
 
 ![Catálogo de looks](img/ui-looks.png)
 
@@ -1129,7 +1130,7 @@ Diga: "Põe um whoosh aos 12,4 segundos no `meu-reel`." A IA acrescenta o efeito
 
 #### Pela interface
 
-Não existe uma tela de efeitos sonoros. Na interface clássica, aba **JSON**, acrescente o bloco `audio.sfx` (ou `"sound": true` num texto) e **Aplicar**.
+Não existe uma tela de efeitos sonoros. Na interface nova, **Editor**, aba **JSON**, acrescente o bloco `audio.sfx` (ou `"sound": true` num texto), **Aplicar** e **Salvar**.
 
 #### Pela CLI
 
@@ -1183,7 +1184,7 @@ Diga: "No primeiro trecho do `meu-reel`, troca o fundo por branco." A IA acresce
 
 #### Pela interface
 
-Não existe um botão para o recorte: na interface clássica, aba **JSON**, ponha o bloco `matte` no clipe e **Aplicar**. A prévia ao vivo do player não mostra a troca de fundo: gere a **Preview**.
+Não existe um botão para o recorte: na interface nova, **Editor**, aba **JSON**, ponha o bloco `matte` no clipe, **Aplicar** e **Salvar**. A prévia ao vivo do player não mostra a troca de fundo: gere a **Preview**.
 
 #### Pela CLI
 
@@ -1240,7 +1241,7 @@ Diga: "No `meu-reel`, o título dos 0 aos 3 segundos deve ficar atrás da pessoa
 
 #### Pela interface
 
-Não existe um botão para a camada: na interface clássica, aba **JSON**, ponha `"layer": "behind-person"` no texto e **Aplicar** (o campo é preservado ao salvar). A prévia ao vivo do player não mostra o efeito: gere a **Preview**.
+Não existe um botão para a camada: na interface nova, **Editor**, aba **JSON**, ponha `"layer": "behind-person"` no texto, **Aplicar** e **Salvar** (o campo é preservado ao salvar). A prévia ao vivo do player não mostra o efeito: gere a **Preview**.
 
 #### Pela CLI
 
@@ -1298,7 +1299,7 @@ Diga: "No `meu-reel`, põe na região `topo`, dos 1 aos 6 segundos, uma animaç�
 
 #### Pela interface
 
-Não existe uma faixa nem um botão para a animação: a edição na linha do tempo fica para a fase 4 da interface nova (DMK-20). O render funciona igual pela interface (**Renderizar**, **Prévia**). Para pôr ou ajustar a animação à mão, use a aba **JSON** da interface clássica e acrescente a sobreposição `{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6}`; o campo `data` e os demais são preservados ao salvar.
+Não existe uma faixa nem um botão para a animação: a edição na linha do tempo fica para a fase 4 da interface nova (DMK-20). O render funciona igual pela interface (**Renderizar**, **Prévia**). Para pôr ou ajustar a animação à mão, use a aba **JSON** do **Editor** (interface nova) e acrescente a sobreposição `{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6}`; o campo `data` e os demais são preservados ao salvar.
 
 #### Pela CLI
 
@@ -1359,7 +1360,7 @@ Diga: "No `meu-reel`, põe na região `topo`, dos 1 aos 6 segundos, um contador 
 
 #### Pela interface
 
-Interface nova, **Infográficos**: cada modelo tem um quadro de exemplo; **Ajustar os valores** abre o formulário do esquema (rótulos, limites e erros no campo) e mostra o quadro com o que você digitou, no instante e na marca que escolher. **Copiar trecho da spec** copia a composição. Pôr pela linha do tempo fica para a fase 4 da interface nova (DMK-20): por enquanto, cole o trecho em `overlays`, na aba **JSON** da interface clássica.
+Interface nova, **Infográficos**: cada modelo tem um quadro de exemplo; **Ajustar os valores** abre o formulário do esquema (rótulos, limites e erros no campo) e mostra o quadro com o que você digitou, no instante e na marca que escolher. **Copiar trecho da spec** copia a composição. Pôr pela linha do tempo fica para a fase 4 da interface nova (DMK-20): por enquanto, cole o trecho em `overlays`, na aba **JSON** do **Editor** (interface nova), e **Aplicar**.
 
 #### Pela CLI
 
@@ -1546,7 +1547,7 @@ Diga: "Exporta o `meu-reel` para Shorts e Facebook Reels." A IA lança a exporta
 
 #### Pela interface
 
-Interface nova, tela do projeto, **Renderizar**, opção **Exportar em vários formatos**: marque os formatos e **Exportar**. Na clássica, o botão **Exportar** da barra superior.
+Interface nova, tela do projeto, **Renderizar**, opção **Exportar em vários formatos**: marque os formatos e **Exportar**. No **Editor**, o botão **Exportar** da barra de ações abre a mesma escolha (salva o projeto antes).
 
 #### Pela CLI
 
@@ -1600,7 +1601,7 @@ Diga: "Confere o `meu-reel`." A IA valida, gera a prévia, lê o relatório de Q
 
 #### Pela interface
 
-Interface nova, tela do projeto: **Validar** (duração e avisos) e **Conferir qualidade** (o relatório de QA). Na clássica, a aba **Preview** traz o **Relatório de QA**, a **Grade de quadros** e **Quadro em t=**.
+Interface nova, tela do projeto: **Validar** (duração e avisos) e **Conferir qualidade** (o relatório de QA). No **Editor**, o botão **Validar** salva antes e valida, e a aba **Preview** traz o vídeo já renderizado com o **Relatório de QA** (do arquivo que você escolheu, prévia ou final), a **Grade de quadros** e o **Quadro em**, um quadro no instante em segundos.
 
 ![Tela do projeto com validação e relatório de QA](img/ui-projeto-qa.png)
 
@@ -2494,7 +2495,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
 | DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
-| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; e a **Dublagem** (preparar, revisar as falas, gerar, comparar, baixar as trilhas e usar no projeto, com botão de parar) | "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Dublar um vídeo para outro idioma", "Usando pela interface gráfica" |
+| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica); e a **Dublagem** (preparar, revisar as falas, gerar, comparar, baixar as trilhas e usar no projeto, com botão de parar) | "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Dublar um vídeo para outro idioma", "Usando pela interface gráfica" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 

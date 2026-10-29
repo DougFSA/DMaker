@@ -37,6 +37,8 @@ const workspace = useWorkspaceStore()
 const detail = ref<ProjectDetail | null>(null)
 const loading = ref(true)
 const loadError = ref<{ title: string; message: string } | null>(null)
+// a spec do disco não passa na validação: o editor abre esse projeto direto na aba JSON para consertar
+const invalidSpec = ref(false)
 
 const summary = ref<ValidationSummary | null>(null)
 const report = ref<QaReport | null>(null)
@@ -55,6 +57,7 @@ const segmentsInSpec = computed(() => detail.value?.spec.timeline?.length ?? 0)
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
+  invalidSpec.value = false
   detail.value = null
   summary.value = null
   report.value = null
@@ -65,9 +68,11 @@ async function load(): Promise<void> {
     if (error instanceof ApiError && error.status === 404) {
       loadError.value = { title: 'Projeto não encontrado', message: `Não existe um projeto chamado “${props.name}”.` }
     } else if (error instanceof ApiError && error.status === 422) {
+      invalidSpec.value = true
+      const reason = error.message.replace(/[.\s]+$/, '')
       loadError.value = {
         title: 'A spec deste projeto não passa na validação',
-        message: `${error.message}\n\nCorrija na interface clássica ou direto no arquivo spec.json.`,
+        message: `${reason}. Abra o projeto no editor e corrija o texto na aba JSON, ou edite direto o arquivo spec.json.`,
       }
     } else {
       loadError.value = { title: 'Não foi possível abrir o projeto', message: errorMessage(error) }
@@ -173,7 +178,10 @@ watch(() => props.name, load, { immediate: true })
 
     <AppCard v-else-if="loadError">
       <EmptyState icon="alert" :title="loadError.title" :description="loadError.message">
-        <AppButton to="/projetos" variant="primary">Voltar para Projetos</AppButton>
+        <AppButton v-if="invalidSpec" :to="{ name: 'editor', params: { name } }" variant="primary">
+          Abrir no editor para corrigir
+        </AppButton>
+        <AppButton to="/projetos" :variant="invalidSpec ? 'secondary' : 'primary'">Voltar para Projetos</AppButton>
         <AppButton :href="CLASSIC_UI_PATH">Abrir a interface clássica</AppButton>
       </EmptyState>
     </AppCard>
@@ -192,9 +200,13 @@ watch(() => props.name, load, { immediate: true })
           <AppIcon name="sparkles" :size="18" />
           Conferir qualidade
         </AppButton>
-        <AppButton :href="`${CLASSIC_UI_PATH}#project=${encodeURIComponent(detail.name)}`">
+        <AppButton :to="{ name: 'editor', params: { name: detail.name } }">
+          <AppIcon name="film" :size="18" />
+          Abrir no editor
+        </AppButton>
+        <AppButton variant="ghost" :href="`${CLASSIC_UI_PATH}#project=${encodeURIComponent(detail.name)}`">
           <AppIcon name="external" :size="18" />
-          Editar na clássica
+          Abrir na clássica
         </AppButton>
         <AppButton variant="primary" @click="renderOpen = true">
           <AppIcon name="play" :size="18" />
