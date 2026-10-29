@@ -428,7 +428,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 
 ## Usando pela interface gráfica
 
-Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova), o dublar e a aba Modelos. A **Voz** já funciona por inteira na nova: a biblioteca, a criação de voz (clonar e desenhar), a narração com prévia ao vivo, a pronúncia e as três ferramentas de áudio (isolar voz, corrigir fala e trocar voz). A **Fila** de narrações, que narra os roteiros longos em segundo plano, também.
+Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova) e a aba Modelos. A **Voz** já funciona por inteira na nova: a biblioteca, a criação de voz (clonar e desenhar), a narração com prévia ao vivo, a pronúncia e as três ferramentas de áudio (isolar voz, corrigir fala e trocar voz). A **Fila** de narrações, que narra os roteiros longos em segundo plano, também.
 
 ```powershell
 cd D:\DMaker
@@ -439,7 +439,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Voz**, **Fila**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Dublagem e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz tem uma aba para cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz) e todas já funcionam por inteiro. Escolha a aba depois de abrir **Voz** na barra lateral.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Voz**, **Dublagem**, **Fila**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Modelos aparece com o selo "em breve": abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz tem uma aba para cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz) e todas já funcionam por inteiro. Escolha a aba depois de abrir **Voz** na barra lateral.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -452,6 +452,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Voz, aba Narração**: escolha a **Voz** (a que você marcou em **Usar** já vem escolhida), o **Idioma**, a **Velocidade** de 0,5 a 2x, uma **Semente** opcional e o **Dicionário de pronúncia**, e escreva o **Roteiro**: a tela estima os caracteres e a duração, e entende `[pausa 1.2]` e `[[termo|pronúncia]]`. **Gerar narração** mostra a etapa e o tempo decorrido, e cada fala toca assim que fica pronta (**Silenciar prévia** cala só a prévia; **Parar** cancela entre duas falas e guarda o que já saiu). O **Resultado** traz o player, **Baixar áudio** e **Inserir no projeto aberto**, que acrescenta a narração em `audio.narration` do projeto aberto, no segundo do campo **Começa em (s)** (em branco, logo depois da última narração do projeto), e salva. O **Histórico da sessão** guarda as últimas 30 narrações (Ouvir, Baixar, Reusar texto e Inserir no projeto). **Mandar para a fila** entrega o roteiro à fila de narrações, que roda em segundo plano. Veja as tarefas "Narrar um roteiro com a minha voz" e "Pôr a narração dentro de um vídeo".
 - **Voz, aba Pronúncia**: o dicionário de como a voz fala siglas e nomes, global ou de uma marca (**Dicionário**). Cada termo mostra como se fala, o idioma e onde vale; **Ouvir** gera uma frase curta com a voz escolhida na Narração e **Remover** tira o termo depois de perguntar. O cartão **Adicionar termo** pede o **Termo**, o **Falar como** e o **Idioma da fala**. Veja a tarefa "Ensinar o DMaker a pronunciar um nome".
 - **Voz, abas Isolar voz, Corrigir fala e Trocar voz**: escolha um arquivo do projeto aberto ou envie um do computador, acompanhe a etapa e o tempo do trabalho, ouça o antes e o depois (a correção toca só o trecho trocado, com 1,5 s de folga) e baixe o resultado. **Usar no projeto** troca o arquivo original pelo novo em tudo que o projeto usa e salva. O resultado e o que você preencheu ficam guardados ao trocar de aba. Veja as tarefas "Separar a voz da música e do ruído", "Corrigir uma palavra errada sem regravar" e "Trocar a voz de uma gravação inteira".
+- **Dublagem**: prepara a tradução de um vídeo ou áudio, mostra as falas numa tabela para você corrigir, gera o vídeo dublado, compara com o original e baixa o vídeo, a legenda e as trilhas. Você pode **Parar** qualquer etapa, e a dublagem preparada fica guardada para abrir depois. Veja a tarefa "Dublar um vídeo para outro idioma".
 - **Fila**: os roteiros longos que o servidor narra em segundo plano, um por vez; ela roda sozinha enquanto o `dmaker ui` está aberto. A lista se atualiza ao vivo e, em cada item, mostra o estado (Pendente, Rodando, Pausado, Concluído, Cancelado ou Falhou), o andamento (capítulo, fala e quanto falta) e os botões que o estado permite: **Pausar**, **Retomar**, **Cancelar**, **Subir**, **Descer**, **Tentar de novo** e **Remover**. O item pronto traz **Arquivos prontos**, com **Ouvir** (toca ali mesmo) e **Baixar** em cada arquivo. **Importar roteiro** lê um arquivo `.txt`, `.md` ou `.docx` (**Título do item**, formato WAV ou MP3 e **Rascunho**; a voz, o idioma e a velocidade são os que a aba Narração tem escolhidos) e **Limpar concluídos** tira da lista os itens prontos e cancelados, sem apagar os áudios da pasta. Sem nenhum executor ativo, a tela avisa que os itens esperam parados. Veja a tarefa "Narrar um roteiro longo em segundo plano (fila)".
 - **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
 - **Transições**, **Looks** e **Infográficos**: catálogos com a prévia de cada um (veja as tarefas "Escolher a transição entre os trechos", "Dar um acabamento de cinema ao vídeo" e "Pôr um infográfico animado no vídeo"); no de infográficos, o formulário monta os campos do esquema do modelo e mostra o quadro com o que você digitou.
@@ -2229,9 +2230,9 @@ Diga: "Dubla `gravacao.mp4` para inglês." A IA prepara (separa voz e fundo, tra
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Dublar**: escolha o **Arquivo**, o **Idioma da fala** e **Dublar para**, a **Voz**, e opcionalmente **Quantas pessoas falam**, **Voz da biblioteca**, **Voz original por baixo (dB)**, **Quando a fala não cabe** e **Termos que não se traduzem**. **Preparar (transcrever e traduzir)** mostra a tabela de falas (tempo, falante, original, tradução, travar): corrija o que precisar e **Salvar traduções**. **Gerar dublagem** mostra o progresso "fala i de n". **Ouvir o original** e **Ouvir o dublado** comparam; baixe o vídeo e a legenda, ou **Usar no projeto**.
+Interface nova, **Dublagem**: escolha o **Arquivo** (um vídeo ou áudio do projeto aberto, ou **Enviar um arquivo...**), o **Idioma da fala** e **Dublar para**, o **Modo de voz** e, se quiser, **Quantas pessoas falam**, **Voz da biblioteca**, **Voz original por baixo (dB)**, **Quando a fala não cabe** e **Termos que não se traduzem**. **Preparar (transcrever e traduzir)** mostra a etapa e o tempo e tem o botão **Parar**; no fim aparece o cartão **Falas**, uma tabela com o tempo, o original e a tradução. Corrija o texto e marque **Travar** nas falas que não devem mudar. O aviso **Alterações não salvas** some depois de **Salvar traduções**; **Traduzir de novo as destravadas** pede confirmação e refaz só as falas sem a trava. Para continuar uma dublagem já preparada, escolha-a em **Abrir uma dublagem já preparada** e clique em **Abrir projeto**. **Gerar dublagem** salva a tabela antes e mostra "Sintetizando a fala i de n"; **Rascunho** (8 passos de síntese, metade do tempo) vale para ela e para as trilhas. Depois de gerar, cada fala mostra como coube (cabe, avança na pausa, comprimida, vídeo esticado, não coube) e a marca "nova" quando foi sintetizada agora. No cartão **Dublagem pronta**, **Ouvir original** e **Ouvir dublado** tocam os dois do começo, um de cada vez; **Baixar o vídeo dublado** e **Baixar a legenda (.srt)** salvam os arquivos, e **Usar no projeto** troca o arquivo original pelo dublado nos trechos do projeto aberto e salva (para uma dublagem reaberta, ele acha no projeto aberto o arquivo que foi dublado). A tabela, o resultado e o que você preencheu ficam guardados ao trocar de tela. Na interface clássica é a aba **Voz**, seção **Dublar**, com os mesmos campos: **Preparar** mostra a tabela, **Gerar dublagem** o progresso "fala i de n", e **Ouvir o original** e **Ouvir o dublado** comparam.
 
-![Seção Dublar](img/classica-dublar.png)
+![Seção Dublar da interface clássica](img/classica-dublar.png)
 
 #### Pela CLI
 
@@ -2254,6 +2255,7 @@ Ouça o vídeo dublado e leia o `.srt`. Cada fala tem um `status` no relatório 
 - **A fala traduzida não cabe**: encurte a tradução da fala, ou use o modo que estica o vídeo (tarefa "Dublar esticando o vídeo onde a fala não cabe").
 - **Duas pessoas, uma voz só**: veja "Dublar com mais de uma pessoa falando".
 - **Muito lento**: use `--draft` para conferir e a versão final só no fim.
+- **Quero parar no meio**: na interface nova, **Parar** pede ao servidor que pare na próxima etapa ou fala (a separação da voz em andamento termina antes de parar); o que já foi sintetizado fica em cache e a dublagem preparada não se perde. A CLI e a clássica não têm esse botão.
 
 ### Dublar com mais de uma pessoa falando
 <!-- tarefa: dublar-varias-pessoas -->
@@ -2290,7 +2292,7 @@ Diga: "Dubla `entrevista.mp4` para inglês; são duas pessoas." A IA prepara com
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Dublar**: ponha o número em **Quantas pessoas falam**; na tabela de falas, a coluna **falante** é editável (só aquela fala é refeita).
+Interface nova, **Dublagem**: deixe o **Modo de voz** em "Uma voz clonada por pessoa" e ponha o número em **Quantas pessoas falam**; na tabela de falas, a coluna **Falante** (que aparece com duas ou mais pessoas) é editável: troque o falante da fala que ficou errada, **Salvar traduções** e **Gerar dublagem** (só aquela fala é refeita). Na interface clássica é a aba **Voz**, seção **Dublar**, com a coluna **falante**.
 
 #### Pela CLI
 
@@ -2342,7 +2344,7 @@ Diga: "Dubla `gravacao.mp4` para inglês sem acelerar a voz, esticando o vídeo.
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Dublar**: o campo **Quando a fala não cabe** escolhe entre acelerar a voz, esticar o vídeo ou os dois.
+Interface nova, **Dublagem**: o campo **Quando a fala não cabe** escolhe entre acelerar a voz, esticar o vídeo ou os dois; ele é salvo junto com as traduções, e a tabela mostra a situação de cada fala depois de gerar. Na interface clássica é o mesmo campo, na aba **Voz**, seção **Dublar**.
 
 #### Pela CLI
 
@@ -2390,7 +2392,7 @@ Diga: "Exporta as trilhas separadas da dublagem de `gravacao.en.dub.json`, em um
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Dublar**: **Baixar trilhas** baixa um `.zip` com os três arquivos.
+Interface nova, **Dublagem**, ao lado de **Gerar dublagem**: **Baixar trilhas** salva a tabela, gera as trilhas (as falas já sintetizadas vêm do cache) e baixa um `.zip` com os três arquivos; o resumo diz os arquivos e a duração. Na interface clássica é o mesmo botão, na aba **Voz**, seção **Dublar**.
 
 #### Pela CLI
 
@@ -2504,7 +2506,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
 | DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
-| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), a **Narração** com prévia ao vivo, **Parar**, histórico e **Inserir no projeto aberto**, a **Pronúncia**, mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica) | "Narrar um roteiro com a minha voz", "Ensinar o DMaker a pronunciar um nome", "Pôr a narração dentro de um vídeo", "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Usando pela interface gráfica" |
+| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), a **Narração** com prévia ao vivo, **Parar**, histórico e **Inserir no projeto aberto**, a **Pronúncia**, mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica); e a **Dublagem** (preparar, revisar as falas, gerar, comparar, baixar as trilhas e usar no projeto, com botão de parar) | "Narrar um roteiro com a minha voz", "Ensinar o DMaker a pronunciar um nome", "Pôr a narração dentro de um vídeo", "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Dublar um vídeo para outro idioma", "Usando pela interface gráfica" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 

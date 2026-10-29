@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -461,3 +462,56 @@ def test_render_job_returns_the_speaker_and_voice_of_each_line(client, dub: DubH
     report = job.result["report"]
     assert [r["speaker"] for r in report] == ["Falante 1", "Falante 2", "Falante 1"]
     assert report[0]["voice"] == report[2]["voice"] != report[1]["voice"]
+
+
+# ---------- parar a pedido ----------
+
+
+def held_until_cancelled(client, target, method_name: str, start) -> object:
+    """Segura `target.method_name` até o teste pedir para parar o job que `start` disparou; devolve o job terminado."""
+    entered, release = threading.Event(), threading.Event()
+    original = getattr(target, method_name)
+
+    def hold(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), "o teste não liberou o trabalho a tempo"
+        return original(*args, **kwargs)
+
+    setattr(target, method_name, hold)
+    job_id = start()
+    assert entered.wait(10), "o trabalho não chegou ao ponto segurado"
+    snapshot = client.get(f"/api/jobs/{job_id}").json()
+    assert snapshot["cancellable"] is True
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+    release.set()
+    return finished(job_id)
+
+
+def test_prepare_can_be_cancelled_and_saves_no_project(client, dub: DubHarness):
+    def start() -> str:
+        body = {"path": str(dub.src), "target_language": "en", "source_language": "pt"}
+        return client.post("/api/dub/prepare", json=body).json()["job_id"]
+
+    job = held_until_cancelled(client, dub.translator, "translate", start)
+    assert job.status == "cancelled"
+    assert not (dub_folder() / "entrevista.en.dub.json").exists()
+
+
+def test_render_can_be_cancelled_before_synthesizing_any_speech(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    dub.synthesizer.requests.clear()
+
+    def start() -> str:
+        return client.post("/api/dub/render", json={"project": project}).json()["job_id"]
+
+    job = held_until_cancelled(client, dub.base.isolation, "isolate", start)
+    assert job.status == "cancelled"
+    assert dub.synthesizer.requests == []
+
+
+def test_cancelling_a_finished_dubbing_job_is_ignored(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    job_id = client.post("/api/dub/render", json={"project": project}).json()["job_id"]
+    assert finished(job_id).status == "done"
+    client.post(f"/api/jobs/{job_id}/cancel")
+    assert server.jobs.get(job_id).status == "done"

@@ -35,7 +35,8 @@ from ..pipeline.dubbing import (
     report_dict,
     result_dict,
 )
-from ..pipeline.jobs import Job, JobManager
+from ..pipeline.jobs import Job, JobCancelled, JobManager
+from ..pipeline.speech_fix import ProgressReport
 from ..voice.synth import DRAFT_STEPS
 from .speech_routes import file_url, isolation_service, media_file, stage_reporter
 from .voice_routes import Services, VoiceServices, audio_url, exclusive_synthesis, existing_voice
@@ -134,6 +135,22 @@ def _dubbing_service(job: Job, services: VoiceServices) -> DubbingService:
     )
 
 
+def _cancellable_progress(job: Job) -> ProgressReport:
+    """Progresso do job que também o encerra, no próximo ponto seguro, quando a pessoa pede para parar.
+
+    Cada etapa e cada fala passam por aqui; parar entre elas deixa o que já foi sintetizado no cache.
+    """
+    report = stage_reporter(job)
+
+    def checked(label: str, fraction: float) -> None:
+        # no 1.0 o trabalho já terminou: dizer "cancelado" de uma dublagem pronta seria mentira
+        if job.cancel_requested and fraction < 1.0:
+            raise JobCancelled("Cancelado a pedido.")
+        report(label, fraction)
+
+    return checked
+
+
 def _summary(project: DubProject, path: Path) -> dict:
     return {**project_summary(project, path), "source_url": file_url(Path(project.source))}
 
@@ -150,7 +167,7 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
             keep_original_db=req.keep_original_db,
             glossary=req.glossary,
             project_path=path,
-            on_progress=stage_reporter(job),
+            on_progress=_cancellable_progress(job),
             fit_mode=req.fit_mode,
         )
     return _summary(project, path)
@@ -158,7 +175,7 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
 
 def _run_retranslate(job: Job, services: VoiceServices, path: Path) -> dict:
     with exclusive_synthesis(job):
-        project = _dubbing_service(job, services).retranslate(_load(path), stage_reporter(job))
+        project = _dubbing_service(job, services).retranslate(_load(path), _cancellable_progress(job))
         save_dub_project(project, path)
     return _summary(project, path)
 
@@ -167,7 +184,7 @@ def _run_render(job: Job, services: VoiceServices, path: Path, draft: bool) -> d
     project = _load(path)
     with exclusive_synthesis(job):
         result = _dubbing_service(job, services).render(
-            project, on_progress=stage_reporter(job), steps=DRAFT_STEPS if draft else None
+            project, on_progress=_cancellable_progress(job), steps=DRAFT_STEPS if draft else None
         )
     return {
         "output": str(result.path),
@@ -186,7 +203,7 @@ def _run_stems(job: Job, services: VoiceServices, path: Path, draft: bool) -> di
     project = _load(path)
     with exclusive_synthesis(job):
         stems = _dubbing_service(job, services).export_stems(
-            project, StemsOptions(make_zip=True), stage_reporter(job), DRAFT_STEPS if draft else None
+            project, StemsOptions(make_zip=True), _cancellable_progress(job), DRAFT_STEPS if draft else None
         )
     return {
         "folder": str(stems.folder),
@@ -239,7 +256,7 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: preparar ({source.name})",
             lambda job: _run_prepare(job, services, req, source, path),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 
@@ -267,7 +284,7 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: traduzir de novo ({path.name})",
             lambda job: _run_retranslate(job, services, path),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 
@@ -282,7 +299,7 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: gerar ({path.name})",
             lambda job: _run_render(job, services, path, req.draft),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 
@@ -297,7 +314,7 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         job = jobs.start(
             f"dublagem: trilhas ({path.name})",
             lambda job: _run_stems(job, services, path, req.draft),
-            meta={"kind": "voice"},
+            meta={"kind": "voice", "cancellable": True},
         )
         return {"job_id": job.id}
 

@@ -51,3 +51,4 @@ Ouça o vídeo dublado e leia o `.srt`. Cada fala tem um `status` no relatório 
 - **A fala traduzida não cabe**: encurte a tradução da fala, ou use o modo que estica o vídeo (tarefa "Dublar esticando o vídeo onde a fala não cabe").
 - **Duas pessoas, uma voz só**: veja "Dublar com mais de uma pessoa falando".
 - **Muito lento**: use `--draft` para conferir e a versão final só no fim.
+- **Quero parar no meio**: na interface nova, **Parar** pede ao servidor que pare na próxima etapa ou fala (a separação da voz em andamento termina antes de parar); o que já foi sintetizado fica em cache e a dublagem preparada não se perde. A CLI e a clássica não têm esse botão.

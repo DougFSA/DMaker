@@ -207,6 +207,94 @@ describe('MediaPicker', () => {
     expect(wrapper.find('input[type="file"]').exists()).toBe(true)
   })
 
+  describe('ao remontar (voltar à aba), devolve a escolha que a tela guardou', () => {
+    it('um arquivo do projeto continua escolhido, sem avisar uma troca nem cair no primeiro', async () => {
+      stubApi({ project: detail(absoluteSpec) })
+      mountPicker({ project: 'demo' })
+      await flushPromises()
+      await wrapper.find('select').setValue('project:1')
+      const kept = picks().at(-1)
+      expect(kept).toMatchObject({ path: 'D:/m/fundo.mp3' })
+      wrapper.unmount()
+
+      mountPicker({ project: 'demo', modelValue: kept })
+      await flushPromises()
+      expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('project:1')
+      // nada mudou de verdade: a tela continua com o mesmo objeto
+      expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    })
+
+    it('enquanto a lista do projeto chega, não apaga a escolha guardada', async () => {
+      stubApi({ project: detail(absoluteSpec) })
+      mountPicker({ project: 'demo' })
+      await flushPromises()
+      await wrapper.find('select').setValue('project:1')
+      const kept = picks().at(-1)
+      wrapper.unmount()
+
+      mountPicker({ project: 'demo', modelValue: kept })
+      expect(picks()).toEqual([])
+      await flushPromises()
+      expect(picks()).toEqual([])
+    })
+
+    it('um arquivo enviado continua escolhido, com o nome e sem pedir o envio de novo', async () => {
+      const calls = stubApi({})
+      const sent: PickedMedia = { path: 'cache/uploads/abc-voz.wav', name: 'voz.wav', origin: 'upload', entry: null }
+      mountPicker({ project: null, modelValue: sent })
+      await flushPromises()
+      expect(wrapper.findAll('option').map((option) => option.text())).toEqual(['Enviado: voz.wav', 'Enviar um arquivo...'])
+      expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('uploaded')
+      expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+      expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+      expect(calls).toEqual([])
+    })
+
+    it('um arquivo que o projeto não usa mais cai na primeira mídia', async () => {
+      stubApi({ project: detail(absoluteSpec) })
+      const gone: PickedMedia = {
+        path: 'D:/m/sumiu.mp4',
+        name: 'sumiu.mp4',
+        origin: 'project',
+        entry: { id: 'file:D:/m/sumiu.mp4', kind: 'clip', label: 'sumiu.mp4', path: 'D:/m/sumiu.mp4', src: 'D:/m/sumiu.mp4' },
+      }
+      mountPicker({ project: 'demo', modelValue: gone })
+      await flushPromises()
+      expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('project:0')
+      expect(picks().at(-1)).toMatchObject({ path: 'D:/m/entrevista.mp4' })
+    })
+
+    it('sem projeto aberto, uma escolha do projeto vira "nenhuma" e oferece o envio', async () => {
+      stubApi({})
+      const old: PickedMedia = {
+        path: 'D:/m/entrevista.mp4',
+        name: 'entrevista.mp4',
+        origin: 'project',
+        entry: { id: 'file:D:/m/entrevista.mp4', kind: 'clip', label: 'entrevista.mp4', path: 'D:/m/entrevista.mp4', src: 'D:/m/entrevista.mp4' },
+      }
+      mountPicker({ project: null, modelValue: old })
+      await flushPromises()
+      expect(picks().at(-1) ?? null).toBeNull()
+      expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+    })
+
+    it('a escolha de uma fonte sincronizada sobrevive a trocar o arquivo dela (mesmo id)', async () => {
+      stubApi({ project: detail({ sources: { cam1: { src: 'D:/m/cam1.mp4' } }, timeline: [{ type: 'clip', src: 'D:/m/outro.mp4' }] }) })
+      mountPicker({ project: 'demo' })
+      await flushPromises()
+      await wrapper.find('select').setValue('project:0')
+      const kept = picks().at(-1)
+      expect(kept?.entry?.id).toBe('source:cam1')
+      wrapper.unmount()
+
+      stubApi({ project: detail({ sources: { cam1: { src: 'D:/m/cam1.en.mp4' } }, timeline: [{ type: 'clip', src: 'D:/m/outro.mp4' }] }) })
+      mountPicker({ project: 'demo', modelValue: kept })
+      await flushPromises()
+      expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('project:0')
+      expect(picks().at(-1)).toMatchObject({ path: 'D:/m/cam1.en.mp4' })
+    })
+  })
+
   it('usa o rótulo pedido', async () => {
     stubApi({})
     mountPicker({ project: null, label: 'Arquivo para isolar' })
