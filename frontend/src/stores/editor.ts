@@ -114,6 +114,18 @@ export const useEditorStore = defineStore('editor', () => {
     return map
   })
 
+  /** Os caminhos (crus e resolvidos) que a vista marcou como ausentes do disco: dali não adianta pedir miniatura. */
+  const missingPaths = computed(() => {
+    const set = new Set<string>()
+    const add = (...paths: Array<string | null | undefined>) => paths.forEach((path) => path && set.add(path))
+    for (const track of view.value?.tracks ?? []) {
+      for (const item of track.items) if (item.missing) add(item.src, item.path)
+    }
+    // uma fonte em várias partes não diz qual parte sumiu: só vale quando ela tem um arquivo só
+    for (const source of Object.values(view.value?.sources ?? {})) if (source.missing && source.parts.length <= 1) add(source.src, source.path)
+    return set
+  })
+
   /* ---------- abrir e fechar ---------- */
 
   function resetProject(projectName: string | null): void {
@@ -327,16 +339,13 @@ export const useEditorStore = defineStore('editor', () => {
 
   /* ---------- as operações de edição do servidor ---------- */
 
-  async function runOperation(op: EditOperation): Promise<boolean> {
-    const target = name.value
+  /** Chama o servidor com uma operação e adota a spec e a vista que voltam. Quem chama decide o passo do desfazer. */
+  async function callOperation(op: EditOperation, target: string): Promise<boolean> {
     const current = spec.value
-    if (!target || !current) return false
-    const before = currentJson.value
+    if (name.value !== target || !current) return false
     try {
       const result = await api.editor.edit(target, pruneEmpty(current), op)
       if (name.value !== target) return false
-      recordHistory(before)
-      coalescedPath = null
       spec.value = normalizeSpec(result.spec)
       specErrors.value = []
       validation.value = null
@@ -348,17 +357,47 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  /** Roda as operações uma depois da outra; um comando de várias operações vale UM passo do desfazer. */
+  async function runOperations(ops: EditOperation[]): Promise<boolean> {
+    const target = name.value
+    if (!target || !spec.value) return false
+    const before = currentJson.value
+    let done = 0
+    for (const op of ops) {
+      if (!(await callOperation(op, target))) break
+      done += 1
+    }
+    // o que já foi feito antes de uma falha continua valendo, e desfazer o devolve inteiro
+    if (done > 0 && name.value === target) {
+      recordHistory(before)
+      coalescedPath = null
+    }
+    return done === ops.length
+  }
+
+  function enqueue(ops: EditOperation[]): Promise<boolean> {
+    const run = opChain.then(
+      () => runOperations(ops),
+      () => runOperations(ops),
+    )
+    opChain = run
+    return run
+  }
+
   /**
    * Aplica uma das dez operações da linha do tempo (cortar, remover, mover, aparar, duplicar, inserir, ajustar uma
    * sobreposição, mudar um campo) pelo servidor. As chamadas entram em fila: cada uma parte da spec que a anterior deixou.
    */
   function applyOp(op: EditOperation): Promise<boolean> {
-    const run = opChain.then(
-      () => runOperation(op),
-      () => runOperation(op),
-    )
-    opChain = run
-    return run
+    return enqueue([op])
+  }
+
+  /**
+   * Aplica várias operações em sequência como um comando só: remover cinco trechos selecionados é um passo do
+   * desfazer, não cinco. Se uma falha, as seguintes não rodam e o que já foi feito fica registrado.
+   */
+  function applyOps(ops: EditOperation[]): Promise<boolean> {
+    return ops.length === 0 ? Promise.resolve(true) : enqueue(ops)
   }
 
   /** Guarda o resultado da validação do projeto (o cartão na tela do editor); qualquer mudança na spec o apaga. */
@@ -444,6 +483,11 @@ export const useEditorStore = defineStore('editor', () => {
     return resolvedPaths.value.get(src) ?? src
   }
 
+  /** O arquivo deste `src` da spec não está no disco, segundo a vista. */
+  function isMissing(src: string): boolean {
+    return missingPaths.value.has(src) || missingPaths.value.has(resolvePath(src))
+  }
+
   /** O item da vista com este id e a trilha dele. */
   function findItem(id: string): SelectedItem | null {
     for (const track of view.value?.tracks ?? []) {
@@ -482,6 +526,7 @@ export const useEditorStore = defineStore('editor', () => {
     mutate,
     replaceSpec,
     applyOp,
+    applyOps,
     // vista
     view,
     viewError,
@@ -503,5 +548,6 @@ export const useEditorStore = defineStore('editor', () => {
     clearSelection,
     findItem,
     resolvePath,
+    isMissing,
   }
 })

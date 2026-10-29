@@ -79,3 +79,8 @@ export function pruneEmpty<T>(value: T): T {
 export function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
+
+/** O caminho é absoluto: letra de unidade (`C:\` ou `C:/`), pasta de rede (`\\`) ou raiz (`/`). */
+export function isAbsolutePath(path: string): boolean {
+  return /^([a-zA-Z]:[\\/]|[\\/])/.test(path)
+}

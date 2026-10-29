@@ -244,7 +244,7 @@ describe('o som', () => {
   })
 })
 
-describe('transporte e teclado', () => {
+describe('transporte', () => {
   it('o botão de tocar alterna entre tocar e pausar', async () => {
     const panel = await mountPlayer()
     await panel.find('button[aria-label="Tocar"]').trigger('click')
@@ -264,33 +264,11 @@ describe('transporte e teclado', () => {
     expect(panel.find('.transport__timecode').text()).toBe('00:00:00:00')
   })
 
-  it('J, K e L voltam, param e avançam, e repetir dobra a velocidade', async () => {
-    const panel = await mountPlayer()
-    const player = usePlayerStore()
-    const press = async (key: string) => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
-      await flushPromises()
-    }
-    await press('l')
-    expect(player.rate).toBe(1)
-    await press('L')
-    expect(player.rate).toBe(2)
-    expect(panel.find('.transport__speed').text()).toBe('2x')
-    await press('j')
-    expect(player.rate).toBe(-1)
-    await press('k')
-    expect(player.rate).toBe(0)
-  })
-
-  it('os atalhos não valem dentro de um campo de texto nem com Ctrl', async () => {
+  it('o painel não escuta o teclado: J, K e L são do teclado do editor (senão cada tecla agiria duas vezes)', async () => {
     await mountPlayer()
-    const player = usePlayerStore()
-    const input = document.createElement('input')
-    document.body.appendChild(input)
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true }))
     await flushPromises()
-    expect(player.rate).toBe(0)
+    expect(usePlayerStore().rate).toBe(0)
   })
 
   it('o volume do player é um controle de 0 a 100%', async () => {

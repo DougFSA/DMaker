@@ -410,6 +410,79 @@ describe('operações da linha do tempo', () => {
     expect(step).toBe(3)
     expect((store.get('timeline') as unknown[]).length).toBe(5) // 2 + 3
   })
+
+  describe('um comando de várias operações', () => {
+    /** Cada chamada acrescenta um cartão à spec que recebeu, como as duplicações de um "duplicar tudo". */
+    function growing(failAt = Infinity) {
+      let calls = 0
+      return (call: { body: unknown }) => {
+        calls += 1
+        if (calls === failAt) return reply(400, { detail: 'índice fora do intervalo' })
+        const received = (call.body as { spec: { timeline: unknown[] } }).spec.timeline.length
+        return {
+          spec: { ...projectSpec(), timeline: Array.from({ length: received + 1 }, () => ({ type: 'card', title: 'x' })) },
+          timeline: timelineView(Array.from({ length: received + 1 }, (_, i) => timelineItem(i))),
+        }
+      }
+    }
+
+    it('vale um passo só do desfazer, não um por operação', async () => {
+      serve({ 'POST /api/projects/demo/edit': growing() })
+      const store = await opened()
+      const ok = await store.applyOps([
+        { type: 'duplicate', index: 1 },
+        { type: 'duplicate', index: 0 },
+        { type: 'duplicate', index: 0 },
+      ])
+      expect(ok).toBe(true)
+      expect((store.get('timeline') as unknown[]).length).toBe(5)
+      store.undo()
+      expect((store.get('timeline') as unknown[]).length).toBe(2)
+      expect(store.canUndo).toBe(false)
+      expect(store.dirty).toBe(false)
+    })
+
+    it('se uma falha, as seguintes não rodam e o que já foi feito fica registrado em um passo', async () => {
+      serve({ 'POST /api/projects/demo/edit': growing(2) })
+      const store = await opened()
+      const ok = await store.applyOps([
+        { type: 'duplicate', index: 0 },
+        { type: 'duplicate', index: 0 },
+        { type: 'duplicate', index: 0 },
+      ])
+      expect(ok).toBe(false)
+      expect(fetch.to('POST /api/projects/demo/edit')).toHaveLength(2)
+      expect((store.get('timeline') as unknown[]).length).toBe(3)
+      expect(useToastsStore().items.at(-1)).toMatchObject({ tone: 'error', description: 'índice fora do intervalo' })
+      store.undo()
+      expect((store.get('timeline') as unknown[]).length).toBe(2)
+    })
+
+    it('se a primeira falha, nada entra no desfazer', async () => {
+      serve({ 'POST /api/projects/demo/edit': growing(1) })
+      const store = await opened()
+      expect(await store.applyOps([{ type: 'remove', index: 0 }, { type: 'remove', index: 0 }])).toBe(false)
+      expect(store.canUndo).toBe(false)
+    })
+
+    it('sem operações, devolve verdadeiro sem chamar o servidor', async () => {
+      serve({ 'POST /api/projects/demo/edit': growing() })
+      const store = await opened()
+      expect(await store.applyOps([])).toBe(true)
+      expect(fetch.to('POST /api/projects/demo/edit')).toHaveLength(0)
+    })
+
+    it('entra na mesma fila das operações avulsas', async () => {
+      serve({ 'POST /api/projects/demo/edit': growing() })
+      const store = await opened()
+      const results = await Promise.all([
+        store.applyOp({ type: 'duplicate', index: 0 }),
+        store.applyOps([{ type: 'duplicate', index: 0 }, { type: 'duplicate', index: 0 }]),
+      ])
+      expect(results).toEqual([true, true])
+      expect((store.get('timeline') as unknown[]).length).toBe(5)
+    })
+  })
 })
 
 describe('cursor e seleção', () => {
@@ -448,6 +521,35 @@ describe('cursor e seleção', () => {
     await store.refreshView()
     expect(store.selection).toEqual(['V1:0'])
     expect(store.playhead).toBe(3)
+  })
+})
+
+describe('arquivos ausentes', () => {
+  it('um arquivo que a vista marcou como ausente (pelo src cru ou pelo caminho resolvido) é dado como ausente', async () => {
+    const view = timelineView([
+      timelineItem(0, { src: 'cam1.mp4', path: 'C:/projeto/cam1.mp4' }),
+      timelineItem(1, { src: 'perdido.mp4', path: 'C:/projeto/perdido.mp4', missing: true }),
+    ])
+    serve({ 'POST /api/projects/demo/timeline': () => view })
+    const store = await opened()
+    expect(store.isMissing('perdido.mp4')).toBe(true)
+    expect(store.isMissing('C:/projeto/perdido.mp4')).toBe(true)
+    expect(store.isMissing('cam1.mp4')).toBe(false)
+    expect(store.isMissing('outro.mp4')).toBe(false)
+  })
+
+  it('uma fonte de um arquivo só marcada ausente conta; a de várias partes não diz qual parte sumiu', async () => {
+    const view = {
+      ...timelineView(),
+      sources: {
+        mesa: { src: 'mesa.wav', parts: [], offset: 0, in_point: 0, path: 'C:/projeto/mesa.wav', missing: true },
+        cam: { src: 'a.mp4', parts: ['a.mp4', 'b.mp4'], offset: 0, in_point: 0, path: 'C:/projeto/a.mp4', missing: true },
+      },
+    }
+    serve({ 'POST /api/projects/demo/timeline': () => view })
+    const store = await opened()
+    expect(store.isMissing('mesa.wav')).toBe(true)
+    expect(store.isMissing('a.mp4')).toBe(false)
   })
 })
 

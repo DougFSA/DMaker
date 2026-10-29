@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
 import { useWorkspaceStore } from '@/stores/workspace'
 import SidebarNav from './SidebarNav.vue'
 import TopBar from './TopBar.vue'
 
 const workspace = useWorkspaceStore()
+const route = useRoute()
 </script>
 
 <template>
@@ -14,7 +16,7 @@ const workspace = useWorkspaceStore()
     </aside>
     <div class="shell__main">
       <TopBar />
-      <main id="conteudo" class="shell__content" tabindex="-1">
+      <main id="conteudo" :class="['shell__content', { 'shell__content--wide': route.meta.wide }]" tabindex="-1">
         <slot />
       </main>
     </div>
@@ -54,6 +56,10 @@ const workspace = useWorkspaceStore()
   max-width: 80rem;
   margin: 0 auto;
   padding: var(--space-6) var(--space-5) var(--space-7);
+}
+
+.shell__content--wide {
+  max-width: none;
 }
 
 .shell__content:focus {

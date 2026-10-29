@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cloneJson, getPath, pruneEmpty, setPath } from './editorPaths'
+import { cloneJson, getPath, isAbsolutePath, pruneEmpty, setPath } from './editorPaths'
 
 describe('getPath', () => {
   const spec = { timeline: [{ reframe: { focus: [0.2, 0.8] } }], output: { fps: 0 } }
@@ -89,5 +89,21 @@ describe('cloneJson', () => {
     const copy = cloneJson(original)
     copy.a.b.push(3)
     expect(original.a.b).toEqual([1, 2])
+  })
+})
+
+describe('isAbsolutePath', () => {
+  it('reconhece unidade, pasta de rede e raiz', () => {
+    expect(isAbsolutePath('C:\\Videos\\a.mp4')).toBe(true)
+    expect(isAbsolutePath('D:/Videos/a.mp4')).toBe(true)
+    expect(isAbsolutePath('\\\\servidor\\pasta\\a.mp4')).toBe(true)
+    expect(isAbsolutePath('/home/a.mp4')).toBe(true)
+  })
+
+  it('caminho relativo ou vazio não é absoluto', () => {
+    expect(isAbsolutePath('cam2.mp4')).toBe(false)
+    expect(isAbsolutePath('cards/abertura.png')).toBe(false)
+    expect(isAbsolutePath('logo')).toBe(false)
+    expect(isAbsolutePath('')).toBe(false)
   })
 })
