@@ -27,6 +27,9 @@ export function useJobNotifications(router: Router): void {
         description: `${batch.name}: ${batch.summary}`,
         action: { label: 'Ver lote', run: () => void router.push({ name: 'batch' }) },
       })
+    } else if (job.status === 'cancelled') {
+      // parar a pedido não é falha: avisar "o job falhou" faria a pessoa procurar um erro que não existe
+      toasts.push({ tone: 'info', title: 'Parado a pedido', description: job.description })
     } else if (job.status === 'done') {
       toasts.push({
         tone: 'success',

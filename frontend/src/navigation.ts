@@ -36,7 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Dublagem',
     to: '/dublagem',
     icon: 'languages',
-    ready: false,
+    ready: true,
   },
   {
     key: 'queue',
