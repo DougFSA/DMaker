@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import type { BatchListItem, BatchReport, BatchRow, BatchValidation } from '@/api'
 import { createAppRouter } from '@/router'
+import BatchProgressCard from '@/components/batches/BatchProgressCard.vue'
 import BatchView from './BatchView.vue'
 
 /** EventSource de mentira: o teste não precisa do SSE, só de a tela conseguir pedir o acompanhamento do job. */
@@ -140,11 +141,21 @@ function stubServer(): void {
   )
 }
 
-async function mountView() {
+// toda tela montada é desmontada no fim do teste: uma que ficasse viva continuaria consultando o lote a cada
+// segundo e leria a resposta do servidor falso do teste seguinte (a causa do erro intermitente de `report.rows`)
+const mounted: Array<{ unmount: () => void }> = []
+
+async function routerAt(path: string) {
   const router = createAppRouter(createMemoryHistory())
-  await router.push('/lote')
+  await router.push(path)
   await router.isReady()
+  return router
+}
+
+async function mountView() {
+  const router = await routerAt('/lote')
   const wrapper = mount(BatchView, { global: { plugins: [router] }, attachTo: document.body })
+  mounted.push(wrapper)
   await flushPromises()
   return wrapper
 }
@@ -163,6 +174,7 @@ beforeEach(() => {
   stubServer()
 })
 afterEach(() => {
+  while (mounted.length) mounted.pop()?.unmount()
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
@@ -337,7 +349,6 @@ describe('tela Lote: andamento, pausa e relatório', () => {
 
     expect(calls.some((call) => call.method === 'POST' && call.url === '/api/batches/serie/pause')).toBe(true)
     expect(wrapper.text()).toContain('Pausando depois deste vídeo')
-    wrapper.unmount()
   })
 
   it('não oferece refazer enquanto o lote roda', async () => {
@@ -348,6 +359,17 @@ describe('tela Lote: andamento, pausa e relatório', () => {
     const redo = wrapper.findAll('button').filter((button) => ['Refazer', 'Tentar de novo'].includes(button.text()))
     expect(redo.length).toBeGreaterThan(0)
     expect(redo.every((button) => button.attributes('disabled') !== undefined)).toBe(true)
-    wrapper.unmount()
+  })
+})
+
+describe('cartão de andamento do lote', () => {
+  it('não quebra com um relatório sem a lista de vídeos', async () => {
+    const wrapper = mount(BatchProgressCard, {
+      props: { report: { ...report(), rows: undefined } as unknown as BatchReport },
+      global: { plugins: [await routerAt('/lote')] },
+    })
+    mounted.push(wrapper)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Lote serie')
   })
 })

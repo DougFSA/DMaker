@@ -23,6 +23,7 @@ from ..domain.spec import ClipSegment, Project
 from ..media.probe import probe
 from .context import Prober
 from .layout import OriginAggregate, aggregate_by_origin, project_layout
+from .missing import MissingMedia
 from .sync import OffsetFinder
 
 Operation = Callable[[Project, dict, OriginAggregate], Project]
@@ -104,7 +105,10 @@ def apply_edit(
         raise EditError(
             f"operação de edição desconhecida: {op_type!r}. Use uma de: {', '.join(sorted(EDIT_OPERATIONS))}"
         )
-    layout = aggregate_by_origin(project, project_layout(project, prober, offset_finder))
+    # a edição também acontece com uma fonte ausente: é assim que a pessoa corta, move ou troca o arquivo dela
+    layout = aggregate_by_origin(
+        project, project_layout(project, prober, offset_finder, MissingMedia.scan(project))
+    )
     try:
         return handler(project, op, layout)
     except EditError:

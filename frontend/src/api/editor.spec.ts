@@ -60,6 +60,20 @@ describe('cliente do editor: projeto, legendas e linha do tempo', () => {
     await editorApi.proxies.build('a')
     expect(fetch.last()).toMatchObject({ url: '/api/projects/a/proxies', method: 'POST' })
   })
+
+  it('pede a mixagem do áudio da prévia com a edição na tela e consulta uma chave', async () => {
+    const fetch = stubFetch({ state: 'building', key: 'abc' })
+    await editorApi.previewAudio.request('meu projeto', { name: 'a' })
+    expect(fetch.last()).toMatchObject({
+      url: '/api/projects/meu%20projeto/preview-audio',
+      method: 'POST',
+      body: { spec: { name: 'a' } },
+    })
+    await editorApi.previewAudio.request('a')
+    expect(fetch.last().body).toEqual({ spec: null })
+    await editorApi.previewAudio.get('a', 'chave 1')
+    expect(fetch.last()).toMatchObject({ url: '/api/projects/a/preview-audio?key=chave%201', method: 'GET' })
+  })
 })
 
 describe('cliente do editor: cartão, mídia e conferência', () => {

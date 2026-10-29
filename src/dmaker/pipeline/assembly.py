@@ -12,7 +12,7 @@ from pathlib import Path
 from ..config import FONTS_DIR
 from ..domain.spec import Transition
 from ..filtergraph.audio import AudioTaps, audio_graph, loudnorm_measure_graph
-from ..filtergraph.audiogram import audiogram_graph
+from ..filtergraph.audiogram import audiogram_graph, normalization_gain_db
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
 from ..filtergraph.encode import encode_args, resolve_encoder
@@ -30,6 +30,8 @@ from .voicefiles import PreparedVoiceFile
 from .voiceover import PreparedVoiceover
 
 SILENCE_LUFS = -60.0
+# a linha de comando do Windows aceita ~32 mil caracteres: acima deste tamanho o grafo vai para um arquivo
+INLINE_GRAPH_LIMIT = 20_000
 
 
 def _relpath(target: Path, base: Path) -> str:
@@ -55,7 +57,18 @@ def _music_duration(ctx: RenderContext, music_path: Path | None) -> float | None
     return ctx.prober(music_path).duration
 
 
-def _audio_only_graph(
+def graph_args(ctx: RenderContext, inputs: Inputs, lines: list[str], name: str) -> list[str]:
+    """Entradas e grafo como argumentos do ffmpeg. Um projeto com centenas de trechos passa do limite da linha
+    de comando, então o grafo grande vai para um arquivo da pasta do trabalho (`name`)."""
+    graph = ";".join(lines)
+    if len(graph) + sum(len(arg) + 1 for arg in inputs.args) < INLINE_GRAPH_LIMIT:
+        return [*inputs.args, "-filter_complex", graph]
+    path = ctx.job_dir / name
+    path.write_text(graph, encoding="utf-8")
+    return [*inputs.args, *filter_complex_file_args(str(path))]
+
+
+def audio_only_graph(
     ctx: RenderContext,
     prepared: list[PreparedSegment],
     transitions: list[Transition | None],
@@ -66,8 +79,13 @@ def _audio_only_graph(
     include_music: bool = True,
     sfx: Sequence[SfxInput] = (),
     voice_files: Sequence[PreparedVoiceFile] = (),
+    *,
+    include_norm: bool = False,
+    measured: dict | None = None,
 ) -> tuple[Inputs, list[str], str]:
-    """Entradas e linhas do grafo só de áudio (sem normalização), com a mesma mixagem da montagem final."""
+    """Entradas e linhas do grafo só de áudio, com a mesma mixagem da montagem final. Sem `include_norm` é a
+    mistura antes da normalização (a que se mede); com ele, já normalizada, como sai do render (`measured` é a
+    medição do modo two-pass). É o que o render mede e o que a prévia da linha do tempo mixa."""
     inputs = Inputs()
     for item in prepared:
         inputs.add(item.mezzanine)
@@ -84,8 +102,9 @@ def _audio_only_graph(
         ctx.project.audio,
         music_path,
         total,
+        measured=measured,
         include_music=include_music,
-        include_norm=False,
+        include_norm=include_norm,
         extra_voices=pip_audio,
         music_duration=_music_duration(ctx, music_path),
         narrations=voiceovers,
@@ -128,7 +147,7 @@ class LoudnessMeter:
         sfx: Sequence[SfxInput] = (),
         voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> LoudnessMeasure:
-        inputs, lines, aout = _audio_only_graph(
+        inputs, lines, aout = audio_only_graph(
             ctx,
             prepared,
             transitions,
@@ -140,13 +159,51 @@ class LoudnessMeter:
             voice_files=voice_files,
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
-        args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[ameas]", "-f", "null", "-"]
+        args = [*graph_args(ctx, inputs, lines, "loudness.txt"), "-map", "[ameas]", "-f", "null", "-"]
         stderr = ctx.runner.capture(args, label="medição de loudness")
         data = _loudnorm_report(stderr)
         if data is None:
             return LoudnessMeasure(None)
         (ctx.job_dir / "loudnorm.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         return LoudnessMeasure(data)
+
+
+@dataclass(frozen=True)
+class LoudnessPlan:
+    """Como a normalização de loudness vai ser aplicada: a medição (só no modo two-pass), se normaliza e o ganho
+    (dB) que ela dá à saída, que os audiogramas repetem na cópia do áudio que leem."""
+
+    measured: dict | None
+    normalize: bool
+    gain_db: float
+
+
+def plan_loudness(
+    ctx: RenderContext,
+    meter: LoudnessMeter,
+    prepared: list[PreparedSegment],
+    transitions: list[Transition | None],
+    music_path: Path | None,
+    total: float,
+    voiceovers: Sequence[PreparedVoiceover] = (),
+    video_overlays: Sequence[ResolvedVideoOverlay] = (),
+    sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[PreparedVoiceFile] = (),
+) -> LoudnessPlan:
+    """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição alimenta o
+    modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só. É a mesma decisão para o render e
+    para a prévia da linha do tempo, que por isso têm o mesmo nível."""
+    mode = ctx.project.audio.normalize
+    if mode == "off" or ctx.options.dry_run:
+        return LoudnessPlan(None, mode != "off", 0.0)
+    measure = meter.measure(
+        ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
+    )
+    if measure.silent:
+        ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")
+        return LoudnessPlan(None, False, 0.0)
+    gain = normalization_gain_db(measure.values, ctx.project.audio.target_lufs)
+    return LoudnessPlan(measure.values if mode == "two-pass" else None, True, gain)
 
 
 @dataclass(frozen=True)
@@ -173,7 +230,7 @@ class VoiceLevelMeter:
         voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> VoiceLevel | None:
         """None quando não há voz (clipes mudos, só música) ou a medição não devolveu números."""
-        inputs, lines, aout = _audio_only_graph(
+        inputs, lines, aout = audio_only_graph(
             ctx,
             prepared,
             transitions,
@@ -185,7 +242,7 @@ class VoiceLevelMeter:
             voice_files=voice_files,
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs, "[vmeas]"))
-        args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[vmeas]", "-f", "null", "-"]
+        args = [*graph_args(ctx, inputs, lines, "voice_level.txt"), "-map", "[vmeas]", "-f", "null", "-"]
         data = _loudnorm_report(ctx.runner.capture(args, label="medição da voz"))
         if data is None or LoudnessMeasure(data).silent:
             return None

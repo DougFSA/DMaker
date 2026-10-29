@@ -39,6 +39,9 @@ LEXICON_DIR = DATA_DIR / "assets"  # pronunciation.json global e brands/<marca>/
 CACHE_DIR = DATA_DIR / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
+PREVIEW_AUDIO_DIR = (
+    CACHE_DIR / "preview-audio"
+)  # som da prévia da linha do tempo: pedaços por trecho e a mixagem
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
 STEMS_DIR = CACHE_DIR / "stems"  # voz e fundo separados (isolamento vocal), por trecho de arquivo
@@ -68,6 +71,7 @@ def ensure_dirs() -> None:
         BRANDS_DIR,
         MEZ_DIR,
         PROXY_DIR,
+        PREVIEW_AUDIO_DIR,
         WAVEFORM_DIR,
         JOBS_DIR,
         MODELS_DIR,
