@@ -1,9 +1,9 @@
 /* O registro dos painéis do editor. A tela do editor não conhece nenhum painel pelo nome: ela percorre esta lista
    e põe cada um no encaixe dele. Painel que ainda não existe tem `load: null` e o encaixe mostra um aviso discreto.
 
-   Para plugar um painel novo (o player, a linha do tempo, os filtros, a mídia), crie o componente em
-   `components/editor/` e troque o `load: null` da linha dele por `() => import('./NomeDoPainel.vue')`. O componente
-   não recebe props: lê e muda tudo pelo store do editor (`useEditorStore`). */
+   Para plugar um painel novo, crie o componente em `components/editor/` e troque o `load: null` da linha dele por
+   `() => import('./NomeDoPainel.vue')`. O componente não recebe props: lê e muda tudo pelo store do editor
+   (`useEditorStore`). Hoje os oito painéis existem; o `load: null` fica para um painel futuro. */
 import { defineAsyncComponent, type Component } from 'vue'
 import type { useEditorStore } from '@/stores/editor'
 
@@ -26,10 +26,10 @@ export interface EditorPanelDef {
 }
 
 export const EDITOR_PANELS: EditorPanelDef[] = [
-  // bancada: o que cada encaixe vira nas próximas etapas
-  { id: 'media', title: 'Mídia', zone: 'workbench', load: null },
+  // bancada
+  { id: 'media', title: 'Mídia', zone: 'workbench', load: () => import('./MediaPanel.vue') },
   { id: 'player', title: 'Player', zone: 'workbench', load: () => import('./PlayerPanel.vue') },
-  { id: 'filters', title: 'Filtros', zone: 'workbench', load: null },
+  { id: 'filters', title: 'Filtros', zone: 'workbench', load: () => import('./FiltersPanel.vue') },
   { id: 'timeline', title: 'Linha do tempo', zone: 'workbench', load: () => import('./TimelinePanel.vue') },
   // inspetor
   { id: 'properties', title: 'Propriedades', zone: 'inspector', load: () => import('./PropertiesPanel.vue') },

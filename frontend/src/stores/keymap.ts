@@ -1,5 +1,5 @@
 /* Os atalhos do editor: a tabela em uso (o padrão com as trocas da pessoa por cima), a janela de atalhos e os
-   comandos que as outras telas registram (a Mídia registra o A e o V quando chegar). As trocas ficam no navegador,
+   comandos que as outras telas registram (o painel Mídia registra o A e o V). As trocas ficam no navegador,
    na mesma chave e no mesmo formato da interface clássica. */
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'

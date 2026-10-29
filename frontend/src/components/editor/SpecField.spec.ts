@@ -161,3 +161,109 @@ describe('SpecField: arquivo', () => {
     expect(opened.store.get('timeline.0.src')).toBe('C:/midia/novo.mp4')
   })
 })
+
+describe('SpecField: com atraso (debounceMs)', () => {
+  const DELAY = 300
+
+  async function mountDelayed(field: FieldDef, base = 'timeline.0') {
+    const opened = await openEditor()
+    const wrapper = await mountEditorPart(SpecField, opened, { field, base, debounceMs: DELAY })
+    return { opened, wrapper }
+  }
+
+  it('o número só vai para a spec depois de 300 ms de silêncio, e o campo mostra o que foi digitado', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await wrapper.find('input').setValue('2')
+      await vi.advanceTimersByTimeAsync(DELAY - 1)
+      expect(opened.store.get('timeline.0.speed')).toBe(1)
+      expect((wrapper.find('input').element as HTMLInputElement).value).toBe('2')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(opened.store.get('timeline.0.speed')).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cada tecla reinicia a espera: digitar em sequência grava uma vez só, com o último valor', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const setField = vi.spyOn(opened.store, 'setField')
+      for (const text of ['1', '1.', '1.5']) {
+        await wrapper.find('input').setValue(text)
+        await vi.advanceTimersByTimeAsync(200)
+      }
+      expect(setField).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(DELAY)
+      expect(setField).toHaveBeenCalledTimes(1)
+      expect(opened.store.get('timeline.0.speed')).toBe(1.5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lista e caixa de marcar gravam na hora, sem esperar', async () => {
+    const delayedQuality = await mountDelayed(quality, 'output')
+    await delayedQuality.wrapper.find('select').setValue('draft')
+    expect(delayedQuality.opened.store.get('output.quality')).toBe('draft')
+
+    const delayedMute = await mountDelayed(mute)
+    await delayedMute.wrapper.find('input[type="checkbox"]').setValue(true)
+    expect(delayedMute.opened.store.get('timeline.0.mute')).toBe(true)
+  })
+
+  it('o texto também espera, e esvaziar o campo apaga a chave quando a espera acaba', async () => {
+    const { opened, wrapper } = await mountDelayed(title, 'timeline.1')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await wrapper.find('input').setValue('')
+      expect((wrapper.find('input').element as HTMLInputElement).value).toBe('')
+      expect(opened.store.get('timeline.1.title')).toBe('Fim')
+      await vi.advanceTimersByTimeAsync(DELAY)
+      expect(opened.store.get('timeline.1')).not.toHaveProperty('title')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sair do campo grava na hora o que estava esperando', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    await wrapper.find('input').setValue('3')
+    expect(opened.store.get('timeline.0.speed')).toBe(1)
+    await wrapper.find('input').trigger('focusout')
+    expect(opened.store.get('timeline.0.speed')).toBe(3)
+  })
+
+  it('salvar, operar na linha do tempo ou desfazer antes da espera acabar não perde a digitação', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    await wrapper.find('input').setValue('4')
+    expect(opened.store.get('timeline.0.speed')).toBe(1)
+    await opened.store.save()
+    expect(opened.store.get('timeline.0.speed')).toBe(4)
+    expect(opened.fetch.to('PUT /api/projects/demo')[0]?.body).toMatchObject({ timeline: [{ speed: 4 }, {}] })
+  })
+
+  it('desmontar o campo (a seleção mudou) grava o que esperava, no caminho de antes', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    await wrapper.find('input').setValue('5')
+    wrapper.unmount()
+    expect(opened.store.get('timeline.0.speed')).toBe(5)
+  })
+
+  it('o mesmo campo reaproveitado em outro item grava o que esperava no item anterior', async () => {
+    const { opened, wrapper } = await mountDelayed(speed)
+    await wrapper.find('input').setValue('6')
+    await wrapper.setProps({ base: 'timeline.1' })
+    expect(opened.store.get('timeline.0.speed')).toBe(6)
+    expect(opened.store.get('timeline.1')).not.toHaveProperty('speed')
+  })
+
+  it('sem debounceMs o campo continua gravando a cada tecla, como na aba Propriedades', async () => {
+    const opened = await openEditor()
+    const wrapper = await mountEditorPart(SpecField, opened, { field: speed, base: 'timeline.0' })
+    await wrapper.find('input').setValue('2')
+    expect(opened.store.get('timeline.0.speed')).toBe(2)
+  })
+})

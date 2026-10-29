@@ -17,7 +17,7 @@ const fail = (message: string): Plan => ({ ok: false, message })
 /** A distância mínima do cursor às pontas do trecho para o corte ter dois pedaços de verdade (segundos). */
 const MIN_CUT_MARGIN = 0.02
 
-function lockedMessage(trackId: string): string {
+export function lockedMessage(trackId: string): string {
   return `A trilha ${trackId} está bloqueada (cadeado no cabeçalho).`
 }
 

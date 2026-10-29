@@ -8,7 +8,8 @@ import { isAbsolutePath } from '@/lib/editorPaths'
 import { fileUrl } from '@/lib/player'
 import { useEditorStore } from '@/stores/editor'
 
-const props = defineProps<{ src: string; kind: 'video' | 'image' }>()
+/** `compact`: a miniatura pequena das listas (a do painel Mídia); sem ela, a dos cartões da aba Propriedades. */
+const props = defineProps<{ src: string; kind: 'video' | 'image'; compact?: boolean }>()
 
 const AUDIO_ONLY = /\.(wav|mp3|m4a|aac|flac|ogg|opus)$/i
 
@@ -30,13 +31,18 @@ watch(url, () => {
 </script>
 
 <template>
-  <div v-if="showable" class="thumb">
+  <div v-if="showable" :class="['thumb', { 'thumb--compact': compact }]">
     <img v-if="kind === 'image'" :src="url" alt="" loading="lazy" @error="failed = true" />
     <!-- #t=0.1 mostra o primeiro quadro sem tocar; metadata baixa só o começo do arquivo -->
     <video v-else :src="`${url}#t=0.1`" preload="metadata" muted playsinline @error="failed = true" />
   </div>
-  <div v-else-if="missing && !!src" class="thumb thumb--missing" role="img" aria-label="Arquivo não encontrado">
-    Arquivo não encontrado
+  <div
+    v-else-if="missing && !!src"
+    :class="['thumb', 'thumb--missing', { 'thumb--compact': compact }]"
+    role="img"
+    aria-label="Arquivo não encontrado"
+  >
+    {{ compact ? 'Ausente' : 'Arquivo não encontrado' }}
   </div>
 </template>
 
@@ -48,6 +54,11 @@ watch(url, () => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-soft);
+}
+
+.thumb--compact {
+  width: 4.5rem;
+  height: 2.75rem;
 }
 
 .thumb img,

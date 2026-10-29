@@ -8,9 +8,9 @@ import { EDITOR_PANELS } from './panels'
 
 const original = new Map(EDITOR_PANELS.map((panel) => [panel.id, panel.load]))
 
-/** Tira do caminho os painéis que já existem: o teste do encaixe só quer o aviso dos que ainda não existem. */
+/** Esvazia os encaixes: o teste da grade só quer o aviso dos painéis que não existem, não os painéis de verdade. */
 function emptySlots(): void {
-  for (const id of ['player', 'timeline'] as const) EDITOR_PANELS.find((panel) => panel.id === id)!.load = null
+  for (const id of ['media', 'player', 'filters', 'timeline'] as const) EDITOR_PANELS.find((panel) => panel.id === id)!.load = null
 }
 
 function mountWorkbench() {

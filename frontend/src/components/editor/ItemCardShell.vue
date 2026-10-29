@@ -81,6 +81,10 @@ const named = computed(() => `${props.noun} ${props.position}`)
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-soft);
+  /* com centenas de trechos, os cartões fora da tela não precisam de layout nem de pintura: o navegador só os
+     calcula quando chegam perto; a altura do cartão recolhido (ou a última medida) segura a barra de rolagem */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 3.25rem;
 }
 
 .card__head {
