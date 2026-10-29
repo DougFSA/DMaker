@@ -253,6 +253,13 @@ function grLayers(t: number, input: StageInput): GrLayer[] {
   return layers
 }
 
+/** A proporção do quadro do PiP: o círculo é sempre 1:1, `aspect` ("16:9", "1:1") manda, e sem ele vale 16:9. */
+function pipAspect(overlay: Loose, shape: string): string {
+  if (shape === 'circle') return '1 / 1'
+  const [width, height] = (stringOf(overlay, 'aspect') ?? '').split(':').map(Number)
+  return width && height ? `${width} / ${height}` : '16 / 9'
+}
+
 function pipStyle(item: TimelineItem, overlay: Loose, view: TimelineView): CssStyle {
   const shape = stringOf(overlay, 'shape') ?? 'rounded'
   const radius = shape === 'circle' ? '50%' : shape === 'rounded' ? `${numberOf(overlay, 'radius', 0.08) * 100}%` : '0'
@@ -270,6 +277,7 @@ function pipStyle(item: TimelineItem, overlay: Loose, view: TimelineView): CssSt
   return {
     width: `${numberOf(overlay, 'width', 0.28) * 100}%`,
     opacity: String(numberOf(overlay, 'opacity', 1)),
+    aspectRatio: pipAspect(overlay, shape),
     borderRadius: radius,
     border: `${numberOf(overlay, 'border', 0)}px solid ${stringOf(overlay, 'border_color') ?? 'white'}`,
     ...position,

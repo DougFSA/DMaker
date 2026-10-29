@@ -163,6 +163,17 @@ describe('camada PiP', () => {
     expect(stageLayers(1, input(view, spec)).pips).toEqual([])
   })
 
+  it('o círculo é 1:1, `aspect` manda no resto e sem ele vale 16:9', () => {
+    const pip = timelineItem(0, { id: 'V2-0', kind: 'video', start: 0, end: 8, path: 'C:/w.mp4' })
+    const view = viewOf([timelineTrack('V2', [pip])])
+    const aspectOf = (overlay: Record<string, unknown>) =>
+      stageLayers(1, input(view, { overlays: [overlay] })).pips[0]?.style.aspectRatio
+    expect(aspectOf({ shape: 'circle', aspect: '16:9' })).toBe('1 / 1')
+    expect(aspectOf({ shape: 'rect', aspect: '4:5' })).toBe('4 / 5')
+    expect(aspectOf({})).toBe('16 / 9')
+    expect(aspectOf({ aspect: 'quebrado' })).toBe('16 / 9')
+  })
+
   it('x e y da spec mandam na posição, e o PiP de fonte ausente vem marcado', () => {
     const pip = timelineItem(0, { id: 'V2-0', kind: 'video', start: 0, end: 8, path: 'C:/w.mp4', missing: true })
     const view = viewOf([timelineTrack('V2', [pip])])

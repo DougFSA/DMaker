@@ -290,6 +290,30 @@ def test_second_build_is_the_cache_and_an_edit_redoes_only_that_cut(tmp_path):
     assert len(mixes(runner)) == 2
 
 
+def test_measuring_the_sync_does_not_make_the_first_mix_unreachable(tmp_path):
+    """Sincronizar pelo áudio grava o `sync.json`, que entra na chave: a mixagem fica guardada sob a chave de
+    depois, a que o próximo pedido da mesma spec calcula, e então ele a acha em vez de mixar de novo."""
+    spec = {
+        "sources": {"cam1": {"src": "cam1.mp4"}, "mesa": {"src": "mesa.wav", "sync": "auto"}},
+        "timeline": [{"type": "clip", "source": "cam1", "start": 20, "end": 30, "mute": True}],
+        "audio": {"tracks": [{"source": "mesa"}], "normalize": "off"},
+    }
+    builder, runner = make_builder(tmp_path)
+    builder.offset_finder = lambda master, other, ms, os_: SyncResult(-3.0, confidence=9.0)
+    project = make_project(tmp_path, **spec)
+    asked = builder.key(project)
+
+    first = builder.build(project, asked)
+    assert (tmp_path / "sync.json").exists()
+    assert first.key != asked  # a chave de antes de medir não é a de depois
+    assert builder.key(project) == first.key
+    assert builder.cached(project.name, first.key) is not None
+
+    done = len(runner.commands)
+    again = builder.build(project)
+    assert again.path == first.path and len(runner.commands) == done
+
+
 def test_mute_clips_and_a_muted_track_change_the_next_mix(tmp_path):
     builder, runner = make_builder(tmp_path)
     plain = builder.build(make_project(tmp_path, **SESSION))
@@ -588,6 +612,30 @@ def test_a_queued_mix_is_dropped_when_a_newer_edit_of_the_project_arrives(tmp_pa
     wait_for(newest, "ready")
     assert builder.cached("sessao", superseded.key) is None  # a intermediária nunca foi mixada
     assert builder.cached("sessao", newest.key) is not None
+
+
+def test_a_graph_too_long_for_the_command_line_goes_to_a_file(tmp_path):
+    """Um projeto com centenas de trechos passa dos ~32 mil caracteres que a linha de comando do Windows aceita:
+    o grafo longo vai para um arquivo da pasta do trabalho, o curto continua inline."""
+    from types import SimpleNamespace
+
+    from dmaker.filtergraph.common import Inputs
+    from dmaker.pipeline.assembly import INLINE_GRAPH_LIMIT, graph_args
+
+    ctx = SimpleNamespace(job_dir=tmp_path)
+    inputs = Inputs()
+    inputs.add("a.wav")
+    assert graph_args(ctx, inputs, ["[0:a]anull[a]"], "g.txt") == [
+        "-i",
+        "a.wav",
+        "-filter_complex",
+        "[0:a]anull[a]",
+    ]
+
+    lines = [f"[{i % 3}:a]anull[a{i}]" for i in range(INLINE_GRAPH_LIMIT // 10)]
+    args = graph_args(ctx, inputs, lines, "g.txt")
+    assert "-filter_complex" not in args and args[-1] == str(tmp_path / "g.txt")
+    assert (tmp_path / "g.txt").read_text(encoding="utf-8") == ";".join(lines)
 
 
 def test_cache_directory_lives_under_the_data_dir():

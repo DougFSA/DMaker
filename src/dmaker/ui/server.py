@@ -538,12 +538,13 @@ def _narration_durations(project: Project, services: VoiceServices) -> list[floa
 def _timeline_view_dict(project: Project, services: VoiceServices) -> dict:
     """Vista multitrilha do projeto. Arquivo ausente não derruba: o item abre marcado; o que a spec não
     deixa calcular de jeito nenhum (ex.: um clipe fora da cobertura da fonte) vira 422 com o motivo."""
+    from ..media.ffmpeg import FFmpegError
     from ..pipeline.timeline_service import project_timeline_view
 
     durations = _narration_durations(project, services)
     try:
         return project_timeline_view(project, durations).to_dict()
-    except (FileNotFoundError, KeyError, ValueError) as exc:
+    except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
         raise _error(422, str(exc)) from exc
 
 
@@ -634,9 +635,11 @@ def request_preview_audio(name: str, req: PreviewAudioRequest, services: Service
             project = load_project(name)
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
+    from ..media.ffmpeg import FFmpegError
+
     try:
         status = preview_audio_tasks.request(project, _preview_audio_builder(services))
-    except (FileNotFoundError, KeyError, ValueError) as exc:
+    except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
         raise _error(422, str(exc)) from exc
     return _preview_audio_dict(status)
 

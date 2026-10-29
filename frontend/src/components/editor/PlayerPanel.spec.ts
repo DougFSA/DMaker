@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PreviewAudioStatus, TimelineView } from '@/api'
 import { projectSpec, timelineItem, timelineTrack } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
+import { reply } from '@/test/routedFetch'
 import { MIX_POLL_MS } from '@/stores/playerMedia'
 import { usePlayerStore } from '@/stores/player'
 import { usePlayerMediaStore } from '@/stores/playerMedia'
@@ -110,10 +111,12 @@ describe('o painel do player', () => {
     }
   })
 
-  it('sem a linha do tempo calculada não há o que mostrar ainda', async () => {
-    const panel = await mountPlayer({ 'POST /api/projects/demo/timeline': () => Promise.reject(new Error('x')) })
+  it('sem a linha do tempo calculada, diz o motivo em vez de um palco vazio', async () => {
+    const panel = await mountPlayer({ 'POST /api/projects/demo/timeline': reply(422, { detail: 'fonte não cobre o trecho' }) })
     await flushPromises()
-    expect(panel.text()).toContain('Sem prévia ainda')
+    expect(panel.text()).toContain('A prévia não abriu')
+    expect(panel.text()).toContain('fonte não cobre o trecho')
+    expect(panel.find('.stage').exists()).toBe(false)
   })
 
   it('todo vídeo do palco é mudo, o do trecho e o do PiP', async () => {

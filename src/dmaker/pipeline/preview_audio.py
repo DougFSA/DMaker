@@ -211,14 +211,18 @@ class PreviewAudioBuilder:
 
     def build(self, project: Project, key: str | None = None) -> PreviewAudio:
         """Mixa o áudio do projeto (reaproveitando o que já está em cache) e devolve o arquivo."""
-        key = key or self.key(project)
-        ready = self.cached(project.name, key)
+        original = project
+        key = key or self.key(original)
+        ready = self.cached(original.name, key)
         if ready is not None:
             return ready
-        project = apply_track_state(project)
+        project = apply_track_state(original)
         missing = MissingMedia.scan(project)
         project = without_missing_audio(project, missing)
         layout = project_layout(project, self.prober, self.offset_finder, missing)
+        # medir a sincronia grava o `sync.json`, que entra na chave: a mixagem fica guardada sob a chave de depois,
+        # a que o próximo pedido da mesma spec vai calcular, senão a primeira mixagem nunca seria reaproveitada
+        key = self.key(original)
         if layout.total <= 0:
             raise ValueError("o projeto não tem duração: não há áudio para a prévia")
         job_dir = self.jobs_dir / f"{project.name}_preview_audio"

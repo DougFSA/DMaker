@@ -29,6 +29,12 @@ const EMPTY_PLAN: LivePlan = { channels: [], dropped: [] }
 
 const hasView = computed(() => !!editor.view && !!editor.spec)
 
+/** O que dizer no lugar do palco enquanto não há linha do tempo: calculando, ou o motivo de não ter (spec inválida). */
+const emptyTitle = computed(() => (editor.viewError ? 'A prévia não abriu' : editor.viewBusy ? 'Calculando a prévia' : 'Sem prévia ainda'))
+const emptyDescription = computed(() =>
+  editor.viewError || 'O player aparece quando a linha do tempo do projeto estiver calculada.',
+)
+
 /** O estado do som em palavras, para o aviso e para quem inspeciona a tela. */
 const soundState = computed<'mix' | 'live'>(() => (media.current ? 'mix' : 'live'))
 
@@ -132,12 +138,7 @@ onBeforeUnmount(() => {
       </AppBadge>
     </template>
 
-    <EmptyState
-      v-if="!hasView"
-      icon="video"
-      title="Sem prévia ainda"
-      description="O player aparece quando a linha do tempo do projeto estiver calculada."
-    />
+    <EmptyState v-if="!hasView" icon="video" :title="emptyTitle" :description="emptyDescription" />
 
     <template v-else>
       <PlayerStage />

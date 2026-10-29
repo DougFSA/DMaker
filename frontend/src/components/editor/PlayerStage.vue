@@ -238,7 +238,6 @@ function pipKey(pip: PipLayer): string {
 .pip {
   position: absolute;
   overflow: hidden;
-  aspect-ratio: 16 / 9;
   background: #000;
 }
 

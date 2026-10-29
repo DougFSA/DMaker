@@ -53,6 +53,11 @@ function segmentVolume(spec: SpecDocument, index: number): number {
   return typeof segment?.volume === 'number' ? segment.volume : 1
 }
 
+function audioSettings(spec: SpecDocument): { mute_clips?: unknown } {
+  const audio = spec.audio
+  return audio && typeof audio === 'object' ? (audio as { mute_clips?: unknown }) : {}
+}
+
 function liveChannel(
   track: TimelineTrack,
   t: number,
@@ -62,20 +67,22 @@ function liveChannel(
   const item = itemAt(track.items, t)
   if (!item || item.missing) return null
   const { view, spec, master } = input
+  // no render, `mute_clips` cala o barramento dos clipes, e as faixas externas entram nele (cada trecho as mistura)
+  const silenced = track.muted || (track.id !== 'MUS' && audioSettings(spec).mute_clips === true)
   if (track.id === 'A1') {
     // o som da câmera sai do arquivo do clipe: numa fonte em partes, da parte que grava o instante
     const speed = typeof item.extra?.speed === 'number' && item.extra.speed > 0 ? item.extra.speed : 1
     const playback = clipPlayback(item, t, speed, offsetOf, sourcePathOf(item, view))
     const url = mediaUrl(playback.path, input.proxyUrls)
     if (!playback.path || !url) return null
-    const gain = audioGain(item, track.muted, master, segmentVolume(spec, item.index))
+    const gain = audioGain(item, silenced, master, segmentVolume(spec, item.index))
     return { trackId: track.id, path: playback.path, url, fileTime: playback.fileTime, speed, loop: false, ...gain }
   }
   const path = sourcePathOf(item, view)
   const url = mediaUrl(path, input.proxyUrls)
   if (!path || !url) return null
   const speed = typeof item.extra?.speed === 'number' && item.extra.speed > 0 ? item.extra.speed : 1
-  const gain = audioGain(item, track.muted, master)
+  const gain = audioGain(item, silenced, master)
   return {
     trackId: track.id,
     path,

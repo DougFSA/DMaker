@@ -113,6 +113,15 @@ describe('som ao vivo: só o que cobre o instante', () => {
     expect(plan(14, { master: 0 }).channels).toEqual([])
   })
 
+  it('mute_clips cala a câmera e as faixas externas, como no render, mas não a música', () => {
+    const { view, spec } = session()
+    view.tracks.find((t) => t.id === 'A1')!.items[0]!.muted = false
+    const muted = liveAudioPlan(14, { view, spec: { ...spec, audio: { mute_clips: true } }, proxyUrls: {}, master: 1 })
+    expect(muted.channels.map((c) => c.trackId)).toEqual(['MUS'])
+    const plain = liveAudioPlan(14, { view, spec, proxyUrls: {}, master: 1 })
+    expect(plain.channels.map((c) => c.trackId)).toEqual(['A1', 'A2', 'MUS'])
+  })
+
   it('o volume e o mudo mudam o plano seguinte, sem nada guardado', () => {
     const before = plan(14).channels.find((c) => c.trackId === 'A2')
     const { view, spec } = session()
