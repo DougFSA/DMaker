@@ -12,9 +12,28 @@ Editor de vídeos curtos **por comando**: você descreve a edição (para uma IA
 - **Cortar pausas e vícios** de uma gravação falada; **vídeo explicativo**; **lote** de vídeos a partir de uma planilha.
 - **Voz local**: narrar um roteiro com a sua voz (clonada com autorização), corrigir uma palavra dita errada sem regravar, trocar a voz, separar voz e fundo, **dublar** para outro idioma. Toda voz gerada sai com marca d'água inaudível e etiqueta de procedência.
 - Multicâmera sincronizada pelo áudio, picture-in-picture e troca de fundo sem tela verde.
-- Operado por **Claude** (servidor MCP), por um **modelo local** (Ollama), pela **interface** (`dmaker ui`) ou pela **CLI**.
+- Operado por **Claude** (servidor MCP), por um **modelo local** sem internet (`dmaker agent` e a tela **Agente**), pela **interface** (`dmaker ui`) ou pela **CLI**.
 
 Base aberta e local: [FFmpeg](https://ffmpeg.org), [libass](https://github.com/libass/libass), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), Pillow, OmniVoice, Kokoro, Demucs e Ollama. Nada é enviado para a internet depois do primeiro download dos modelos.
+
+## Usar sem internet (agente local)
+
+O DMaker pode ser operado por conversa com um modelo que roda na sua máquina, sem nenhum serviço na nuvem. Com internet, **uma vez**, baixe o que as funções usam; depois, desligue a rede.
+
+```powershell
+dmaker doctor --offline        # lista o que falta baixar e o comando de cada download
+ollama pull gpt-oss:20b        # o modelo de linguagem (ou outro, por DMAKER_AGENT_MODEL)
+dmaker doctor --offline        # "Tudo pronto: o DMaker funciona sem internet"
+dmaker agent                   # conversa no terminal (ou a tela Agente, em dmaker ui)
+dmaker agent --once "Dubla este vídeo D:\videos\aula.mp4 para inglês"
+```
+
+- **Motor e modelo por configuração**: `DMAKER_AGENT_ENGINE` (`ollama` ou `openai`, para llama.cpp server e LM Studio), `DMAKER_AGENT_MODEL`, `DMAKER_AGENT_URL`. Nada de nome de modelo fixo no código.
+- **Kits de ferramentas**: cada pedido cai num kit (edição, legendas, voz, dublagem, correção de fala, multicâmera, composições, lote) e o modelo só vê as ferramentas e o manual curto daquele kit.
+- **Proteções**: argumentos conferidos contra o esquema da ferramenta; nenhum caminho de arquivo inventado; confirmação sua antes de render final, apagar e sobrescrever; clonar voz só com a autorização do dono da voz.
+- **Medir**: `dmaker agent eval` roda uma bateria de pedidos em português e mostra acerto, passos, tempo e memória por modelo. Máquina de 16 GB de RAM roda o `gpt-oss:20b` (cerca de 14 GB, na CPU cada resposta leva minutos): na bateria de 22 pedidos ele acertou 82%, sem nenhuma ação insegura; modelos de 30 bilhões de parâmetros não cabem.
+
+Detalhes no capítulo "Usando com LLM local (Ollama)" do [manual](docs/MANUAL.md).
 
 ## Instalação rápida (Windows)
 

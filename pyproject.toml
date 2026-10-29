@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",  # upload de referência de voz na interface (FastAPI Form/UploadFile)
     "numpy>=1.26",
+    "jsonschema>=4.20",  # confere os argumentos do agente local e os exemplos do manual contra o esquema das ferramentas
 ]
 
 [project.optional-dependencies]

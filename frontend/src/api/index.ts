@@ -1,6 +1,8 @@
 /* Cliente tipado da API do DMaker: uma função por rota usada pela interface. */
 import { http } from './http'
 import type {
+  AgentMessageResponse,
+  AgentStatus,
   AppState,
   AutoCutRequest,
   BatchListItem,
@@ -93,6 +95,21 @@ export const api = {
     sheetUrl: (name: string, brand?: string) => `/api/looks/${enc(name)}/sheet${brandQuery(brand)}`,
     /** Folha com todos os looks lado a lado. */
     overviewUrl: (brand?: string) => `/api/looks/sheet${brandQuery(brand)}`,
+  },
+
+  agent: {
+    /** Motor, modelo, se o servidor do modelo responde e os kits de ferramentas. */
+    status: () => http.get<AgentStatus>('/api/agent/status'),
+    /** Manda uma mensagem; o agente responde num job, acompanhado pelo SSE de `jobs.eventsUrl`. */
+    send: (message: string, conversationId: string | null) =>
+      http.post<AgentMessageResponse>('/api/agent/messages', { message, conversation_id: conversationId }),
+    /** Responde ao botão de confirmação (render final, apagar, sobrescrever, autorização da voz). */
+    confirm: (conversationId: string, confirmationId: string, approve: boolean) =>
+      http.post<{ approved: boolean }>(
+        `/api/agent/confirmations/${enc(confirmationId)}?conversation_id=${enc(conversationId)}`,
+        { approve },
+      ),
+    reset: (conversationId: string) => http.delete<{ reset: string }>(`/api/agent/conversations/${enc(conversationId)}`),
   },
 
   infographics: {

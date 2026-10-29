@@ -37,10 +37,20 @@ class Reply:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     thinking: str | None = None
+    prompt_tokens: int | None = None  # o que o servidor leu do histórico: mede se o kit cabe no contexto
+    completion_tokens: int | None = None
 
 
 class ChatModel(Protocol):
     def chat(self, messages: list[dict], tools: list[dict]) -> Reply: ...
+
+
+class HealthCheckedChat(ChatModel, Protocol):
+    """Um motor de conversa que sabe dizer se o servidor está no ar e se o modelo configurado está instalado."""
+
+    def is_alive(self) -> bool: ...
+
+    def has_model(self) -> bool: ...
 
 
 def _parse_arguments(raw: Any) -> dict[str, Any]:
@@ -58,7 +68,7 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _parse_tool_calls(raw: list[dict] | None) -> list[ToolCall]:
+def parse_tool_calls(raw: list[dict] | None) -> list[ToolCall]:
     calls = []
     for item in raw or []:
         function = item.get("function", {})
@@ -120,8 +130,10 @@ class OllamaChat:
         message = data.get("message") or {}
         return Reply(
             content=message.get("content") or "",
-            tool_calls=_parse_tool_calls(message.get("tool_calls")),
+            tool_calls=parse_tool_calls(message.get("tool_calls")),
             thinking=message.get("thinking") or None,
+            prompt_tokens=data.get("prompt_eval_count"),
+            completion_tokens=data.get("eval_count"),
         )
 
     def is_alive(self) -> bool:

@@ -156,11 +156,21 @@ def _main(version: Annotated[bool, typer.Option("--version", help="Mostra a vers
 @app.command()
 def doctor(
     hw: Annotated[bool, typer.Option(help="Testa encoders de hardware (nvenc/amf/qsv).")] = True,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Confere se tudo que as funções usam já está baixado e mostra o que falha sem rede.",
+        ),
+    ] = False,
 ) -> None:
-    """Verifica FFmpeg, fontes, marcas e dependências opcionais."""
+    """Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet."""
     from .domain.brand import available_brands
     from .media import fonts
 
+    if offline:
+        _doctor_offline()
+        return
     console.print(f"[bold]DMaker {__version__}[/bold]  raiz: {config.ROOT}")
     exe = config.find_tool("ffmpeg")
     if not exe or not config.find_tool("ffprobe"):
@@ -217,6 +227,22 @@ def doctor(
         ("projetos", config.PROJECTS_DIR),
     ):
         console.print(f"  {name}: {d}")
+
+
+def _doctor_offline() -> None:
+    """O relatório de "funciona sem internet?": cada item com onde procurei e o comando para baixar."""
+    from .agent.offline import DiskOfflineProbe, build_report, render_report
+    from .agent.settings import SettingsError, load_settings
+
+    try:
+        settings = load_settings()
+    except SettingsError as exc:
+        _fail(str(exc))
+    report = build_report(settings, DiskOfflineProbe())
+    for line in render_report(report):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    if not report.ready:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -1335,50 +1361,125 @@ def _agent_tool_call_line(name: str, arguments: dict) -> str:
 
 
 def _agent_on_event(kind: str, data: dict) -> None:
-    if kind == "tool_call":
+    if kind == "triage":
+        from .agent.kits import kit_by_name
+
+        titles = ", ".join(kit_by_name(name).title for name in data["kits"])
+        console.print(f"  kit: {titles} ({data['method']})", style="dim", markup=False)
+    elif kind == "tool_call":
         console.print(_agent_tool_call_line(data["name"], data["arguments"]), style="dim", markup=False)
+    elif kind == "tool_blocked":
+        first_line = (data["reason"] or "").splitlines()[0] if data["reason"] else ""
+        console.print(f"  barrado: {first_line}", style="yellow", markup=False)
     elif kind == "tool_result":
         first_line = (data["result"] or "").splitlines()[0] if data["result"] else ""
         console.print(f"  <- {first_line}", style="dim", markup=False)
 
 
-@app.command()
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+class _TerminalConfirmation:
+    """Pergunta no terminal antes do que é longo ou difícil de desfazer; sem terminal interativo, recusa."""
+
+    def confirm(self, request) -> bool:
+        console.print()
+        console.print(request.question, markup=False, highlight=False)
+        if not _interactive():
+            console.print("Sem terminal interativo para perguntar: não vou fazer isso.", markup=False)
+            return False
+        if request.kind == "voice_consent":
+            return typer.confirm("O dono da voz autorizou o uso dela?", default=False)
+        return typer.confirm("Confirma?", default=False)
+
+
+def _agent_session(settings, on_event=None, policy=None):
+    """A sessão do agente com o motor configurado, o servidor MCP em processo e a confirmação no terminal."""
+    from .agent import AgentSession, build_chat
+    from .agent.session import default_host_factory, server_tool_names
+    from .pipeline.recipes import project_exists
+
+    return AgentSession(
+        chat=build_chat(settings),
+        host_factory=default_host_factory(),
+        available=server_tool_names(),
+        policy=policy or _TerminalConfirmation(),
+        on_event=on_event or _agent_on_event,
+        free_html=settings.free_html,
+        project_exists=project_exists,
+    )
+
+
+def _agent_settings(
+    engine: str | None, model: str | None, url: str | None, num_ctx: int | None, timeout: float | None
+):
+    from .agent.settings import SettingsError, load_settings
+
+    try:
+        return load_settings(engine=engine, model=model, url=url, num_ctx=num_ctx, timeout=timeout)
+    except SettingsError as exc:
+        _fail(str(exc))
+
+
+def _require_language_model(settings) -> None:
+    """Para o comando cedo, com o remédio, quando o servidor do modelo está fora do ar ou falta o modelo."""
+    from .agent import build_chat
+
+    chat = build_chat(settings)
+    if not chat.is_alive():
+        start = (
+            "abra o app do Ollama ou rode `ollama serve`"
+            if settings.engine == "ollama"
+            else "inicie o servidor"
+        )
+        _fail(f"{settings.engine_label} não está respondendo em {settings.url}; {start}.")
+    if settings.engine == "ollama" and not chat.has_model():
+        _fail(f"Modelo '{settings.model}' não encontrado no Ollama; rode `ollama pull {settings.model}`.")
+
+
+agent_app = typer.Typer(
+    help=(
+        "Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina, sem internet. "
+        "Sem subcomando, abre a conversa no terminal."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+app.add_typer(agent_app, name="agent")
+
+ENGINE_HELP = "Motor do modelo: ollama (padrão) ou openai (llama.cpp server, LM Studio)."
+
+
+@agent_app.callback()
 def agent(
-    model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
-    url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
-    num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    ctx: typer.Context,
+    model: Annotated[str | None, typer.Option(help="Modelo (padrão: DMAKER_AGENT_MODEL).")] = None,
+    engine: Annotated[str | None, typer.Option(help=ENGINE_HELP)] = None,
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor do modelo.")] = None,
+    num_ctx: Annotated[int | None, typer.Option(help="Tamanho do contexto (tokens), no Ollama.")] = None,
     timeout: Annotated[
-        float, typer.Option(help="Espera máxima por resposta do modelo (s); modelo em CPU demora.")
-    ] = 1800.0,
+        float | None, typer.Option(help="Espera máxima por resposta do modelo (s); modelo em CPU demora.")
+    ] = None,
     once: Annotated[str | None, typer.Option(help="Executa um único pedido e sai.")] = None,
 ) -> None:
-    """Opera o DMaker por um modelo local do Ollama: tarefas mecânicas (template, render, QA, legendas).
+    """Opera o DMaker por conversa: a triagem escolhe o kit de ferramentas e o modelo só vê o manual dele.
 
-    Cortes na mão, ritmo e textos da marca continuam sendo trabalho de uma IA maior ou de uma pessoa;
-    multicâmera entra só pelo caminho automático (template com bloco `multicam` + `plan_multicam`).
-    Veja o capítulo "Usando com LLM local (Ollama)" do manual (docs/MANUAL.md).
+    Render final, apagar e sobrescrever pedem a sua confirmação no terminal; clonar voz só com a autorização
+    do dono da voz. Veja o capítulo "Usando com LLM local (Ollama)" do manual (docs/MANUAL.md).
     """
-    import os
-
-    from .agent import AgentLoop, McpToolHost, OllamaChat, system_prompt
-    from .agent.llm import OLLAMA_URL_ENV
-
-    base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
-    chat = OllamaChat(model=model, base_url=base_url, num_ctx=num_ctx, timeout=timeout)
-
-    if not chat.is_alive():
-        _fail(f"Ollama não está rodando em {base_url}; abra o app do Ollama ou rode `ollama serve`.")
-    if not chat.has_model():
-        _fail(f"Modelo '{model}' não encontrado no Ollama; rode `ollama pull {model}`.")
-
-    loop = AgentLoop(model=chat, tools=McpToolHost(), system=system_prompt(), on_event=_agent_on_event)
+    if ctx.invoked_subcommand is not None:
+        return
+    settings = _agent_settings(engine, model, url, num_ctx, timeout)
+    _require_language_model(settings)
+    session = _agent_session(settings)
 
     def _ask(message: str) -> str | None:
         try:
             with console.status("pensando...", spinner="dots"):
-                return loop.ask(message)
+                return session.ask(message)
         except (OSError, ValueError) as exc:
-            console.print(f"[red]Erro de comunicação com o Ollama: {exc}[/red]")
+            console.print(f"[red]Erro de comunicação com o modelo: {exc}[/red]")
             return None
 
     if once is not None:
@@ -1388,8 +1489,8 @@ def agent(
         return
 
     console.print(
-        "[bold]Agente DMaker[/bold] (modelo local via Ollama). "
-        "/sair encerra, /limpar reinicia a conversa, /ferramentas lista o que ele pode usar."
+        f"[bold]Agente DMaker[/bold] ({settings.model}, {settings.engine_label}). "
+        "/sair encerra, /limpar reinicia a conversa, /ferramentas lista o que ele pode usar agora."
     )
     while True:
         try:
@@ -1402,16 +1503,82 @@ def agent(
         if message == "/sair":
             break
         if message == "/limpar":
-            loop.reset()
+            session.reset()
             console.print("[dim]histórico limpo.[/dim]")
             continue
         if message == "/ferramentas":
-            for spec in McpToolHost().specs():
-                console.print(f"  {spec.name}: {spec.description}", markup=False, highlight=False)
+            from .agent.kits import kit_names
+
+            for name in session.tool_names(session.current_kits or kit_names()):
+                console.print(f"  {name}", markup=False, highlight=False)
             continue
         answer = _ask(message)
         if answer is not None:
             console.print(answer, markup=False)
+
+
+@agent_app.command("eval")
+def agent_eval(
+    model: Annotated[str | None, typer.Option(help="Modelo a medir (padrão: DMAKER_AGENT_MODEL).")] = None,
+    engine: Annotated[str | None, typer.Option(help=ENGINE_HELP)] = None,
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor do modelo.")] = None,
+    num_ctx: Annotated[int | None, typer.Option(help="Tamanho do contexto (tokens), no Ollama.")] = None,
+    timeout: Annotated[float | None, typer.Option(help="Espera máxima por resposta do modelo (s).")] = None,
+    cases: Annotated[
+        Path | None, typer.Option(help="Arquivo da bateria (padrão: tests/data/agent_eval.json).")
+    ] = None,
+    only: Annotated[
+        list[str] | None, typer.Option(help="Roda só estes pedidos (id); repita a opção.")
+    ] = None,
+    real_tools: Annotated[
+        bool,
+        typer.Option(
+            "--real-tools/--stub-heavy",
+            help="Executa de verdade as ferramentas pesadas (render, Whisper, dublagem) em vez de simulá-las.",
+        ),
+    ] = False,
+    fake: Annotated[
+        bool,
+        typer.Option(
+            "--fake", help="Usa o modelo falso que segue o roteiro de cada pedido (valida a bateria)."
+        ),
+    ] = False,
+    out: Annotated[
+        Path | None, typer.Option(help="Pasta do relatório (padrão: output/avaliacao-agente).")
+    ] = None,
+) -> None:
+    """Mede o agente com a bateria de pedidos reais: acerto, passos, tempo por pedido e memória do modelo.
+
+    Cada pedido roda numa pasta de dados temporária, com mídia sintética, e o relatório sai em Markdown e JSON.
+    """
+    from rich.markup import escape
+
+    from .agent import evaluation as ev
+    from .agent import evaluation_runner as runner
+
+    settings = _agent_settings(engine, model, url, num_ctx, timeout)
+    path = cases or config.ROOT / "tests" / "data" / "agent_eval.json"
+    try:
+        battery = ev.load_cases(path)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(escape(str(exc)))
+    if only:
+        battery = [case for case in battery if case.id in only]
+    if not fake:
+        _require_language_model(settings)
+    report = runner.run_battery(
+        battery,
+        settings=settings,
+        fake=fake,
+        real_tools=real_tools,
+        progress=lambda line: console.print(line, markup=False, highlight=False),
+    )
+    folder = out or config.OUTPUT_DIR / "avaliacao-agente"
+    markdown_path, json_path = ev.write_report(report, folder)
+    console.print("\n".join(ev.render_markdown(report)), markup=False, highlight=False, soft_wrap=True)
+    console.print(f"\nRelatório gravado em {markdown_path} e {json_path}", markup=False)
+    if not report.passed_threshold:
+        raise typer.Exit(code=1)
 
 
 # ---------- manual: partes geradas, exportação e ajuda ----------
@@ -1556,9 +1723,11 @@ def ajuda(
 
 def _offer_agent(task_id: str, question: str, chat) -> None:
     """Pergunta se o agente local deve executar a tarefa do manual e, se a pessoa aceitar, abre a conversa."""
-    from .agent import AgentLoop, McpToolHost, system_prompt
-    from .agent.prompt import EXTRA_RULES
+    from .agent import AgentLoop, McpToolHost, ToolGate
+    from .agent.kits import BASE_TOOLS
+    from .agent.prompt import task_prompt
     from .manual import service
+    from .pipeline.recipes import project_exists
 
     offer = service.agent_offer(task_id)
     if offer is None:
@@ -1572,8 +1741,11 @@ def _offer_agent(task_id: str, question: str, chat) -> None:
         return
     if not typer.confirm(f"\nQuer que o agente local execute '{offer.title}' agora?", default=False):
         return
-    system = system_prompt(extra_rules=f"{EXTRA_RULES}\n## Manual da tarefa\n\n{offer.manual}")
-    loop = AgentLoop(model=chat, tools=McpToolHost(), system=system, on_event=_agent_on_event)
+    tools = McpToolHost(allowed=list(dict.fromkeys([*BASE_TOOLS, *offer.tools])))
+    gate = ToolGate(schemas={}, policy=_TerminalConfirmation(), project_exists=project_exists)
+    loop = AgentLoop(
+        model=chat, tools=tools, system=task_prompt(offer.manual), on_event=_agent_on_event, gate=gate
+    )
     message = f"Pedido do usuário: {question}\nSiga o manual da tarefa e pergunte o que faltar."
     while message:
         try:

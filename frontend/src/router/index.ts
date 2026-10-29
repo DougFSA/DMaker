@@ -56,6 +56,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         component: () => import('@/views/InfographicsView.vue'),
         meta: { title: 'Infográficos' },
       },
+      {
+        path: '/agente',
+        name: 'agent',
+        component: () => import('@/views/AgentView.vue'),
+        meta: { title: 'Agente' },
+      },
       // telas das próximas fases: a rota já existe, só o componente muda quando a fase chegar
       ...NAV_ITEMS.filter((item) => !item.ready).map((item) => ({
         path: item.to,

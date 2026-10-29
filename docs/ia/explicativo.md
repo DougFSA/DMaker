@@ -17,13 +17,9 @@ Você grava uma explicação de frente para a câmera e tem uma imagem ou infogr
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
-1. `probe_media`: conhecer a duração da gravação
-   Argumentos de exemplo: `{"paths": ["C:/videos/gravacao.mp4"]}`
-2. `new_from_template`: criar o projeto
-   Argumentos de exemplo: `{"template": "explicativo", "name": "meu-explicativo", "params": {"gravacao": "C:/videos/gravacao.mp4", "assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "infografico": {"nome": "contador", "parametros": {"ate": 10000, "prefixo": "+ de R$"}}}, {"fim": 60, "fundo": "claro", "infografico": {"nome": "barra", "parametros": {"valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400}}}]}}`
-3. `validate_project`: conferir duração e avisos
-   Argumentos de exemplo: `{"name_or_path": "meu-explicativo"}`
-4. `render_project`: gerar a prévia
+1. `build_explainer_video`: criar o projeto e conferir duração e avisos
+   Argumentos de exemplo: `{"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "infografico": {"nome": "contador", "parametros": {"ate": 10000, "prefixo": "+ de R$"}}}, {"fim": 60, "fundo": "claro", "infografico": {"nome": "barra", "parametros": {"valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400}}}]}`
+2. `render_project`: gerar a prévia
    Argumentos de exemplo: `{"name_or_path": "meu-explicativo", "preview": true}`
 
 ## Equivalente na CLI

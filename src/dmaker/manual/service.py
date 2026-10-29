@@ -150,6 +150,7 @@ class AgentOffer:
     title: str
     manual: str
     missing_tools: tuple[str, ...]
+    tools: tuple[str, ...] = ()  # todas as ferramentas que as chamadas da tarefa usam
 
     @property
     def runnable(self) -> bool:
@@ -163,8 +164,9 @@ def agent_offer(task_id: str, agent_tools: Sequence[str] | None = None) -> Agent
     if task is None or manual is None:
         return None
     available = agent_tools if agent_tools is not None else live_agent_tools()
-    missing = tuple(dict.fromkeys(call.tool for call in parse_calls(task) if call.tool not in available))
-    return AgentOffer(task.id, task.title, manual, missing)
+    used = tuple(dict.fromkeys(call.tool for call in parse_calls(task)))
+    missing = tuple(name for name in used if name not in available)
+    return AgentOffer(task.id, task.title, manual, missing, used)
 
 
 def invented_commands(text: str) -> list[str]:

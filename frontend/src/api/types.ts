@@ -418,3 +418,44 @@ export interface BatchStartResponse {
   name: string
   job_id: string
 }
+
+/** Um kit de ferramentas do agente local (GET /api/agent/status). */
+export interface AgentKit {
+  name: string
+  title: string
+  description: string
+  /** Quantas ferramentas do kit o servidor tem de fato. */
+  tools: number
+}
+
+export interface AgentStatus {
+  engine: 'ollama' | 'openai'
+  engine_label: string
+  model: string
+  url: string
+  free_html: boolean
+  reachable: boolean
+  model_installed: boolean
+  kits: AgentKit[]
+}
+
+export interface AgentMessageResponse {
+  job_id: string
+  conversation_id: string
+}
+
+export type ConfirmationType = 'action' | 'voice_consent'
+
+/** Eventos que o agente manda pelo SSE do job (além de start, progress, log e end, comuns a todo job). */
+export type AgentEvent =
+  | { kind: 'triage'; t: number; kits: string[]; method: string }
+  | { kind: 'model_reply'; t: number; seconds: number; tool_calls: number }
+  | { kind: 'thinking'; t: number; text: string }
+  | { kind: 'tool_call'; t: number; name: string; arguments: Record<string, unknown> }
+  | { kind: 'tool_blocked'; t: number; name: string; reason: string }
+  | { kind: 'tool_result'; t: number; name: string; result: string }
+  | { kind: 'tool_progress'; t: number; name: string; status: string | null; progress: Partial<JobProgress> }
+  | { kind: 'confirmation_request'; t: number; id: string; tool: string; question: string; type: ConfirmationType }
+  | { kind: 'confirmation_answered'; t: number; id: string; approved: boolean }
+  | { kind: 'answer'; t: number; text: string }
+
