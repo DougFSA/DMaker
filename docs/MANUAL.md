@@ -428,7 +428,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 
 ## Usando pela interface gráfica
 
-Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova) e a aba Modelos. A **Voz** já funciona por inteira na nova: a biblioteca, a criação de voz (clonar e desenhar), a narração com prévia ao vivo, a pronúncia e as três ferramentas de áudio (isolar voz, corrigir fala e trocar voz). A **Fila** de narrações, que narra os roteiros longos em segundo plano, também.
+Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova). Os **Modelos** de IA já funcionam por inteiro na nova. A **Voz** já funciona por inteira na nova: a biblioteca, a criação de voz (clonar e desenhar), a narração com prévia ao vivo, a pronúncia e as três ferramentas de áudio (isolar voz, corrigir fala e trocar voz). A **Fila** de narrações, que narra os roteiros longos em segundo plano, também.
 
 ```powershell
 cd D:\DMaker
@@ -439,7 +439,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Voz**, **Dublagem**, **Fila**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Modelos aparece com o selo "em breve": abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz tem uma aba para cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz) e todas já funcionam por inteiro. Escolha a aba depois de abrir **Voz** na barra lateral.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. A Voz tem uma aba para cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz) e todas já funcionam por inteiro. Escolha a aba depois de abrir **Voz** na barra lateral.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -454,6 +454,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Voz, abas Isolar voz, Corrigir fala e Trocar voz**: escolha um arquivo do projeto aberto ou envie um do computador, acompanhe a etapa e o tempo do trabalho, ouça o antes e o depois (a correção toca só o trecho trocado, com 1,5 s de folga) e baixe o resultado. **Usar no projeto** troca o arquivo original pelo novo em tudo que o projeto usa e salva. O resultado e o que você preencheu ficam guardados ao trocar de aba. Veja as tarefas "Separar a voz da música e do ruído", "Corrigir uma palavra errada sem regravar" e "Trocar a voz de uma gravação inteira".
 - **Dublagem**: prepara a tradução de um vídeo ou áudio, mostra as falas numa tabela para você corrigir, gera o vídeo dublado, compara com o original e baixa o vídeo, a legenda e as trilhas. Você pode **Parar** qualquer etapa, e a dublagem preparada fica guardada para abrir depois. Veja a tarefa "Dublar um vídeo para outro idioma".
 - **Fila**: os roteiros longos que o servidor narra em segundo plano, um por vez; ela roda sozinha enquanto o `dmaker ui` está aberto. A lista se atualiza ao vivo e, em cada item, mostra o estado (Pendente, Rodando, Pausado, Concluído, Cancelado ou Falhou), o andamento (capítulo, fala e quanto falta) e os botões que o estado permite: **Pausar**, **Retomar**, **Cancelar**, **Subir**, **Descer**, **Tentar de novo** e **Remover**. O item pronto traz **Arquivos prontos**, com **Ouvir** (toca ali mesmo) e **Baixar** em cada arquivo. **Importar roteiro** lê um arquivo `.txt`, `.md` ou `.docx` (**Título do item**, formato WAV ou MP3 e **Rascunho**; a voz, o idioma e a velocidade são os que a aba Narração tem escolhidos) e **Limpar concluídos** tira da lista os itens prontos e cancelados, sem apagar os áudios da pasta. Sem nenhum executor ativo, a tela avisa que os itens esperam parados. Veja a tarefa "Narrar um roteiro longo em segundo plano (fila)".
+- **Modelos**: a tabela dos modelos de IA, com o **Estado** (baixado, incompleto ou não baixado), o tamanho **No disco**, a **Licença**, para que cada um serve e o que deixa de funcionar sem ele. **Baixar** (ou **Continuar download**, quando ficou pela metade) roda em segundo plano, com a barra e o tempo na própria linha; **Apagar** mostra o aviso do servidor com o que some e quais funções param, e só apaga depois do seu sim; **Medir de novo** refaz a medida do disco. Quando há **Sobras** (arquivos em `cache/models` que nenhum modelo usa), aparece o cartão com a lista, o total e **Apagar sobras**, que também pede confirmação. Veja a tarefa "Ver, baixar e apagar os modelos de IA".
 - **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
 - **Transições**, **Looks** e **Infográficos**: catálogos com a prévia de cada um (veja as tarefas "Escolher a transição entre os trechos", "Dar um acabamento de cinema ao vídeo" e "Pôr um infográfico animado no vídeo"); no de infográficos, o formulário monta os campos do esquema do modelo e mostra o quadro com o que você digitou.
 
@@ -2444,9 +2445,17 @@ Diga: "Lista os modelos e baixa o OmniVoice." A IA lista, baixa em segundo plano
 
 #### Pela interface
 
-Interface clássica, aba **Modelos**: a tabela mostra o **Modelo**, o **Estado**, **No disco** e a **Licença**, com botões para baixar e apagar; **Medir de novo** refaz a medida do disco, e **Apagar sobras** limpa o que nenhum modelo usa.
+Interface nova, **Modelos**: a tabela mostra o **Modelo** (o nome, para que serve e quais funções dependem dele), o **Estado** (**baixado**, **incompleto** ou **não baixado**), **No disco** (o tamanho medido; de um modelo que não foi baixado, quanto ele vai ocupar) e a **Licença**. No alto, a pasta e o resumo do disco (o que os modelos ocupam, o espaço livre e o tamanho das sobras); **Medir de novo** refaz a medida.
 
-![Aba Modelos](img/classica-modelos.png)
+- **Baixar** (com o tamanho, como em **Baixar (3,04 GB)**) ou **Continuar download**, para um modelo que ficou pela metade: o download roda em segundo plano e a linha do modelo mostra a etapa, a porcentagem e o tempo decorrido; os botões dele esperam, e os dos outros modelos continuam livres. Quando termina, o estado vira **baixado** e aparece o aviso **Modelo baixado**. O download não tem botão de parar; se a conexão cair ou você fechar o DMaker, o modelo fica **incompleto** e **Continuar download** retoma de onde parou.
+- **Apagar**: abre o aviso do servidor, "Vai apagar tal modelo e liberar tantos GB", com as funções que deixam de funcionar até o modelo ser baixado de novo e as pastas que saem. Só apaga depois de **Apagar** no aviso; **Cancelar** não mexe em nada.
+- **Sobras**: se houver arquivos ou pastas em `cache/models` que nenhum modelo do DMaker usa, aparece o cartão **Sobras** com a lista, o total e **Apagar sobras**. O aviso lista os itens e pede para você conferir se algum é seu. Enquanto um modelo baixa, **Apagar sobras** fica desligado.
+
+![Tela Modelos da interface nova](img/ui-modelos.png)
+
+Na interface clássica, aba **Modelos**, é a mesma tabela, com os mesmos botões **Baixar**, **Apagar**, **Medir de novo** e **Apagar sobras**.
+
+![Aba Modelos da interface clássica](img/classica-modelos.png)
 
 #### Pela CLI
 
@@ -2461,13 +2470,14 @@ dmaker models prune
 
 #### Como conferir
 
-`dmaker models list` mostra o estado (`instalado`, `parcial` ou `ausente`) e o tamanho medido em disco; um modelo `parcial` ficou pela metade e `download` completa. Os modelos ficam em `cache/models`.
+`dmaker models list` mostra o estado (`instalado`, `parcial` ou `ausente`) e o tamanho medido em disco; um modelo `parcial` ficou pela metade e `download` completa. Na interface nova, é a coluna **Estado** da tela **Modelos**: **baixado**, **incompleto** (o mesmo que `parcial`) ou **não baixado** (`ausente`). Os modelos ficam em `cache/models`.
 
 #### Se der errado
 
-- **Download parou**: rode `download` de novo, que retoma e confere que ficou inteiro (hash).
+- **Download parou**: rode `download` de novo, que retoma e confere que ficou inteiro (hash). Na interface nova, o motivo aparece em vermelho na linha do modelo; clique em **Continuar download**.
 - **Uma função parou de funcionar**: apagou o modelo dela; baixe de novo.
-- **Sobrou pasta em `cache/models`**: é sobra de um modelo antigo; `prune` apaga.
+- **Sobrou pasta em `cache/models`**: é sobra de um modelo antigo; `prune` apaga. Na interface nova, é o cartão **Sobras**, com **Apagar sobras**.
+- **Apagar sobras está desligado ou o servidor recusa**: há um download em andamento; espere terminar.
 
 ---
 
@@ -2506,7 +2516,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
 | DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
-| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), a **Narração** com prévia ao vivo, **Parar**, histórico e **Inserir no projeto aberto**, a **Pronúncia**, mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica); e a **Dublagem** (preparar, revisar as falas, gerar, comparar, baixar as trilhas e usar no projeto, com botão de parar) | "Narrar um roteiro com a minha voz", "Ensinar o DMaker a pronunciar um nome", "Pôr a narração dentro de um vídeo", "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Dublar um vídeo para outro idioma", "Usando pela interface gráfica" |
+| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), a **Narração** com prévia ao vivo, **Parar**, histórico e **Inserir no projeto aberto**, a **Pronúncia**, mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica); e a **Dublagem** (preparar, revisar as falas, gerar, comparar, baixar as trilhas e usar no projeto, com botão de parar); e os **Modelos** (a tabela com estado, tamanho e licença, baixar com andamento, apagar com o aviso do servidor e as sobras) | "Ver, baixar e apagar os modelos de IA", "Narrar um roteiro com a minha voz", "Ensinar o DMaker a pronunciar um nome", "Pôr a narração dentro de um vídeo", "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Dublar um vídeo para outro idioma", "Usando pela interface gráfica" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 

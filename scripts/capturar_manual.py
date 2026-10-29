@@ -87,6 +87,15 @@ def _fill_narration(page: Any) -> None:
     _settle(page, 600)
 
 
+def _show_models(page: Any) -> None:
+    """Põe no lugar do caminho da pasta temporária da captura o de uma instalação comum, que é o que o leitor vê."""
+    _settle(page, 1500)
+    page.evaluate(
+        "(folder) => { document.querySelector('[data-testid=\"models-dir\"]').textContent = folder }",
+        "D:\\DMaker\\cache\\models",
+    )
+
+
 def _open_tab(tab: str, scroll_to: str | None = None) -> Callable[[Any], None]:
     def prepare(page: Any) -> None:
         page.locator(f'button[data-tab="{tab}"]').click()
@@ -110,6 +119,7 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-voz-vozes.png", "/voz", height=1250, prepare=_fill_clone_voice),
         Shot("ui-voz-narracao.png", "/voz/narracao", height=1000, prepare=_fill_narration),
         Shot("ui-fila.png", "/fila", height=900, prepare=lambda page: _settle(page, 2500)),
+        Shot("ui-modelos.png", "/modelos", height=1300, prepare=_show_models),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),
         Shot("classica-dublar.png", "/classica", height=900, prepare=_open_tab("voice", "#dub-source")),
