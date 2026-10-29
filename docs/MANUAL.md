@@ -428,7 +428,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 
 ## Usando pela interface gráfica
 
-Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova) e a aba Voz (vozes, narração, dublar) e a aba Modelos.
+Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o player e a linha do tempo do editor (os formulários, o JSON, as legendas e o preview do editor já estão na nova) e a aba Voz (narração, dublar) e a aba Modelos. A biblioteca de vozes e a criação de voz (clonar e desenhar) já funcionam na nova.
 
 ```powershell
 cd D:\DMaker
@@ -439,7 +439,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz), e as três últimas já funcionam por inteiro: escolha a aba depois de abrir **Voz** na barra lateral.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Editor** (sem o player e a linha do tempo, que ainda estão na clássica), **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz), e a primeira (**Vozes**) e as três últimas já funcionam por inteiro; Narração e Pronúncia mostram a tela "em construção" até chegarem. Escolha a aba depois de abrir **Voz** na barra lateral.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -448,6 +448,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Editor**: o projeto aberto para edição, com a barra de ações (**Salvar**, **Desfazer**, **Refazer**, **Validar**, **Prévia**, **Render final**, **Exportar**) e abas embaixo. **Propriedades** é o formulário da spec em blocos recolhíveis (**Saída**, **Fontes sincronizadas**, **Trechos**, **Sobreposições**, **Legendas** e **Áudio**). **JSON** mostra a spec inteira como texto, a saída para tudo que não tem formulário (look, efeitos sonoros, recorte de pessoa, composições). **Legendas** (aparece quando o projeto tem legendas automáticas) edita o texto de cada frase. **Preview** mostra o vídeo já renderizado, o relatório de QA, a grade de quadros e um quadro num instante. **Salvar** (ou `Ctrl+S`) grava; o selo **Não salvo** avisa quando há mudança, e sair da tela pergunta se descarta. **Validar** e os renders salvam antes. As caixas do player, da linha do tempo, dos filtros e da mídia aparecem com um aviso de que ainda não estão disponíveis: por enquanto, estão na interface clássica.
 - **Lote**: o passo a passo de vários vídeos de uma planilha (veja a tarefa "Fazer vários vídeos de uma planilha").
 - **Saídas**: os vídeos já gerados, com busca e filtro; assista ali ou baixe.
+- **Voz, aba Vozes**: a **Biblioteca** lista as vozes prontas, clonadas e desenhadas, com filtro por marca. Em cada voz, **Ouvir** gera uma amostra curta (um job; a primeira vez carrega o modelo e demora) e toca, **Usar** a escolhe para o roteiro da Narração (a escolha fica guardada) e **Remover** apaga, depois de perguntar (as vozes prontas não saem). O cartão **Nova voz** tem **Clonar** (nome, arquivo de áudio ou microfone, o que é dito, idioma, marca e a caixa de permissão do dono da voz) e **Desenhar** (gênero, faixa etária, tom, sotaque, idioma, marca, voz sussurrada e descrição livre). Veja as tarefas "Clonar uma voz" e "Criar uma voz descrevendo como ela soa".
 - **Voz, abas Isolar voz, Corrigir fala e Trocar voz**: escolha um arquivo do projeto aberto ou envie um do computador, acompanhe a etapa e o tempo do trabalho, ouça o antes e o depois (a correção toca só o trecho trocado, com 1,5 s de folga) e baixe o resultado. **Usar no projeto** troca o arquivo original pelo novo em tudo que o projeto usa e salva. O resultado e o que você preencheu ficam guardados ao trocar de aba. Veja as tarefas "Separar a voz da música e do ruído", "Corrigir uma palavra errada sem regravar" e "Trocar a voz de uma gravação inteira".
 - **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
 - **Transições**, **Looks** e **Infográficos**: catálogos com a prévia de cada um (veja as tarefas "Escolher a transição entre os trechos", "Dar um acabamento de cinema ao vídeo" e "Pôr um infográfico animado no vídeo"); no de infográficos, o formulário monta os campos do esquema do modelo e mostra o quadro com o que você digitou.
@@ -1725,9 +1726,9 @@ Diga: "Tenho a autorização da dona da voz; clona `referencia.wav` com o nome `
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Nova voz**, aba **Clonar**: dê o **Nome da voz**, escolha **Enviar arquivo** ou **Gravar pelo microfone**, escreva o que é dito (opcional), escolha **Idioma** e **Marca**, marque **Tenho permissão do dono desta voz para cloná-la** e clique em **Clonar voz**. O botão só habilita com a permissão marcada.
+Interface nova, **Voz**, aba **Vozes**, cartão **Nova voz**, **Clonar**: dê o **Nome da voz**, escolha **Enviar arquivo** ou **Gravar pelo microfone**, escreva o que é dito (opcional), escolha **Idioma** e **Marca**, marque **Tenho permissão do dono desta voz para cloná-la** e clique em **Clonar voz**. O botão só habilita com o nome, o áudio e a permissão marcada, e a frase embaixo dele diz o que falta. No microfone, **Gravar** e **Parar gravação** mostram o relógio e o conselho de 5 a 8 segundos; a gravação para sozinha aos 30 segundos e dá para ouvi-la antes de clonar. Se o navegador não achar um microfone ou a permissão for negada, a tela avisa e o envio de arquivo continua valendo. Quando termina, a voz nova entra na **Biblioteca** já escolhida para o roteiro. Na interface clássica, aba **Voz**, seção **Nova voz**, aba **Clonar**, os campos são os mesmos.
 
-![Seção Nova voz, com a caixa de permissão](img/classica-voz.png)
+![Tela Vozes da interface nova, com o cartão Nova voz e a caixa de permissão](img/ui-voz-vozes.png)
 
 #### Pela CLI
 
@@ -1781,7 +1782,7 @@ Diga: "Cria a voz `narradora`: feminina, de meia-idade, tom grave." A IA cadastr
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, **Nova voz**, aba **Desenhar**: **Nome da voz**, **Gênero**, **Faixa etária**, **Tom**, **Sotaque**, **Idioma**, **Marca**, **Voz sussurrada** e uma **Descrição livre** opcional; **Criar voz**.
+Interface nova, **Voz**, aba **Vozes**, cartão **Nova voz**, **Desenhar**: **Nome da voz**, **Gênero**, **Faixa etária**, **Tom**, **Sotaque**, **Idioma**, **Marca**, **Voz sussurrada** e uma **Descrição livre** opcional (quando preenchida, vale no lugar dos quatro primeiros); **Criar voz**. Sem o nome, o campo pede o nome e nada é criado. A voz nova entra na **Biblioteca**, onde **Ouvir** gera uma amostra para você escutar. Na interface clássica, aba **Voz**, **Nova voz**, aba **Desenhar**, os campos são os mesmos.
 
 #### Pela CLI
 
@@ -2492,7 +2493,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
 | DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
-| DMK-38 | A interface nova passa a fazer o que a clássica fazia (em andamento): **Isolar voz**, **Corrigir fala** e **Trocar voz** na área Voz; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica) | "Usando pela interface gráfica" |
+| DMK-38 | A interface nova passa a fazer o que só a clássica fazia (em andamento): na **Voz**, a aba **Vozes** com a biblioteca (**Ouvir**, **Usar**, **Remover**, filtro por marca) e a **Nova voz** (**Clonar** por arquivo ou microfone e **Desenhar**), mais **Isolar voz**, **Corrigir fala** e **Trocar voz**; o **Editor** com o formulário da spec, a aba **JSON** que também conserta spec inválida, as **Legendas** editáveis, o **Preview** com QA do arquivo escolhido, **Salvar** com `Ctrl+S`, **Desfazer** e **Refazer** (o player e a linha do tempo ainda estão na clássica) | "Clonar uma voz", "Criar uma voz descrevendo como ela soa", "Usando pela interface gráfica" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
