@@ -62,6 +62,59 @@ def _audio_source_chain(in_point: float, volume: float, length: float) -> list[s
     return chain
 
 
+def uses_camera_audio(seg: ClipSegment, info: MediaInfo) -> bool:
+    """O som da própria câmera entra no trecho: o arquivo tem áudio e o trecho não está mudo nem a volume zero."""
+    return info.has_audio and not seg.mute and seg.volume > 0
+
+
+def clip_audio_lines(
+    inputs: Inputs,
+    lines: list[str],
+    seg: ClipSegment,
+    info: MediaInfo,
+    duration: float,
+    length: float,
+    *,
+    source_index: int,
+    tracks: tuple[TrackSlice, ...] = (),
+    audio_stream: int = 0,
+    camera_audio: Path | None = None,
+) -> None:
+    """Acrescenta a `lines` o ramo de áudio do trecho, terminado em `[aout]`: câmera (se houver e não estiver
+    muda) + faixas externas, tudo alinhado ao início do trecho, com velocidade e fades. `source_index` é a
+    entrada do arquivo do clipe. É a mesma receita para o mezanino do render e para o áudio da prévia
+    (`filtergraph/preview_audio.py`), que por isso soam iguais."""
+    afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
+    afades += audio_edge_fades(seg.audio_fade, duration)
+    voices: list[str] = []
+    if uses_camera_audio(seg, info):
+        if camera_audio is not None:
+            index = inputs.add(camera_audio, "-t", f"{length:.3f}")
+            camera = f"[{index}:a:0]"
+        else:
+            camera = f"[{source_index}:a:{audio_stream}]"
+        lines.append(camera + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]")
+        voices.append("[mz_cam]")
+    for k, track in enumerate(tracks):
+        idx = inputs.add(track.path, "-ss", f"{max(track.in_point, 0):.3f}", "-t", f"{length:.3f}")
+        chain = _audio_source_chain(min(track.in_point, 0.0), track.volume, length)
+        lines.append(f"[{idx}:a:{track.audio_stream}]" + ",".join(chain) + f"[mz_trk{k}]")
+        voices.append(f"[mz_trk{k}]")
+
+    tail = ([atempo_chain(seg.speed)] if seg.speed != 1 else []) + [AUDIO_FMT_MEZZ] + afades
+    if not voices:
+        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}[aout]")
+    elif len(voices) == 1:
+        lines.append(voices[0] + ",".join(tail) + "[aout]")
+    else:
+        lines.append(
+            "".join(voices)
+            + f"amix=inputs={len(voices)}:duration=longest:dropout_transition=0:normalize=0,"
+            + ",".join(tail)
+            + "[aout]"
+        )
+
+
 def clip_mezzanine(
     seg: ClipSegment,
     info: MediaInfo,
@@ -88,8 +141,6 @@ def clip_mezzanine(
     `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec; `look` é o
     acabamento (cor e efeitos) do look que vale no trecho, já resolvido."""
     reframe = reframe or seg.reframe
-    afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
-    afades += audio_edge_fades(seg.audio_fade, duration)
     inputs = Inputs()
     start = seg.start if in_point is None else in_point
     length = max(duration * seg.speed, 0.01)  # tempo de fonte que o trecho consome
@@ -103,35 +154,18 @@ def clip_mezzanine(
     lines += post_video_lines(
         "[mz_v1]", "[vout]", seg.color, look, seg.fade_in, seg.fade_out, duration, (W, H), fps
     )
-
-    # áudio: câmera (se houver e não estiver muda) + faixas externas, tudo já alinhado ao trecho
-    voices: list[str] = []
-    if info.has_audio and not seg.mute and seg.volume > 0:
-        if camera_audio is not None:
-            index = inputs.add(camera_audio, "-t", f"{length:.3f}")
-            camera = f"[{index}:a:0]"
-        else:
-            camera = f"[0:a:{audio_stream}]"
-        lines.append(camera + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]")
-        voices.append("[mz_cam]")
-    for k, track in enumerate(tracks):
-        idx = inputs.add(track.path, "-ss", f"{max(track.in_point, 0):.3f}", "-t", f"{length:.3f}")
-        chain = _audio_source_chain(min(track.in_point, 0.0), track.volume, length)
-        lines.append(f"[{idx}:a:{track.audio_stream}]" + ",".join(chain) + f"[mz_trk{k}]")
-        voices.append(f"[mz_trk{k}]")
-
-    tail = ([atempo_chain(seg.speed)] if seg.speed != 1 else []) + [AUDIO_FMT_MEZZ] + afades
-    if not voices:
-        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}[aout]")
-    elif len(voices) == 1:
-        lines.append(voices[0] + ",".join(tail) + "[aout]")
-    else:
-        lines.append(
-            "".join(voices)
-            + f"amix=inputs={len(voices)}:duration=longest:dropout_transition=0:normalize=0,"
-            + ",".join(tail)
-            + "[aout]"
-        )
+    clip_audio_lines(
+        inputs,
+        lines,
+        seg,
+        info,
+        duration,
+        length,
+        source_index=0,
+        tracks=tracks,
+        audio_stream=audio_stream,
+        camera_audio=camera_audio,
+    )
     return _finish(inputs, lines, fps, duration, out, label)
 
 

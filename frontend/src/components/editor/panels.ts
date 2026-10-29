@@ -28,7 +28,7 @@ export interface EditorPanelDef {
 export const EDITOR_PANELS: EditorPanelDef[] = [
   // bancada: o que cada encaixe vira nas próximas etapas
   { id: 'media', title: 'Mídia', zone: 'workbench', load: null },
-  { id: 'player', title: 'Player', zone: 'workbench', load: null },
+  { id: 'player', title: 'Player', zone: 'workbench', load: () => import('./PlayerPanel.vue') },
   { id: 'filters', title: 'Filtros', zone: 'workbench', load: null },
   { id: 'timeline', title: 'Linha do tempo', zone: 'workbench', load: null },
   // inspetor

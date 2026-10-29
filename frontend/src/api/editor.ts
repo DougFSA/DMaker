@@ -9,6 +9,7 @@ import type {
   CardPreviewParams,
   EditOperation,
   EditResponse,
+  PreviewAudioStatus,
   ProbeEntry,
   ProjectTheme,
   ProxiesBuild,
@@ -45,6 +46,15 @@ export const editorApi = {
   /** Aplica uma operação de edição à spec dada e devolve a nova spec com a vista dela. Não grava nada. */
   edit: (name: string, spec: SpecDocument, op: EditOperation) =>
     http.post<EditResponse>(`${project(name)}/edit`, { spec, op }),
+  previewAudio: {
+    /** Pede a mixagem de áudio da prévia (a mesma do render, num arquivo leve) para a edição dada; já pronta no
+     * cache volta com a URL, senão começa em segundo plano. Sem `spec`, vale a do arquivo do projeto. */
+    request: (name: string, spec?: SpecDocument | null) =>
+      http.post<PreviewAudioStatus>(`${project(name)}/preview-audio`, { spec: spec ?? null }),
+    /** Como está a mixagem de uma chave pedida antes (consulta rápida enquanto ela é feita). */
+    get: (name: string, key: string) =>
+      http.get<PreviewAudioStatus>(withQuery(`${project(name)}/preview-audio`, { key })),
+  },
   /** Cores, fonte e logos do projeto, para o player desenhar como o render. */
   theme: (name: string) => http.get<ProjectTheme>(`${project(name)}/theme`),
 

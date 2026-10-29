@@ -1285,12 +1285,12 @@ def clean(
         bool, typer.Option(help="Apaga também cache/jobs (grafos, ASS, áudio de transcrição).")
     ] = False,
 ) -> None:
-    """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy) e formas
-    de onda (cache/waveform)."""
+    """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
+    onda (cache/waveform) e o áudio da prévia da linha do tempo (cache/preview-audio)."""
     import shutil
 
     n = 0
-    for d in (config.MEZ_DIR, config.PROXY_DIR, config.WAVEFORM_DIR):
+    for d in (config.MEZ_DIR, config.PROXY_DIR, config.WAVEFORM_DIR, config.PREVIEW_AUDIO_DIR):
         if d.exists():
             n += sum(1 for _ in d.iterdir())
             shutil.rmtree(d)

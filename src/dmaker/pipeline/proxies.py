@@ -79,8 +79,9 @@ def project_video_sources(project: Project) -> list[Path]:
 @dataclass
 class ProxyStatus:
     src: Path
-    proxy: Path
+    proxy: Path | None  # None quando o original sumiu: o nome do proxy depende da data e do tamanho dele
     ready: bool
+    missing: bool = False  # o original não está no disco: não há o que gerar, e a prévia o marca
 
 
 class ProxyBuilder:
@@ -96,6 +97,9 @@ class ProxyBuilder:
     def status(self, project: Project) -> list[ProxyStatus]:
         out = []
         for src in project_video_sources(project):
+            if not src.exists():
+                out.append(ProxyStatus(src, None, False, missing=True))
+                continue
             proxy = proxy_path(src)
             out.append(ProxyStatus(src, proxy, proxy.exists()))
         return out
@@ -106,7 +110,7 @@ class ProxyBuilder:
         pela metade nem colidir com outro job de proxies gerando a mesma fonte ao mesmo tempo.
         Informa o progresso por fonte concluída em `sink`."""
         statuses = self.status(project)
-        todo = [item for item in statuses if not item.ready]
+        todo = [item for item in statuses if not item.ready and not item.missing]
         if sink:
             sink.start("proxies de prévia", len(todo))
         for done, item in enumerate(todo):
@@ -124,6 +128,7 @@ class ProxyBuilder:
         chamadas); se o proxy final já existir quando terminar (outro processo terminou antes), o
         nosso tmp é descartado em vez de sobrescrevê-lo. Nunca deixa um `.tmp` para trás, mesmo com
         erro no meio (finally)."""
+        assert item.proxy is not None  # só se gera o que existe (ver `build`)
         info = self.prober(item.src)
         item.proxy.parent.mkdir(parents=True, exist_ok=True)
         tmp = item.proxy.with_name(

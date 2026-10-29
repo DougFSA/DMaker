@@ -11,7 +11,9 @@ afterEach(() => {
 })
 
 describe('EditorWorkbench', () => {
-  it('mostra os quatro encaixes com um aviso discreto enquanto os painéis não existem', () => {
+  it('mostra os quatro encaixes, com um aviso discreto nos que ainda não existem', () => {
+    // o player já existe; para este teste só importa o aviso dos outros, então o dele sai do caminho
+    EDITOR_PANELS.find((panel) => panel.id === 'player')!.load = null
     const wrapper = mount(EditorWorkbench)
     const slots = wrapper.findAll('[data-panel]')
     expect(slots.map((slot) => slot.attributes('data-panel'))).toEqual(['media', 'player', 'filters', 'timeline'])
@@ -20,6 +22,7 @@ describe('EditorWorkbench', () => {
   })
 
   it('cada encaixe é uma área da grade, para o painel novo só precisar se registrar', () => {
+    EDITOR_PANELS.find((panel) => panel.id === 'player')!.load = null
     const wrapper = mount(EditorWorkbench)
     const areas = wrapper.findAll('[data-panel]').map((slot) => (slot.element as HTMLElement).style.gridArea)
     expect(areas).toEqual(['media', 'player', 'filters', 'timeline'])

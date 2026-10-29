@@ -350,7 +350,13 @@ def test_get_proxies_returns_status(client, monkeypatch):
     monkeypatch.setattr(proxies_module, "ProxyBuilder", _MissingProxyBuilder)
     body = client.get(f"/api/projects/{PROXY_PROJECT}/proxies").json()
     assert body == [
-        {"src": "clip.mp4", "proxy": str(config.PROXY_DIR / "fake.mp4"), "ready": False, "url": None}
+        {
+            "src": "clip.mp4",
+            "proxy": str(config.PROXY_DIR / "fake.mp4"),
+            "ready": False,
+            "missing": False,
+            "url": None,
+        }
     ]
     assert client.get("/api/projects/nao-existe/proxies").status_code == 404
 
@@ -377,6 +383,7 @@ def test_post_proxies_skips_job_when_everything_is_ready(client, monkeypatch):
             "src": "clip.mp4",
             "proxy": str(config.PROXY_DIR / "fake.mp4"),
             "ready": True,
+            "missing": False,
             "url": server._file_url(config.PROXY_DIR / "fake.mp4"),
         }
     ]

@@ -26,7 +26,9 @@ const emit = defineEmits<{ pause: []; resume: []; redo: [row: BatchRow]; play: [
 
 const running = computed(() => props.report.status === 'running')
 const percent = computed(() => batchPercent(props.report))
-const unfinished = computed(() => props.report.rows.filter((row) => row.state === 'failed' || row.state === 'invalid'))
+// o relatório pode chegar incompleto (uma resposta que não é do lote, ou o lote ainda sendo gravado): sem linhas a tabela fica vazia
+const rows = computed(() => props.report.rows ?? [])
+const unfinished = computed(() => rows.value.filter((row) => row.state === 'failed' || row.state === 'invalid'))
 const counts = computed(() => [
   { label: 'Prontos', value: props.report.done, tone: 'success' },
   { label: 'Falharam', value: props.report.failed, tone: 'error' },
@@ -66,7 +68,7 @@ const counts = computed(() => [
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in report.rows" :key="row.index">
+        <tr v-for="row in rows" :key="row.index">
           <td class="cell-num">{{ row.index }}</td>
           <td class="cell-name">
             {{ row.title || `linha ${row.line}` }}

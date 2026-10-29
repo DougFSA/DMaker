@@ -15,14 +15,12 @@ from ..domain.sfx import plan_sfx
 from ..domain.spec import HtmlOverlay, Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
 from ..domain.tracks import apply_track_state
-from ..filtergraph.audiogram import normalization_gain_db
-from ..filtergraph.sfx import voice_reference_db
 from ..media.browser import BrowserUnavailable
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly
+from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly, plan_loudness
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
@@ -31,7 +29,7 @@ from .lint import lint
 from .narration import NarrationService
 from .person_layer import PersonLayerBuilder
 from .segments import MezzanineBuilder
-from .sfx import SfxTrack, level_tracks, resolve_files
+from .sfx import SfxTrack, leveled_effects, resolve_files
 from .sources import expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
@@ -338,32 +336,18 @@ class RenderPipeline:
     def _effects(
         self, ctx, prepared, transitions, spans, total, voiceovers, video_overlays=(), voice_files=()
     ) -> list[SfxTrack]:
-        """Efeitos sonoros do projeto (`audio.sfx` e os de entrada), com o nível acertado contra a voz.
-
-        A voz é medida sozinha (barato, só áudio) e só quando há efeitos; na simulação não se mede nada.
-        """
-        items = plan_sfx(ctx.project, spans)
-        if not items:
-            return []
-        resolved = resolve_files(ctx.project, items)
-        reference = None
-        if not ctx.options.dry_run:
-            voice = self.voice_level.measure(
-                ctx, prepared, transitions, total, voiceovers, video_overlays, voice_files
-            )
-            if voice is not None:
-                audio = ctx.project.audio
-                target = None if audio.normalize == "off" else audio.target_lufs
-                reference = voice_reference_db(voice.loudness, voice.true_peak, target)
-        ctx.log(
-            f"efeitos sonoros: {len(items)}"
-            + (
-                f" (pico de referência da voz {reference:.1f} dBFS)"
-                if reference is not None
-                else " (sem voz medida)"
-            )
+        """Efeitos sonoros do projeto, com o nível acertado contra a voz (ver `leveled_effects`)."""
+        return leveled_effects(
+            ctx,
+            self.voice_level,
+            prepared,
+            transitions,
+            spans,
+            total,
+            voiceovers,
+            video_overlays,
+            voice_files,
         )
-        return level_tracks(resolved, reference)
 
     def _loudness(
         self,
@@ -377,20 +361,20 @@ class RenderPipeline:
         sfx=(),
         voice_files=(),
     ) -> tuple[dict | None, bool, float]:
-        """Mede sempre (barato, só áudio): silêncio faz o loudnorm gerar NaN, então é pulado; a medição
-        alimenta o modo linear (two-pass). "fast" usa o modo dinâmico, numa passada só. O terceiro valor é
-        o ganho (dB) que a normalização dá à saída, que os audiogramas repetem na cópia do áudio que leem."""
-        mode = ctx.project.audio.normalize
-        if mode == "off" or ctx.options.dry_run:
-            return None, mode != "off", 0.0
-        measure = self.loudness.measure(
-            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
+        """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`)."""
+        plan = plan_loudness(
+            ctx,
+            self.loudness,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            video_overlays,
+            sfx,
+            voice_files,
         )
-        if measure.silent:
-            ctx.warn("Áudio praticamente silencioso: normalização de loudness pulada.")
-            return None, False, 0.0
-        gain = normalization_gain_db(measure.values, ctx.project.audio.target_lufs)
-        return (measure.values if mode == "two-pass" else None), True, gain
+        return plan.measured, plan.normalize, plan.gain_db
 
     def _thumbnail(self, ctx: RenderContext, out_path: Path, total: float) -> Path | None:
         if not ctx.options.thumbnail or ctx.options.dry_run:
