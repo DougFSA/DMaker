@@ -77,6 +77,15 @@ def _fill_clone_voice(page: Any) -> None:
     _settle(page, 600)
 
 
+def _fill_narration(page: Any) -> None:
+    roteiro = (
+        "Olá! Este é o roteiro da narração.\n\n"
+        "O [[DMaker|Di-mêiker]] fala cada frase assim que ela fica pronta. [pausa 0.8] Até já."
+    )
+    page.get_by_label("Roteiro").fill(roteiro)
+    _settle(page, 600)
+
+
 def _open_tab(tab: str, scroll_to: str | None = None) -> Callable[[Any], None]:
     def prepare(page: Any) -> None:
         page.locator(f'button[data-tab="{tab}"]').click()
@@ -98,6 +107,7 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-transicoes.png", "/transicoes", prepare=_wait_images),
         Shot("ui-looks.png", "/looks", prepare=_wait_images),
         Shot("ui-voz-vozes.png", "/voz", height=1250, prepare=_fill_clone_voice),
+        Shot("ui-voz-narracao.png", "/voz/narracao", height=1000, prepare=_fill_narration),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),
         Shot("classica-dublar.png", "/classica", height=900, prepare=_open_tab("voice", "#dub-source")),

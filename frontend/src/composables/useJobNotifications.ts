@@ -27,9 +27,6 @@ export function useJobNotifications(router: Router): void {
         description: `${batch.name}: ${batch.summary}`,
         action: { label: 'Ver lote', run: () => void router.push({ name: 'batch' }) },
       })
-    } else if (job.status === 'cancelled') {
-      // parar a pedido não é falha: avisar "o job falhou" faria a pessoa procurar um erro que não existe
-      toasts.push({ tone: 'info', title: 'Parado a pedido', description: job.description })
     } else if (job.status === 'done') {
       toasts.push({
         tone: 'success',
@@ -37,6 +34,9 @@ export function useJobNotifications(router: Router): void {
         description: job.description,
         action: { label: 'Ver saídas', run: () => void router.push({ name: 'outputs' }) },
       })
+    } else if (job.status === 'cancelled') {
+      // parar a pedido (a narração, por exemplo) não é falha: o que já saiu ficou guardado
+      toasts.push({ tone: 'info', title: 'Parado', description: job.description })
     } else {
       toasts.push({
         tone: 'error',

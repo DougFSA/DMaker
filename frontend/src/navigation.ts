@@ -29,7 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Voz',
     to: '/voz',
     icon: 'mic',
-    ready: false,
+    ready: true,
   },
   {
     key: 'dubbing',

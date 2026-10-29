@@ -1,49 +1,54 @@
+import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, type EffectScope } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import type { Router } from 'vue-router'
+import { FakeEventSource } from '@/test/fetch'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
-import { FakeEventSource, stubFetch } from '@/test/fetch'
 import { useJobNotifications } from './useJobNotifications'
 
 let scope: EffectScope
+const router = { push: vi.fn() } as unknown as Router
 
 beforeEach(() => {
   setActivePinia(createPinia())
   FakeEventSource.reset()
   vi.stubGlobal('EventSource', FakeEventSource)
-  stubFetch({})
   scope = effectScope()
-  scope.run(() => useJobNotifications(createRouter({ history: createMemoryHistory(), routes: [] })))
+  scope.run(() => useJobNotifications(router))
 })
 afterEach(() => {
   scope.stop()
   vi.unstubAllGlobals()
 })
 
-/** Faz o job `j1` terminar do jeito pedido, como o SSE do servidor faria. */
-function endJob(status: 'done' | 'error' | 'cancelled', error: string | null = null): void {
-  useJobsStore().track('j1', { description: 'dublagem: gerar (entrevista.en.dub.json)' })
-  FakeEventSource.latest().emit({ kind: 'end', t: 1, status, error, result: null })
+/** Um job que a interface viu rodando e que termina como o servidor disser. */
+async function finishJob(status: string, error: string | null = null, result: unknown = null): Promise<void> {
+  useJobsStore().track('j1', { description: 'Narração: roteiro curto' })
+  FakeEventSource.latest().emit({ kind: 'end', t: 9, status, error, result })
+  await flushPromises()
 }
 
-describe('useJobNotifications', () => {
-  it('job concluído avisa com o caminho para as saídas', () => {
-    endJob('done')
-    expect(useToastsStore().items[0]).toMatchObject({ tone: 'success', title: 'Concluído' })
+const lastToast = () => useToastsStore().items.at(-1)
+
+describe('avisos de fim de job', () => {
+  it('um job concluído avisa com o botão para as saídas', async () => {
+    await finishJob('done')
+    expect(lastToast()).toMatchObject({ tone: 'success', title: 'Concluído', description: 'Narração: roteiro curto' })
+    expect(lastToast()?.action?.label).toBe('Ver saídas')
   })
 
-  it('job que falhou mostra a primeira linha do erro', () => {
-    endJob('error', 'RuntimeError: sem espaço\ntraceback')
-    expect(useToastsStore().items[0]).toMatchObject({ tone: 'error', title: 'O job falhou' })
-    expect(useToastsStore().items[0]!.description).toContain('RuntimeError: sem espaço')
+  it('um job parado a pedido avisa "Parado" em tom neutro, e não como falha', async () => {
+    await finishJob('cancelled', null, { ready: 2, total: 5 })
+    expect(lastToast()).toMatchObject({ tone: 'info', title: 'Parado', description: 'Narração: roteiro curto' })
+    expect(useToastsStore().items.map((toast) => toast.title)).not.toContain('O job falhou')
   })
 
-  it('job parado a pedido não é falha: avisa que parou', () => {
-    endJob('cancelled')
-    const toast = useToastsStore().items[0]!
-    expect(toast).toMatchObject({ tone: 'info', title: 'Parado a pedido', description: 'dublagem: gerar (entrevista.en.dub.json)' })
-    expect(useToastsStore().items.map((item) => item.title)).not.toContain('O job falhou')
+  it('um job que falhou avisa com a primeira linha do erro', async () => {
+    await finishJob('error', 'RuntimeError: sem modelo\nTraceback (most recent call last)')
+    expect(lastToast()).toMatchObject({ tone: 'error', title: 'O job falhou' })
+    expect(lastToast()?.description).toContain('RuntimeError: sem modelo')
+    expect(lastToast()?.description).not.toContain('Traceback')
   })
 })
