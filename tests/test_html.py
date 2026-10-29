@@ -904,7 +904,7 @@ def test_a_composition_after_the_end_of_the_video_is_dropped(tmp_path: Path):
 
 def test_the_layer_version_is_a_pinned_constant():
     # mexer nela invalida o cache só das composições (o MEZZ_VERSION, o MATTE_VERSION e o da pessoa ficam)
-    assert HTML_LAYER_VERSION == "h1"
+    assert HTML_LAYER_VERSION == "h2"
 
 
 # ---------- atrás da pessoa, no pipeline ----------

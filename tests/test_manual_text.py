@@ -24,7 +24,7 @@ def test_replace_generated_swaps_only_the_marked_block_and_is_idempotent():
     assert read_generated(once, "cli") == "linha nova"
     assert read_generated(once, "mcp") == ""  # os outros blocos ficam como estavam
     assert replace_generated(once, "cli", "linha nova") == once
-    assert generated_names(SAMPLE_MANUAL) == ["indice", "cli", "mcp", "spec"]
+    assert generated_names(SAMPLE_MANUAL) == ["indice", "cli", "mcp", "spec", "infograficos"]
 
 
 def test_replace_generated_fails_when_the_manual_lacks_the_marker():

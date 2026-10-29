@@ -41,6 +41,13 @@ def agent_tools() -> tuple[str, ...]:
     return tuple(AGENT_TOOLS)
 
 
+def infographics() -> tuple[dict[str, Any], ...]:
+    """Os esquemas dos infográficos prontos: de onde sai a tabela de parâmetros de cada modelo."""
+    from ..pipeline.infographics import describe_infographics
+
+    return tuple(describe_infographics())
+
+
 def build_inputs() -> BuildInputs:
     return BuildInputs(
         cli_root=cli_root(),
@@ -48,4 +55,5 @@ def build_inputs() -> BuildInputs:
         spec_schema=spec_schema(),
         agent_tools=agent_tools(),
         field_notes=FIELD_NOTES,
+        infographics=infographics(),
     )

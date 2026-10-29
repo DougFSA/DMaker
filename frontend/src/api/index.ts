@@ -12,6 +12,8 @@ import type {
   BatchValidation,
   BrowseResponse,
   CutReport,
+  InfographicFrameRequest,
+  InfographicInfo,
   JobSnapshot,
   JobStartResponse,
   LookCatalog,
@@ -91,6 +93,15 @@ export const api = {
     sheetUrl: (name: string, brand?: string) => `/api/looks/${enc(name)}/sheet${brandQuery(brand)}`,
     /** Folha com todos os looks lado a lado. */
     overviewUrl: (brand?: string) => `/api/looks/sheet${brandQuery(brand)}`,
+  },
+
+  infographics: {
+    catalog: () => http.get<{ infographics: InfographicInfo[] }>('/api/infographics'),
+    /** Quadro (PNG) do modelo com os valores de exemplo; o servidor o gera na primeira vez e guarda em cache. */
+    previewUrl: (name: string, brand?: string) => `/api/infographics/${enc(name)}/preview${brandQuery(brand)}`,
+    /** Quadro (PNG) do modelo com os valores digitados no formulário, pelo mesmo renderizador do vídeo. */
+    frame: (name: string, request: InfographicFrameRequest) =>
+      http.postBlob(`/api/infographics/${enc(name)}/frame`, request),
   },
 
   jobs: {

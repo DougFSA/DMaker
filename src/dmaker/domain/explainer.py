@@ -2,8 +2,10 @@
 o que o JSON do template não calcula sozinho (duração de cada assunto, tom do fundo, o trecho de fundo).
 
 Cada assunto vira um trecho de fundo na linha do tempo e, se tiver imagem, uma sobreposição na região
-"topo". A gravação do apresentador é uma sobreposição só, contínua: por isso os assuntos precisam ser
-contíguos e a troca de fundo nunca corta a fala. Tudo aqui é puro: recebe dados, devolve dados.
+"topo"; se tiver infográfico (`infografico`: o nome de um modelo pronto e os parâmetros dele), uma composição em
+HTML na mesma região, durante o assunto. A gravação do apresentador é uma sobreposição só, contínua: por isso os
+assuntos precisam ser contíguos e a troca de fundo nunca corta a fala. Tudo aqui é puro: recebe dados, devolve
+dados. Os parâmetros do infográfico são conferidos pelo esquema do modelo na validação do projeto, não aqui.
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ NAMED_BACKGROUNDS: dict[str, tuple[str, str]] = {
 # quando o assunto não diz o fundo, alterna: a troca de cor é o que marca a virada de assunto
 DEFAULT_CYCLE = ("escuro", "bege", "claro")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-TOPIC_FIELDS = {"inicio", "fim", "fundo", "imagem"}
+TOPIC_FIELDS = {"inicio", "fim", "fundo", "imagem", "infografico"}
+INFOGRAPHIC_FIELDS = {"nome", "parametros"}
 CONTIGUITY_TOLERANCE = 0.005  # s: abaixo disso uma emenda entre assuntos é só arredondamento
 _HEX_RE = re.compile(r"#[0-9a-fA-F]{6}")
 
@@ -69,20 +72,49 @@ def background_segment(background: str, duration: float, label: str) -> dict:
     return segment
 
 
+def plan_infographic(raw: Any, number: int) -> dict | None:
+    """O infográfico de um assunto (`{"nome": "contador", "parametros": {...}}`) conferido na forma, ou None se o
+    assunto não tem. Quais parâmetros o modelo aceita é assunto do esquema dele, conferido na validação do projeto."""
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"assunto {number}: `infografico` precisa ser um objeto com `nome` e `parametros`, "
+            'como {"nome": "contador", "parametros": {"ate": 10000}}'
+        )
+    unknown = sorted(set(raw) - INFOGRAPHIC_FIELDS)
+    if unknown:
+        raise ValueError(
+            f"assunto {number}: `infografico` tem campo(s) desconhecido(s): {', '.join(unknown)} "
+            f"(use {', '.join(sorted(INFOGRAPHIC_FIELDS))})"
+        )
+    name = raw.get("nome")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(
+            f"assunto {number}: `infografico` precisa de `nome` (um modelo de `list_infographics`)"
+        )
+    params = raw.get("parametros") or {}
+    if not isinstance(params, dict):
+        raise ValueError(f"assunto {number}: `infografico.parametros` precisa ser um objeto")
+    return {"nome": name.strip(), "parametros": params}
+
+
 def plan_topics(raw: Any) -> list[dict]:
-    """Assuntos conferidos e completos. Aceita `inicio`, `fim`, `fundo` e `imagem`; o início de cada um é
+    """Assuntos conferidos e completos. Aceita `inicio`, `fim`, `fundo`, `imagem` e `infografico`; o início de cada um é
     o fim do anterior (e 0 para o primeiro), e dizê-lo é opcional. Levanta ValueError dizendo qual
     assunto e o que está errado."""
     if not isinstance(raw, list) or not raw:
         raise ValueError(
-            "`assuntos` precisa ser uma lista com pelo menos um assunto (inicio, fim, fundo, imagem)"
+            "`assuntos` precisa ser uma lista com pelo menos um assunto (inicio, fim, fundo, imagem, infografico)"
         )
     topics: list[dict] = []
     previous_end = 0.0
     for position, item in enumerate(raw):
         number = position + 1
         if not isinstance(item, dict):
-            raise ValueError(f"assunto {number}: esperava um objeto com inicio, fim, fundo e imagem")
+            raise ValueError(
+                f"assunto {number}: esperava um objeto com inicio, fim, fundo, imagem e infografico"
+            )
         unknown = sorted(set(item) - TOPIC_FIELDS)
         if unknown:
             raise ValueError(
@@ -123,6 +155,7 @@ def plan_topics(raw: Any) -> list[dict]:
                 "duracao": duration,
                 "fundo": fundo,
                 "imagem": image,
+                "infografico": plan_infographic(item.get("infografico"), number),
                 "segmento": segment,
             }
         )

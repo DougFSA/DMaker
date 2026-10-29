@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Linha: se desenha do ponto A até o ponto B (frações da página) e mostra o rótulo na chegada.
+  Uma coisa só: sem fundo. O traço é SVG (suavizado, sem serrilhado) e o texto é HTML com a fonte da marca. As cores
+  vêm das variáveis --dm-*. O desenho de cada instante sai de `dmakerSeek(t)`.
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro { position: absolute; inset: 0; font-family: var(--dm-font); }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .rotulo {
+    position: absolute; white-space: nowrap; font-weight: 700; line-height: 1;
+    padding: 0.38em 0.8em; border-radius: min(var(--dm-radius), 1.2em);
+    background: rgba(11, 18, 32, 0.72);
+  }
+  .com-sombra svg { filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4)); }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro">
+  <svg id="svg" shape-rendering="geometricPrecision">
+    <path id="traco" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+    <circle id="ponto-a" r="0"></circle>
+    <circle id="ponta" r="0"></circle>
+    <path id="seta" stroke-linejoin="round"></path>
+  </svg>
+  <div class="rotulo" id="rotulo-b"></div>
+  <div class="rotulo" id="rotulo-a"></div>
+</div>
+<script>
+  const d = dmaker.data;
+  const corDaMarca = (valor) => (String(valor).startsWith("#") ? valor : `var(--dm-${String(valor).replace(/_/g, "-")})`);
+  const $ = (id) => document.getElementById(id);
+  const W = dmaker.width, H = dmaker.height;
+
+  const quadro = $("quadro"), svg = $("svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (d.sombra) quadro.classList.add("com-sombra");
+
+  const traco = $("traco"), pontoA = $("ponto-a"), ponta = $("ponta"), seta = $("seta");
+  const cor = corDaMarca(d.cor);
+  traco.setAttribute("stroke", cor);
+  traco.setAttribute("stroke-width", d.espessura);
+  if (d.tracejada) traco.setAttribute("stroke-dasharray", `${d.espessura * 0.1} ${d.espessura * 2.2}`);
+  for (const bolinha of [pontoA, ponta]) bolinha.setAttribute("fill", cor);
+  seta.setAttribute("fill", cor);
+  seta.setAttribute("stroke", cor);
+  seta.setAttribute("stroke-width", d.espessura * 0.4);
+
+  const a = { x: d.de_x * W, y: d.de_y * H }, b = { x: d.ate_x * W, y: d.ate_y * H };
+  const raio = d.espessura * 1.7;
+  const tamanhoDaLetra = Math.max(H * 0.085, 26);
+
+  // o rótulo de uma ponta fica do lado oposto ao da outra ponta (acima de quem está no alto), dentro da página
+  function colocar(elemento, texto, ponto, outro) {
+    elemento.textContent = texto;
+    elemento.style.display = texto ? "block" : "none";
+    elemento.style.color = corDaMarca(d.cor_texto);
+    elemento.style.fontSize = tamanhoDaLetra + "px";
+    if (!texto) return;
+    const largura = elemento.offsetWidth, altura = elemento.offsetHeight;
+    const acima = ponto.y <= outro.y;
+    const folga = raio + d.espessura * 0.6 + 8;
+    const esquerda = Math.min(Math.max(ponto.x - largura / 2, 4), W - largura - 4);
+    const topo = Math.min(Math.max(acima ? ponto.y - folga - altura : ponto.y + folga, 4), H - altura - 4);
+    elemento.style.left = esquerda + "px";
+    elemento.style.top = topo + "px";
+  }
+  // os rótulos são medidos no primeiro quadro, com a fonte da marca já carregada
+  let preparado = false;
+  function preparar() {
+    preparado = true;
+    colocar($("rotulo-b"), d.rotulo, b, a);
+    colocar($("rotulo-a"), d.rotulo_inicio, a, b);
+  }
+
+  const ritmos = {
+    suave: (p) => 1 - Math.pow(1 - p, 3),
+    "entrada-saida": (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    linear: (p) => p,
+  };
+  const ritmo = ritmos[d.easing] || ritmos["entrada-saida"];
+  const angulo = Math.atan2(b.y - a.y, b.x - a.x);
+
+  window.dmakerSeek = (t) => {
+    if (!preparado) preparar();
+    const p = Math.min(Math.max(t / d.duracao, 0), 1);
+    const avanco = p >= 1 ? 1 : ritmo(p);
+    const ponto = { x: a.x + (b.x - a.x) * avanco, y: a.y + (b.y - a.y) * avanco };
+    traco.setAttribute("d", `M${a.x} ${a.y} L${ponto.x} ${ponto.y}`);
+    traco.style.display = avanco > 0 ? "block" : "none";
+
+    // as pontas: a de saída pula para o tamanho cheio no primeiro instante; a de chegada acompanha a linha
+    const chegada = Math.min(t / 0.18, 1);
+    pontoA.setAttribute("cx", a.x); pontoA.setAttribute("cy", a.y);
+    pontoA.setAttribute("r", d.pontas === "bolinha" ? raio * chegada : 0);
+    ponta.setAttribute("cx", ponto.x); ponta.setAttribute("cy", ponto.y);
+    ponta.setAttribute("r", d.pontas === "bolinha" ? raio * Math.min(avanco * 8, 1) : 0);
+    if (d.pontas === "seta" && avanco > 0) {
+      const braco = raio * 2.4;
+      const ponto1 = [ponto.x - braco * Math.cos(angulo - 0.45), ponto.y - braco * Math.sin(angulo - 0.45)];
+      const ponto2 = [ponto.x - braco * Math.cos(angulo + 0.45), ponto.y - braco * Math.sin(angulo + 0.45)];
+      seta.setAttribute("d", `M${ponto.x} ${ponto.y} L${ponto1[0]} ${ponto1[1]} L${ponto2[0]} ${ponto2[1]} Z`);
+    } else {
+      seta.setAttribute("d", "");
+    }
+
+    // o rótulo da chegada surge quando a linha termina de se desenhar; o da partida, com a primeira bolinha
+    const surge = (inicio) => Math.min(Math.max((t - inicio) / 0.25, 0), 1);
+    const fim = d.duracao;
+    $("rotulo-b").style.opacity = String(surge(fim));
+    $("rotulo-b").style.transform = `scale(${0.85 + 0.15 * surge(fim)})`;
+    $("rotulo-a").style.opacity = String(surge(0));
+    $("rotulo-a").style.transform = `scale(${0.85 + 0.15 * surge(0)})`;
+    const sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    quadro.style.opacity = String(sai);
+  };
+</script>
+</body>
+</html>

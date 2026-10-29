@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..domain.audiogram import audiogram_size, bars_layout, resolve_follow
 from ..domain.brand import Theme
+from ..domain.infographics import resolve_infographic
 from ..domain.regions import resolve_region
 from ..domain.spec import (
     AudiogramOverlay,
@@ -30,6 +31,7 @@ from ..visuals.audiogram import style_assets
 from ..visuals.pip import pip_mask, render_pip_assets
 from .context import RenderContext
 from .html_layer import ResolvedHtmlOverlay, resolve_html_overlay, resolve_html_source
+from .infographic_anchor import anchor_html_overlay
 
 # `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
 FRAME_SLACK_PX = 1e-6
@@ -234,6 +236,10 @@ def build_text_layer(
             if audiogram is not None:
                 layer.audiograms.append(audiogram)
         elif isinstance(overlay, HtmlOverlay):
+            overlay = resolve_infographic(overlay, project)  # o modelo pronto vira uma composição comum
+            overlay = anchor_html_overlay(ctx, overlay, cues, total, overlay_index)  # presa a uma palavra
+            if overlay is None:
+                continue
             overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             source = resolve_html_source(project, overlay.src)
             composition = resolve_html_overlay(ctx, overlay, source, total, overlay_index)

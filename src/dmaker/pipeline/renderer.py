@@ -9,6 +9,7 @@ from .. import config
 from ..config import ensure_dirs
 from ..domain.audiogram import project_has_voice
 from ..domain.brand import load_theme
+from ..domain.infographics import resolve_infographic
 from ..domain.presets import Preset, get_preset
 from ..domain.sfx import plan_sfx
 from ..domain.spec import HtmlOverlay, Project
@@ -260,7 +261,7 @@ class RenderPipeline:
             return
         for overlay in ctx.project.overlays:
             if isinstance(overlay, HtmlOverlay):
-                resolve_html_source(ctx.project, overlay.src)
+                resolve_html_source(ctx.project, resolve_infographic(overlay, ctx.project).src)
         reason = None if ctx.options.dry_run else self.html_layers.unavailable_reason()
         if reason:
             raise BrowserUnavailable(f"O projeto tem composição HTML e o navegador não está pronto. {reason}")

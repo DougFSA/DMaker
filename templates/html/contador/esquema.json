@@ -1,0 +1,81 @@
+{
+  "title": "Contador",
+  "description": "Um número que conta de um valor até outro, com prefixo e sufixo e formatação brasileira (10.000, 1.234,5). Termina exatamente no valor e fica parado.",
+  "size": [900, 300],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.72, "height": 0.135 },
+  "duration": 4,
+  "example": { "de": 0, "ate": 10000, "prefixo": "+ de R$" },
+  "params": {
+    "de": {
+      "type": "number",
+      "label": "Começa em",
+      "description": "O número com que a contagem começa.",
+      "default": 0,
+      "min": -1000000000,
+      "max": 1000000000
+    },
+    "ate": {
+      "type": "number",
+      "label": "Termina em",
+      "description": "O número em que a contagem para. É o valor que fica na tela.",
+      "required": true,
+      "min": -1000000000,
+      "max": 1000000000,
+      "example": 10000
+    },
+    "prefixo": {
+      "type": "text",
+      "label": "Antes do número",
+      "description": "Texto pequeno antes do número, como \"+ de R$\".",
+      "default": "",
+      "max_length": 30
+    },
+    "sufixo": {
+      "type": "text",
+      "label": "Depois do número",
+      "description": "Texto pequeno depois do número, como \"mg\" ou \"%\".",
+      "default": "",
+      "max_length": 30
+    },
+    "casas": {
+      "type": "integer",
+      "label": "Casas decimais",
+      "description": "Quantas casas depois da vírgula (0 mostra só inteiros).",
+      "default": 0,
+      "min": 0,
+      "max": 4
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo contando (s)",
+      "description": "Quantos segundos a contagem leva; depois disso o número fica parado.",
+      "default": 1.2,
+      "min": 0.1,
+      "max": 30
+    },
+    "easing": {
+      "type": "choice",
+      "label": "Ritmo da contagem",
+      "description": "suave começa rápido e desacelera até o valor; entrada-saida acelera e desacelera; linear mantém a velocidade.",
+      "default": "suave",
+      "options": ["suave", "entrada-saida", "linear"]
+    },
+    "cor": {
+      "type": "color",
+      "label": "Cor do número",
+      "description": "Uma cor da marca (accent, primary, white...) ou um hexadecimal #RRGGBB.",
+      "default": "accent"
+    },
+    "cor_texto": {
+      "type": "color",
+      "label": "Cor do prefixo e do sufixo",
+      "default": "white"
+    },
+    "sombra": {
+      "type": "bool",
+      "label": "Sombra suave",
+      "description": "Uma sombra leve atrás das letras, para ler sobre qualquer fundo.",
+      "default": true
+    }
+  }
+}

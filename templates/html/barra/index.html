@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Barra: enche até `valor` numa escala de 0 a `maximo`, com divisões e a marca de um `limite`.
+  Uma coisa só: não traz fundo. Marca por variáveis (--dm-*), medidas em cqh/cqw (relativas à página, então o mesmo
+  modelo serve em qualquer região). O desenho de cada instante sai de `dmakerSeek(t)`.
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro {
+    position: absolute; inset: 0; container-type: size;
+    display: flex; flex-direction: column; justify-content: center; gap: 4cqh;
+    padding: 0 4cqw; box-sizing: border-box;
+    font-family: var(--dm-font);
+  }
+  .cabeca { display: flex; align-items: baseline; gap: 0.3em; white-space: nowrap; font-size: 17cqh; line-height: 1; }
+  .valor { font-weight: 800; font-size: 1.9em; font-variant-numeric: tabular-nums; }
+  .unidade { font-weight: 700; font-size: 1em; }
+  .rotulo { font-weight: 500; font-size: 0.8em; opacity: 0.9; }
+  .pista { position: relative; height: 14cqh; margin-top: 10cqh; }
+  .trilho {
+    position: absolute; inset: 0; overflow: hidden;
+    border-radius: min(var(--dm-radius), 7.5cqh);
+    background: rgba(255, 255, 255, 0.2); box-shadow: inset 0 0 0 0.5cqh rgba(255, 255, 255, 0.35);
+  }
+  .enche { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+  .divisao { position: absolute; top: 0; bottom: 0; width: 0.5cqh; background: rgba(255, 255, 255, 0.55); transform: translateX(-50%); }
+  .escala { position: absolute; top: 100%; margin-top: 1.5cqh; transform: translateX(-50%); font-size: max(7cqh, 24px); font-weight: 600; opacity: 0.85; white-space: nowrap; }
+  .limite { position: absolute; top: max(-6cqh, -30px); bottom: -3cqh; width: 1.2cqh; transform: translateX(-50%); border-radius: 1cqh; }
+  .limite-nome { position: absolute; bottom: 100%; margin-bottom: 0.6cqh; font-size: max(7.5cqh, 26px); font-weight: 700; white-space: nowrap; }
+  .com-sombra { text-shadow: 0 0.12em 0.4em rgba(0, 0, 0, 0.45); }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro">
+  <div class="cabeca" id="cabeca">
+    <span class="valor" id="valor"></span><span class="unidade" id="unidade"></span><span class="rotulo" id="rotulo"></span>
+  </div>
+  <div class="pista" id="pista">
+    <div class="trilho"><div class="enche" id="enche"></div><div id="divisoes"></div></div>
+    <div id="escalas"></div>
+    <div class="limite" id="limite"><span class="limite-nome" id="limite-nome"></span></div>
+  </div>
+</div>
+<script>
+  const d = dmaker.data;
+  const corDaMarca = (valor) => (String(valor).startsWith("#") ? valor : `var(--dm-${String(valor).replace(/_/g, "-")})`);
+  const $ = (id) => document.getElementById(id);
+
+  const quadro = $("quadro"), pista = $("pista"), enche = $("enche"), limite = $("limite");
+  quadro.style.color = corDaMarca(d.cor_texto);
+  if (d.sombra) quadro.classList.add("com-sombra");
+  $("valor").style.color = corDaMarca(d.cor);
+  enche.style.background = corDaMarca(d.cor);
+  $("unidade").textContent = d.sufixo;
+  $("rotulo").textContent = d.rotulo;
+
+  // 1.234,5 à brasileira, escrito à mão para não depender dos dados de idioma do navegador
+  // se o valor final é inteiro, a contagem mostra só inteiros (sem 48,9 pelo caminho)
+  const casas = Number.isInteger(d.valor) && Number.isInteger(d.maximo) ? 0 : 1;
+  function formatar(valor) {
+    const [parte, decimais] = valor.toFixed(casas).split(".");
+    return parte.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + (decimais ? "," + decimais : "");
+  }
+  const fracao = (valor) => Math.min(Math.max(valor / d.maximo, 0), 1);
+
+  // as divisões e os números da escala (4 divisões em 400: 100, 200 e 300)
+  for (let k = 1; k < d.marcas; k++) {
+    const onde = (k / d.marcas) * 100;
+    const marca = document.createElement("div");
+    marca.className = "divisao"; marca.style.left = onde + "%";
+    $("divisoes").append(marca);
+    const numero = document.createElement("div");
+    numero.className = "escala"; numero.style.left = onde + "%";
+    numero.textContent = formatar((k / d.marcas) * d.maximo);
+    $("escalas").append(numero);
+  }
+
+  // a marca do limite: uma haste e o nome, que fica dentro da pista mesmo no fim da barra
+  if (d.limite === undefined) {
+    limite.style.display = "none";
+  } else {
+    const onde = fracao(d.limite) * 100;
+    limite.style.left = onde + "%";
+    limite.style.background = corDaMarca(d.cor_texto);
+    const nome = $("limite-nome");
+    nome.textContent = `${d.rotulo_limite} ${formatar(d.limite)}${d.sufixo ? " " + d.sufixo : ""}`.trim();
+    nome.style.left = onde > 70 ? "auto" : "50%";
+    nome.style.right = onde > 70 ? "-0.6cqh" : "auto";
+    nome.style.transform = onde > 70 ? "none" : "translateX(-50%)";
+  }
+
+  const ritmos = {
+    suave: (p) => 1 - Math.pow(1 - p, 3),
+    "entrada-saida": (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    linear: (p) => p,
+  };
+  const ritmo = ritmos[d.easing] || ritmos.suave;
+
+  window.dmakerSeek = (t) => {
+    const p = Math.min(Math.max(t / d.duracao, 0), 1);
+    const atual = p >= 1 ? d.valor : d.valor * ritmo(p); // no fim, exatamente `valor`
+    enche.style.width = fracao(atual) * 100 + "%";
+    $("valor").textContent = formatar(atual);
+    const entra = Math.min(t / 0.25, 1), sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    quadro.style.opacity = String(Math.min(entra, sai));
+    quadro.style.transform = `translateY(${(1 - entra) * 5}cqh)`;
+  };
+</script>
+</body>
+</html>

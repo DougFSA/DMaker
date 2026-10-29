@@ -30,9 +30,13 @@ from .html_site import (
     FREEZE_CSS,
     ORIGIN,
     CompositionSite,
+    FontFace,
     brand_css,
+    brand_font_faces_css,
+    brand_font_probes,
     font_face_probes,
     font_faces_css,
+    font_file_names,
     is_composition_origin,
     is_local_scheme,
 )
@@ -73,7 +77,11 @@ class HtmlComposition:
     """O que o renderizador precisa saber de uma composição.
 
     `size` é o tamanho da página em px CSS (a base 1080 do resto do DMaker) e `scale` quantos pixels de saída
-    cabem em um px CSS: a prévia renderiza a mesma página com `scale` 0,5, e o desenho sai igual em menor."""
+    cabem em um px CSS: a prévia renderiza a mesma página com `scale` 0,5, e o desenho sai igual em menor.
+
+    A marca chega à página por `colors` (variáveis `--dm-<cor>`), `font_family` (`--dm-font`), `radius` (`--dm-radius`,
+    o raio dos cantos em px na base 1080) e `fonts` (os arquivos de fonte da marca que não são a Poppins de
+    `assets/fonts`, servidos por `@font-face`). `files` são os arquivos do projeto que a composição declarou, por nome."""
 
     source: Path
     size: tuple[int, int]
@@ -83,6 +91,9 @@ class HtmlComposition:
     data: Mapping[str, Any] = field(default_factory=dict)
     colors: Mapping[str, str] = field(default_factory=dict)
     font_family: str = "Poppins"
+    radius: float | None = None
+    fonts: tuple[FontFace, ...] = ()
+    files: Mapping[str, Path] = field(default_factory=dict)
 
     @property
     def output_size(self) -> tuple[int, int]:
@@ -110,9 +121,22 @@ class HtmlRenderer(Protocol):
 def runtime_script(composition: HtmlComposition, fonts_dir: Path | None = None) -> str:
     """O script que entra antes de qualquer outro da página: a configuração e o `html_runtime.js`."""
     fonts = fonts_dir or config.FONTS_DIR
+    # a família da marca chega por `composition.fonts` quando não é a Poppins; sem isso, a família pedida é servida
+    # com a Poppins de `assets/fonts` (o caso comum). As fontes por papel (`dm-<papel>`) vêm sempre de `fonts`.
+    serves_family = any(face.family == composition.font_family for face in composition.fonts)
+    faces_css = brand_font_faces_css(composition.fonts)
+    probes = brand_font_probes(composition.fonts)
+    if not serves_family:
+        faces_css = font_faces_css(fonts, composition.font_family) + faces_css
+        probes = font_face_probes(fonts, composition.font_family) + probes
+    role_fonts = {
+        face.family.removeprefix("dm-"): face.family
+        for face in composition.fonts
+        if face.family.startswith("dm-")
+    }
     css = (
-        font_faces_css(fonts, composition.font_family)
-        + brand_css(dict(composition.colors), composition.font_family)
+        faces_css
+        + brand_css(dict(composition.colors), composition.font_family, composition.radius, role_fonts)
         + FREEZE_CSS
     )
     settings = {
@@ -123,7 +147,7 @@ def runtime_script(composition: HtmlComposition, fonts_dir: Path | None = None) 
         "data": dict(composition.data),
         "brand": dict(composition.colors),
         "fontFamily": composition.font_family,
-        "fontFaces": font_face_probes(fonts, composition.font_family),
+        "fontFaces": probes,
         "css": css,
         "epoch": EPOCH_MS,
         "seed": RANDOM_SEED,
@@ -162,7 +186,10 @@ class _CompositionPage:
         self._browser = browser
         self._composition = composition
         self._warnings = warnings
-        self._site = CompositionSite(composition.source)
+        self._site = CompositionSite(
+            composition.source,
+            files={**composition.files, **font_file_names(composition.fonts)},
+        )
         self._context: Any = None
         self._page: Any = None
         self._cdp: Any = None

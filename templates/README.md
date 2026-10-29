@@ -200,3 +200,13 @@ Alguns templates simplificam o exemplo original para caber num conjunto pequeno 
 Caminhos de mídia que mudam a cada uso (vídeos, prints, gravações) ficam sempre `required`, sem
 `default`. Textos e caminhos que servem de exemplo claro (trilha padrão, nomes de exemplo) ficam
 com `default`, editável a qualquer momento.
+
+## Infográficos prontos (`html/`)
+
+A subpasta `html/` não tem modelos de projeto: cada pasta dela é um **infográfico animado pronto** (`contador`, `barra`,
+`linha`, `imagem`, `etiqueta`, `grifo`, `emoji`), uma composição em HTML com os parâmetros declarados num `esquema.json`
+ao lado do `index.html`. Na spec, `{"type": "html", "infographic": "contador", "region": "topo", "data": {"ate": 10000}}`
+usa o modelo pelo nome; `dmaker infographics list` mostra os parâmetros e `dmaker infographics frame` desenha um quadro.
+Para escrever um modelo novo, copie a pasta do `contador` (o contrato e o formato do esquema estão no `dmaker://guide`,
+seção "Infográficos prontos"): o desenho de cada instante sai de `window.dmakerSeek(t)`, a marca vem só das variáveis
+`--dm-*` e o modelo não traz fundo.

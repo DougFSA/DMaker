@@ -6,6 +6,7 @@ from collections.abc import Collection, Sequence
 
 from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
+from ..domain.infographics import infographic_warnings
 from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
 from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, TextOverlay
@@ -37,6 +38,7 @@ def lint(
     warnings: list[str] = []
     segments = project.timeline
     _check_look_names(project, theme)
+    warnings += infographic_warnings(project, theme)
     if preset.max_duration and total > preset.max_duration + 0.01:
         warnings.append(
             f"Duração final {total:.1f}s passa do limite de {preset.platform} {preset.name} ({preset.max_duration:.0f}s)."

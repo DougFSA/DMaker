@@ -276,6 +276,47 @@ export interface LookCatalog {
   looks: LookInfo[]
 }
 
+/* ---------- infográficos prontos (src/dmaker/ui/infographic_routes.py) ---------- */
+
+export type InfographicParamType = 'number' | 'integer' | 'text' | 'choice' | 'bool' | 'color' | 'path'
+
+/** Um parâmetro de um infográfico, como o esquema do modelo o descreve (rótulo em português, limites, opções). */
+export interface InfographicParam {
+  name: string
+  type: InfographicParamType
+  label: string
+  description?: string
+  required: boolean
+  default?: string | number | boolean
+  min?: number
+  max?: number
+  max_length?: number
+  options?: string[]
+  example?: string | number | boolean
+}
+
+/** Item de GET /api/infographics: o modelo, o tamanho natural da página e o esquema dos parâmetros. */
+export interface InfographicInfo {
+  name: string
+  title: string
+  description: string
+  size: [number, number]
+  area: Record<string, number>
+  duration: number
+  example: Record<string, string | number | boolean>
+  anchors_to_caption: boolean
+  params: InfographicParam[]
+}
+
+/** Corpo de POST /api/infographics/{nome}/frame: os valores digitados e onde olhar. */
+export interface InfographicFrameRequest {
+  params: Record<string, string | number | boolean>
+  at?: number
+  size?: [number, number]
+  brand?: string
+  background?: string
+}
+
 /* ---------- lote: vários vídeos de uma planilha (src/dmaker/ui/batch_routes.py) ---------- */
 
 export type BatchIssueLevel = 'erro' | 'aviso'

@@ -1,0 +1,36 @@
+{
+  "title": "Emoji animado",
+  "description": "Um emoji animado do Google Noto (joinha, check, coração, fogo, festa, lâmpada, café, gráfico subindo, surpresa, risada). Licença CC BY 4.0: dê o crédito \"Animated Noto Emoji, Google, CC BY 4.0\" na descrição do vídeo.",
+  "size": [400, 400],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.3, "height": 0.16 },
+  "duration": 3,
+  "example": { "emoji": "joinha" },
+  "params": {
+    "emoji": {
+      "type": "choice",
+      "label": "Emoji",
+      "required": true,
+      "options": ["joinha", "check", "coracao", "fogo", "festa", "lampada", "cafe", "grafico", "surpresa", "risada"],
+      "example": "joinha"
+    },
+    "repetir": {
+      "type": "bool",
+      "label": "Repetir enquanto fica",
+      "description": "Desligado, o emoji toca uma vez e para na pose de repouso. Ligado, repete até a composição sair.",
+      "default": false
+    },
+    "entrada": {
+      "type": "choice",
+      "label": "Como surge",
+      "default": "pop",
+      "options": ["pop", "fade", "nenhuma"]
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo para surgir (s)",
+      "default": 0.35,
+      "min": 0.05,
+      "max": 5
+    }
+  }
+}

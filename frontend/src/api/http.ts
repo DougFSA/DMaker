@@ -66,7 +66,38 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   return data as T
 }
 
+/** POST que devolve um arquivo (imagem): o erro sai igual ao das outras chamadas, a resposta boa vem como `Blob`. */
+async function postForBlob(path: string, body: unknown): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(0, 'Não foi possível falar com o servidor do DMaker. Ele está rodando?')
+  }
+  if (!response.ok) {
+    let data: unknown
+    try {
+      data = JSON.parse(await response.text())
+    } catch {
+      data = null
+    }
+    const detail =
+      data && typeof data === 'object' && 'detail' in data ? (data as { detail: unknown }).detail : data
+    throw new ApiError(
+      response.status,
+      messageFromDetail(detail, `Erro ${response.status} ao chamar ${path}`),
+      data,
+    )
+  }
+  return response.blob()
+}
+
 export const http = {
+  postBlob: postForBlob,
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body ?? {}),
