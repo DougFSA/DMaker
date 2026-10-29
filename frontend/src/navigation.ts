@@ -43,7 +43,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Fila',
     to: '/fila',
     icon: 'queue',
-    ready: false,
+    ready: true,
   },
   {
     key: 'models',

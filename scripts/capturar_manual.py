@@ -10,7 +10,8 @@ Uso (de dentro da pasta do DMaker, com o extra `docs` e o Chromium instalados):
     python scripts/capturar_manual.py --base-url http://127.0.0.1:8769
 
 Os nomes dos projetos usados (`quick_gravacao`, `entrevista-corte`, o lote `semana`) vêm da tarefa "Fazer um Reel"
-e das tarefas de corte e de lote do manual: seguir o manual numa pasta de dados limpa os cria.
+e das tarefas de corte e de lote do manual: seguir o manual numa pasta de dados limpa os cria. A captura da Fila
+mostra o que a fila da pasta de dados tem na hora: deixe nela um item pronto, um rodando e alguns esperando.
 """
 
 from __future__ import annotations
@@ -108,6 +109,7 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-looks.png", "/looks", prepare=_wait_images),
         Shot("ui-voz-vozes.png", "/voz", height=1250, prepare=_fill_clone_voice),
         Shot("ui-voz-narracao.png", "/voz/narracao", height=1000, prepare=_fill_narration),
+        Shot("ui-fila.png", "/fila", height=900, prepare=lambda page: _settle(page, 2500)),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),
         Shot("classica-dublar.png", "/classica", height=900, prepare=_open_tab("voice", "#dub-source")),
