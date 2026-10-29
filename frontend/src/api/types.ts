@@ -1,5 +1,7 @@
 /* Tipos das respostas da API (src/dmaker/ui/server.py), escritos à mão a partir das respostas reais.
-   Os nomes dos campos seguem o backend (snake_case) para não haver camada de tradução. */
+   Os nomes dos campos seguem o backend (snake_case) para não haver camada de tradução.
+   Os tipos de cada área grande (voz, fala, dublagem, fila, modelos, editor) ficam em types/<área>.ts. */
+import type { UtteranceEvent } from './types/voice'
 
 export interface PresetInfo {
   id: string
@@ -227,16 +229,19 @@ export interface JobSnapshot {
   elapsed_s: number
   progress: JobProgress
   error: string | null
+  /** O trabalho aceita ser parado (POST /api/jobs/{id}/cancel): hoje só os de voz e áudio. */
+  cancellable: boolean
   focus: boolean
   project: string | null
 }
 
-/** Eventos do SSE em /api/jobs/{id}/events. */
+/** Eventos do SSE em /api/jobs/{id}/events. `utterance` só vem do job de narração (cada fala pronta). */
 export type JobEvent =
   | { kind: 'start'; t: number; description: string }
   | { kind: 'log'; t: number; message: string }
   | ({ kind: 'progress'; t: number } & JobProgress)
   | { kind: 'end'; t: number; status: JobStatus; error: string | null; result: unknown }
+  | UtteranceEvent
 
 export interface BrowseResponse {
   path: string

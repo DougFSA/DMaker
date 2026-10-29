@@ -439,7 +439,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve" e levam à interface clássica.
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz).
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 

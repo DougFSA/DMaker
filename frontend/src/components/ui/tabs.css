@@ -1,0 +1,50 @@
+/* Visual das abas (AppTabs e RouteTabs), o mesmo do SegmentedControl: pílula com a aba ativa em destaque. */
+
+.tabs__list {
+  display: flex;
+  gap: var(--space-1);
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.2rem;
+  overflow-x: auto;
+  list-style: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+}
+
+.tabs__tab {
+  display: inline-grid;
+  place-items: center;
+  min-height: 2.25rem;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--color-text-soft);
+  text-decoration: none;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+.tabs__tab:hover:not([data-state='active'], .is-active) {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.tabs__tab[data-state='active'],
+.tabs__tab.is-active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+}
+
+.tabs__tab:disabled,
+.tabs__tab[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

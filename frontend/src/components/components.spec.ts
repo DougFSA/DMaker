@@ -10,6 +10,7 @@ import type {
   TemplateParam,
   TransitionCatalog,
 } from '@/api'
+import { NAV_ITEMS } from '@/navigation'
 import { createAppRouter } from '@/router'
 import { useJobsStore } from '@/stores/jobs'
 import { useThemeStore } from '@/stores/theme'
@@ -99,7 +100,8 @@ describe('SidebarNav', () => {
       'Infográficos',
       'Agente',
     ])
-    expect(wrapper.findAll('.nav__soon')).toHaveLength(5)
+    // cada frente do DMK-38 tira o selo da sua área trocando `ready` em navigation.ts; o teste acompanha
+    expect(wrapper.findAll('.nav__soon')).toHaveLength(NAV_ITEMS.filter((item) => !item.ready).length)
     expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
   })
 

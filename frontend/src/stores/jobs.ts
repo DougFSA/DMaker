@@ -15,6 +15,8 @@ export interface JobView {
   log: string[]
   /** Resultado do job (ex.: o RenderResult), só chega pelo evento final do SSE. */
   result: unknown
+  /** O trabalho aceita ser parado (`cancel`): hoje só os de voz e áudio. Ausente vale como não. */
+  cancellable?: boolean
 }
 
 export type JobEndListener = (job: JobView) => void
@@ -93,6 +95,9 @@ export const useJobsStore = defineStore('jobs', () => {
       case 'end':
         finish(job, event.status, event.error, event.result)
         break
+      case 'utterance':
+        // fala pronta da narração: quem toca a prévia ao vivo é `followJob`, a barra de jobs não precisa dela
+        break
     }
   }
 
@@ -110,11 +115,13 @@ export const useJobsStore = defineStore('jobs', () => {
         error: snapshot.error,
         log: [],
         result: null,
+        cancellable: !!snapshot.cancellable,
       }
       return
     }
-    // um job registrado por track() ainda não sabia o projeto nem a descrição
+    // um job registrado por track() ainda não sabia o projeto, a descrição nem se aceita ser parado
     existing.project ??= snapshot.project
+    existing.cancellable ||= !!snapshot.cancellable
     if (existing.description === PENDING_DESCRIPTION) existing.description = snapshot.description
     if (snapshot.status !== 'running') {
       finish(existing, snapshot.status, snapshot.error, existing.result)
@@ -138,6 +145,7 @@ export const useJobsStore = defineStore('jobs', () => {
         error: null,
         log: [],
         result: null,
+        cancellable: false,
       }
     }
     const source = new EventSource(api.jobs.eventsUrl(id))
@@ -187,6 +195,11 @@ export const useJobsStore = defineStore('jobs', () => {
     for (const id of [...sources.keys()]) closeSource(id)
   }
 
+  /** Pede ao servidor que pare o job; o estado vira `cancelled` quando o evento final chega pelo SSE. */
+  async function cancel(id: string): Promise<void> {
+    await api.jobs.cancel(id)
+  }
+
   async function clearFinished(): Promise<void> {
     await api.jobs.clearFinished()
     for (const job of Object.values(jobs.value)) {
@@ -207,6 +220,7 @@ export const useJobsStore = defineStore('jobs', () => {
     refresh,
     startPolling,
     stopPolling,
+    cancel,
     clearFinished,
   }
 })

@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JobEvent, JobSnapshot } from '@/api'
+import { stubFetch } from '@/test/fetch'
 import { useJobsStore } from './jobs'
 
 /** EventSource de mentira: o teste empurra os eventos que o servidor mandaria. */
@@ -36,6 +37,7 @@ function snapshot(overrides: Partial<JobSnapshot> = {}): JobSnapshot {
     elapsed_s: 4,
     progress: {},
     error: null,
+    cancellable: false,
     focus: false,
     project: 'demo',
     ...overrides,
@@ -150,5 +152,35 @@ describe('useJobsStore', () => {
     await jobs.refresh()
     await jobs.clearFinished()
     expect(jobs.list.map((job) => job.id)).toEqual(['j1'])
+  })
+
+  it('guarda se o trabalho aceita ser parado e ignora as falas prontas da narração', async () => {
+    stubJobsApi([snapshot({ cancellable: true })])
+    const jobs = useJobsStore()
+    await jobs.refresh()
+    expect(jobs.jobs['j1']!.cancellable).toBe(true)
+
+    FakeEventSource.instances[0]!.emit({
+      kind: 'utterance',
+      t: 1,
+      index: 1,
+      total: 3,
+      audio_url: '/api/voices/audio?path=f1.wav',
+      duration_s: 1,
+      pause_after_s: 0.2,
+    })
+    expect(jobs.jobs['j1']).toMatchObject({ status: 'running', log: [] })
+  })
+
+  it('pedir para parar chama o servidor; o estado muda quando o evento final chega', async () => {
+    const fetch = stubFetch({})
+    const jobs = useJobsStore()
+    jobs.track('j1')
+    await jobs.cancel('j1')
+    expect(fetch.last()).toMatchObject({ url: '/api/jobs/j1/cancel', method: 'POST' })
+    expect(jobs.jobs['j1']!.status).toBe('running')
+
+    FakeEventSource.instances[0]!.emit({ kind: 'end', t: 4, status: 'cancelled', error: null, result: null })
+    expect(jobs.jobs['j1']!.status).toBe('cancelled')
   })
 })

@@ -5,13 +5,15 @@ export interface NavItem {
   label: string
   to: string
   icon: IconName
-  /** false = tela de uma fase futura: o item aparece com o selo "em breve" e leva à interface clássica. */
+  /**
+   * false = a área ainda não está completa: o item aparece com o selo "em breve" e a rota mostra a view
+   * "em construção". Quando uma frente do DMK-38 termina a sua área, ela troca só este valor para true
+   * (e a view da rota pelo conteúdo de verdade).
+   */
   ready: boolean
-  /** Frase da página "em breve", dizendo o que a tela vai trazer. */
-  promise?: string
 }
 
-/** Ordem da barra lateral. Cada fase seguinte troca `ready` e a rota, sem mexer no resto do layout. */
+/** Ordem da barra lateral. Cada área tem o seu bloco, para trocar `ready` não encostar nas vizinhas. */
 export const NAV_ITEMS: NavItem[] = [
   { key: 'projects', label: 'Projetos', to: '/projetos', icon: 'folder', ready: true },
   { key: 'batch', label: 'Lote', to: '/lote', icon: 'copy', ready: true },
@@ -21,7 +23,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: '/editor',
     icon: 'film',
     ready: false,
-    promise: 'Player, linha do tempo com trilhas, arrastar e aparar trechos e layouts de tela.',
   },
   {
     key: 'voice',
@@ -29,7 +30,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: '/voz',
     icon: 'mic',
     ready: false,
-    promise: 'Estúdio de voz: vozes, nova voz por arquivo ou microfone, narração com prévia e pronúncia.',
   },
   {
     key: 'dubbing',
@@ -37,7 +37,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: '/dublagem',
     icon: 'languages',
     ready: false,
-    promise: 'Isolar a voz, corrigir a fala, trocar a voz e dublar com tabela de segmentos e falantes.',
   },
   {
     key: 'queue',
@@ -45,7 +44,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: '/fila',
     icon: 'queue',
     ready: false,
-    promise: 'A fila de narrações e trabalhos de voz em andamento.',
   },
   {
     key: 'models',
@@ -53,7 +51,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: '/modelos',
     icon: 'layers',
     ready: false,
-    promise: 'Os modelos de voz e de transcrição instalados na máquina.',
   },
   { key: 'outputs', label: 'Saídas', to: '/saidas', icon: 'video', ready: true },
   { key: 'transitions', label: 'Transições', to: '/transicoes', icon: 'sparkles', ready: true },
