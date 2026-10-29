@@ -112,7 +112,8 @@ class McpToolHost:
 
     `argument_defaults` completa, nas ferramentas que têm o argumento no esquema, o que o modelo não disse
     (`wait_seconds`, para esperar o fim da tarefa; `show_ui=False` quando o agente roda dentro da própria
-    interface). O que o modelo pediu explicitamente nunca é trocado.
+    interface). O que o modelo pediu nunca é trocado, exceto `wait_seconds` abaixo do padrão, que só pode ser
+    o valor do esquema copiado sem querer.
     """
 
     def __init__(
@@ -154,6 +155,15 @@ class McpToolHost:
         for key, value in self._defaults.items():
             if key in properties and key not in filled:
                 filled[key] = value
+        # um modelo pequeno copia o padrão do esquema (`wait_seconds: 0`) sem querer dizer "não espere": com 0 a
+        # ferramenta devolveria o número da tarefa e ele gastaria voltas de minutos sondando `job_status`
+        waits = filled.get("wait_seconds")
+        if (
+            "wait_seconds" in self._defaults
+            and isinstance(waits, int | float)
+            and waits < self._defaults["wait_seconds"]
+        ):
+            filled["wait_seconds"] = self._defaults["wait_seconds"]
         return filled
 
     def call(self, name: str, arguments: dict) -> str:

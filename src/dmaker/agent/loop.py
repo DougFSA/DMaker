@@ -91,7 +91,12 @@ class AgentLoop:
             self.steps_taken += 1
             self._emit(
                 "model_reply",
-                {"seconds": round(time.monotonic() - started, 2), "tool_calls": len(reply.tool_calls)},
+                {
+                    "seconds": round(time.monotonic() - started, 2),
+                    "tool_calls": len(reply.tool_calls),
+                    "prompt_tokens": reply.prompt_tokens,
+                    "completion_tokens": reply.completion_tokens,
+                },
             )
             if reply.thinking:
                 self._emit("thinking", {"text": reply.thinking})

@@ -6,7 +6,6 @@ import json
 
 import pytest
 
-from dmaker import config
 from dmaker.agent.llm import OllamaChat, Reply, ToolCall, _normalize_model_name
 from dmaker.agent.loop import GIVE_UP_WARNING, AgentLoop
 from dmaker.agent.prompt import ESSENTIAL_RULES, system_prompt, task_prompt
@@ -253,12 +252,14 @@ def test_default_system_prompt_uses_the_generated_kit_manual_and_is_dash_free():
     assert "camera_altar" in prompt and "camera_lateral" in prompt
 
 
-def test_the_prompt_is_far_smaller_than_the_whole_skill():
+def test_the_biggest_kit_prompt_leaves_room_in_a_16k_context():
+    """Regras mais manual do kit ficam em cerca de 2 mil tokens; as ferramentas somam outros 3 a 4 mil. Medido com
+    o modelo real, o maior histórico de um pedido da bateria foi de uns 7 mil tokens."""
+    from dmaker.agent.kits import KITS
     from dmaker.manual.ia_docs import estimate_tokens
 
-    skill = (config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert estimate_tokens(system_prompt(["editing"])) < estimate_tokens(skill)
+    for kit in KITS:
+        assert estimate_tokens(system_prompt([kit.name])) <= 2600, kit.name
 
 
 def test_task_prompt_is_the_rules_plus_the_task_file():
@@ -381,6 +382,27 @@ def test_ollama_chat_and_mcp_host_are_valid_chat_model_and_tool_host_protocols()
     host = McpToolHost()
     tools = to_ollama_tools(host.specs())
     assert all(t["type"] == "function" for t in tools)
+
+
+def test_chat_reports_how_many_prompt_tokens_the_server_read():
+    opener = FakeOpener({"message": {"content": "oi"}, "prompt_eval_count": 5400, "eval_count": 37})
+
+    reply = OllamaChat(model="m", opener=opener).chat([], [])
+
+    assert (reply.prompt_tokens, reply.completion_tokens) == (5400, 37)
+
+
+def test_the_model_reply_event_carries_the_token_usage():
+    model = ScriptedModel([Reply(content="ok", prompt_tokens=7000, completion_tokens=12)])
+    events = []
+    loop = AgentLoop(
+        model=model, tools=FakeToolHost(), system="s", on_event=lambda k, d: events.append((k, d))
+    )
+
+    loop.ask("oi")
+
+    data = next(d for k, d in events if k == "model_reply")
+    assert data["prompt_tokens"] == 7000 and data["completion_tokens"] == 12
 
 
 if __name__ == "__main__":  # pragma: no cover

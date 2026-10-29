@@ -108,6 +108,8 @@ class OpenAICompatibleChat:
             content=_text_content(message.get("content")),
             tool_calls=parse_tool_calls(message.get("tool_calls")),
             thinking=message.get("reasoning_content") or message.get("reasoning") or None,
+            prompt_tokens=(data.get("usage") or {}).get("prompt_tokens"),
+            completion_tokens=(data.get("usage") or {}).get("completion_tokens"),
         )
 
     def is_alive(self) -> bool:

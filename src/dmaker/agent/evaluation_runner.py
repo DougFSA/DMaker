@@ -36,10 +36,105 @@ from .session import AgentSession, server_tool_names
 from .settings import AgentSettings, build_chat
 from .tools import DEFAULT_WAIT_SECONDS, McpToolHost, ToolHost, ToolSpec
 
-STUB_RESULT = json.dumps(
-    {"status": "done", "simulado": True, "aviso": "ferramenta pesada simulada na avaliação"},
-    ensure_ascii=False,
-)
+STUB_NOTE = "ferramenta pesada simulada na avaliação"
+
+
+def _job_result(result: dict) -> str:
+    """O formato de uma ferramenta de segundo plano que já terminou: o retrato do job mais o resultado."""
+    return json.dumps(
+        {
+            "job_id": "simulado",
+            "status": "done",
+            "elapsed_s": 0.0,
+            "progress": {},
+            "error": None,
+            "result": result,
+            "aviso": STUB_NOTE,
+        },
+        ensure_ascii=False,
+    )
+
+
+def stub_result(name: str, arguments: Mapping[str, Any]) -> str:
+    """O resultado que a ferramenta pesada devolveria, no mesmo formato do real, para o modelo continuar o fluxo.
+
+    Um resultado vazio deixaria o modelo sem o caminho do projeto de dublagem ou do arquivo gerado, e a avaliação
+    mediria o simulador e não o modelo.
+    """
+    output = config.OUTPUT_DIR
+    source = str(arguments.get("path") or arguments.get("src") or arguments.get("source") or "")
+    stem = Path(source).stem or "gravacao"
+    project = str(arguments.get("name") or arguments.get("name_or_path") or f"quick_{stem}")
+    video = {
+        "output": f"{output.as_posix()}/{stem}.mp4",
+        "duration_s": 4.0,
+        "warnings": [],
+        "resolution": "1080x1920",
+    }
+    flat: dict[str, Any] = {
+        "clone_voice": {"id": str(arguments.get("name", "voz")), "kind": "clone", "engine": "omnivoice"},
+        "plan_multicam": {"clips": 12, "warnings": [], "phases": [{"name": "abertura", "at_s": 0.0}]},
+        "cut_pauses_and_caption": {
+            "project": project,
+            "spec_path": f"{config.PROJECTS_DIR.as_posix()}/{project}/spec.json",
+            "duration_before_s": 4.0,
+            "duration_after_s": 3.2,
+            "removed_s": 0.8,
+            "cuts_by_reason": {"silence": 1},
+            "captions": True,
+        },
+        "verify_watermark": {"level": "absent", "verdict": "não encontrada"},
+    }
+    if name in flat:
+        return json.dumps({**flat[name], "aviso": STUB_NOTE}, ensure_ascii=False)
+    jobs: dict[str, dict[str, Any]] = {
+        "quick_edit": {"spec_path": f"{config.PROJECTS_DIR.as_posix()}/{project}/spec.json", **video},
+        "render_project": video,
+        "export_project": {"outputs": [video]},
+        "autocut": {
+            "project": project,
+            "spec_path": f"{config.PROJECTS_DIR.as_posix()}/{project}/spec.json",
+            "report": {
+                "duration_before_s": 4.0,
+                "duration_after_s": 3.2,
+                "removed_s": 0.8,
+                "counts": {"silence": 1},
+            },
+            "warnings": [],
+        },
+        "dub_prepare": {
+            "project": f"{output.as_posix()}/dublagem/{stem}.{arguments.get('target_language', 'en')}.dub.json",
+            "source": source,
+            "target_language": arguments.get("target_language", "en"),
+            "segments": [
+                {
+                    "id": "s1",
+                    "start": 0.0,
+                    "end": 3.5,
+                    "original": "Olá, tudo bem?",
+                    "text": "Hello, how are you?",
+                }
+            ],
+        },
+        "dub_render": {
+            "output": f"{output.as_posix()}/dublagem/{stem}.dublado.mp4",
+            "output_seconds": 4.0,
+            "warnings": [],
+        },
+        "dub_stems": {"zip": f"{output.as_posix()}/dublagem/trilhas.zip"},
+        "isolate_vocals": {
+            "voice": f"{output.as_posix()}/isolamento/{stem}.voz.wav",
+            "background": f"{output.as_posix()}/isolamento/{stem}.fundo.wav",
+        },
+        "speech_words": {
+            "words": [{"text": "oi", "start": 0.4, "end": 0.7}, {"text": "pessoal", "start": 0.8, "end": 1.4}]
+        },
+        "fix_speech": {"output": f"{output.as_posix()}/{stem}.corrigido.wav", "warnings": []},
+        "synthesize_speech": {"output": f"{output.as_posix()}/narracao.wav", "duration_s": 3.0},
+    }
+    return _job_result(jobs.get(name, {}))
+
+
 MODEL_PROCESS_NAMES = ("ollama", "llama-server", "llama_server", "llama.cpp", "lm studio", "lm-studio")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -231,7 +326,7 @@ class RecordingHost:
     def call(self, name: str, arguments: dict) -> str:
         self.executed.append((name, dict(arguments)))
         if self.stub_heavy and name in HEAVY_TOOLS:
-            return STUB_RESULT
+            return stub_result(name, arguments)
         return self.inner.call(name, arguments)
 
 
@@ -286,6 +381,18 @@ def _observe(case: EvalCase, root: Path, before: Mapping[str, str | None]) -> di
     return {"projects": projects, "unchanged": unchanged, "files": files}
 
 
+def asks_the_user(answer: str) -> bool:
+    """A resposta termina numa pergunta: o modelo parou esperando a pessoa, como numa conversa de verdade."""
+    return answer.rstrip().endswith("?")
+
+
+def answer_follow_up(session: AgentSession, case: EvalCase, answer: str) -> str:
+    """Se o modelo pergunta antes de agir e o pedido diz o que a pessoa responde (`follow_up`), ela responde uma vez."""
+    if case.follow_up and asks_the_user(answer):
+        return session.ask(case.follow_up)
+    return answer
+
+
 def run_case(
     case: EvalCase,
     chat_factory: Callable[[EvalCase, Mapping[str, str]], ChatModel],
@@ -311,6 +418,7 @@ def run_case(
         attempted: list[str] = []
         kits: list[str] = []
         replies: list[float] = []
+        prompts: list[int] = []
         policy = ScriptedPolicy(case.confirm, case.consent)
 
         def listen(kind: str, data: dict[str, Any]) -> None:
@@ -320,6 +428,8 @@ def run_case(
                 kits.extend(data["kits"])
             elif kind == "model_reply":
                 replies.append(data["seconds"])
+                if data.get("prompt_tokens") is not None:
+                    prompts.append(data["prompt_tokens"])
 
         defaults = {"wait_seconds": DEFAULT_WAIT_SECONDS, "show_ui": False}
 
@@ -341,6 +451,7 @@ def run_case(
         answer = ""
         try:
             answer = session.ask(request)
+            answer = answer_follow_up(session, case, answer)
         except Exception as exc:  # noqa: BLE001 - um pedido que quebra conta como falha, não derruba a bateria
             error = f"{type(exc).__name__}: {exc}"
         seconds = time.monotonic() - started
@@ -363,6 +474,7 @@ def run_case(
             steps=session.steps_taken,
             seconds=seconds,
             first_reply_seconds=replies[0] if replies and case.simple else None,
+            prompt_tokens=max(prompts) if prompts else None,
             tools=[name for name, _ in executed],
             answer=answer,
             error=error,
@@ -419,4 +531,5 @@ def run_battery(
         memory_bytes=peak,
         fake=fake,
         real_tools=real_tools,
+        context_limit=None if fake else settings.num_ctx,
     )

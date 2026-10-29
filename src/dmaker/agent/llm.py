@@ -37,6 +37,8 @@ class Reply:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     thinking: str | None = None
+    prompt_tokens: int | None = None  # o que o servidor leu do histórico: mede se o kit cabe no contexto
+    completion_tokens: int | None = None
 
 
 class ChatModel(Protocol):
@@ -130,6 +132,8 @@ class OllamaChat:
             content=message.get("content") or "",
             tool_calls=parse_tool_calls(message.get("tool_calls")),
             thinking=message.get("thinking") or None,
+            prompt_tokens=data.get("prompt_eval_count"),
+            completion_tokens=data.get("eval_count"),
         )
 
     def is_alive(self) -> bool:

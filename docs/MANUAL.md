@@ -575,6 +575,7 @@ Você tem um vídeo falado (celular, webcam) e quer um Reel pronto, sem montar u
 - Qual é o arquivo de vídeo (caminho completo) e se é falado em português.
 - Em que segundos o Reel começa e termina (o padrão é do início ao fim; Reels aceitam até 180 s).
 - Qual frase de gancho aparece nos primeiros 3 segundos, se quiser uma, e o formato (Reels é o padrão).
+- Se pediu uma marca (MedlyCare): `brand` com o nome em minúsculas (`medlycare`) e `logo` para pôr o logo. A marca não é o gancho.
 
 #### Pela IA
 

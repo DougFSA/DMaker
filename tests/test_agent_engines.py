@@ -130,6 +130,17 @@ def tool_call_reply() -> dict:
     }
 
 
+def test_openai_usage_becomes_prompt_and_completion_tokens():
+    reply = {
+        "choices": [{"message": {"content": "ok"}}],
+        "usage": {"prompt_tokens": 4100, "completion_tokens": 9},
+    }
+    with FakeOpenAIServer([], reply) as server:
+        result = OpenAICompatibleChat(model="m", base_url=server.url, timeout=5).chat([], [])
+
+    assert (result.prompt_tokens, result.completion_tokens) == (4100, 9)
+
+
 def test_chat_posts_to_the_chat_completions_route_and_parses_tool_calls():
     with FakeOpenAIServer(["qualquer"], tool_call_reply()) as server:
         chat = OpenAICompatibleChat(model="qualquer", base_url=server.url, timeout=5)

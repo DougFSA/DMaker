@@ -161,9 +161,22 @@ def test_the_mcp_host_waits_for_long_tools_instead_of_leaving_the_model_to_poll(
 def test_what_the_model_asked_for_is_never_replaced_by_a_default():
     host = McpToolHost(allowed=["render_project"], argument_defaults={"wait_seconds": 99, "show_ui": False})
 
-    filled = host._with_defaults("render_project", {"name_or_path": "x", "wait_seconds": 5})
+    filled = host._with_defaults("render_project", {"name_or_path": "x", "preview": True, "show_ui": True})
 
-    assert filled["wait_seconds"] == 5 and filled["show_ui"] is False
+    assert filled["preview"] is True and filled["show_ui"] is True  # o que o modelo pediu fica
+
+
+def test_a_wait_below_the_default_is_the_schema_default_copied_by_the_model_and_is_raised():
+    """O modelo pequeno devolve todos os argumentos com o valor padrão do esquema, inclusive `wait_seconds: 0`."""
+    host = McpToolHost(allowed=["render_project"], argument_defaults={"wait_seconds": 99})
+
+    assert (
+        host._with_defaults("render_project", {"name_or_path": "x", "wait_seconds": 0})["wait_seconds"] == 99
+    )
+    assert (
+        host._with_defaults("render_project", {"name_or_path": "x", "wait_seconds": 600})["wait_seconds"]
+        == 600
+    )
 
 
 # ---------- progresso ao vivo ----------
