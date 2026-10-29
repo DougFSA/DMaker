@@ -428,7 +428,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 
 ## Usando pela interface gráfica
 
-Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o editor de linha do tempo e a aba Voz (vozes, narração, isolar voz, corrigir fala, trocar voz, dublar) e a aba Modelos.
+Há duas interfaces. A **interface nova** (Vue) é a que abre em `/`; a **interface clássica** continua em `/classica` e tem o que a nova ainda não cobre: o editor de linha do tempo e a aba Voz (vozes, narração, dublar) e a aba Modelos.
 
 ```powershell
 cd D:\DMaker
@@ -439,7 +439,7 @@ Abre em <http://127.0.0.1:8765> (`--port` troca a porta; `--no-browser` não abr
 
 ### Interface nova
 
-A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz).
+A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, **Fila**, **Modelos**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**. Hoje funcionam **Projetos**, **Lote**, **Saídas**, **Transições**, **Looks**, **Infográficos** e **Agente**; Editor, Voz, Dublagem, Fila e Modelos aparecem com o selo "em breve": cada um abre uma tela "em construção" com o botão **Abrir a interface clássica**, onde a função continua funcionando até a nova cobrir tudo. A Voz já tem as abas de cada seção (Vozes, Narração, Pronúncia, Isolar voz, Corrigir fala e Trocar voz), e as três últimas já funcionam por inteiro: escolha a aba depois de abrir **Voz** na barra lateral.
 
 ![Tela Projetos da interface nova](img/ui-projetos.png)
 
@@ -447,6 +447,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Editar na clássica** (abre o editor de linha do tempo) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. O andamento aparece ao vivo.
 - **Lote**: o passo a passo de vários vídeos de uma planilha (veja a tarefa "Fazer vários vídeos de uma planilha").
 - **Saídas**: os vídeos já gerados, com busca e filtro; assista ali ou baixe.
+- **Voz, abas Isolar voz, Corrigir fala e Trocar voz**: escolha um arquivo do projeto aberto ou envie um do computador, acompanhe a etapa e o tempo do trabalho, ouça o antes e o depois (a correção toca só o trecho trocado, com 1,5 s de folga) e baixe o resultado. **Usar no projeto** troca o arquivo original pelo novo em tudo que o projeto usa e salva. O resultado e o que você preencheu ficam guardados ao trocar de aba. Veja as tarefas "Separar a voz da música e do ruído", "Corrigir uma palavra errada sem regravar" e "Trocar a voz de uma gravação inteira".
 - **Agente**: a conversa com o agente local, com o andamento das ferramentas ao vivo e botões de confirmação (veja "Usando com LLM local").
 - **Transições**, **Looks** e **Infográficos**: catálogos com a prévia de cada um (veja as tarefas "Escolher a transição entre os trechos", "Dar um acabamento de cinema ao vídeo" e "Pôr um infográfico animado no vídeo"); no de infográficos, o formulário monta os campos do esquema do modelo e mostra o quadro com o que você digitou.
 
@@ -1991,7 +1992,7 @@ Diga: "Isola a voz dos primeiros 60 segundos de `entrevista.mp4`." A IA lança o
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Isolar voz**: escolha o **Arquivo** (do projeto ou **Enviar vídeo ou áudio**), **Início** e **Fim** opcionais, o **Formato** e **Isolar voz**. Ouça os dois resultados ali mesmo. Num projeto, o clipe aceita `"audio_mode": "voice"` ou `"background"`, que usa a voz ou o fundo no lugar do áudio da câmera.
+Interface nova, **Voz**, aba **Isolar voz**: escolha o **Arquivo** (um vídeo ou áudio do projeto aberto, ou **Enviar um arquivo...** do computador), **Início** e **Fim** opcionais, em segundos, e o **Formato** (`wav`, sem perdas, ou `mp3`), e clique em **Isolar voz**. A barra mostra a etapa e o tempo decorrido. No fim aparecem a **Voz** e o **Fundo**, cada um com player e botão **Baixar voz** ou **Baixar fundo**; o resultado fica na tela mesmo que você troque de aba da Voz. Na interface clássica é a aba **Voz**, seção **Isolar voz**, com os mesmos campos. Num projeto, o clipe aceita `"audio_mode": "voice"` ou `"background"`, que usa a voz ou o fundo no lugar do áudio da câmera.
 
 #### Pela CLI
 
@@ -2045,7 +2046,7 @@ Diga: "Em `gravacao.mp4`, onde ele diz 'Medicare', ponha 'MedlyCare'." A IA list
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Corrigir fala**: escolha o **Arquivo**, o intervalo opcional (**Transcrever de** e **até**) e **Transcrever**; clique na primeira e na última palavra do trecho errado, escreva **O que deve ser dito no lugar**, escolha a **Voz** (ou deixe a do falante), deixe marcado **Falar também as palavras vizinhas** (entonação mais natural) e clique em **Corrigir fala**. **Ouvir o trecho original** e **Ouvir o trecho corrigido** comparam; **Usar no projeto** troca o arquivo nos trechos do projeto aberto.
+Interface nova, **Voz**, aba **Corrigir fala**: escolha o **Arquivo**, o intervalo opcional (**Transcrever de** e **até**) e **Transcrever**. As palavras aparecem em linhas, uma por fôlego (pausa de 0,25 s), com o tempo no começo de cada linha. Clique na primeira e na última palavra do trecho errado (uma palavra só: clique nela duas vezes) e o trecho fica marcado. Escreva **O que deve ser dito no lugar**, escolha a **Voz** (ou deixe a do falante), preencha **Guardar a voz do falante como** se quiser reaproveitá-la, deixe marcado **Falar também as palavras vizinhas** (entonação mais natural) e clique em **Corrigir fala**. No fim aparece o resumo do que foi trocado; **Ouvir trecho original** e **Ouvir trecho corrigido** tocam só o trecho trocado, com 1,5 s antes e depois, para ouvir a emenda; **Baixar corrigido** salva o arquivo; **Usar no projeto** troca o arquivo nos trechos do projeto aberto e salva (só vale para um arquivo que veio do projeto, não para um enviado do computador). A transcrição e o trecho escolhido ficam guardados ao trocar de aba. Na interface clássica é a aba **Voz**, seção **Corrigir fala**, com os mesmos campos.
 
 #### Pela CLI
 
@@ -2100,7 +2101,7 @@ Diga: "Testa a troca de voz nos primeiros 30 s de `gravacao.mp4` com `narradora`
 
 #### Pela interface
 
-Interface clássica, aba **Voz**, seção **Trocar voz**: **Arquivo** (do projeto ou **Enviar vídeo ou áudio**), **Voz que vai falar**, **Início** e **Fim** opcionais e **Trocar voz**. **Ouvir o original** e **Ouvir a voz trocada** comparam; **Usar no projeto** vale quando o arquivo inteiro foi convertido.
+Interface nova, **Voz**, aba **Trocar voz**: **Arquivo** (do projeto aberto ou **Enviar um arquivo...**), **Voz que vai falar**, **Início** e **Fim** opcionais e **Trocar voz**. No fim aparecem o resumo (trecho ou arquivo, blocos e o ajuste de volume), **Ouvir original** e **Ouvir voz trocada**, que partem do mesmo ponto para comparar a mesma fala, e **Baixar com a voz trocada**. **Usar no projeto** vale quando o arquivo inteiro foi convertido: com **Início** ou **Fim** preenchidos o botão fica desligado e explica por quê. Na interface clássica é a aba **Voz**, seção **Trocar voz**.
 
 #### Pela CLI
 
@@ -2490,6 +2491,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-37 | A linha do tempo da interface clássica passou a tocar o som da mesa e das faixas externas, fatiado pelos cortes como no render | "Usando pela interface gráfica" |
 | DMK-35 | Agente local por conversa, sem internet: kits de ferramentas e triagem, manual curto por kit, receitas do servidor MCP, confirmação antes do que é longo ou difícil de desfazer, segundo motor (servidor compatível com a OpenAI), `dmaker doctor --offline`, a tela **Agente** e a bateria `dmaker agent eval` | "Usando com LLM local (Ollama)" |
 | DMK-36 | Este manual, organizado por tarefa, com a versão para IA local (`docs/ia`), a busca `search_manual`, o `dmaker ajuda` e a exportação em PDF e HTML | "Usando com LLM local (Ollama)" |
+| DMK-38 | A interface nova passa a fazer o que a clássica fazia (em andamento): **Isolar voz**, **Corrigir fala** e **Trocar voz** na área Voz | "Usando pela interface gráfica" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
