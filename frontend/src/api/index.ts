@@ -52,7 +52,9 @@ export const api = {
     get: (name: string) => http.get<ProjectDetail>(`/api/projects/${enc(name)}`),
     create: (request: NewProjectRequest) => http.post<NewProjectResponse>('/api/projects', request),
     validate: (name: string) => http.post<ValidationSummary>(`/api/projects/${enc(name)}/validate`),
-    qa: (name: string) => http.post<QaReport>(`/api/projects/${enc(name)}/qa`),
+    /** `output` é o vídeo renderizado a conferir (a prévia ou a final); sem ele vale a última final do formato da spec. */
+    qa: (name: string, output?: string | null) =>
+      http.post<QaReport>(`/api/projects/${enc(name)}/qa`, output ? { output } : undefined),
     render: (name: string, request: RenderRequest) =>
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/render`, request),
     export: (name: string, presets: string[]) =>
