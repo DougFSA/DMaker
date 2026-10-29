@@ -130,6 +130,12 @@ class FrameRequest(BaseModel):
     width: int = 540
 
 
+class QaRequest(BaseModel):
+    # arquivo renderizado a conferir (a prévia ou a final que a pessoa escolheu); sem ele vale a última
+    # saída final do formato da spec, como sempre foi
+    output: str | None = None
+
+
 class CaptionsUpdate(BaseModel):
     cues: list[dict]
 
@@ -413,10 +419,10 @@ def validate_project(name: str) -> dict:
 
 
 @app.post("/api/projects/{name}/qa")
-def qa_project(name: str) -> dict:
+def qa_project(name: str, req: QaRequest | None = None) -> dict:
     """Relatório de QA em texto: checagens estáticas da spec e, se já houver uma saída final renderizada
-    para o preset da spec, também as checagens sobre o arquivo (duração, resolução, quadros pretos, silêncio,
-    loudness)."""
+    para o preset da spec (ou o arquivo pedido em `output`), também as checagens sobre o arquivo (duração,
+    resolução, quadros pretos, silêncio, loudness)."""
     from ..pipeline.projects import load_project
     from ..pipeline.report import build_report
 
@@ -426,11 +432,18 @@ def qa_project(name: str) -> dict:
         raise _error(404, str(exc)) from exc
     output = None
     try:
-        preset_id = get_preset(project.output.preset).id.replace("/", "-")
-        files = sorted(
-            config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
-        output = files[0] if files else None
+        if req is not None and req.output:
+            output = Path(req.output)
+            if not _allowed_file(output):
+                raise _error(404, "arquivo não encontrado ou não permitido")
+        else:
+            preset_id = get_preset(project.output.preset).id.replace("/", "-")
+            files = sorted(
+                config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            output = files[0] if files else None
         report = build_report(project, output=output)
     except (ValueError, KeyError) as exc:
         raise _error(400, str(exc)) from exc

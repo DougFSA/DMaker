@@ -355,6 +355,34 @@ def test_qa_endpoint(client):
     assert client.post("/api/projects/nao-existe/qa").status_code == 404
 
 
+def test_qa_endpoint_checks_the_chosen_output(client, monkeypatch, tmp_path):
+    """O editor deixa escolher a prévia ou a final: `output` aponta o arquivo que o QA vai inspecionar."""
+    from dmaker.pipeline import report as report_module
+
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    chosen = tmp_path / "escolhida.mp4"
+    chosen.write_bytes(b"x")
+    seen: dict[str, Path | None] = {}
+    real_build_report = report_module.build_report
+
+    def spy(project, **kwargs):
+        seen["output"] = kwargs.get("output")
+        return real_build_report(project)  # só as checagens da spec: o arquivo de teste não é vídeo
+
+    monkeypatch.setattr(report_module, "build_report", spy)
+    result = client.post(f"/api/projects/{PROJECT}/qa", json={"output": str(chosen)})
+    assert result.status_code == 200
+    assert seen["output"] == chosen
+
+    missing = client.post(f"/api/projects/{PROJECT}/qa", json={"output": str(tmp_path / "nao-existe.mp4")})
+    assert missing.status_code == 404
+
+    # sem `output` (e com corpo vazio) continua valendo a última saída final do formato da spec
+    seen.clear()
+    assert client.post(f"/api/projects/{PROJECT}/qa", json={}).status_code == 200
+    assert seen["output"] is None
+
+
 # ---------- estúdio de voz ----------
 
 
