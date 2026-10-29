@@ -160,6 +160,34 @@ def test_the_bar_fills_to_95_of_400_and_the_limit_mark_is_visible(renderer):
     assert (mark[:, 3] > 200).mean() > 0.9  # a haste do limite está desenhada, de ponta a ponta
 
 
+@pytest.mark.parametrize(
+    "size", [(778, 509), (900, 300), (778, 192)], ids=["topo-do-explicativo", "natural", "baixa"]
+)
+def test_the_bar_text_fits_inside_any_shape_of_region_without_the_labels_colliding(renderer, size):
+    """A região "topo" do modelo explicativo é larga e alta (1080 x 509 no render final): a barra mede pela menor das
+    proporções da página, e a descrição do valor e o nome do limite cabem sem se encostar."""
+    composition = page(
+        "barra", "medlycare", size=size, valor=95, maximo=400, limite=400, sufixo="mg", rotulo="de cafeína"
+    )
+    with open_page(renderer, composition) as (opened, warnings):
+        opened.seek(2.4)
+        boxes = opened.js(
+            """(() => {
+              const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect();
+                                          return [r.left, r.top, r.right, r.bottom]; };
+              return {value: box('#valor'), description: box('#rotulo'), limit: box('#limite-nome'),
+                      track: box('.trilho'), scale: box('.escala')};
+            })()"""
+        )
+    width, height = size
+    assert warnings == []
+    for name, (left, top, right, bottom) in boxes.items():
+        assert 0 <= left and right <= width and 0 <= top and bottom <= height, f"{name} sai da página {size}"
+    description, limit = boxes["description"], boxes["limit"]
+    apart = description[2] < limit[0] or limit[2] < description[0] or description[3] < limit[1]
+    assert apart, "a descrição do valor e o nome do limite se encostam"
+
+
 # ---------- a linha ----------
 
 
