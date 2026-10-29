@@ -223,6 +223,39 @@ def test_event_stream_sends_the_queue_when_it_changes_and_a_keepalive_while_it_d
     assert changed.startswith("data: ") and json.loads(changed[6:])["items"][0]["utterance"] == 2
 
 
+def test_event_stream_sends_again_when_only_the_worker_flag_changes(service):
+    service.add_text("Um texto para a fila.", QueueOptions())
+    worker = {"on": False}
+    stream = queue_event_stream(
+        service, sleep=lambda _s: None, snapshot=lambda: {**service.view(), "worker": worker["on"]}
+    )
+
+    assert json.loads(next(stream)[6:])["worker"] is False
+    worker["on"] = True
+    assert json.loads(next(stream)[6:])["worker"] is True
+
+
+def test_events_route_frames_say_whether_a_worker_is_running(service, monkeypatch):
+    """A tela só mostra "nenhum executor ativo" se o fluxo diz isso; sem o campo, o aviso piscaria entre itens."""
+    import asyncio
+
+    from dmaker.ui import queue_routes
+
+    route = next(r for r in build_queue_router().routes if r.path == "/api/voices/queue/events")
+
+    def first_frame() -> dict:
+        body = route.endpoint(service).body_iterator
+        return json.loads(asyncio.run(anext(body))[6:])
+
+    assert first_frame()["worker"] is False
+
+    class RunningWorker:
+        running = True
+
+    monkeypatch.setattr(queue_routes.runtime, "worker", RunningWorker())
+    assert first_frame()["worker"] is True
+
+
 def test_events_route_answers_as_an_event_stream_without_caching(service):
     # ler a rota pelo TestClient travaria (o fluxo não termina); aqui se chama o endpoint e se confere a resposta
     route = next(r for r in build_queue_router().routes if r.path == "/api/voices/queue/events")
