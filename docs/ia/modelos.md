@@ -38,12 +38,13 @@ dmaker models prune
 
 ## Como conferir
 
-`dmaker models list` mostra o estado (`instalado`, `parcial` ou `ausente`) e o tamanho medido em disco; um modelo `parcial` ficou pela metade e `download` completa. Os modelos ficam em `cache/models`.
+`dmaker models list` mostra o estado (`instalado`, `parcial` ou `ausente`) e o tamanho medido em disco; um modelo `parcial` ficou pela metade e `download` completa. Na interface nova, é a coluna **Estado** da tela **Modelos**: **baixado**, **incompleto** (o mesmo que `parcial`) ou **não baixado** (`ausente`). Os modelos ficam em `cache/models`.
 
 ## Erros comuns
 
-- **Download parou**: rode `download` de novo, que retoma e confere que ficou inteiro (hash).
+- **Download parou**: rode `download` de novo, que retoma e confere que ficou inteiro (hash). Na interface nova, o motivo aparece em vermelho na linha do modelo; clique em **Continuar download**.
 - **Uma função parou de funcionar**: apagou o modelo dela; baixe de novo.
-- **Sobrou pasta em `cache/models`**: é sobra de um modelo antigo; `prune` apaga.
+- **Sobrou pasta em `cache/models`**: é sobra de um modelo antigo; `prune` apaga. Na interface nova, é o cartão **Sobras**, com **Apagar sobras**.
+- **Apagar sobras está desligado ou o servidor recusa**: há um download em andamento; espere terminar.
 
 ---

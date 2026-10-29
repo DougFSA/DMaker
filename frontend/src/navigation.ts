@@ -50,7 +50,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Modelos',
     to: '/modelos',
     icon: 'layers',
-    ready: false,
+    ready: true,
   },
   { key: 'outputs', label: 'Saídas', to: '/saidas', icon: 'video', ready: true },
   { key: 'transitions', label: 'Transições', to: '/transicoes', icon: 'sparkles', ready: true },
