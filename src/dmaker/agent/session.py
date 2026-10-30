@@ -12,6 +12,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .attachments import ImageLoader, TurnAttachments
 from .extraction import extract_facts, render_facts
 from .kits import FREE_HTML_TOOLS, KITS, Kit, kit_by_name, tools_for_kits
 from .llm import ChatModel, StreamingChat
@@ -52,8 +53,14 @@ class ConversationSession(Protocol):
 
     chat: ChatModel
     current_kits: tuple[str, ...]
+    image_loader: ImageLoader | None  # a conversa o define: refaz o base64 das imagens que ela guardou
 
-    def ask(self, message: str, control: TurnControl | None = None) -> str: ...
+    def ask(
+        self,
+        message: str,
+        control: TurnControl | None = None,
+        attachments: TurnAttachments | None = None,
+    ) -> str: ...
 
     @property
     def interrupted(self) -> bool: ...
@@ -91,6 +98,7 @@ class AgentSession:
         None  # os projetos que existem, para achar o nome no pedido
     )
     max_steps: int = 25
+    image_loader: ImageLoader | None = None
     current_kits: tuple[str, ...] = field(default=(), init=False)
     _loop: AgentLoop | None = field(default=None, init=False, repr=False)
 
@@ -116,7 +124,12 @@ class AgentSession:
             on_event=self.on_event,
             max_steps=self.max_steps,
             gate=ToolGate(**gate_arguments),
+            image_loader=self._load_image,
         )
+
+    def _load_image(self, ref: str) -> str | None:
+        """A imagem de um anexo; a conversa define o `image_loader` depois que a sessão nasce, por isso é lido na hora."""
+        return self.image_loader(ref) if self.image_loader is not None else None
 
     def choose(self, message: str, should_stop: ShouldStop | None = None) -> Triage:
         """Escolhe o kit do pedido; uma resposta curta ("sim", "pode") continua no kit anterior."""
@@ -126,8 +139,17 @@ class AgentSession:
         self._emit("triage", {"kits": list(result.kits), "method": result.method})
         return result
 
-    def ask(self, message: str, control: TurnControl | None = None) -> str:
-        """Responde a uma mensagem: triagem, troca de kit se for o caso e o loop de ferramentas."""
+    def ask(
+        self,
+        message: str,
+        control: TurnControl | None = None,
+        attachments: TurnAttachments | None = None,
+    ) -> str:
+        """Responde a uma mensagem: triagem, troca de kit se for o caso e o loop de ferramentas.
+
+        A triagem olha só o que a pessoa escreveu (o nome de um arquivo anexado não deve escolher o kit), mas os dados
+        do pedido ("o que o pedido já diz") incluem os caminhos anexados, para o modelo usá-los sem perguntar.
+        """
         chosen = self.choose(message, control.should_stop if control else None).kits
         if self._loop is None:
             self._loop = self._build_loop(chosen)
@@ -135,10 +157,11 @@ class AgentSession:
             rebuilt = self._build_loop(chosen)
             self._loop.configure(rebuilt.system, rebuilt.tools)
         self.current_kits = tuple(chosen)
-        facts = render_facts(extract_facts(message, self._project_names()))
+        request = attachments.request(message) if attachments else message
+        facts = render_facts(extract_facts(request, self._project_names()))
         if facts:
             self._emit("facts", {"text": facts})
-        return self._loop.ask(message, facts, control)
+        return self._loop.ask(message, facts, control, attachments)
 
     def _project_names(self) -> Sequence[str]:
         if self.known_projects is not None:

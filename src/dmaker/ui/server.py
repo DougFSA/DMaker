@@ -25,7 +25,7 @@ from .. import __version__, config
 from ..domain.brand import available_brands, load_theme
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
-from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
+from ..media.probe import MEDIA_EXTS
 from ..pipeline.batch_files import SHEET_SUFFIXES
 from ..pipeline.build import build_id
 from ..pipeline.jobs import Job, JobManager
@@ -48,8 +48,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 CLASSIC_INDEX = STATIC_DIR / "index.html"
 # saída do `npm run build` em frontend/ (artefato de build: fora do git, dentro do pacote no release)
 DIST_DIR = Path(__file__).parent / "dist"
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
-MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
 # painéis conhecidos pelo seletor de layouts da interface (espelha KNOWN_PANELS em layout.js).
 LAYOUT_PANELS = {"player", "filters", "media", "timeline", "progress", "properties", "sidebar", "voice"}

@@ -19,11 +19,10 @@ from .. import config
 from ..domain.spec import ClipSegment, Project, VideoOverlay
 from ..filtergraph.proxy import proxy_command
 from ..media.ffmpeg import FFmpegRunner, ProgressSink
-from ..media.probe import probe
+from ..media.probe import VIDEO_EXTS, probe
 from .context import Prober
 
 PROXY_VERSION = "p1"  # muda quando a receita do proxy muda (invalida o cache; ver filtergraph/proxy.py)
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
 # tentativas de troca do tmp pelo proxy final antes de desistir; no Windows o ffmpeg às vezes ainda
 # segura o handle do arquivo por um instante depois de o processo sair (PermissionError WinError 32)

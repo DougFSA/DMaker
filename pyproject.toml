@@ -34,6 +34,8 @@ captions = ["faster-whisper>=1.0", "av>=11,<16"]
 voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5", "demucs>=4.1", "sherpa-onnx>=1.13.8", "audioseal>=0.2"]
 # lote: ler planilha .xlsx no `dmaker batch` (CSV e JSON não precisam de nada)
 lote = ["openpyxl>=3.1"]
+# agente: anexar arquivos PDF na conversa com o agente local (.txt, .md, .srt e .docx não precisam de nada)
+agente = ["pypdf==6.20.1"]
 # docs: exportar o manual em PDF (`dmaker manual export`) e tirar as capturas de tela, pelo Chromium do Playwright
 # html: composição animada em HTML sobreposta ao vídeo (type "html"), pelo mesmo Chromium
 # o Chromium baixa à parte, para dentro do clone (bin/playwright): dmaker setup --html

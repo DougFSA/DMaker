@@ -14,14 +14,23 @@ testes usam falsos.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent import AgentSession, ProgressReportingHost, build_chat, load_settings
-from ..agent.catalog import CatalogError, ModelCatalog, model_entries
+from ..agent.attachments import (
+    KIND_IMAGE,
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    AttachedFile,
+    AttachmentRecord,
+    AttachmentRefused,
+    compose_turn,
+)
+from ..agent.catalog import CatalogError, ModelCatalog, ModelInfo, model_entries
 from ..agent.conversations import (
     MODE_OPERATE,
     ConversationFormatError,
@@ -41,6 +50,7 @@ from ..agent.session import server_tool_names
 from ..agent.settings import AgentSettings, SettingsError, build_catalog
 from ..agent.tools import DEFAULT_WAIT_SECONDS, McpToolHost, ToolHost
 from ..pipeline.jobs import Job, JobCancelled, JobManager
+from .agent_attachments import AttachmentService, register_attachment_routes
 from .agent_conversations import (
     KEEP,
     Conversation,
@@ -85,6 +95,8 @@ class MessageBody(BaseModel):
     model: str | None = Field(default=None, min_length=1)
     effort: str | None = None
     options: OptionsBody | None = None
+    # Os ids dos anexos já enviados à conversa (`POST /conversations/{id}/attachments`) que seguem nesta mensagem.
+    attachments: list[str] = Field(default_factory=list, max_length=MAX_ATTACHMENTS_PER_MESSAGE)
 
 
 class CreateConversationBody(BaseModel):
@@ -182,9 +194,11 @@ def build_agent_router(
     memory_probe: MemoryProbe | None = None,
     store: ConversationStore | None = None,
     free_session_factory: SessionFactory = default_free_session_factory,
+    attachments: AttachmentService | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["agente local"])
     registry = ConversationRegistry(store or DiskConversationStore(), session_factory, free_session_factory)
+    attachment_service = attachments or AttachmentService()
     catalogs: dict[
         tuple[str, str], ModelCatalog
     ] = {}  # um por servidor: o detalhe de cada modelo fica guardado
@@ -308,16 +322,93 @@ def build_agent_router(
             for item in running
         )
 
+    def installed_model(current: AgentSettings, model: str) -> tuple[ModelInfo | None, list[ModelInfo]]:
+        """O que o servidor diz de um modelo e a lista de todos, ou `(None, [])` se não dá para saber.
+
+        Só o Ollama informa o que cada modelo faz (imagem, ferramentas). Nos outros motores, com o servidor fora do
+        ar, com o modelo fora da lista ou com o detalhe dele ilegível, nada se sabe e nada é recusado: o servidor
+        responde, e a falha dele chega à pessoa em português (`describe_failure`).
+        """
+        if current.engine != "ollama":
+            return None, []
+        try:
+            installed = catalog_for(current).models()
+        except CatalogError:
+            return None, []
+        info = next((item for item in installed if same_model(item.name, model)), None)
+        if info is None or not info.capabilities_known:
+            return None, []
+        return info, installed
+
+    def require_tools_when_operating(current: AgentSettings, mode: str, model: str) -> None:
+        """Operar o DMaker é usar ferramentas: um modelo que sabidamente não as tem é recusado aqui, sem passar pelo Ollama."""
+        if mode != MODE_OPERATE:
+            return
+        info, _ = installed_model(current, model)
+        if info is not None and "tools" not in info.capabilities:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"O modelo {info.name} não usa ferramentas. Para operar o DMaker, escolha um modelo com "
+                    "ferramentas; para conversar com ele, use a Conversa livre."
+                ),
+            )
+
+    def vision_refusal(
+        current: AgentSettings, mode: str, model: str, records: Sequence[AttachmentRecord]
+    ) -> JSONResponse | None:
+        """O 422 de uma mensagem com imagem para um modelo que não enxerga, com os modelos instalados que enxergam.
+
+        Só se sugere o que serve a esta conversa: no modo Operar, um modelo de imagem sem ferramentas seria recusado
+        logo depois, então ele só aparece no texto, como caminho pela Conversa livre.
+        """
+        if not any(record.kind == KIND_IMAGE for record in records):
+            return None
+        info, installed = installed_model(current, model)
+        if info is None or "vision" in info.capabilities:
+            return None
+        seeing = [item for item in installed if "vision" in item.capabilities]
+        usable = [
+            item.name
+            for item in seeing
+            if mode != MODE_OPERATE or not item.capabilities_known or "tools" in item.capabilities
+        ]
+        if usable:
+            advice = f"Escolha um destes: {', '.join(usable)}."
+        elif seeing:
+            advice = (
+                f"Os modelos de imagem instalados ({', '.join(item.name for item in seeing)}) não usam ferramentas: "
+                "para falar da imagem, abra uma Conversa livre com um deles."
+            )
+        else:
+            advice = "Nenhum modelo instalado aceita imagem; instale um com o selo de imagem no Ollama para usar este anexo."
+        message = f"O modelo {info.name} não aceita imagens. {advice}"
+        return JSONResponse(
+            status_code=422, content={"detail": message, "error": message, "suggested_models": usable}
+        )
+
     def stop_turn(conversation: Conversation) -> None:
         """O Parar: a confirmação pendente vira "não" e a conexão com o modelo é fechada (o sinal já foi marcado)."""
         conversation.relay.cancel()
         conversation.session.abort()
 
-    def run_turn(conversation: Conversation, job: Job, message: str, current: AgentSettings) -> dict:
+    def run_turn(
+        conversation: Conversation,
+        job: Job,
+        message: str,
+        current: AgentSettings,
+        attached: Sequence[AttachedFile] = (),
+    ) -> dict:
         conversation.relay.attach(job)
         job.on_cancel(lambda: stop_turn(conversation))
-        conversation.begin_turn(message)
         turn = settings_for_conversation(current, conversation.record)
+        try:
+            composed = compose_turn(attached, turn.num_ctx, conversation.record.mode == MODE_OPERATE)
+        except AttachmentRefused as exc:  # a rota já conferiu; isto é a última barreira
+            conversation.begin_turn(message)
+            conversation.fail(exc)
+            raise
+        conversation.begin_turn(message, composed.summaries)
         configure_chat(conversation.session.chat, turn)
         control = TurnControl(
             should_stop=lambda: job.cancel_requested,
@@ -325,9 +416,9 @@ def build_agent_router(
             model_cold=model_is_cold(current, conversation, turn.num_ctx),
         )
         try:
-            answer = conversation.session.ask(message, control)
+            answer = conversation.session.ask(message, control, composed.attachments)
         except Exception as exc:
-            conversation.fail(exc)
+            conversation.fail(exc, with_images=bool(composed.attachments.images))
             raise
         conversation.end_turn()
         result = {"answer": answer, "kits": list(conversation.session.current_kits)}
@@ -402,12 +493,25 @@ def build_agent_router(
 
     # ---------- mensagens e confirmações ----------
 
-    @router.post("/api/agent/messages")
-    def send_message(body: MessageBody) -> dict:
+    @router.post("/api/agent/messages", response_model=None)
+    def send_message(body: MessageBody) -> dict | JSONResponse:
         current = settings()
         conversation = open_conversation(body.conversation_id, current) if body.conversation_id else None
+        if body.attachments and conversation is None:
+            raise HTTPException(
+                status_code=422, detail="Os anexos pertencem a uma conversa: envie também o conversation_id."
+            )
         model = body.model or (conversation.model if conversation else current.model)
+        mode = body.mode or (conversation.record.mode if conversation else MODE_OPERATE)
         require_model_server(current, model)
+        require_tools_when_operating(current, mode, model)
+        records = (
+            attachment_service.lookup(conversation, body.attachments)
+            if conversation is not None and body.attachments
+            else []
+        )
+        if (refusal := vision_refusal(current, mode, model, records)) is not None:
+            return refusal
         options = body.options.to_options() if body.options is not None else None
         explicit_effort = "effort" in body.model_fields_set
         inherited = conversation.record.effort if conversation else None
@@ -422,6 +526,7 @@ def build_agent_router(
                 options,
             )
         with lock:
+            attached: list[AttachedFile] = []
             if conversation is None:
                 conversation = registry.create(current, body.mode or MODE_OPERATE, model, effort, options)
             else:
@@ -433,6 +538,10 @@ def build_agent_router(
                     raise HTTPException(
                         status_code=409, detail="O agente ainda está respondendo à mensagem anterior."
                     )
+                if (
+                    records
+                ):  # antes de mudar qualquer coisa: um anexo recusado não deixa a conversa pela metade
+                    attached = attachment_service.load(conversation, records, mode == MODE_OPERATE)
                 if body.mode is not None:
                     try:
                         registry.change_mode(conversation, body.mode, current)
@@ -445,9 +554,12 @@ def build_agent_router(
                         options=options,
                     )
             target = conversation
+            sent = tuple(attached)
+            if sent:
+                target.mark_attachments_sent(item.record.id for item in sent)
             job = jobs.start(
                 "agente: " + body.message[:60],
-                lambda running_job: run_turn(target, running_job, body.message, current),
+                lambda running_job: run_turn(target, running_job, body.message, current, sent),
                 meta={"kind": AGENT_KIND, "conversation": target.id, "cancellable": True},
             )
             target.running = job
@@ -472,13 +584,15 @@ def build_agent_router(
         model = body.model or current.model
         if body.model:
             require_installed_if_known(current, model)
+        require_tools_when_operating(current, body.mode, model)
         options = body.options.to_options() if body.options is not None else None
         effort = resolve_effort(current, model, body.effort or None, True, options)
-        return registry.create(current, body.mode, model, effort, options).detail()
+        return registry.create(current, body.mode, model, effort, options).detail(current.num_ctx)
 
     @router.get("/api/agent/conversations/{conversation_id}")
     def get_conversation(conversation_id: str) -> dict:
-        return open_conversation(conversation_id, settings()).detail()
+        current = settings()
+        return open_conversation(conversation_id, current).detail(current.num_ctx)
 
     @router.patch("/api/agent/conversations/{conversation_id}")
     def update_conversation(conversation_id: str, body: UpdateConversationBody) -> dict:
@@ -489,6 +603,8 @@ def build_agent_router(
         model_changed = not same_model(model, conversation.model)
         if model_changed:
             require_installed_if_known(current, model)
+        if model_changed or body.mode is not None:
+            require_tools_when_operating(current, body.mode or conversation.record.mode, model)
         options = body.options.to_options() if body.options is not None else None
         if "options" in fields and body.options is None:
             options = ConversationOptions()  # `options: null` volta às opções do ambiente
@@ -519,7 +635,7 @@ def build_agent_router(
                 effort=effort if (explicit_effort or effort != inherited) else KEEP,
                 options=options,
             )
-        return conversation.detail()
+        return conversation.detail(current.num_ctx)
 
     @router.delete("/api/agent/conversations/{conversation_id}")
     def delete_conversation(conversation_id: str) -> dict:
@@ -547,4 +663,5 @@ def build_agent_router(
         jobs.cancel(running.id)
         return {"stopping": True, "job_id": running.id}
 
+    register_attachment_routes(router, attachment_service, open_conversation, settings)
     return router

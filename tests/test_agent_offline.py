@@ -125,6 +125,15 @@ def test_missing_python_packages_point_to_the_pip_extra():
     assert item.status == "missing" and item.download == 'pip install -e ".[captions]"'
 
 
+def test_the_pdf_reader_is_an_optional_module_with_its_own_extra():
+    report = build_report(SETTINGS, FakeProbe(modules=("pypdf",)))
+
+    item = by_name(report)["Pacote Python pypdf"]
+    assert item.status == "missing" and item.download == 'pip install -e ".[agente]"'
+    assert "PDF" in item.needed_by and not report.ready
+    assert by_name(build_report(SETTINGS, FakeProbe()))["Pacote Python pypdf"].ok
+
+
 def test_missing_ffmpeg_fonts_and_sounds_are_reported_with_dmaker_setup():
     report = build_report(
         SETTINGS,

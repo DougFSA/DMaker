@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .. import config
+from .attachments import AttachmentRecord
 from .catalog import think_value
 from .settings import AgentSettings
 from .transcript import utc_now
@@ -81,6 +82,9 @@ class ConversationRecord:
     kits: list[str] = field(default_factory=list)
     history: list[dict[str, Any]] = field(default_factory=list)  # o que o modelo lê, sem o prompt de sistema
     transcript: list[dict[str, Any]] = field(default_factory=list)  # o que a tela desenha
+    attachments: list[AttachmentRecord] = field(
+        default_factory=list
+    )  # os enviados e os que esperam a mensagem
 
     @property
     def display_title(self) -> str:
@@ -104,6 +108,7 @@ class ConversationRecord:
             "kits": list(self.kits),
             "history": self.history,
             "transcript": self.transcript,
+            "attachments": [attachment.to_dict() for attachment in self.attachments],
         }
 
     @classmethod
@@ -112,6 +117,14 @@ class ConversationRecord:
             raise ConversationFormatError("O arquivo não tem o formato de uma conversa do DMaker.")
         if data.get("version", SCHEMA_VERSION) > SCHEMA_VERSION:
             raise ConversationFormatError("A conversa foi salva por uma versão mais nova do DMaker.")
+        try:
+            attachments = [
+                AttachmentRecord.from_dict(item)
+                for item in data.get("attachments") or []
+                if isinstance(item, dict)
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConversationFormatError("Os anexos da conversa estão ilegíveis.") from exc
         return cls(
             id=data["id"],
             mode=data["mode"],
@@ -124,6 +137,7 @@ class ConversationRecord:
             kits=[str(kit) for kit in data.get("kits") or []],
             history=list(data.get("history") or []),
             transcript=list(data.get("transcript") or []),
+            attachments=attachments,
         )
 
 
