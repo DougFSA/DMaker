@@ -7,14 +7,14 @@ import { useEditorActions } from '@/composables/useEditorActions'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { ShortcutId } from '@/lib/keymap'
 import { useEditorStore } from '@/stores/editor'
-import { useEditorPanelsStore } from '@/stores/editorPanels'
 import { useKeymapStore } from '@/stores/keymap'
+import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useTimelineStore } from '@/stores/timeline'
 
 const editor = useEditorStore()
 const timeline = useTimelineStore()
 const keymap = useKeymapStore()
-const panels = useEditorPanelsStore()
+const layout = useScreenLayoutStore()
 const actions = useEditorActions()
 
 const ready = computed(() => !!editor.view)
@@ -82,10 +82,10 @@ function hint(text: string, id: ShortcutId): string {
         size="sm"
         icon-only
         aria-label="Filtros"
-        :variant="panels.isHidden('filters') ? 'secondary' : 'primary'"
-        :aria-pressed="!panels.isHidden('filters')"
+        :variant="layout.isHidden('filters') ? 'secondary' : 'primary'"
+        :aria-pressed="!layout.isHidden('filters')"
         title="Mostrar ou ocultar o painel Filtros"
-        @click="panels.toggle('filters')"
+        @click="layout.toggle('filters')"
       >
         F
       </AppButton>
@@ -93,10 +93,10 @@ function hint(text: string, id: ShortcutId): string {
         size="sm"
         icon-only
         aria-label="Mídia"
-        :variant="panels.isHidden('media') ? 'secondary' : 'primary'"
-        :aria-pressed="!panels.isHidden('media')"
+        :variant="layout.isHidden('media') ? 'secondary' : 'primary'"
+        :aria-pressed="!layout.isHidden('media')"
         title="Mostrar ou ocultar o painel Mídia"
-        @click="panels.toggle('media')"
+        @click="layout.toggle('media')"
       >
         M
       </AppButton>

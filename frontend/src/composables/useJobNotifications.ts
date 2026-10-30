@@ -1,6 +1,7 @@
 import { onScopeDispose } from 'vue'
 import type { Router } from 'vue-router'
 import { batchResultOf } from '@/lib/batches'
+import { announcesItself, jobDestination } from '@/lib/jobDestination'
 import { useJobsStore, type JobView } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
 
@@ -28,11 +29,15 @@ export function useJobNotifications(router: Router): void {
         action: { label: 'Ver lote', run: () => void router.push({ name: 'batch' }) },
       })
     } else if (job.status === 'done') {
+      // o download de modelo já avisa pela tela dele ("Modelo baixado"): um segundo aviso só repetiria
+      if (announcesItself(job)) return
+      const destination = jobDestination(job)
       toasts.push({
         tone: 'success',
         title: 'Concluído',
         description: job.description,
-        action: { label: 'Ver saídas', run: () => void router.push({ name: 'outputs' }) },
+        // só quem gerou vídeo leva às Saídas; os outros levam à tela que disparou o job
+        action: destination ? { label: destination.label, run: () => void router.push(destination.to) } : undefined,
       })
     } else if (job.status === 'cancelled') {
       // parar a pedido (a narração, por exemplo) não é falha: o que já saiu ficou guardado

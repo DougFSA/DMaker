@@ -10,6 +10,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { useEditorStore } from '@/stores/editor'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
+import ScreenLayoutPicker from './ScreenLayoutPicker.vue'
 
 const editor = useEditorStore()
 const jobs = useJobsStore()
@@ -109,6 +110,10 @@ async function startRender(choice: RenderChoice): Promise<void> {
       </AppButton>
       <AppButton @click="openRender('final')">Render final</AppButton>
       <AppButton @click="openRender('export')">Exportar</AppButton>
+    </div>
+
+    <div class="toolbar__group">
+      <ScreenLayoutPicker />
     </div>
 
     <RenderDialog

@@ -175,7 +175,8 @@ function pipKey(pip: PipLayer): string {
 }
 
 .stage {
-  --stage-max-h: min(52vh, 34rem);
+  /* o layout de tela dá a altura do encaixe; fora dele, a janela decide */
+  --stage-max-h: var(--editor-stage-max-h, min(52vh, 34rem));
   position: relative;
   aspect-ratio: var(--ratio);
   width: min(100%, calc(var(--stage-max-h) * var(--ratio)));

@@ -1,18 +1,41 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { SIZE_DEFAULTS, SIZE_RANGES } from '@/lib/editorLayout'
+import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useWorkspaceStore } from '@/stores/workspace'
+import LayoutDivider from './LayoutDivider.vue'
 import SidebarNav from './SidebarNav.vue'
 import TopBar from './TopBar.vue'
 
 const workspace = useWorkspaceStore()
+const screenLayout = useScreenLayoutStore()
 const route = useRoute()
+
+/** A largura da barra lateral vem do layout de tela (o divisor entre ela e o conteúdo); recolhida, vale a medida fixa. */
+const sidebarWidth = computed(() => screenLayout.layout.sizes['col-sidebar'] ?? SIZE_DEFAULTS['col-sidebar'])
+const resizing = ref(false)
+const shellStyle = computed(() => (workspace.sidebarCollapsed ? undefined : { '--sidebar-width': `${sidebarWidth.value}px` }))
 </script>
 
 <template>
-  <div :class="['shell', { 'shell--collapsed': workspace.sidebarCollapsed }]">
+  <div :class="['shell', { 'shell--collapsed': workspace.sidebarCollapsed, 'shell--resizing': resizing }]" :style="shellStyle">
     <a href="#conteudo" class="shell__skip">Ir para o conteúdo</a>
     <aside class="shell__sidebar">
       <SidebarNav :collapsed="workspace.sidebarCollapsed" />
+      <LayoutDivider
+        v-if="!workspace.sidebarCollapsed"
+        class="shell__resizer"
+        orientation="vertical"
+        label="Largura da barra lateral"
+        :value="sidebarWidth"
+        :min="SIZE_RANGES['col-sidebar'][0]"
+        :max="SIZE_RANGES['col-sidebar'][1]"
+        :per-pixel="1"
+        :step="16"
+        @resize="screenLayout.setSize('col-sidebar', $event)"
+        @drag="resizing = $event"
+      />
     </aside>
     <div class="shell__main">
       <TopBar />
@@ -35,6 +58,11 @@ const route = useRoute()
   grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
 }
 
+/* arrastando o divisor, a largura acompanha o mouse na hora, sem a animação do recolher */
+.shell--resizing {
+  transition: none;
+}
+
 .shell__sidebar {
   position: sticky;
   top: 0;
@@ -42,6 +70,15 @@ const route = useRoute()
   overflow-y: auto;
   background: var(--color-bg-soft);
   border-right: 1px solid var(--color-border);
+}
+
+.shell__resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 6px;
 }
 
 .shell__main {

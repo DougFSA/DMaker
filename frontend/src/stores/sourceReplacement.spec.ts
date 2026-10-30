@@ -1,6 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MediaEntry } from '@/lib/media'
+import { openEditor } from '@/test/editorMount'
+import { timelineView } from '@/test/editorFixtures'
 import { useSourceReplacementStore } from './sourceReplacement'
 
 const spec = {
@@ -103,5 +105,26 @@ describe('sourceReplacement', () => {
 
     await expect(store.replace('demo', fileEntry, 'x.mp4')).rejects.toThrow('Spec inválida.')
     expect(store.busy).toBe(false)
+  })
+
+  it('com o editor aberto no projeto, a troca passa por ele: a cópia dele muda e o salvar grava', async () => {
+    const { store: editor, fetch } = await openEditor(undefined, {
+      'POST /api/projects/demo/edit': (call: { body: unknown }) => {
+        const { spec: sent, op } = call.body as { spec: Record<string, unknown>; op: { path: string; value: string } }
+        const next = structuredClone(sent) as { timeline: Array<Record<string, unknown>> }
+        next.timeline[0]!.src = op.value
+        return { spec: next, timeline: timelineView() }
+      },
+    })
+    const store = useSourceReplacementStore()
+    const entry: MediaEntry = { id: 'file:clip0.mp4', kind: 'clip', label: 'clip0.mp4', path: 'clip0.mp4', src: 'clip0.mp4' }
+
+    expect(await store.replace('demo', entry, 'novo.mp4')).toBe(1)
+
+    expect((editor.spec?.timeline as Array<{ src: string }>)[0]!.src).toBe('novo.mp4')
+    expect(editor.dirty).toBe(false)
+    // não leu o projeto do disco de novo (a spec do editor é a verdade) e gravou uma vez
+    expect(fetch.to('PUT /api/projects/demo')).toHaveLength(1)
+    expect(fetch.to('GET /api/projects/demo')).toHaveLength(1)
   })
 })

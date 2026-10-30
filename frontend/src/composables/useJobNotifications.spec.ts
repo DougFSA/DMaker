@@ -24,8 +24,13 @@ afterEach(() => {
 })
 
 /** Um job que a interface viu rodando e que termina como o servidor disser. */
-async function finishJob(status: string, error: string | null = null, result: unknown = null): Promise<void> {
-  useJobsStore().track('j1', { description: 'Narração: roteiro curto' })
+async function finishJob(
+  status: string,
+  error: string | null = null,
+  result: unknown = null,
+  description = 'Narração: roteiro curto',
+): Promise<void> {
+  useJobsStore().track('j1', { description })
   FakeEventSource.latest().emit({ kind: 'end', t: 9, status, error, result })
   await flushPromises()
 }
@@ -33,10 +38,31 @@ async function finishJob(status: string, error: string | null = null, result: un
 const lastToast = () => useToastsStore().items.at(-1)
 
 describe('avisos de fim de job', () => {
-  it('um job concluído avisa com o botão para as saídas', async () => {
-    await finishJob('done')
-    expect(lastToast()).toMatchObject({ tone: 'success', title: 'Concluído', description: 'Narração: roteiro curto' })
+  it('um render concluído avisa com o botão para as saídas', async () => {
+    const result = { output: 'output/a.mp4', preset: 'instagram/reels' }
+    await finishJob('done', null, result, 'meu: render final')
+    expect(lastToast()).toMatchObject({ tone: 'success', title: 'Concluído', description: 'meu: render final' })
     expect(lastToast()?.action?.label).toBe('Ver saídas')
+    lastToast()?.action?.run()
+    expect(router.push).toHaveBeenLastCalledWith({ name: 'outputs' })
+  })
+
+  it('um job de áudio concluído não oferece as saídas: leva à tela que o disparou', async () => {
+    await finishJob('done', null, { ready: 3, total: 3 }, 'narração (Ana, 40 caracteres)')
+    expect(lastToast()).toMatchObject({ tone: 'success', title: 'Concluído' })
+    expect(lastToast()?.action?.label).toBe('Abrir Narração')
+    lastToast()?.action?.run()
+    expect(router.push).toHaveBeenLastCalledWith({ name: 'voice-narration' })
+  })
+
+  it('o download de modelo não ganha um segundo aviso: a tela de Modelos já diz "Modelo baixado"', async () => {
+    await finishJob('done', null, { id: 'whisper' }, 'baixar modelo (Whisper)')
+    expect(useToastsStore().items).toHaveLength(0)
+  })
+
+  it('o download de modelo que falha ainda avisa', async () => {
+    await finishJob('error', 'sem rede', null, 'baixar modelo (Whisper)')
+    expect(lastToast()).toMatchObject({ tone: 'error', title: 'O job falhou' })
   })
 
   it('um job parado a pedido avisa "Parado" em tom neutro, e não como falha', async () => {

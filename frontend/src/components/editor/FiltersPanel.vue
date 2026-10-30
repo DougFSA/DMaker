@@ -122,7 +122,7 @@ const ready = computed(() => !!editor.spec)
 </script>
 
 <template>
-  <AppCard class="filters" title="Filtros" :subtitle="ready ? subtitle : undefined" flush>
+  <AppCard class="filters" :subtitle="ready ? subtitle : undefined" flush>
     <template #actions>
       <PopoverRoot v-model:open="menuOpen">
         <PopoverTrigger as-child>

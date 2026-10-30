@@ -64,10 +64,10 @@ describe('EditorView (/editor/:name)', () => {
       expect(buttonOf(wrapper, label), label).toBeDefined()
     }
     expect(wrapper.findAll('[data-panel]').map((slot) => slot.attributes('data-panel')).slice(0, 4)).toEqual([
-      'media',
       'player',
       'filters',
       'timeline',
+      'media',
     ])
     expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual(['Propriedades', 'JSON', 'Preview'])
     expect(wrapper.find('.properties').exists()).toBe(true)
@@ -229,13 +229,14 @@ describe('EditorView (/editor/:name)', () => {
     expect(wrapper.find('[data-panel="filters"]').exists()).toBe(true)
     await buttonOf(wrapper, 'Filtros')?.trigger('click')
     expect(wrapper.find('[data-panel="filters"]').exists()).toBe(false)
-    expect(wrapper.find('.workbench--no-filters').exists()).toBe(true)
+    // a coluna dos filtros recolhe junto com o painel
+    expect(wrapper.find('.workbench').attributes('style')).toContain('0px 0px minmax(0, 1fr) 6px 240px')
     await buttonOf(wrapper, 'Mídia')?.trigger('click')
-    expect(wrapper.find('.workbench--no-media.workbench--no-filters').exists()).toBe(true)
+    expect(wrapper.find('[data-panel="media"]').exists()).toBe(false)
     await buttonOf(wrapper, 'Filtros')?.trigger('click')
     await buttonOf(wrapper, 'Mídia')?.trigger('click')
     expect(wrapper.find('[data-panel="media"]').exists()).toBe(true)
-    expect(wrapper.find('.workbench--no-media').exists()).toBe(false)
+    expect(wrapper.find('[data-panel="filters"]').exists()).toBe(true)
   })
 
   it('J, K e L agem uma vez só: o teclado é do editor, e o painel do player não tem ouvinte próprio', async () => {

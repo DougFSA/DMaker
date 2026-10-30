@@ -6,6 +6,7 @@ import ConfirmHost from '@/components/ui/ConfirmHost.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
 import { useClientHeartbeat } from '@/composables/useClientHeartbeat'
 import { useJobNotifications } from '@/composables/useJobNotifications'
+import { useRemoteFocus } from '@/composables/useRemoteFocus'
 import { followRemoteRender } from '@/router/remoteHash'
 import { useJobsStore } from '@/stores/jobs'
 
@@ -14,6 +15,8 @@ const router = useRouter()
 
 useClientHeartbeat()
 useJobNotifications(router)
+// render disparado pela CLI ou pelo MCP: a interface abre o projeto dele sozinha (o `focus` do job)
+useRemoteFocus(router)
 
 onMounted(async () => {
   jobs.startPolling()

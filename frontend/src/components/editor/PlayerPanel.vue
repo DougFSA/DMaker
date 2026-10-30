@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AppCard class="player" title="Player" flush :data-sound="soundState">
+  <AppCard class="player" flush :data-sound="soundState">
     <template #actions>
       <AppBadge v-if="hasView" :tone="media.current ? 'accent' : 'warning'" dot>
         {{ media.current ? 'Áudio da mixagem' : 'Áudio aproximado' }}
