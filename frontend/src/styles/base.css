@@ -139,6 +139,11 @@ button {
   border: 0;
 }
 
+/* a gaveta de navegação aberta (tela estreita) trava a rolagem da página por baixo dela */
+html.is-scroll-locked {
+  overflow: hidden;
+}
+
 /* barras de rolagem discretas, no tom do tema */
 * {
   scrollbar-width: thin;
