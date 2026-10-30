@@ -431,7 +431,8 @@ onBeforeUnmount(() => {
 
 .form__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  /* o mínimo nunca passa da largura disponível: a 375 px o cartão tem só uns 17 rem, e uma coluna de 19 rem vazava dele */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
   gap: var(--space-4);
 }
 

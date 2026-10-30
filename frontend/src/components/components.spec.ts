@@ -153,6 +153,38 @@ describe('JobsMenu', () => {
     const wrapper = mount(JobsMenu, { global: { plugins: [await createReadyRouter()] } })
     expect(wrapper.text()).toContain('Servidor sem resposta')
   })
+
+  it('em tela estreita (compacto) esconde o resumo e mostra só o número de jobs rodando', async () => {
+    const jobs = useJobsStore()
+    const wrapper = mount(JobsMenu, { props: { compact: true }, global: { plugins: [await createReadyRouter()] } })
+    const pill = wrapper.get('.jobs-pill')
+    expect(pill.classes()).toContain('jobs-pill--compact')
+    expect(wrapper.get('.jobs-pill__text').classes()).toContain('visually-hidden')
+    expect(wrapper.find('.jobs-pill__count').exists()).toBe(false)
+    expect(pill.attributes('title')).toBe('Nenhum job ativo')
+
+    jobs.jobs['a'] = {
+      id: 'a',
+      description: 'demo: preview',
+      status: 'running',
+      project: 'demo',
+      progress: { percent: 30 },
+      startedAtMs: Date.now(),
+      finishedAtMs: null,
+      error: null,
+      log: [],
+      result: null,
+    }
+    await flushPromises()
+    expect(wrapper.get('.jobs-pill__count').text()).toBe('1')
+  })
+
+  it('em tela larga mostra o resumo por extenso e não o número', async () => {
+    const wrapper = mount(JobsMenu, { global: { plugins: [await createReadyRouter()] } })
+    expect(wrapper.get('.jobs-pill__text').classes()).not.toContain('visually-hidden')
+    expect(wrapper.find('.jobs-pill__count').exists()).toBe(false)
+    expect(wrapper.get('.jobs-pill').attributes('title')).toBeUndefined()
+  })
 })
 
 async function createReadyRouter() {
