@@ -1734,7 +1734,7 @@ def _isolation_work(
 ) -> dict:
     """Isolamento ligado ao job: cada bloco do modelo vira progresso."""
     from .media.ffmpeg import SubprocessRunner
-    from .pipeline.isolation import default_isolation_service
+    from .pipeline.isolation import default_export_dir, default_isolation_service
 
     def on_progress(done: int, total: int) -> None:
         job.progress = {
@@ -1747,7 +1747,7 @@ def _isolation_work(
     service = default_isolation_service(SubprocessRunner(sink=job.sink()), job.log)
     stems = service.export(
         Path(path),
-        Path(out_dir) if out_dir else config.OUTPUT_DIR / "isolamento",
+        Path(out_dir) if out_dir else default_export_dir(),
         audio_format,  # type: ignore[arg-type]
         start,
         end,

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
+import dmaker.mcp_server as mcp_server
 from dmaker.agent.llm import Reply, ToolCall
 from dmaker.agent.loop import AgentLoop
 from dmaker.agent.safety import (
     CONFIRMATION_RULES,
+    REDOES_EXISTING_PROJECT,
     ApproveAll,
     ConfirmationRequest,
     DenyAll,
@@ -198,14 +203,97 @@ def test_removing_content_and_pronunciations_asks_but_editing_does_not():
     assert [r.tool for r in asked.asked] == ["edit_project", "edit_project", "pronunciation"]
 
 
-def test_autocut_asks_only_when_it_will_overwrite():
+CUT_TOOLS = ("autocut", "cut_pauses_and_caption")
+REDO_QUESTION = 'Posso refazer o projeto "meu-corte", apagando o corte anterior?'
+
+
+def cut_call(**extra):
+    return {"source": "a.mp4", "name": "meu-corte", **extra}
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_redoing_a_cut_asks_when_the_flag_is_on_and_the_project_exists_and_names_it(tool):
     asked = ApproveAll()
-    g = gate(asked, existing={"a.mp4"})
+    g = gate(asked, existing={"a.mp4"}, projects={"meu-corte"})
 
-    g.check("autocut", {"source": "a.mp4", "name": "x"})
-    g.check("autocut", {"source": "a.mp4", "name": "x", "overwrite": True})
+    assert g.check(tool, cut_call(overwrite=True)) is None
 
-    assert len(asked.asked) == 1
+    (request,) = asked.asked
+    assert request.tool == tool and request.kind == "action"
+    assert request.question == REDO_QUESTION
+    assert "—" not in request.question  # regra da marca: sem travessão no texto que a pessoa lê
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_redoing_a_cut_asks_nothing_when_the_flag_is_on_but_the_project_does_not_exist(tool):
+    """Era o falso positivo: `overwrite=true` num nome livre perguntava se podia apagar um corte que não há."""
+    asked = ApproveAll()
+    g = gate(asked, existing={"a.mp4"}, projects={"outro-projeto"})
+
+    assert g.check(tool, cut_call(overwrite=True)) is None
+
+    assert asked.asked == []
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_a_cut_without_the_flag_never_asks_even_when_the_project_exists(tool):
+    """Sem a flag o servidor recusa sozinho o nome que já existe, então nada é apagado e não há o que perguntar."""
+    asked = ApproveAll()
+    g = gate(asked, existing={"a.mp4"}, projects={"meu-corte"})
+
+    assert g.check(tool, cut_call()) is None
+    assert g.check(tool, cut_call(overwrite=False)) is None
+
+    assert asked.asked == []
+
+
+def test_a_gate_that_cannot_tell_which_projects_exist_asks_on_the_safe_side():
+    asked = ApproveAll()
+    g = ToolGate(schemas={}, policy=asked, exists={"a.mp4"}.__contains__)  # nenhum `project_exists` injetado
+
+    g.check("autocut", cut_call(overwrite=True))
+    g.check("autocut", cut_call())
+
+    assert [r.question for r in asked.asked] == [REDO_QUESTION]
+
+
+def test_only_a_real_true_turns_the_flag_on_and_a_name_is_needed_to_ask_about_a_project():
+    g = gate(ApproveAll(), existing={"a.mp4"}, projects={"meu-corte", ""})
+
+    assert g.confirmations("autocut", cut_call(overwrite="true")) == []
+    assert g.confirmations("autocut", cut_call(overwrite=1)) == []
+    assert g.confirmations("autocut", {"source": "a.mp4", "overwrite": True}) == []
+    assert g.confirmations("autocut", {"source": "a.mp4", "name": "", "overwrite": True}) == []
+    assert len(g.confirmations("autocut", cut_call(overwrite=True))) == 1
+
+
+def test_replace_is_not_a_flag_of_the_cut_tools_anymore():
+    """Nenhuma das duas ferramentas tem esse parâmetro (só o `run_batch`, que pergunta sempre): era código morto."""
+    g = gate(ApproveAll(), existing={"a.mp4"}, projects={"meu-corte"})
+
+    assert g.confirmations("autocut", cut_call(replace=True)) == []
+    assert g.confirmations("cut_pauses_and_caption", cut_call(replace=True)) == []
+    assert len(g.confirmations("run_batch", {"template": "t", "sheet": "p.csv", "replace": True})) == 1
+
+
+def test_a_refused_redo_blocks_the_call_and_says_which_project_stays_untouched():
+    g = gate(DenyAll(), existing={"a.mp4"}, projects={"meu-corte"})
+
+    text = g.check("autocut", cut_call(overwrite=True))
+
+    assert text is not None and "não autorizou" in text and '"meu-corte"' in text
+    assert "Não execute esta ação" in text
+
+
+def test_the_redo_table_only_lists_tools_that_have_the_name_and_the_flag():
+    """Contrato com o servidor MCP: a tabela fala dos argumentos que as ferramentas têm de verdade."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+
+    for tool, (name_argument, flag) in REDOES_EXISTING_PROJECT.items():
+        properties = tools[tool].input_schema["properties"]
+        assert properties[name_argument]["type"] == "string"
+        assert properties[flag]["type"] == "boolean" and properties[flag]["default"] is False
+        assert "replace" not in properties
 
 
 VIDEO = "C:/v/aula.mp4"
