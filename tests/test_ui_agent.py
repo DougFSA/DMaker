@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from dmaker import config
 from dmaker.agent import AgentSession, ConfirmationRequest
 from dmaker.agent.catalog import CatalogError, EffortLevel, LoadedModel, ModelInfo
 from dmaker.agent.llm import Reply, ToolCall, same_model
@@ -336,14 +337,18 @@ def test_an_empty_or_huge_message_is_rejected_by_validation(make_client):
     assert client.post("/api/agent/messages", json={"message": "x" * 5000}).status_code == 422
 
 
-def test_reset_clears_an_idle_conversation_and_refuses_a_busy_or_unknown_one(make_client):
+def test_delete_removes_an_idle_conversation_for_real_and_refuses_an_unknown_one(make_client):
     client, manager = make_client(Env([Reply("ok")]))
     started = client.post("/api/agent/messages", json={"message": "oi"}).json()
     wait_for(manager.get(started["job_id"]))
+    saved = config.CONVERSATIONS_DIR / f"{started['conversation_id']}.json"
+    assert saved.exists()
 
     assert client.delete(f"/api/agent/conversations/{started['conversation_id']}").json() == {
-        "reset": started["conversation_id"]
+        "deleted": started["conversation_id"]
     }
+    assert not saved.exists()  # apagar é apagar: não sobra a conversa no disco
+    assert client.get(f"/api/agent/conversations/{started['conversation_id']}").status_code == 404
     assert client.delete("/api/agent/conversations/nada").status_code == 404
 
 

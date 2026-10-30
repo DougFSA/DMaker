@@ -118,7 +118,6 @@ export const api = {
         `/api/agent/confirmations/${enc(confirmationId)}?conversation_id=${enc(conversationId)}`,
         { approve },
       ),
-    reset: (conversationId: string) => http.delete<{ reset: string }>(`/api/agent/conversations/${enc(conversationId)}`),
   },
 
   infographics: {

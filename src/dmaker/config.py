@@ -55,6 +55,9 @@ JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = DATA_DIR / "output"
 PROJECTS_DIR = DATA_DIR / "projects"
+# Conversas do agente local (um JSON por conversa e, ao lado, a pasta dos anexos dela): dado de quem usa o editor, por
+# isso mora fora de `cache/`, que se pode apagar a qualquer hora.
+CONVERSATIONS_DIR = DATA_DIR / "conversations"
 TEMPLATES_DIR = ROOT / "templates"
 # Infográficos prontos (contador, barra, linha...): cada um é uma pasta de composição em HTML com o seu esquema de
 # parâmetros; moram ao lado dos modelos de projeto, como os outros recursos versionados do clone.

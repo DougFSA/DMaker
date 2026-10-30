@@ -60,7 +60,6 @@ function stubServer(overrides: { status?: unknown; send?: () => Response } = {})
         return overrides.send ? Promise.resolve(overrides.send()) : json({ job_id: 'j1', conversation_id: 'c1' })
       }
       if (url.startsWith('/api/agent/confirmations/')) return json({ approved: true })
-      if (url.startsWith('/api/agent/conversations/')) return json({ reset: 'c1' })
       return json({ detail: 'nada' }, 404)
     }),
   )
@@ -191,14 +190,16 @@ describe('useAgentStore', () => {
     expect(agent.error).toContain('Perdi a conexão')
   })
 
-  it('nova conversa limpa a tela e avisa o servidor para esquecer o histórico', async () => {
+  it('nova conversa limpa a tela e esquece o id, sem apagar a conversa que ficou salva no servidor', async () => {
     const agent = useAgentStore()
     await agent.send('oi')
     FakeEventSource.instances[0]!.emit({ kind: 'end', t: 1, status: 'done', error: null, result: {} })
+    const before = calls.length
 
-    await agent.reset()
+    agent.reset()
 
-    expect(calls.some((call) => call.method === 'DELETE' && call.url === '/api/agent/conversations/c1')).toBe(true)
+    expect(calls.slice(before)).toEqual([]) // nenhuma chamada: em especial, nada de DELETE
+    expect(calls.some((call) => call.method === 'DELETE')).toBe(false)
     expect(agent.items).toEqual([])
     expect(agent.conversationId).toBeNull()
   })

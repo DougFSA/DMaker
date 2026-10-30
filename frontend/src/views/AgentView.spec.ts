@@ -57,7 +57,6 @@ function stubServer(): void {
       if (url === '/api/agent/status') return json(status)
       if (url === '/api/agent/messages') return json({ job_id: 'j1', conversation_id: 'c1' })
       if (url.startsWith('/api/agent/confirmations/')) return json({ approved: true })
-      if (url.startsWith('/api/agent/conversations/')) return json({ reset: 'c1' })
       return Promise.resolve(new Response('{"detail":"nada"}', { status: 404 }))
     }),
   )

@@ -81,6 +81,19 @@ class StreamingChat(ChatModel, Protocol):
     def abort(self) -> None: ...
 
 
+def reply_stoppable(
+    chat: ChatModel, messages: list[dict], tools: list[dict], should_stop: ShouldStop | None
+) -> Reply:
+    """Uma resposta inteira que o Parar consegue interromper: em fluxo, se o motor sabe e alguém pode pedir Parar.
+
+    Sem `should_stop` (a CLI, a bateria) é o `chat` de sempre. Serve às chamadas curtas fora do laço (a triagem), que
+    em CPU levam minutos quando o modelo ainda está carregando.
+    """
+    if should_stop is not None and isinstance(chat, StreamingChat):
+        return chat.stream(messages, tools, lambda kind, text: None, should_stop)
+    return chat.chat(messages, tools)
+
+
 class HealthCheckedChat(ChatModel, Protocol):
     """Um motor de conversa que sabe dizer se o servidor está no ar e se o modelo configurado está instalado."""
 
