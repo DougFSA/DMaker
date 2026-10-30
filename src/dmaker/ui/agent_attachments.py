@@ -3,9 +3,13 @@
 É a camada entre o upload HTTP e `agent/attachments.py` (puro). O anexo nasce numa conversa que já existe, antes da
 mensagem: a tela o envia, mostra a ficha e só então manda a mensagem com os ids. Cada tipo vai para um lugar:
 
-- imagem e texto extraído ficam em `conversations/<id>/` (somem junto com a conversa), com o nome do anexo no arquivo;
+- texto extraído fica em `conversations/<id>/` (some junto com a conversa), com o nome do anexo no arquivo;
 - vídeo, áudio e planilha vão para `cache/uploads` pela mesma função do upload de fala (as ferramentas leem por
-  caminho, e enviar o mesmo arquivo de novo reaproveita o caminho e os caches por caminho).
+  caminho, e enviar o mesmo arquivo de novo reaproveita o caminho e os caches por caminho);
+- a imagem vai para onde a conversa a usa: numa conversa que opera o DMaker ela é arquivo de trabalho e segue para
+  `cache/uploads` como o vídeo, para a foto entrar num projeto; numa conversa livre só o modelo a vê, e ela fica na
+  pasta da conversa. O modo pode mudar até a primeira mensagem, então quem manda é o modo do envio: a imagem que
+  nasceu na pasta da conversa ganha a cópia de trabalho quando a mensagem vai para quem opera.
 
 Os limites de tamanho são por tipo e a recusa diz qual é o limite. O leitor de planilha entra por parâmetro.
 """
@@ -36,7 +40,7 @@ from ..agent.attachments import (
     image_signature_matches,
     sheet_preview,
 )
-from ..agent.conversations import MODE_FREE, settings_for_conversation
+from ..agent.conversations import MODE_FREE, MODE_OPERATE, settings_for_conversation
 from ..agent.settings import AgentSettings
 from ..agent.transcript import utc_now
 from ..domain.batch_sheet import Sheet, SheetError
@@ -49,7 +53,7 @@ from ..text.documents import (
     extract_text,
 )
 from .agent_conversations import Conversation
-from .uploads import MAX_UPLOAD_BYTES, media_upload_dir, read_upload, save_upload
+from .uploads import MAX_UPLOAD_BYTES, media_upload_dir, read_upload, save_upload, upload_file_name
 
 MIB = 1024 * 1024
 MAX_IMAGE_BYTES = 20 * MIB  # uma foto de celular tem poucos MB; o modelo reduz a imagem de qualquer jeito
@@ -89,6 +93,21 @@ def too_big_message(kind: str) -> str:
     return f"O arquivo passa do limite de {shown} para {label}."
 
 
+def require_real_image(upload: UploadFile, name: str) -> None:
+    """Recusa o arquivo cujo conteúdo não é a imagem que a extensão diz, antes de gravar qualquer coisa em disco.
+
+    Olhar os primeiros bytes antes de gravar evita deixar o impostor em `cache/uploads`, onde o nome leva o conteúdo e
+    outro uso do mesmo arquivo poderia ser apagado junto. Um arquivo vazio passa: quem o recusa, com o motivo certo, é o upload.
+    """
+    head = upload.file.read(16)
+    upload.file.seek(0)
+    if head and not image_signature_matches(head, upload_file_name(upload)):
+        raise AttachmentRefused(
+            f"O arquivo '{name}' não é uma imagem {Path(name).suffix.upper().lstrip('.')} de verdade: "
+            "o conteúdo não bate com a extensão."
+        )
+
+
 class AttachmentService:
     """Guarda e entrega os anexos de uma conversa. O disco e o leitor de planilha são dele; a regra de negócio é pura."""
 
@@ -122,6 +141,8 @@ class AttachmentService:
             KIND_SHEET: self._receive_sheet,
             KIND_TEXT: self._receive_text,
         }[kind]
+        if kind == KIND_IMAGE and conversation.record.mode == MODE_OPERATE:
+            receive = self._receive_working_image
         record = receive(upload, name, attachment_id, folder)
         conversation.add_attachment(record)
         return record
@@ -132,18 +153,21 @@ class AttachmentService:
     def _receive_image(
         self, upload: UploadFile, name: str, attachment_id: str, folder: Path
     ) -> AttachmentRecord:
+        require_real_image(upload, name)
         saved = save_upload(
             upload, folder, size_limit(KIND_IMAGE)[0], too_big_message(KIND_IMAGE), attachment_id
         )
-        with saved.path.open("rb") as handle:
-            head = handle.read(16)
-        if not image_signature_matches(head, saved.path.name):
-            saved.path.unlink(missing_ok=True)
-            raise AttachmentRefused(
-                f"O arquivo '{name}' não é uma imagem {Path(name).suffix.upper().lstrip('.')} de verdade: "
-                "o conteúdo não bate com a extensão."
-            )
         return self._record(attachment_id, KIND_IMAGE, name, saved.size, file=saved.path.name)
+
+    def _receive_working_image(
+        self, upload: UploadFile, name: str, attachment_id: str, folder: Path
+    ) -> AttachmentRecord:
+        """A imagem de uma conversa que opera o DMaker: arquivo de trabalho em `cache/uploads`, como o vídeo."""
+        require_real_image(upload, name)
+        saved = save_upload(
+            upload, media_upload_dir(), size_limit(KIND_IMAGE)[0], too_big_message(KIND_IMAGE)
+        )
+        return self._record(attachment_id, KIND_IMAGE, name, saved.size, path=saved.path.as_posix())
 
     def _receive_media(
         self, upload: UploadFile, name: str, attachment_id: str, folder: Path
@@ -277,15 +301,40 @@ class AttachmentService:
                         "Remova o anexo ou use uma conversa do tipo Operar o DMaker."
                     ),
                 )
+            if record.kind == KIND_IMAGE and can_use_files:
+                self._ensure_working_file(conversation, record)
             files.append(AttachedFile(record, self._read_stored_text(conversation, record)))
         return files
 
+    def _ensure_working_file(self, conversation: Conversation, record: AttachmentRecord) -> None:
+        """Garante a cópia de trabalho de uma imagem que vai a uma conversa que opera o DMaker.
+
+        A imagem anexada antes de o modo mudar (ou antes de a imagem virar arquivo de trabalho) só existe na pasta da
+        conversa; as ferramentas leem por caminho, então ela ganha em `cache/uploads` o mesmo arquivo que um upload
+        de Operar teria, pelo mesmo conteúdo no nome (a mesma foto reaproveita o caminho).
+        """
+        if record.path and Path(record.path).is_file():
+            return
+        source = conversation.attachment_path(record)
+        if source is None or not source.is_file():
+            return  # sem arquivo de origem: `_read_stored_text` diz que sumiu e pede para anexar de novo
+        try:
+            with source.open("rb") as handle:
+                saved = save_upload(
+                    UploadFile(handle, filename=record.name),
+                    media_upload_dir(),
+                    size_limit(KIND_IMAGE)[0],
+                    too_big_message(KIND_IMAGE),
+                )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Não consegui preparar a imagem '{record.name}' para o editor usar. Anexe-a de novo.",
+            ) from exc
+        conversation.bind_working_file(record.id, saved.path.as_posix())
+
     def _read_stored_text(self, conversation: Conversation, record: AttachmentRecord) -> str:
-        stored = (
-            Path(record.path)
-            if record.kind in (KIND_MEDIA, KIND_SHEET) and record.path
-            else conversation.attachment_path(record)
-        )
+        stored = conversation.attachment_file(record)
         if stored is None or not stored.is_file():
             raise HTTPException(
                 status_code=422,
@@ -326,7 +375,7 @@ def register_attachment_routes(
         """A imagem de um anexo, com o tipo certo, para a miniatura. O id é conferido contra a conversa."""
         conversation = open_conversation(conversation_id, settings())
         record = conversation.attachment(attachment_id)
-        path = conversation.attachment_path(record) if record is not None else None
+        path = conversation.attachment_file(record) if record is not None else None
         if record is None or record.kind != KIND_IMAGE or path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="Este anexo não tem uma imagem para mostrar.")
         return FileResponse(

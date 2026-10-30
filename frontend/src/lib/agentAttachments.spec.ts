@@ -5,6 +5,8 @@ import { GEMMA, GPT_OSS, QWEN, imageAttachment, mediaAttachment, textAttachment 
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
+  IMAGE_AS_FILE_TEXT,
+  attachmentInfos,
   attachmentKindOf,
   attachmentOnlyMessage,
   attachmentWarnings,
@@ -145,16 +147,9 @@ describe('os avisos de antes de enviar', () => {
     expect(warning!.text).toBe('O modelo gpt-oss:20b não lê imagem. Escolha um modelo com o selo Imagem: gemma3:4b.')
   })
 
-  it('no modo Operar sugere só quem lê imagem e usa ferramentas', () => {
-    const [warning] = attachmentWarnings(cards(imageAttachment()), 'operate', GPT_OSS, [GPT_OSS, GEMMA, SEER])
-    expect(warning!.models).toEqual(['visao:7b'])
-  })
-
-  it('no modo Operar sem nenhum modelo que leia imagem e opere, diz isso e aponta a Conversa livre', () => {
-    const [warning] = attachmentWarnings(cards(imageAttachment()), 'operate', GPT_OSS, installed)
-    expect(warning!.models).toEqual([])
-    expect(warning!.text).toContain('nenhum modelo instalado lê imagem e opera o DMaker')
-    expect(warning!.text).toContain('abra uma Conversa livre com um modelo de imagem (gemma3:4b)')
+  it('no modo Operar a imagem é também arquivo de trabalho: o modelo sem visão não gera aviso que segure o envio', () => {
+    expect(attachmentWarnings(cards(imageAttachment()), 'operate', GPT_OSS, installed)).toEqual([])
+    expect(attachmentWarnings(cards(imageAttachment()), 'operate', GPT_OSS, [GPT_OSS, GEMMA, SEER])).toEqual([])
   })
 
   it('sem nenhum modelo com visão, diz que não há nenhum instalado', () => {
@@ -192,6 +187,33 @@ describe('os avisos de antes de enviar', () => {
   it('imagem e vídeo juntos numa Conversa livre geram os dois avisos', () => {
     const warnings = attachmentWarnings(cards(imageAttachment(), mediaAttachment()), 'free', GPT_OSS, installed)
     expect(warnings.map((warning) => warning.code)).toEqual(['image_without_vision', 'media_in_free_chat'])
+  })
+})
+
+describe('o que vale saber sem segurar o envio', () => {
+  const installed = [GPT_OSS, GEMMA, QWEN]
+
+  it('no modo Operar, a imagem para um modelo que não a vê é informada: ele ainda pode usá-la no vídeo', () => {
+    const [info] = attachmentInfos(cards(imageAttachment()), 'operate', GPT_OSS)
+    expect(info).toEqual({ code: 'image_as_file', text: IMAGE_AS_FILE_TEXT })
+    expect(info!.text).toBe('O modelo não vê a imagem, mas pode usá-la no vídeo.')
+  })
+
+  it('o modelo que lê imagem, o de capacidades desconhecidas e a falta de modelo não geram informação', () => {
+    expect(attachmentInfos(cards(imageAttachment()), 'operate', GEMMA)).toEqual([])
+    expect(attachmentInfos(cards(imageAttachment()), 'operate', { ...GPT_OSS, capabilities: [] })).toEqual([])
+    expect(attachmentInfos(cards(imageAttachment()), 'operate', undefined)).toEqual([])
+  })
+
+  it('na Conversa livre quem fala é o aviso que segura o envio, e a informação não existe', () => {
+    expect(attachmentInfos(cards(imageAttachment()), 'free', GPT_OSS)).toEqual([])
+    expect(attachmentWarnings(cards(imageAttachment()), 'free', GPT_OSS, installed)).toHaveLength(1)
+  })
+
+  it('sem imagem, ou com a ficha ainda subindo ou falha, não há informação', () => {
+    expect(attachmentInfos(cards(textAttachment(), mediaAttachment()), 'operate', GPT_OSS)).toEqual([])
+    const list = [uploadingCard('k1', { name: 'foto.png', size: 1 }), failedCard(uploadingCard('k2', { name: 'f2.png', size: 1 }), 'erro')]
+    expect(attachmentInfos(list, 'operate', GPT_OSS)).toEqual([])
   })
 })
 

@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import { cardOfAttachment, type AttachmentWarning } from '@/lib/agentAttachments'
+import { cardOfAttachment, IMAGE_AS_FILE_TEXT, type AttachmentInfo, type AttachmentWarning } from '@/lib/agentAttachments'
 import { imageAttachment, textAttachment } from '@/test/agentServer'
 import AgentAttachmentTray from './AgentAttachmentTray.vue'
 
@@ -10,7 +10,9 @@ const WARNING: AttachmentWarning = {
   models: ['gemma3:4b'],
 }
 
-function mountTray(props: Partial<{ cards: ReturnType<typeof cardOfAttachment>[]; warnings: AttachmentWarning[]; notice: string }> = {}) {
+function mountTray(
+  props: Partial<{ cards: ReturnType<typeof cardOfAttachment>[]; warnings: AttachmentWarning[]; infos: AttachmentInfo[]; notice: string }> = {},
+) {
   return mount(AgentAttachmentTray, {
     props: { cards: [], warnings: [], notice: '', conversationId: 'c1', ...props },
   })
@@ -40,6 +42,23 @@ describe('AgentAttachmentTray', () => {
     const wrapper = mountTray({ warnings: [{ ...WARNING, models: [] }] })
 
     expect(wrapper.find('[data-code="image_without_vision"] button').exists()).toBe(false)
+  })
+
+  it('a informação aparece como nota, sem botão, e não é um alerta', () => {
+    const wrapper = mountTray({
+      cards: [cardOfAttachment(imageAttachment())],
+      infos: [{ code: 'image_as_file', text: IMAGE_AS_FILE_TEXT }],
+    })
+
+    const info = wrapper.find('[data-code="image_as_file"]')
+    expect(info.text()).toBe('O modelo não vê a imagem, mas pode usá-la no vídeo.')
+    expect(info.attributes('data-tone')).toBe('info')
+    expect(info.attributes('role')).toBe('status')
+    expect(info.find('button').exists()).toBe(false)
+  })
+
+  it('sem informações a nota não existe', () => {
+    expect(mountTray({ cards: [cardOfAttachment(imageAttachment())] }).find('[data-code="image_as_file"]').exists()).toBe(false)
   })
 
   it('mostra o que a tela recusou ao escolher os arquivos', () => {

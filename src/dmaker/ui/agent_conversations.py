@@ -177,12 +177,31 @@ class Conversation:
             return None
         return self.store.attachments_dir(self.id) / Path(attachment.file).name
 
+    def attachment_file(self, attachment: AttachmentRecord) -> Path | None:
+        """Onde está o arquivo do anexo, em qualquer lugar: a pasta da conversa ou, se ele mora em `cache/uploads`, o caminho.
+
+        Uma imagem mora num ou noutro conforme o modo em que foi anexada (e as de antes de a imagem virar arquivo de
+        trabalho seguem na pasta da conversa), então a miniatura e o envio ao modelo perguntam por aqui.
+        """
+        inside = self.attachment_path(attachment)
+        if inside is not None:
+            return inside
+        return Path(attachment.path) if attachment.path else None
+
+    def bind_working_file(self, attachment_id: str, path: str) -> None:
+        """Anota o caminho de trabalho (em `cache/uploads`) de uma imagem que nasceu na pasta da conversa."""
+        with self.lock:
+            attachment = self.attachment(attachment_id)
+            if attachment is not None:
+                attachment.path = path
+                self._save(touch=False)
+
     def load_image(self, ref: str) -> str | None:
         """O base64 de uma imagem anexada, refeito a cada chamada ao modelo; `None` se o anexo ou o arquivo sumiu."""
         attachment = self.attachment(ref.removeprefix(IMAGE_REF_PREFIX))
         if attachment is None or attachment.kind != KIND_IMAGE:
             return None
-        path = self.attachment_path(attachment)
+        path = self.attachment_file(attachment)
         try:
             return base64.b64encode(path.read_bytes()).decode("ascii") if path is not None else None
         except OSError:

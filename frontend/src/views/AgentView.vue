@@ -270,10 +270,11 @@ function startNew(): void {
             @stop="agent.stop()"
             @attach="agent.attach($event)"
           >
-            <template v-if="agent.attachmentCards.length || agent.warnings.length || agent.attachNotice" #above>
+            <template v-if="agent.attachmentCards.length || agent.warnings.length || agent.infos.length || agent.attachNotice" #above>
               <AgentAttachmentTray
                 :cards="agent.attachmentCards"
                 :warnings="agent.warnings"
+                :infos="agent.infos"
                 :notice="agent.attachNotice"
                 :conversation-id="agent.conversationId"
                 @remove="agent.removeAttachment($event)"
