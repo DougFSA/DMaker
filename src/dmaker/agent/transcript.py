@@ -75,8 +75,12 @@ class TranscriptBuilder:
         """Uma cópia das entradas, segura para serializar enquanto o turno continua escrevendo nelas."""
         return copy.deepcopy(self.entries)
 
-    def add_user(self, text: str) -> None:
-        self._add("user", text=text, at=self._clock())
+    def add_user(self, text: str, attachments: Sequence[Mapping[str, Any]] = ()) -> None:
+        """A mensagem da pessoa. Os anexos entram como fichas (só a referência, nunca a imagem nem o texto extraído)."""
+        fields: dict[str, Any] = {"text": text, "at": self._clock()}
+        if attachments:
+            fields["attachments"] = [dict(item) for item in attachments]
+        self._add("user", **fields)
 
     def add_notice(self, level: str, code: str, text: str) -> None:
         self._add("notice", level=level, code=code, text=text)

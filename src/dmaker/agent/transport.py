@@ -11,6 +11,7 @@ import http.client
 import json
 import socket
 import threading
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any, Literal
@@ -24,6 +25,39 @@ ShouldStop = Callable[[], bool]
 
 class ChatStreamError(RuntimeError):
     """O servidor do modelo mandou um erro no meio do fluxo, ou a resposta veio ilegível ou cortada."""
+
+
+SERVER_MESSAGE_LIMIT = 300
+
+
+def server_error_message(exc: urllib.error.HTTPError) -> str:
+    """O que o servidor do modelo disse ao recusar o pedido: o `error` do corpo (Ollama ou OpenAI) ou o texto cru."""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace").strip()
+    except (OSError, ValueError, http.client.HTTPException):
+        return ""
+    try:
+        error = json.loads(raw).get("error")
+    except (ValueError, AttributeError):
+        return raw[:SERVER_MESSAGE_LIMIT]
+    if isinstance(error, dict):
+        error = error.get("message")
+    return str(error or "")[:SERVER_MESSAGE_LIMIT]
+
+
+def describe_failure(exc: BaseException, with_images: bool = False) -> str:
+    """A falha de um turno em português para a conversa: a recusa do servidor chega com o que ele disse.
+
+    `HTTPError` costuma ser "HTTP Error 400: Bad Request", que não diz nada à pessoa. Quando a mensagem levava
+    imagem, a dica é a causa mais provável: um modelo que não enxerga.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return str(exc) or exc.__class__.__name__
+    detail = server_error_message(exc)
+    text = f"O servidor do modelo recusou o pedido (código {exc.code})" + (f": {detail}" if detail else ".")
+    if with_images:
+        text += " Se o modelo não aceita imagens, escolha outro que tenha o selo de imagem."
+    return text
 
 
 def build_request(

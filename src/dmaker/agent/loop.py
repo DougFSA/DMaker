@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .attachments import ImageLoader, TurnAttachments, resolve_images, trusted_text
 from .flow import DELTA_EVENTS, TOOL_STAGE, DeltaBatcher, stage_label
 from .history import (
     DEFAULT_CHARS_PER_TOKEN,
@@ -67,6 +68,9 @@ class AgentLoop:
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     max_steps: int = DEFAULT_MAX_STEPS
     gate: ToolGate | None = None
+    image_loader: ImageLoader | None = (
+        None  # refaz o base64 das imagens anexadas: o histórico guarda só a referência
+    )
     steps_taken: int = field(default=0, init=False)  # voltas ao modelo no último pedido (a bateria mede)
     interrupted: bool = field(
         default=False, init=False
@@ -97,7 +101,8 @@ class AgentLoop:
         if self.gate is not None:
             for message in messages:
                 if message.get("role") in ("user", "tool"):
-                    self.gate.known_paths.remember(str(message.get("content") or ""))
+                    # o conteúdo de um arquivo anexado não é palavra da pessoa: não amplia os caminhos conhecidos
+                    self.gate.known_paths.remember(trusted_text(str(message.get("content") or "")))
 
     def configure(self, system: str, tools: ToolHost) -> None:
         """Troca o prompt e as ferramentas sem perder a conversa (o pedido seguinte caiu em outro kit)."""
@@ -190,8 +195,10 @@ class AgentLoop:
         """Uma volta ao modelo: em fluxo, quando o motor sabe, contando à tela o que chega; senão o `chat` inteiro."""
         sent_chars = request_chars(self._messages, self._tools_chars)
         images = image_count(self._messages)
+        # as imagens seguem em base64 só nesta chamada; sem imagem o modelo recebe a própria lista, como sempre
+        messages = resolve_images(self._messages, self.image_loader) if images else self._messages
         if not isinstance(self.model, StreamingChat):
-            reply = self.model.chat(self._messages, tool_specs)
+            reply = self.model.chat(messages, tool_specs)
             self._learn_density(sent_chars, images, reply)
             return reply
 
@@ -207,7 +214,7 @@ class AgentLoop:
         self._stage = None
         self._set_stage(stage)
         try:
-            reply = self.model.stream(self._messages, tool_specs, on_delta, should_stop)
+            reply = self.model.stream(messages, tool_specs, on_delta, should_stop)
         finally:
             batcher.flush()  # o que ficou guardado sai antes de qualquer evento seguinte (resposta, ferramenta)
         self._learn_density(sent_chars, images, reply)
@@ -222,19 +229,32 @@ class AgentLoop:
         self._emit("answer", {"text": partial, "interrupted": True})
         return partial
 
-    def ask(self, user_message: str, facts: str = "", control: TurnControl | None = None) -> str:
+    def ask(
+        self,
+        user_message: str,
+        facts: str = "",
+        control: TurnControl | None = None,
+        attachments: TurnAttachments | None = None,
+    ) -> str:
         """Manda uma mensagem do usuário, roda o loop de ferramentas e devolve a resposta final.
 
         `facts` é o bloco "o que o pedido já diz": vai junto da mensagem para o modelo, mas a conferência do "sim" de
         uma confirmação pendente olha só o que a pessoa escreveu. `control` traz o Parar, o contexto para o aparo do
-        histórico e se o modelo estava frio; sem ele o pedido corre como sempre correu.
+        histórico e se o modelo estava frio; sem ele o pedido corre como sempre correu. `attachments` são os
+        arquivos anexados: o conteúdo vem antes da pergunta (o modelo responde melhor com ela por último), os
+        caminhos vêm junto dela, e só os caminhos contam como "escritos pela pessoa".
         """
         control = control or TurnControl()
         stopped = control.should_stop or (lambda: False)
-        sent = f"{user_message}\n\n{facts}" if facts else user_message
-        self._messages.append({"role": "user", "content": sent})
+        attached = attachments or TurnAttachments()
+        spoken = "\n\n".join(part for part in (user_message, attached.references, facts) if part)
+        sent = "\n\n".join(part for part in (attached.context, spoken) if part)
+        message: dict[str, Any] = {"role": "user", "content": sent}
+        if attached.images:
+            message["images"] = list(attached.images)
+        self._messages.append(message)
         if self.gate is not None:
-            self.gate.known_paths.remember(sent)  # um caminho que a pessoa escreveu não é inventado
+            self.gate.known_paths.remember(spoken)  # um caminho que a pessoa escreveu não é inventado
         specs = self.tools.specs()
         self._refresh_gate(specs)
         tool_specs = to_ollama_tools(specs)

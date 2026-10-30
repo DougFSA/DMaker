@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .attachments import ImageLoader, TurnAttachments
 from .llm import ChatModel
 from .loop import AgentLoop, TurnControl
 from .session import abort_chat
@@ -45,14 +46,30 @@ class FreeSession:
     chat: ChatModel
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     system: str = FREE_SYSTEM_PROMPT
+    image_loader: ImageLoader | None = None
     current_kits: tuple[str, ...] = field(default=(), init=False)  # nunca há kit: o contrato pede o campo
     _loop: AgentLoop = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._loop = AgentLoop(model=self.chat, tools=NoTools(), system=self.system, on_event=self.on_event)
+        self._loop = AgentLoop(
+            model=self.chat,
+            tools=NoTools(),
+            system=self.system,
+            on_event=self.on_event,
+            image_loader=self._load_image,
+        )
 
-    def ask(self, message: str, control: TurnControl | None = None) -> str:
-        return self._loop.ask(message, "", control)
+    def _load_image(self, ref: str) -> str | None:
+        """A conversa define o `image_loader` depois que a sessão nasce, por isso ele é lido na hora de usar."""
+        return self.image_loader(ref) if self.image_loader is not None else None
+
+    def ask(
+        self,
+        message: str,
+        control: TurnControl | None = None,
+        attachments: TurnAttachments | None = None,
+    ) -> str:
+        return self._loop.ask(message, "", control, attachments)
 
     @property
     def interrupted(self) -> bool:

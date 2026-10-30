@@ -34,6 +34,7 @@ REQUIRED_MODULES: tuple[tuple[str, str, str], ...] = (
     ("faster_whisper", "captions", "legendas e transcrição"),
     ("kokoro_onnx", "voice", "vozes prontas"),
     ("playwright", "html", "exportar o manual em PDF e as composições em HTML"),
+    ("pypdf", "agente", "anexar arquivos PDF na conversa com o agente"),
 )
 SFX_SAMPLE = "whoosh.wav"
 FONT_SAMPLE = "Poppins-Regular.ttf"

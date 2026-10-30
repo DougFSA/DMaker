@@ -186,6 +186,19 @@ def test_when_the_detail_fails_the_list_still_shows_the_model_and_tries_again_ne
     assert opener.paths("POST").count("/api/show") == 2  # a falha não ficou guardada; o detalhe lido ficou
 
 
+def test_capabilities_are_only_known_when_the_server_said_them():
+    said = {"tmp": {"capabilities": ["completion", "vision"], "details": {}}}
+    silent = {"tmp": {"details": {}}}  # um Ollama antigo não lista as capacidades
+    tag = {"name": "tmp", "digest": "1", "size": 1}
+
+    known = OllamaCatalog(opener=server([tag], shows=said)).models()[0]
+    unknown = OllamaCatalog(opener=server([tag], shows=silent)).models()[0]
+
+    assert known.capabilities_known is True and known.capabilities == ("vision",)
+    assert unknown.capabilities_known is False and unknown.capabilities == ()
+    assert "capabilities_known" not in known.to_dict("fits", False)  # o contrato de /models não muda
+
+
 def test_the_context_falls_back_to_the_list_when_the_detail_has_no_model_info():
     shows = {"tmp": {"capabilities": ["completion"], "details": {}}}
     tag = {"name": "tmp", "digest": "1", "size": 1, "details": {"context_length": 4096}}

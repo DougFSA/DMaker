@@ -117,6 +117,8 @@ class ModelInfo:
     context_length: int | None = None  # o máximo que o modelo aguenta, não o que a conversa usa
     effort_levels: tuple[EffortLevel, ...] = ()
     default_effort: str | None = None
+    # False quando o servidor não disse o que o modelo faz (detalhe ilegível, Ollama antigo): "sem a capacidade X" ali é desconhecido
+    capabilities_known: bool = True
 
     def to_dict(self, fit: Fit, loaded: bool) -> dict[str, Any]:
         return {
@@ -254,6 +256,7 @@ class OllamaCatalog:
             context_length=_context_length(model_info, details.get("context_length")),
             effort_levels=levels,
             default_effort=default_effort(levels, thinking.get("default")),
+            capabilities_known=bool(raw_capabilities),
         )
         return info, complete
 

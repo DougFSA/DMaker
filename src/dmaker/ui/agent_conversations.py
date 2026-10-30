@@ -8,11 +8,14 @@ precisam de Ollama.
 
 from __future__ import annotations
 
+import base64
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
+from ..agent.attachments import IMAGE_REF_PREFIX, KIND_IMAGE, AttachmentRecord
 from ..agent.conversations import (
     MODE_FREE,
     MODE_OPERATE,
@@ -27,6 +30,7 @@ from ..agent.history import repair_history
 from ..agent.session import ConversationSession
 from ..agent.settings import AgentSettings
 from ..agent.transcript import TranscriptBuilder, utc_now
+from ..agent.transport import describe_failure
 from ..pipeline.jobs import Job
 from .agent_turns import TurnRelay
 
@@ -68,13 +72,18 @@ class Conversation:
     ) -> None:
         self.record = record
         self.relay = relay
-        self.session = session
         self.store = store
         self.transcript = TranscriptBuilder(record.transcript)
         self.running: Job | None = None
         self.lock = threading.RLock()  # os eventos chegam da thread do turno e as rotas leem de outra
         self._save_warned = False
         relay.tap = self.on_event
+        self.use_session(session)
+
+    def use_session(self, session: ConversationSession) -> None:
+        """Passa a conversar por esta sessão (a do modo atual); ela busca as imagens anexadas aqui."""
+        self.session = session
+        session.image_loader = self.load_image
 
     @property
     def id(self) -> str:
@@ -116,18 +125,68 @@ class Conversation:
             if kind in SAVE_EVENTS:
                 self._save()
 
-    def begin_turn(self, text: str) -> None:
+    def begin_turn(self, text: str, attachments: Sequence[dict[str, Any]] = ()) -> None:
         with self.lock:
-            self.transcript.add_user(text)
+            self.transcript.add_user(text, attachments)
             if not self.record.title:
                 self.record.title = title_from_message(text)
             self._save()
 
-    def fail(self, exc: BaseException) -> None:
+    def fail(self, exc: BaseException, with_images: bool = False) -> None:
         """O turno acabou em erro: a pessoa lê o motivo na conversa, e o que já aconteceu fica salvo."""
         with self.lock:
-            self.transcript.add_notice("error", "error", str(exc) or exc.__class__.__name__)
+            self.transcript.add_notice("error", "error", describe_failure(exc, with_images))
             self._save()
+
+    # ---------- anexos ----------
+
+    def attachment(self, attachment_id: str) -> AttachmentRecord | None:
+        with self.lock:
+            return next((item for item in self.record.attachments if item.id == attachment_id), None)
+
+    def pending_attachments(self) -> list[AttachmentRecord]:
+        """Os anexos que ainda esperam a mensagem que os leva."""
+        with self.lock:
+            return [item for item in self.record.attachments if not item.sent]
+
+    def add_attachment(self, attachment: AttachmentRecord) -> None:
+        with self.lock:
+            self.record.attachments.append(attachment)
+            self._save(touch=False)
+
+    def remove_attachment(self, attachment_id: str) -> AttachmentRecord | None:
+        """Esquece o anexo (o registro; os arquivos são do serviço de anexos); `None` se não havia."""
+        with self.lock:
+            found = self.attachment(attachment_id)
+            if found is not None:
+                self.record.attachments.remove(found)
+                self._save(touch=False)
+            return found
+
+    def mark_attachments_sent(self, attachment_ids: Iterable[str]) -> None:
+        with self.lock:
+            wanted = set(attachment_ids)
+            for item in self.record.attachments:
+                if item.id in wanted:
+                    item.sent = True
+            self._save(touch=False)
+
+    def attachment_path(self, attachment: AttachmentRecord) -> Path | None:
+        """O arquivo do anexo dentro da pasta da conversa (imagem ou texto extraído); só o nome, nunca um caminho de fora."""
+        if not attachment.file:
+            return None
+        return self.store.attachments_dir(self.id) / Path(attachment.file).name
+
+    def load_image(self, ref: str) -> str | None:
+        """O base64 de uma imagem anexada, refeito a cada chamada ao modelo; `None` se o anexo ou o arquivo sumiu."""
+        attachment = self.attachment(ref.removeprefix(IMAGE_REF_PREFIX))
+        if attachment is None or attachment.kind != KIND_IMAGE:
+            return None
+        path = self.attachment_path(attachment)
+        try:
+            return base64.b64encode(path.read_bytes()).decode("ascii") if path is not None else None
+        except OSError:
+            return None
 
     def end_turn(self) -> None:
         self._save()
@@ -165,15 +224,21 @@ class Conversation:
                 "running": self.is_running,
             }
 
-    def detail(self) -> dict[str, Any]:
-        """A conversa inteira para a tela: o resumo, as opções e a transcrição (o histórico do modelo fica no servidor)."""
+    def detail(self, default_num_ctx: int | None = None) -> dict[str, Any]:
+        """A conversa inteira para a tela: o resumo, as opções e a transcrição (o histórico do modelo fica no servidor).
+
+        `pending_attachments` são os anexos que ainda esperam a mensagem; `default_num_ctx` é o contexto do ambiente,
+        para dizer quanto de cada texto cabe (a conversa pode ter escolhido outro).
+        """
         with self.lock:
+            num_ctx = self.record.options.num_ctx or default_num_ctx
             return {
                 **self.summary(),
                 "options": self.record.options.to_dict(),
                 "kits": list(self.session.current_kits),
                 "mode_locked": self.record.message_count > 0,
                 "running_job_id": self.running.id if self.is_running and self.running else None,
+                "pending_attachments": [item.public(num_ctx) for item in self.pending_attachments()],
                 "transcript": self.transcript.snapshot(),
             }
 
@@ -245,7 +310,7 @@ class ConversationRegistry:
             if conversation.record.message_count > 0 or conversation.is_running:
                 raise ModeLockedError("O modo da conversa não muda depois da primeira mensagem.")
             conversation.record.mode = mode
-            conversation.session = self._build_session(conversation.relay, conversation.record, base)
+            conversation.use_session(self._build_session(conversation.relay, conversation.record, base))
             conversation.save(touch=False)
 
     def summaries(self) -> list[dict[str, Any]]:
