@@ -143,7 +143,8 @@ def test_what_would_leave_less_than_a_useful_piece_is_left_out_and_said_so():
 # ---------- a mensagem que o modelo lê ----------
 
 
-def test_an_image_travels_as_a_reference_and_leaves_no_text_behind():
+def test_an_image_kept_only_in_the_conversation_travels_as_a_reference_and_leaves_no_text_behind():
+    """A imagem sem caminho de trabalho (conversa livre) é só do modelo: nada entra no texto."""
     image = AttachedFile(record(KIND_IMAGE, "foto.png", "i1", file="i1-foto.png"))
 
     composed = compose_turn([image], 16384, can_use_files=True)
@@ -151,6 +152,41 @@ def test_an_image_travels_as_a_reference_and_leaves_no_text_behind():
     assert composed.attachments == TurnAttachments(images=(image_ref("i1"),))
     assert composed.attachments.references == "" and composed.attachments.context == ""
     assert composed.summaries == ({"id": "i1", "kind": "image", "name": "foto.png", "size": 10},)
+
+
+def _working_image() -> AttachedFile:
+    return AttachedFile(record(KIND_IMAGE, "foto.png", "i1", path="C:/dados/cache/uploads/ab12-foto.png"))
+
+
+def test_an_image_in_a_conversation_with_tools_is_a_work_file_and_also_goes_to_a_model_that_sees():
+    composed = compose_turn([_working_image()], 16384, can_use_files=True)
+
+    assert composed.attachments.references == "Arquivo anexado: C:/dados/cache/uploads/ab12-foto.png"
+    assert composed.attachments.images == (image_ref("i1"),)
+    assert composed.attachments.request("usa esta foto") == (
+        "usa esta foto\n\nArquivo anexado: C:/dados/cache/uploads/ab12-foto.png"
+    )
+    assert composed.summaries == ({"id": "i1", "kind": "image", "name": "foto.png", "size": 10},)
+
+
+def test_a_model_that_does_not_see_gets_the_work_image_only_as_a_path():
+    composed = compose_turn([_working_image()], 16384, can_use_files=True, sees_images=False)
+
+    assert composed.attachments.references == "Arquivo anexado: C:/dados/cache/uploads/ab12-foto.png"
+    assert composed.attachments.images == ()  # nada de imagem para quem não enxerga
+    assert len(composed.summaries) == 1  # mas a mensagem ainda mostra o anexo
+
+
+def test_a_free_conversation_never_gets_the_path_of_an_image_even_when_the_record_has_one():
+    composed = compose_turn([_working_image()], 16384, can_use_files=False)
+
+    assert composed.attachments.references == "" and composed.attachments.images == (image_ref("i1"),)
+
+
+def test_an_image_nobody_can_use_is_refused_instead_of_silently_dropped():
+    """Sem visão e sem ferramentas a imagem não serviria a ninguém: a rota já recusa, e isto é a última barreira."""
+    with pytest.raises(AttachmentRefused, match="não aceita imagens"):
+        compose_turn([_working_image()], 16384, can_use_files=False, sees_images=False)
 
 
 def test_a_video_enters_the_text_as_its_path_when_the_conversation_has_tools():
@@ -289,6 +325,19 @@ def test_public_media_shows_the_path_and_nothing_else_of_the_disk():
     shown = record(KIND_MEDIA, "v.mp4", "m1", path="C:/x/v.mp4").public(16384)
 
     assert shown == {"id": "m1", "kind": "media", "name": "v.mp4", "size": 10, "path": "C:/x/v.mp4"}
+
+
+def test_public_image_shows_the_work_path_only_when_it_has_one():
+    working = record(KIND_IMAGE, "f.png", "i1", path="C:/x/ab-f.png").public()
+    kept = record(KIND_IMAGE, "f.png", "i2", file="i2-f.png").public()
+
+    assert working == {"id": "i1", "kind": "image", "name": "f.png", "size": 10, "path": "C:/x/ab-f.png"}
+    assert kept == {
+        "id": "i2",
+        "kind": "image",
+        "name": "f.png",
+        "size": 10,
+    }  # a da conversa livre não tem caminho
 
 
 def test_the_sheet_preview_is_short_in_rows_columns_and_cells():

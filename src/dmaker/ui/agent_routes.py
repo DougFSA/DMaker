@@ -354,37 +354,32 @@ def build_agent_router(
                 ),
             )
 
-    def vision_refusal(
-        current: AgentSettings, mode: str, model: str, records: Sequence[AttachmentRecord]
-    ) -> JSONResponse | None:
-        """O 422 de uma mensagem com imagem para um modelo que não enxerga, com os modelos instalados que enxergam.
+    def model_sees_images(current: AgentSettings, model: str) -> bool:
+        """O modelo lê imagem? Só o que o servidor diz não ter visão conta como "não": sem a informação, a imagem segue."""
+        info, _ = installed_model(current, model)
+        return info is None or "vision" in info.capabilities
 
-        Só se sugere o que serve a esta conversa: no modo Operar, um modelo de imagem sem ferramentas seria recusado
-        logo depois, então ele só aparece no texto, como caminho pela Conversa livre.
+    def vision_refusal(
+        current: AgentSettings, model: str, records: Sequence[AttachmentRecord]
+    ) -> JSONResponse | None:
+        """O 422 de uma mensagem com imagem, numa Conversa livre, para um modelo que não enxerga, com os que enxergam.
+
+        Só a Conversa livre recusa: ali a imagem existe para o modelo olhar. Quem opera o DMaker usa a imagem também como
+        arquivo (o caminho vai no texto), então um modelo que não enxerga continua servindo e a imagem segue sem a visão.
         """
         if not any(record.kind == KIND_IMAGE for record in records):
             return None
         info, installed = installed_model(current, model)
         if info is None or "vision" in info.capabilities:
             return None
-        seeing = [item for item in installed if "vision" in item.capabilities]
-        usable = [
-            item.name
-            for item in seeing
-            if mode != MODE_OPERATE or not item.capabilities_known or "tools" in item.capabilities
-        ]
-        if usable:
-            advice = f"Escolha um destes: {', '.join(usable)}."
-        elif seeing:
-            advice = (
-                f"Os modelos de imagem instalados ({', '.join(item.name for item in seeing)}) não usam ferramentas: "
-                "para falar da imagem, abra uma Conversa livre com um deles."
-            )
+        seeing = [item.name for item in installed if "vision" in item.capabilities]
+        if seeing:
+            advice = f"Escolha um destes: {', '.join(seeing)}."
         else:
             advice = "Nenhum modelo instalado aceita imagem; instale um com o selo de imagem no Ollama para usar este anexo."
         message = f"O modelo {info.name} não aceita imagens. {advice}"
         return JSONResponse(
-            status_code=422, content={"detail": message, "error": message, "suggested_models": usable}
+            status_code=422, content={"detail": message, "error": message, "suggested_models": seeing}
         )
 
     def stop_turn(conversation: Conversation) -> None:
@@ -398,12 +393,15 @@ def build_agent_router(
         message: str,
         current: AgentSettings,
         attached: Sequence[AttachedFile] = (),
+        sees_images: bool = True,
     ) -> dict:
         conversation.relay.attach(job)
         job.on_cancel(lambda: stop_turn(conversation))
         turn = settings_for_conversation(current, conversation.record)
         try:
-            composed = compose_turn(attached, turn.num_ctx, conversation.record.mode == MODE_OPERATE)
+            composed = compose_turn(
+                attached, turn.num_ctx, conversation.record.mode == MODE_OPERATE, sees_images=sees_images
+            )
         except AttachmentRefused as exc:  # a rota já conferiu; isto é a última barreira
             conversation.begin_turn(message)
             conversation.fail(exc)
@@ -510,8 +508,12 @@ def build_agent_router(
             if conversation is not None and body.attachments
             else []
         )
-        if (refusal := vision_refusal(current, mode, model, records)) is not None:
+        if mode != MODE_OPERATE and (refusal := vision_refusal(current, model, records)) is not None:
             return refusal
+        # quem opera sem enxergar recebe a imagem só como caminho; a pergunta ao servidor só vale com imagem na mensagem
+        sees_images = not any(record.kind == KIND_IMAGE for record in records) or model_sees_images(
+            current, model
+        )
         options = body.options.to_options() if body.options is not None else None
         explicit_effort = "effort" in body.model_fields_set
         inherited = conversation.record.effort if conversation else None
@@ -559,7 +561,7 @@ def build_agent_router(
                 target.mark_attachments_sent(item.record.id for item in sent)
             job = jobs.start(
                 "agente: " + body.message[:60],
-                lambda running_job: run_turn(target, running_job, body.message, current, sent),
+                lambda running_job: run_turn(target, running_job, body.message, current, sent, sees_images),
                 meta={"kind": AGENT_KIND, "conversation": target.id, "cancellable": True},
             )
             target.running = job

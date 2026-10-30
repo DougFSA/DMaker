@@ -281,16 +281,26 @@ describe('tela Agente: aviso de imagem antes de enviar', () => {
     expect(view.find('form.composer button[type="submit"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('no modo Operar, diz que nenhum modelo instalado lê imagem e opera o DMaker e aponta a Conversa livre', async () => {
+  it('no modo Operar, o modelo que não vê a imagem recebe só uma informação, e o envio segue liberado', async () => {
     stub({ 'GET /api/agent/models': MODELS_WITH_GEMMA, 'POST /api/agent/conversations/c1/attachments': uploads(() => imageAttachment()) })
     const view = await mountView()
 
     await pick(view, file('foto.png', 'image/png'))
+    await view.find('#agent-message').setValue('cria um projeto com esta foto')
 
-    const text = view.find('[data-code="image_without_vision"]').text()
-    expect(text).toContain('nenhum modelo instalado lê imagem e opera o DMaker')
-    expect(text).toContain('abra uma Conversa livre')
-    expect(view.find('[data-code="image_without_vision"] button').exists()).toBe(false)
+    expect(view.find('[data-code="image_without_vision"]').exists()).toBe(false)
+    const info = view.find('[data-code="image_as_file"]')
+    expect(info.text()).toBe('O modelo não vê a imagem, mas pode usá-la no vídeo.')
+    expect(info.attributes('data-tone')).toBe('info')
+    expect(info.attributes('role')).toBe('status')
+    expect(view.find('form.composer button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('na Conversa livre a informação some e o aviso que segura o envio continua', async () => {
+    const view = await withImage()
+
+    expect(view.find('[data-code="image_as_file"]').exists()).toBe(false)
+    expect(view.find('[data-code="image_without_vision"]').exists()).toBe(true)
   })
 
   it('se o servidor ainda recusar (422), mostra o motivo, oferece os modelos sugeridos e guarda o texto e a ficha', async () => {

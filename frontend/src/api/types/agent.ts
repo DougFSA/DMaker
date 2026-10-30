@@ -91,7 +91,7 @@ export interface AgentAttachment {
   kind: AttachmentKind
   name: string
   size: number
-  /** Vídeo, áudio e planilha: o caminho no computador, que entra no texto da mensagem. */
+  /** Vídeo, áudio, planilha e a imagem do modo Operar: o caminho no computador, que entra no texto da mensagem. */
   path?: string
   /** Texto: quantos caracteres vão ao modelo com o contexto de agora, e quantos o arquivo tem. */
   chars?: number

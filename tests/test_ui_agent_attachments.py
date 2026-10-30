@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import urllib.error
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -221,9 +222,9 @@ def test_a_srt_is_read_as_the_words_that_were_said(make_app):
 # ---------- imagem ----------
 
 
-def test_an_image_is_kept_and_served_back_with_its_own_type_for_the_thumbnail(make_app):
+def test_in_a_free_conversation_the_image_is_kept_in_its_folder_and_served_back_for_the_thumbnail(make_app):
     client, _ = make_app(FlowEnv())
-    conversation = new_conversation(client)
+    conversation = new_conversation(client, mode="free")
 
     body = attach_ok(client, conversation["id"], "foto.png", PNG)
 
@@ -237,14 +238,18 @@ def test_an_image_is_kept_and_served_back_with_its_own_type_for_the_thumbnail(ma
     )
 
 
-def test_a_file_that_only_wears_the_name_of_an_image_is_refused_and_removed(make_app):
+@pytest.mark.parametrize("mode", ["free", "operate"])
+def test_a_file_that_only_wears_the_name_of_an_image_is_refused_and_leaves_nothing_behind(make_app, mode):
     client, _ = make_app(FlowEnv())
-    conversation = new_conversation(client)
+    conversation = new_conversation(client, mode=mode)
 
     response = attach(client, conversation["id"], "golpe.png", b"<html><script>alert(1)</script></html>")
 
     assert response.status_code == 422 and "não é uma imagem PNG de verdade" in response.json()["detail"]
-    assert list((config.CONVERSATIONS_DIR / conversation["id"]).iterdir()) == []
+    folder = config.CONVERSATIONS_DIR / conversation["id"]
+    assert not folder.exists() or list(folder.iterdir()) == []
+    uploads = config.CACHE_DIR / "uploads"
+    assert not uploads.exists() or list(uploads.iterdir()) == []  # nem o arquivo de trabalho do Operar
     assert detail(client, conversation["id"])["pending_attachments"] == []
 
 
@@ -265,12 +270,14 @@ def test_the_thumbnail_route_only_serves_images_that_belong_to_that_conversation
     assert get("nao-existe", image["id"]).status_code == 404
 
 
-def test_an_image_for_a_model_without_vision_is_a_422_with_the_models_that_can_see(make_app):
+def test_in_a_free_conversation_an_image_for_a_model_without_vision_is_a_422_with_the_models_that_can_see(
+    make_app,
+):
     env = OpenEnv(Turn(chunks=words("nunca")))
     client, manager = make_app(
         env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gpt-oss:20b")
     )
-    conversation = new_conversation(client)
+    conversation = new_conversation(client, mode="free")
     image = attach_ok(client, conversation["id"], "foto.png", PNG)
 
     response = send(client, "o que é isto?", conversation["id"], [image["id"]])
@@ -288,7 +295,7 @@ def test_with_no_model_that_sees_installed_the_suggestion_is_empty_and_the_text_
     client, _ = make_app(
         env, catalog=FakeCatalog([OSS, PLAIN]), loader=lambda: AgentSettings(model="gpt-oss:20b")
     )
-    conversation = new_conversation(client)
+    conversation = new_conversation(client, mode="free")
     image = attach_ok(client, conversation["id"], "foto.png", PNG)
 
     response = send(client, "o que é isto?", conversation["id"], [image["id"]])
@@ -402,6 +409,337 @@ def test_what_the_server_says_when_it_refuses_the_request_reaches_the_person_in_
         "O servidor do modelo recusou o pedido (código 400): image input is not supported" in notice["text"]
     )
     assert "selo de imagem" in notice["text"] and "HTTP Error" not in notice["text"]
+
+
+# ---------- imagem como arquivo de trabalho (modo Operar) ----------
+
+
+def uploads_dir() -> Path:
+    return config.CACHE_DIR / "uploads"
+
+
+def test_in_an_operate_conversation_the_image_is_a_work_file_in_the_uploads_cache_like_a_video(make_app):
+    client, _ = make_app(FlowEnv())
+    conversation = new_conversation(client)
+
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    again = attach_ok(client, conversation["id"], "foto.png", PNG)
+
+    assert image["kind"] == "image" and image["path"].startswith(uploads_dir().as_posix())
+    assert Path(image["path"]).read_bytes() == PNG
+    assert (
+        again["path"] == image["path"] and again["id"] != image["id"]
+    )  # o mesmo conteúdo reaproveita o caminho
+    folder = config.CONVERSATIONS_DIR / conversation["id"]
+    assert not folder.exists() or list(folder.iterdir()) == []  # nada da imagem na pasta da conversa
+    on_disk = saved(conversation["id"])["attachments"]
+    assert on_disk[0]["path"] == image["path"] and on_disk[0]["file"] is None
+    thumb = client.get(f"/api/agent/conversations/{conversation['id']}/attachments/{image['id']}")
+    assert thumb.status_code == 200 and thumb.content == PNG
+    assert (
+        thumb.headers["content-type"] == "image/png" and thumb.headers["x-content-type-options"] == "nosniff"
+    )
+
+
+def test_a_model_that_sees_gets_the_work_image_as_a_path_in_the_text_and_as_base64(make_app):
+    env = OpenEnv(Turn(chunks=words("Vou usar a foto.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gemma3:4b")
+    )
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+
+    started = send(client, "cria um projeto com esta foto", conversation["id"], [image["id"]]).json()
+    job = finish(manager, started)
+
+    assert job.status == "done"
+    message = user_message(env)
+    assert message["images"] == [base64.b64encode(PNG).decode()]
+    assert "cria um projeto com esta foto" in message["content"]
+    assert f"Arquivo anexado: {image['path']}" in message["content"]
+    on_disk = saved(conversation["id"])
+    entry = next(e for e in on_disk["transcript"] if e["kind"] == "user")
+    assert entry["attachments"] == [
+        {"id": image["id"], "kind": "image", "name": "foto.png", "size": len(PNG)}
+    ]
+    history_user = next(m for m in on_disk["history"] if m["role"] == "user")
+    assert history_user["images"] == [f"attachment:{image['id']}"]  # o histórico segue só com a referência
+    assert base64.b64encode(PNG).decode() not in json.dumps(on_disk)
+
+
+def test_in_an_operate_conversation_a_model_that_does_not_see_still_gets_the_image_as_a_file(make_app):
+    """Não há mais 422: a foto serve ao vídeo mesmo que o modelo não consiga olhá-la."""
+    env = OpenEnv(Turn(chunks=words("Usei a foto.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gpt-oss:20b")
+    )
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+
+    response = send(client, "cria um projeto com esta foto", conversation["id"], [image["id"]])
+    job = finish(manager, response.json())
+
+    assert response.status_code == 200 and job.status == "done"
+    message = user_message(env)
+    assert f"Arquivo anexado: {image['path']}" in message["content"]
+    assert "images" not in message  # o gpt-oss não recebe a imagem, só o caminho
+    entry = next(e for e in saved(conversation["id"])["transcript"] if e["kind"] == "user")
+    assert [a["id"] for a in entry["attachments"]] == [image["id"]]
+
+
+def test_the_work_image_path_passes_the_gate_but_an_invented_one_and_the_confirmations_stay(make_app):
+    """Anexar a foto não afrouxa nada: o caminho dela vale, o que ninguém anexou continua barrado e o render pergunta."""
+    invented = "C:/outra-pasta/foto-que-ninguem-anexou.png"
+    env = FlowEnv(
+        Turn(tool_calls=[ToolCall("probe_media", {"path": "__PATH__"})]),
+        Turn(tool_calls=[ToolCall("probe_media", {"path": invented})]),
+        Turn(tool_calls=[ToolCall("render_project", {"name_or_path": "teste-foto"})]),
+        Turn(chunks=words("Não renderizei.")),
+    )
+    client, manager = make_app(env)
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    env.chat.turns[0].tool_calls = [ToolCall("probe_media", {"path": image["path"]})]
+
+    started = send(
+        client, "veja a foto e renderiza o projeto teste-foto", conversation["id"], [image["id"]]
+    ).json()
+    job = manager.get(started["job_id"])
+    wait_until(lambda: "confirmation_request" in kinds(job))
+    request = next(e for e in job.events if e["kind"] == "confirmation_request")
+
+    assert env.host.calls == [
+        ("probe_media", {"path": image["path"]})
+    ]  # a foto anexada passou; a inventada, não
+    assert "tool_blocked" in kinds(job) and request["tool"] == "render_project"
+    client.post(
+        f"/api/agent/confirmations/{request['id']}",
+        params={"conversation_id": conversation["id"]},
+        json={"approve": False},
+    )
+    wait_for(job)
+    assert env.host.calls == [("probe_media", {"path": image["path"]})]  # o render não rodou sem o sim
+
+
+def test_an_image_attached_in_a_free_conversation_gets_its_work_copy_when_the_message_goes_to_operate(
+    make_app,
+):
+    """O modo vale no envio: a foto que nasceu na pasta da conversa ganha o arquivo de trabalho na hora."""
+    env = OpenEnv(Turn(chunks=words("Usei a foto.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gpt-oss:20b")
+    )
+    conversation = new_conversation(client, mode="free")
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    assert "path" not in image and not uploads_dir().exists()
+
+    started = send(client, "cria um projeto com esta foto", conversation["id"], [image["id"]], mode="operate")
+    job = finish(manager, started.json())
+
+    assert started.status_code == 200 and job.status == "done"
+    record = saved(conversation["id"])["attachments"][0]
+    assert record["file"] is not None and record["path"].startswith(uploads_dir().as_posix())
+    assert Path(record["path"]).read_bytes() == PNG
+    assert f"Arquivo anexado: {record['path']}" in user_message(env)["content"]
+    assert "images" not in user_message(env)  # e o gpt-oss, que não enxerga, só recebe o caminho
+    assert (config.CONVERSATIONS_DIR / conversation["id"] / record["file"]).read_bytes() == PNG
+    thumb = client.get(f"/api/agent/conversations/{conversation['id']}/attachments/{image['id']}")
+    assert thumb.status_code == 200 and thumb.content == PNG
+
+
+def test_switching_a_free_conversation_to_operate_by_patch_before_the_send_gives_the_image_its_work_copy(
+    make_app,
+):
+    """A troca de modo pela rota PATCH, sem o campo `mode` no envio: vale o modo que a conversa tem na hora de enviar."""
+    env = OpenEnv(Turn(chunks=words("Usei a foto.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gpt-oss:20b")
+    )
+    conversation = new_conversation(client, mode="free")
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    assert "path" not in image and not uploads_dir().exists()  # na Conversa livre a foto fica na pasta dela
+
+    changed = client.patch(f"/api/agent/conversations/{conversation['id']}", json={"mode": "operate"})
+    assert changed.status_code == 200 and changed.json()["mode"] == "operate"
+    pending = detail(client, conversation["id"])["pending_attachments"]
+    assert [a["id"] for a in pending] == [image["id"]] and not uploads_dir().exists()  # trocar não grava nada
+
+    started = send(client, "cria um projeto com esta foto", conversation["id"], [image["id"]])
+    job = finish(manager, started.json())
+
+    assert started.status_code == 200 and job.status == "done"
+    record = saved(conversation["id"])["attachments"][0]
+    assert record["file"] is not None and record["path"].startswith(uploads_dir().as_posix())
+    assert Path(record["path"]).read_bytes() == PNG
+    assert f"Arquivo anexado: {record['path']}" in user_message(env)["content"]
+    assert "images" not in user_message(env)  # o gpt-oss não enxerga: só o caminho
+    thumb = client.get(f"/api/agent/conversations/{conversation['id']}/attachments/{image['id']}")
+    assert thumb.status_code == 200 and thumb.content == PNG
+
+
+def test_switching_an_operate_conversation_to_free_by_patch_before_the_send_keeps_the_image_for_the_model_only(
+    make_app,
+):
+    """O caminho contrário: a foto nasceu como arquivo de trabalho, e a Conversa livre não tem ferramenta para abri-la."""
+    env = OpenEnv(Turn(chunks=words("Um quadrado azul.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, LOOKER]), loader=lambda: AgentSettings(model="gemma3:4b")
+    )
+    conversation = new_conversation(client, model="gpt-oss:20b")
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    assert image["path"].startswith(uploads_dir().as_posix())
+
+    changed = client.patch(
+        f"/api/agent/conversations/{conversation['id']}", json={"mode": "free", "model": "gemma3:4b"}
+    )
+    assert changed.status_code == 200 and changed.json()["mode"] == "free"
+
+    started = send(client, "descreva a imagem", conversation["id"], [image["id"]])
+    job = finish(manager, started.json())
+
+    assert started.status_code == 200 and job.status == "done"
+    message = user_message(env)
+    assert message["images"] == [base64.b64encode(PNG).decode()]
+    assert "Arquivo anexado" not in message["content"]
+    assert Path(image["path"]).read_bytes() == PNG  # o arquivo de trabalho segue onde estava
+
+
+def test_switching_an_operate_conversation_to_a_blind_free_model_by_patch_refuses_the_image_and_changes_nothing(
+    make_app,
+):
+    env = OpenEnv(Turn(chunks=words("nunca")))
+    client, _ = make_app(
+        env, catalog=FakeCatalog([OSS, LOOKER]), loader=lambda: AgentSettings(model="gpt-oss:20b")
+    )
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    assert (
+        client.patch(f"/api/agent/conversations/{conversation['id']}", json={"mode": "free"}).status_code
+        == 200
+    )
+
+    refused = send(client, "o que é isto?", conversation["id"], [image["id"]])
+
+    assert refused.status_code == 422 and refused.json()["suggested_models"] == ["gemma3:4b"]
+    after = detail(client, conversation["id"])
+    assert after["messages"] == 0 and [a["id"] for a in after["pending_attachments"]] == [image["id"]]
+    assert env.chat.requests == []
+
+
+def test_the_work_copy_of_two_conversations_with_the_same_photo_is_one_file(make_app):
+    env = OpenEnv(Turn(chunks=words("ok")), Turn(chunks=words("ok")))
+    client, manager = make_app(env, catalog=FakeCatalog([OSS, VISION]))
+    paths = []
+    for _ in range(2):
+        conversation = new_conversation(client, mode="free")
+        image = attach_ok(client, conversation["id"], "foto.png", PNG)
+        job = finish(
+            manager,
+            send(
+                client, "cria um projeto com esta foto", conversation["id"], [image["id"]], mode="operate"
+            ).json(),
+        )
+        assert job.status == "done"
+        paths.append(saved(conversation["id"])["attachments"][0]["path"])
+
+    assert paths[0] == paths[1] and len(list(uploads_dir().iterdir())) == 1
+
+
+def test_an_operate_image_sent_to_a_free_conversation_goes_only_to_the_model_and_is_refused_if_it_cannot_see(
+    make_app,
+):
+    env = OpenEnv(Turn(chunks=words("É um pixel.")))
+    client, manager = make_app(
+        env, catalog=FakeCatalog([OSS, VISION]), loader=lambda: AgentSettings(model="gpt-oss:20b")
+    )
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+
+    refused = send(client, "o que é isto?", conversation["id"], [image["id"]], mode="free")
+    after = detail(client, conversation["id"])
+
+    assert refused.status_code == 422 and refused.json()["suggested_models"] == ["gemma3:4b"]
+    assert after["mode"] == "operate" and after["messages"] == 0  # nem o modo mudou
+    assert [a["id"] for a in after["pending_attachments"]] == [image["id"]]
+
+    sent = send(client, "o que é isto?", conversation["id"], [image["id"]], mode="free", model="gemma3:4b")
+    finish(manager, sent.json())
+    message = user_message(env)
+    assert message["images"] == [
+        base64.b64encode(PNG).decode()
+    ]  # a imagem de trabalho também chega como imagem
+    assert "Arquivo anexado" not in message["content"]  # mas a conversa livre não tem ferramenta para abri-la
+
+
+def test_a_work_image_that_disappeared_from_the_uploads_cache_asks_to_attach_again(make_app):
+    client, _ = make_app(FlowEnv())
+    conversation = new_conversation(client)
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    for path in uploads_dir().iterdir():
+        path.unlink()  # `dmaker clean` limpou o cache
+
+    response = send(client, "usa esta foto", conversation["id"], [image["id"]])
+
+    assert response.status_code == 422 and "não está mais disponível" in response.json()["detail"]
+    assert detail(client, conversation["id"])["messages"] == 0
+    assert (
+        client.get(f"/api/agent/conversations/{conversation['id']}/attachments/{image['id']}").status_code
+        == 404
+    )
+
+
+def test_removing_a_work_image_only_forgets_it_and_deleting_the_conversation_leaves_the_file(make_app):
+    """Como o vídeo: o arquivo do cache pode estar em uso por um projeto, então apagar a conversa não o leva."""
+    env = OpenEnv(Turn(chunks=words("ok")))
+    client, manager = make_app(env, catalog=FakeCatalog([OSS, VISION]))
+    conversation = new_conversation(client)
+    discarded = attach_ok(client, conversation["id"], "descartada.png", PNG + b"\x00")
+    used = attach_ok(client, conversation["id"], "usada.png", PNG)
+
+    removed = client.delete(f"/api/agent/conversations/{conversation['id']}/attachments/{discarded['id']}")
+    job = finish(
+        manager, send(client, "cria um projeto com esta foto", conversation["id"], [used["id"]]).json()
+    )
+    deleted = client.delete(f"/api/agent/conversations/{conversation['id']}")
+
+    assert job.status == "done" and removed.status_code == 200 and deleted.status_code == 200
+    assert Path(discarded["path"]).exists() and Path(used["path"]).read_bytes() == PNG
+    assert not (config.CONVERSATIONS_DIR / f"{conversation['id']}.json").exists()
+
+
+def test_an_image_saved_in_the_conversation_folder_before_this_change_still_opens_and_still_goes_to_the_model(
+    make_app,
+):
+    """Compatibilidade: a conversa Operar antiga guardou a imagem na pasta dela (`file`, sem `path`)."""
+    env = OpenEnv(Turn(chunks=words("Vou usar a foto.")))
+    client, manager = make_app(env, catalog=FakeCatalog([OSS, VISION]))
+    conversation = new_conversation(client, model="gemma3:4b")
+    image = attach_ok(client, conversation["id"], "foto.png", PNG)
+    first = finish(
+        manager, send(client, "cria um projeto com esta foto", conversation["id"], [image["id"]]).json()
+    )
+    assert first.status == "done"
+    folder = config.CONVERSATIONS_DIR / conversation["id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{image['id']}-foto.png").write_bytes(PNG)
+    path = config.CONVERSATIONS_DIR / f"{conversation['id']}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["attachments"][0].update(file=f"{image['id']}-foto.png", path=None)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    for leftover in uploads_dir().iterdir():
+        leftover.unlink()
+
+    later = OpenEnv(Turn(chunks=words("Azul.")))
+    restarted, manager = make_app(later, catalog=FakeCatalog([OSS, VISION]))
+    second = finish(manager, ask(restarted, "e a cor?", conversation_id=conversation["id"]))
+
+    assert second.status == "done"
+    thumb = restarted.get(f"/api/agent/conversations/{conversation['id']}/attachments/{image['id']}")
+    assert thumb.status_code == 200 and thumb.content == PNG
+    sent = [m for m in later.chat.requests[0][0] if m["role"] == "user"]
+    assert sent[0]["images"] == [
+        base64.b64encode(PNG).decode()
+    ]  # a imagem do primeiro turno segue no contexto
 
 
 # ---------- vídeo, áudio e planilha ----------
@@ -619,6 +957,10 @@ def test_each_kind_has_its_own_size_limit_and_the_refusal_says_which(make_app, m
 
     image = attach(client, conversation["id"], "foto.png", PNG)
     text = attach(client, conversation["id"], "nota.txt", b"x" * 11)
+    uploads = config.CACHE_DIR / "uploads"
+    assert (
+        not uploads.exists() or list(uploads.iterdir()) == []
+    )  # a imagem recusada do Operar não deixa arquivo
 
     assert (
         image.status_code == 413
@@ -626,7 +968,8 @@ def test_each_kind_has_its_own_size_limit_and_the_refusal_says_which(make_app, m
         and "imagens" in image.json()["detail"]
     )
     assert text.status_code == 413 and "documentos de texto" in text.json()["detail"]
-    assert list((config.CONVERSATIONS_DIR / conversation["id"]).iterdir()) == []
+    folder = config.CONVERSATIONS_DIR / conversation["id"]
+    assert not folder.exists() or list(folder.iterdir()) == []
     assert "4 GB" in agent_attachments.too_big_message("media")  # o vídeo tem o limite do upload de fala
 
 
@@ -841,21 +1184,24 @@ def test_a_model_whose_capabilities_are_unknown_is_never_refused_for_missing_too
     assert openai_client.post("/api/agent/conversations", json={"model": "gemma3:4b"}).status_code == 200
 
 
-def test_the_vision_suggestions_for_an_operate_conversation_leave_out_models_without_tools(make_app):
-    env = OpenEnv()
+def test_only_the_free_conversation_refuses_an_image_for_a_model_that_cannot_see(make_app):
+    """O modo Operar usa a imagem como arquivo; ali o modelo sem visão é atendido, e só a Conversa livre recusa."""
+    env = OpenEnv(Turn(chunks=words("Usei a foto.")))
     catalog = FakeCatalog([OSS, LOOKER])
-    client, _ = make_app(env, catalog=catalog, loader=lambda: AgentSettings(model="gpt-oss:20b"))
+    client, manager = make_app(env, catalog=catalog, loader=lambda: AgentSettings(model="gpt-oss:20b"))
     operate = new_conversation(client)
     free = new_conversation(client, mode="free")
     image = attach_ok(client, operate["id"], "foto.png", PNG)
     same_image = attach_ok(client, free["id"], "foto.png", PNG)
 
-    in_operate = send(client, "o que é isto?", operate["id"], [image["id"]])
     in_free = send(client, "o que é isto?", free["id"], [same_image["id"]])
+    in_operate = send(client, "cria um projeto com esta foto", operate["id"], [image["id"]])
+    finish(manager, in_operate.json())
 
-    assert in_operate.status_code == 422 and in_operate.json()["suggested_models"] == []
-    assert "Conversa livre" in in_operate.json()["detail"] and "gemma3:4b" in in_operate.json()["detail"]
     assert in_free.status_code == 422 and in_free.json()["suggested_models"] == ["gemma3:4b"]
+    assert (
+        in_operate.status_code == 200 and f"Arquivo anexado: {image['path']}" in user_message(env)["content"]
+    )
 
 
 def test_a_vision_model_without_tools_describes_an_image_in_a_free_conversation(make_app):

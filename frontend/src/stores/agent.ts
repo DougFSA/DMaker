@@ -28,6 +28,7 @@ import {
 } from '@/lib/agent'
 import { hasOptions, optionsFrom, sameOptions, valuesOf } from '@/lib/agentAdvanced'
 import {
+  attachmentInfos,
   attachmentOnlyMessage,
   attachmentWarnings,
   cardOfAttachment,
@@ -162,6 +163,8 @@ export const useAgentStore = defineStore('agent', () => {
   const warnings = computed(() =>
     attachmentWarnings(attachmentCards.value, mode.value, selectedModel.value, models.value?.models ?? []),
   )
+  /** O que vale saber sobre os anexos sem segurar o envio (a imagem que o modelo não vê, mas o vídeo pode usar). */
+  const infos = computed(() => attachmentInfos(attachmentCards.value, mode.value, selectedModel.value))
   /** Por que os anexos seguram o envio agora; vazio quando não seguram. */
   const attachmentsBlock = computed(() => (uploading.value ? 'Espere os arquivos terminarem de subir.' : (warnings.value[0]?.text ?? '')))
   /** O botão Enviar pode agir: a conversa está pronta e os anexos não seguram a mensagem. */
@@ -687,6 +690,7 @@ export const useAgentStore = defineStore('agent', () => {
     pendingCount,
     uploading,
     warnings,
+    infos,
     attachmentsBlock,
     sendable,
     conversationId,

@@ -1,7 +1,9 @@
 """Anexos da conversa com o agente: o que cada tipo de arquivo vira para o modelo.
 
 - imagem (PNG, JPG, WebP): vai ao modelo como imagem, se ele enxerga; o histórico guarda só a referência
-  (`attachment:<id>`), e o base64 é refeito a cada chamada, para a conversa salva não inchar;
+  (`attachment:<id>`), e o base64 é refeito a cada chamada, para a conversa salva não inchar. Na conversa que opera o
+  DMaker a imagem também é arquivo de trabalho: entra como caminho no texto, como o vídeo, para as ferramentas a
+  usarem num projeto, e um modelo que não enxerga a recebe só pelo caminho;
 - vídeo e áudio: entram como caminho no texto ("Arquivo anexado: C:/..."), porque as ferramentas do DMaker usam arquivo
   por caminho, e o `ToolGate` reconhece o que a pessoa anexou como caminho dela (não é caminho inventado);
 - planilha (.csv, .xlsx): o caminho entra no texto como acima, mais uma prévia das primeiras linhas;
@@ -183,7 +185,8 @@ class AttachmentRecord:
     size: int  # bytes do arquivo enviado
     created_at: str
     file: str | None = None  # imagem ou texto extraído: o nome do arquivo dentro da pasta da conversa
-    path: str | None = None  # vídeo, áudio e planilha: o caminho (absoluto, com /) em cache/uploads
+    # vídeo, áudio, planilha e a imagem de uma conversa que opera o DMaker: o caminho (absoluto, com /) em cache/uploads
+    path: str | None = None
     total_chars: int | None = None  # texto: caracteres do texto extraído, inteiro
     preview: dict[str, Any] | None = None  # planilha: colunas e primeiras linhas; texto: o começo
     sent: bool = False  # já seguiu numa mensagem
@@ -220,7 +223,7 @@ class AttachmentRecord:
     def public(self, num_ctx: int | None = None) -> dict[str, Any]:
         """O anexo para a tela. Num texto, `chars` é quanto vai ao modelo com o contexto atual (no máximo)."""
         data: dict[str, Any] = {"id": self.id, "kind": self.kind, "name": self.name, "size": self.size}
-        if self.kind in (KIND_MEDIA, KIND_SHEET) and self.path:
+        if self.path:
             data["path"] = self.path
         if self.kind == KIND_TEXT:
             total = self.total_chars or 0
@@ -318,11 +321,15 @@ def sheet_block(record: AttachmentRecord) -> str:
     return _block(f"{record.name} (planilha)", "\n".join(lines))
 
 
-def compose_turn(files: Sequence[AttachedFile], num_ctx: int, can_use_files: bool) -> ComposedTurn:
+def compose_turn(
+    files: Sequence[AttachedFile], num_ctx: int, can_use_files: bool, *, sees_images: bool = True
+) -> ComposedTurn:
     """Os anexos de uma mensagem prontos para o modelo, com as fichas da transcrição.
 
     `can_use_files` diz se a conversa tem ferramentas: vídeo e áudio só servem a quem abre arquivos, então numa
-    conversa livre são recusados; a planilha entra só pela prévia.
+    conversa livre são recusados; a planilha entra só pela prévia; a imagem, com ferramentas, ganha também o caminho.
+    `sees_images` diz se o modelo enxerga: a imagem só segue como imagem a quem a lê, e um modelo que opera sem
+    enxergar recebe só o caminho (a foto serve ao vídeo mesmo assim).
     """
     references: list[str] = []
     blocks: list[str] = []
@@ -334,7 +341,14 @@ def compose_turn(files: Sequence[AttachedFile], num_ctx: int, can_use_files: boo
     for index, item in enumerate(files):
         record = item.record
         if record.kind == KIND_IMAGE:
-            images.append(image_ref(record.id))
+            if not sees_images and not can_use_files:
+                raise AttachmentRefused(
+                    "O modelo não aceita imagens, e uma conversa livre não tem ferramentas para usar a imagem como arquivo."
+                )
+            if can_use_files and record.path:
+                references.append(f"Arquivo anexado: {record.path}")
+            if sees_images:
+                images.append(image_ref(record.id))
             summaries[index] = record.summary()
         elif record.kind == KIND_TEXT:
             cut = fitted_by_index[index]
