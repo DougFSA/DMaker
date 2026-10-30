@@ -15,6 +15,9 @@ e das tarefas de corte e de lote do manual: seguir o manual numa pasta de dados 
 mostra o que a fila da pasta de dados tem na hora: deixe nela um item pronto, um rodando e alguns esperando, e
 tire essa foto com `--only ui-fila.png` numa pasta de dados só da fila (sem o worker rodando, para o item não andar).
 As do editor (`ui-editor.png` e `ui-editor-layout.png`) abrem o projeto `quick_gravacao` numa janela de 1440 px.
+A do Agente (`ui-agente.png`) abre a primeira conversa da lista e o painel Avançado: deixe na pasta de dados uma Conversa
+livre curta, com um documento sintético já enviado (e a resposta) e outro arquivo anexado e ainda não enviado, e
+tire essa foto com `--only ui-agente.png`. A lista mostra o que a pasta de dados tem, então use uma pasta só para ela.
 """
 
 from __future__ import annotations
@@ -110,6 +113,15 @@ def _open_layout_menu(page: Any) -> None:
     _settle(page, 800)
 
 
+def _open_agent_conversation(page: Any) -> None:
+    """Abre a conversa salva e o painel Avançado, que é o que a captura do Agente mostra."""
+    _settle(page, 2000)
+    page.locator(".row__open").first.click()
+    _settle(page, 1500)
+    page.locator("summary", has_text="Avançado").click()
+    _settle(page, 1500)
+
+
 def _open_tab(tab: str, scroll_to: str | None = None) -> Callable[[Any], None]:
     def prepare(page: Any) -> None:
         page.locator(f'button[data-tab="{tab}"]').click()
@@ -136,6 +148,7 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-editor.png", "/editor/quick_gravacao", width=1440, height=980, prepare=_editor_ready),
         Shot("ui-editor-layout.png", "/editor/quick_gravacao", width=1440, height=980, prepare=_open_layout_menu),
         Shot("ui-modelos.png", "/modelos", height=1300, prepare=_show_models),
+        Shot("ui-agente.png", "/agente", width=1280, height=1150, prepare=_open_agent_conversation),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),
         Shot("classica-dublar.png", "/classica", height=900, prepare=_open_tab("voice", "#dub-source")),

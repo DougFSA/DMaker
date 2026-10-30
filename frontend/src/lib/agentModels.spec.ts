@@ -7,9 +7,11 @@ import {
   effortAfterModelChange,
   findModel,
   formatBytes,
+  imageModels,
   memoryNotice,
   modelOptionLabel,
   needsMemoryConfirmation,
+  readsImages,
   sameModel,
   sortModels,
   toolsNotice,
@@ -176,5 +178,23 @@ describe('esforço', () => {
     expect(defaultEffortLabel(model())).toBe('Padrão do modelo (Médio)')
     expect(defaultEffortLabel(model({ default_effort: null }))).toBe('Padrão do modelo')
     expect(defaultEffortLabel(undefined)).toBe('Padrão do modelo')
+  })
+})
+
+describe('imagem', () => {
+  const seer = model({ name: 'gemma3:4b', capabilities: ['vision'] })
+
+  it('o modelo de capacidades conhecidas lê imagem só com o selo de imagem', () => {
+    expect(readsImages(seer)).toBe(true)
+    expect(readsImages(model())).toBe(false)
+  })
+
+  it('capacidade desconhecida (motor compatível com a OpenAI) e modelo fora da lista contam como sim: o servidor recusa se for o caso', () => {
+    expect(readsImages(model({ capabilities: [] }))).toBe(true)
+    expect(readsImages(undefined)).toBe(true)
+  })
+
+  it('a lista dos modelos que leem imagem tem só os que têm o selo', () => {
+    expect(imageModels([model(), seer, model({ capabilities: [] })]).map((item) => item.name)).toEqual(['gemma3:4b'])
   })
 })

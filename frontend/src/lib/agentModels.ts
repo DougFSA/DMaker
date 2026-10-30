@@ -57,6 +57,19 @@ export function usesTools(model: AgentModel | undefined): boolean {
   return !model || model.capabilities.length === 0 || model.capabilities.includes('tools')
 }
 
+/**
+ * O modelo lê imagem? Capacidade desconhecida (o motor compatível com a OpenAI não informa) conta como sim, e o servidor
+ * é quem recusa se for o caso; só o modelo de capacidades conhecidas e sem "vision" não lê.
+ */
+export function readsImages(model: AgentModel | undefined): boolean {
+  return !model || model.capabilities.length === 0 || model.capabilities.includes('vision')
+}
+
+/** Os modelos da lista que de fato têm o selo de imagem, na ordem do servidor. */
+export function imageModels(models: AgentModel[]): AgentModel[] {
+  return models.filter((model) => model.capabilities.includes('vision'))
+}
+
 /** O modelo não serve ao modo escolhido? Só o "Operar o DMaker" precisa de ferramentas; a Conversa livre aceita qualquer um. */
 export function cannotOperate(model: AgentModel | undefined, mode: AgentMode): boolean {
   return mode === 'operate' && !usesTools(model)

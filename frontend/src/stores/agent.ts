@@ -6,12 +6,15 @@ import {
   errorMessage,
   followJob,
   isJobCancelled,
+  type AgentConversationCreate,
   type AgentConversationDetail,
   type AgentConversationPatch,
   type AgentConversationSummary,
+  type AgentLoaded,
   type AgentMessageRequest,
   type AgentMode,
   type AgentModels,
+  type AgentOptions,
   type AgentStatus,
 } from '@/api'
 import {
@@ -23,6 +26,18 @@ import {
   type StageInfo,
   type StreamEvent,
 } from '@/lib/agent'
+import { hasOptions, optionsFrom, sameOptions, valuesOf } from '@/lib/agentAdvanced'
+import {
+  attachmentOnlyMessage,
+  attachmentWarnings,
+  cardOfAttachment,
+  failedCard,
+  MAX_ATTACHMENTS,
+  splitPicked,
+  suggestedModelsOf,
+  uploadingCard,
+  type AttachmentCard,
+} from '@/lib/agentAttachments'
 import { effortAfterModelChange, findModel, memoryNotice, needsMemoryConfirmation, toolsNotice } from '@/lib/agentModels'
 import { itemsFromTranscript } from '@/lib/agentTranscript'
 import { readStored, removeStored, writeStored } from '@/lib/storage'
@@ -41,9 +56,10 @@ interface Draft {
   /** Vazio: o modelo padrão do ambiente. */
   model: string
   effort: string | null
+  options: AgentOptions
 }
 
-const NEW_DRAFT: Draft = { mode: 'operate', model: '', effort: null }
+const NEW_DRAFT: Draft = { mode: 'operate', model: '', effort: null, options: {} }
 
 /** A conversa que acabou de nascer no servidor, até o detalhe de verdade chegar. */
 function provisionalDetail(id: string, jobId: string, text: string, draft: Draft, model: string): AgentConversationDetail {
@@ -58,10 +74,11 @@ function provisionalDetail(id: string, jobId: string, text: string, draft: Draft
     effort: draft.effort,
     messages: 1,
     running: true,
-    options: {},
+    options: draft.options,
     kits: [],
     mode_locked: true,
     running_job_id: jobId,
+    pending_attachments: [],
     transcript: [],
   }
 }
@@ -91,11 +108,22 @@ export const useAgentStore = defineStore('agent', () => {
   /** A etapa que o servidor informou (carregando o modelo, lendo o pedido...) e quando a tela soube dela. */
   const stage = ref<(StageInfo & { since: number }) | null>(null)
   const error = ref('')
+  /** Os arquivos que estão subindo ou que falharam; os que já subiram vêm do detalhe (`pending_attachments`). */
+  const uploads = ref<AttachmentCard[]>([])
+  /** O que a tela recusou ao escolher arquivos (passou do máximo, vídeo numa Conversa livre), em palavras de quem usa. */
+  const attachNotice = ref('')
+  /** Os modelos que o servidor sugeriu ao recusar uma imagem, para a pessoa trocar com um clique. */
+  const suggestedModels = ref<string[]>([])
+  /** O que está carregado na memória agora (só o Ollama); `null` até a primeira leitura. */
+  const loaded = ref<AgentLoaded | null>(null)
+  const unloading = ref<string | null>(null)
+  const unloadError = ref('')
 
   let following: AbortController | null = null
   let turnBase = 0
   let counter = 0
   let openToken = 0
+  let creating: Promise<AgentConversationDetail | null> | null = null
 
   const nextId = () => `item-${(counter += 1)}`
   const toasts = () => useToastsStore()
@@ -116,6 +144,28 @@ export const useAgentStore = defineStore('agent', () => {
   const toolsProblem = computed(() => toolsNotice(selectedModel.value, mode.value))
   /** Pode enviar: o servidor do modelo responde, o modelo está instalado e serve ao modo da conversa. */
   const canSend = computed(() => ready.value && !toolsProblem.value)
+
+  /** O motor do modelo (`ollama` ou `openai`); o que o motor não tem (contexto, descarregar) a tela esconde. */
+  const engine = computed(() => models.value?.engine ?? status.value?.engine ?? null)
+  const options = computed<AgentOptions>(() => (detail.value ? detail.value.options : draft.value.options))
+
+  // ---------- anexos ----------
+
+  /** As fichas da caixa de mensagem: os anexos já no servidor, depois os que sobem e os que falharam. */
+  const attachmentCards = computed<AttachmentCard[]>(() => [
+    ...(detail.value?.pending_attachments ?? []).map(cardOfAttachment),
+    ...uploads.value,
+  ])
+  const pendingCount = computed(() => detail.value?.pending_attachments.length ?? 0)
+  const uploading = computed(() => uploads.value.some((card) => card.state === 'uploading'))
+  /** O que o servidor recusaria nestes anexos (imagem para modelo sem visão, vídeo numa Conversa livre). */
+  const warnings = computed(() =>
+    attachmentWarnings(attachmentCards.value, mode.value, selectedModel.value, models.value?.models ?? []),
+  )
+  /** Por que os anexos seguram o envio agora; vazio quando não seguram. */
+  const attachmentsBlock = computed(() => (uploading.value ? 'Espere os arquivos terminarem de subir.' : (warnings.value[0]?.text ?? '')))
+  /** O botão Enviar pode agir: a conversa está pronta e os anexos não seguram a mensagem. */
+  const sendable = computed(() => canSend.value && !attachmentsBlock.value)
 
   /** O que impede de conversar agora, em palavras de quem usa; vazio quando está tudo certo. */
   const problem = computed(() => {
@@ -152,6 +202,35 @@ export const useAgentStore = defineStore('agent', () => {
       models.value = await api.agent.models()
     } catch {
       // mantém a lista anterior
+    }
+  }
+
+  /** O que está carregado na memória agora. Só o Ollama sabe; se a leitura falha, a que já havia continua. */
+  async function loadLoaded(): Promise<void> {
+    if (engine.value === 'openai') return
+    try {
+      loaded.value = await api.agent.loaded()
+    } catch {
+      // mantém a leitura anterior
+    }
+  }
+
+  /**
+   * Descarrega o modelo da memória. O servidor recusa (409) enquanto uma resposta o usa; o motivo fica em `unloadError`.
+   * Devolve se o modelo estava carregado e saiu.
+   */
+  async function unload(name: string): Promise<boolean> {
+    unloading.value = name
+    unloadError.value = ''
+    try {
+      const result = await api.agent.unload(name)
+      await Promise.all([loadLoaded(), loadModels()])
+      return result.unloaded
+    } catch (failure) {
+      unloadError.value = errorMessage(failure)
+      return false
+    } finally {
+      unloading.value = null
     }
   }
 
@@ -209,7 +288,7 @@ export const useAgentStore = defineStore('agent', () => {
     stage.value = null
     following = null
     // o fim de um turno muda a ordem da lista, a memória livre e o que está carregado
-    void Promise.all([loadConversations(), refreshDetail(), loadModels()])
+    void Promise.all([loadConversations(), refreshDetail(), loadModels(), loadLoaded()])
   }
 
   /** Acompanha o job do turno pelo SSE (reconecta sozinho; o servidor reenvia o turno inteiro desde o `start`). */
@@ -239,18 +318,24 @@ export const useAgentStore = defineStore('agent', () => {
 
   /** Manda a mensagem e passa a acompanhar a resposta. Devolve `false` se não foi enviada (erro mostrado em `error`). */
   async function send(message: string): Promise<boolean> {
-    const text = message.trim()
-    if (!text || busy.value) return false
+    const attached = detail.value?.pending_attachments ?? []
+    // o servidor exige texto; uma mensagem que só leva anexo diz isso, e a conversa mostra o texto como foi enviado
+    const text = message.trim() || attachmentOnlyMessage(attached.length)
+    if (!text || busy.value || attachmentsBlock.value) return false
     error.value = ''
+    attachNotice.value = ''
+    suggestedModels.value = []
     const request: AgentMessageRequest = { message: text }
     const current = detail.value
     if (current) {
       request.conversation_id = current.id
+      if (attached.length) request.attachments = attached.map((attachment) => attachment.id)
     } else {
-      // a conversa nova nasce no servidor com o modo, o modelo e o esforço escolhidos na barra
+      // a conversa nova nasce no servidor com o modo, o modelo, o esforço e as opções escolhidos na barra
       request.mode = draft.value.mode
       if (modelName.value) request.model = modelName.value
       if (draft.value.effort) request.effort = draft.value.effort
+      if (hasOptions(draft.value.options)) request.options = draft.value.options
     }
     try {
       const response = await api.agent.send(request)
@@ -258,8 +343,13 @@ export const useAgentStore = defineStore('agent', () => {
         detail.value = provisionalDetail(response.conversation_id, response.job_id, text, draft.value, modelName.value)
         upsertSummary(summaryOf(detail.value))
         writeStored(OPEN_CONVERSATION_KEY, response.conversation_id)
+      } else if (attached.length && detail.value?.id === current.id) {
+        detail.value = { ...detail.value, pending_attachments: [] }
       }
-      items.value = [...items.value, { kind: 'user', id: nextId(), text }]
+      items.value = [
+        ...items.value,
+        { kind: 'user', id: nextId(), text, ...(attached.length ? { attachments: attached.map(cardOfAttachment) } : {}) },
+      ]
       turnBase = items.value.length
       jobId.value = response.job_id
       busy.value = true
@@ -269,7 +359,9 @@ export const useAgentStore = defineStore('agent', () => {
       void refreshDetail()
       return true
     } catch (failure) {
+      // o texto e os anexos continuam como estavam (no servidor, a mensagem recusada deixa os anexos pendentes)
       error.value = errorMessage(failure)
+      suggestedModels.value = suggestedModelsOf(failure)
       return false
     }
   }
@@ -310,6 +402,9 @@ export const useAgentStore = defineStore('agent', () => {
     stopping.value = false
     stage.value = null
     error.value = ''
+    uploads.value = []
+    attachNotice.value = ''
+    suggestedModels.value = []
     turnBase = 0
   }
 
@@ -349,6 +444,9 @@ export const useAgentStore = defineStore('agent', () => {
     const current = detail.value
     if (current === null || (current.messages === 0 && !items.value.length)) {
       error.value = ''
+      attachNotice.value = ''
+      // a conversa vazia que serve de rascunho (nasceu para receber um anexo) volta em branco, sem os arquivos de antes
+      if (current) void discardPending(current)
       return
     }
     openToken += 1
@@ -396,6 +494,129 @@ export const useAgentStore = defineStore('agent', () => {
     return true
   }
 
+  // ---------- anexos ----------
+
+  /**
+   * A conversa onde os anexos vão. O servidor exige conversa existente para receber um arquivo, então o rascunho
+   * vira conversa aqui, com o modo, o modelo, o esforço e as opções escolhidos; vários arquivos de uma vez criam uma só.
+   */
+  function ensureConversation(): Promise<AgentConversationDetail | null> {
+    if (detail.value) return Promise.resolve(detail.value)
+    creating ??= createFromDraft().finally(() => {
+      creating = null
+    })
+    return creating
+  }
+
+  async function createFromDraft(): Promise<AgentConversationDetail | null> {
+    const body: AgentConversationCreate = { mode: draft.value.mode }
+    if (modelName.value) body.model = modelName.value
+    if (draft.value.effort) body.effort = draft.value.effort
+    if (hasOptions(draft.value.options)) body.options = draft.value.options
+    try {
+      const created = await api.agent.conversations.create(body)
+      // a pessoa pode ter aberto outra conversa enquanto esta nascia: a que já está aberta vale
+      if (detail.value) return detail.value
+      detail.value = created
+      upsertSummary(summaryOf(created))
+      writeStored(OPEN_CONVERSATION_KEY, created.id)
+      return created
+    } catch (failure) {
+      error.value = errorMessage(failure)
+      return null
+    }
+  }
+
+  /** Por que não dá para anexar agora (a pessoa vê o motivo no lugar das fichas); vazio quando dá. */
+  function attachRefusal(): string {
+    if (busy.value) return 'Espere a resposta terminar para anexar arquivos.'
+    if (!ready.value) return problem.value || 'O modelo local não está respondendo.'
+    if (toolsProblem.value) return toolsProblem.value
+    return ''
+  }
+
+  /**
+   * Sobe os arquivos escolhidos, um depois do outro, e deixa cada um pendente na conversa até a mensagem. A tela recusa
+   * antes o que o servidor recusaria (vídeo numa Conversa livre, mais de 8 anexos); o resto, o servidor decide e a
+   * recusa dele aparece na ficha do arquivo.
+   */
+  async function attach(files: File[]): Promise<void> {
+    if (!files.length) return
+    error.value = ''
+    suggestedModels.value = []
+    const refusal = attachRefusal()
+    if (refusal) {
+      attachNotice.value = refusal
+      return
+    }
+    const room = MAX_ATTACHMENTS - pendingCount.value - uploads.value.filter((card) => card.state === 'uploading').length
+    const { accepted, notices } = splitPicked(files, mode.value, room)
+    attachNotice.value = notices.join(' ')
+    if (!accepted.length) return
+
+    const cards = accepted.map((file) => uploadingCard(nextId(), file))
+    uploads.value = [...uploads.value, ...cards]
+    const conversation = await ensureConversation()
+    if (!conversation) {
+      uploads.value = uploads.value.filter((item) => !cards.some((card) => card.key === item.key))
+      return
+    }
+    for (const [index, file] of accepted.entries()) {
+      const card = cards[index]!
+      // a pessoa abriu outra conversa no meio: o que falta não sobe para onde ela não está mais
+      if (detail.value?.id !== conversation.id) return
+      try {
+        const attachment = await api.agent.conversations.attachments.upload(conversation.id, file)
+        if (detail.value?.id !== conversation.id) return
+        detail.value = { ...detail.value, pending_attachments: [...detail.value.pending_attachments, attachment] }
+        uploads.value = uploads.value.filter((item) => item.key !== card.key)
+      } catch (failure) {
+        if (detail.value?.id !== conversation.id) return
+        uploads.value = uploads.value.map((item) => (item.key === card.key ? failedCard(item, errorMessage(failure)) : item))
+      }
+    }
+    // o servidor refaz o corte do texto de cada anexo com o contexto de agora: a ficha mostra o que ele conta
+    void refreshDetail()
+  }
+
+  /** Tira a ficha: a que falhou só sai da tela; a que já subiu também é apagada no servidor. */
+  async function removeAttachment(card: AttachmentCard): Promise<void> {
+    attachNotice.value = ''
+    const current = detail.value
+    if (card.state !== 'ready' || !card.id || !current) {
+      uploads.value = uploads.value.filter((item) => item.key !== card.key)
+      return
+    }
+    try {
+      await api.agent.conversations.attachments.remove(current.id, card.id)
+    } catch (failure) {
+      // 404: o anexo já não existe no servidor, e a ficha pode sair; qualquer outro erro deixa a ficha onde está
+      if (!(failure instanceof ApiError && failure.status === 404)) {
+        error.value = errorMessage(failure)
+        if (failure instanceof ApiError && failure.status === 409) void refreshDetail()
+        return
+      }
+    }
+    if (detail.value?.id === current.id) {
+      detail.value = {
+        ...detail.value,
+        pending_attachments: detail.value.pending_attachments.filter((attachment) => attachment.id !== card.id),
+      }
+    }
+  }
+
+  /** Esquece os anexos pendentes de uma conversa vazia que vai servir de rascunho de novo (sem erro na tela se algum falhar). */
+  async function discardPending(conversation: AgentConversationDetail): Promise<void> {
+    const pending = conversation.pending_attachments
+    if (!pending.length) return
+    if (detail.value?.id === conversation.id) detail.value = { ...detail.value, pending_attachments: [] }
+    await Promise.all(
+      pending.map((attachment) =>
+        api.agent.conversations.attachments.remove(conversation.id, attachment.id).catch(() => undefined),
+      ),
+    )
+  }
+
   // ---------- modo, modelo e esforço ----------
 
   /**
@@ -436,6 +657,14 @@ export const useAgentStore = defineStore('agent', () => {
     else draft.value = { ...draft.value, effort: value }
   }
 
+  /** O contexto, a temperatura e a semente da conversa; o que não vem volta ao padrão. Vale a partir da mensagem seguinte. */
+  async function setOptions(next: AgentOptions): Promise<void> {
+    const wanted = optionsFrom(valuesOf(next))
+    if (sameOptions(wanted, options.value)) return
+    if (detail.value) await patchOpen({ options: hasOptions(wanted) ? wanted : null }, { options: wanted })
+    else draft.value = { ...draft.value, options: wanted }
+  }
+
   return {
     status,
     models,
@@ -447,6 +676,19 @@ export const useAgentStore = defineStore('agent', () => {
     stopping,
     stage,
     error,
+    attachNotice,
+    suggestedModels,
+    loaded,
+    unloading,
+    unloadError,
+    engine,
+    options,
+    attachmentCards,
+    pendingCount,
+    uploading,
+    warnings,
+    attachmentsBlock,
+    sendable,
     conversationId,
     mode,
     modeLocked,
@@ -463,10 +705,14 @@ export const useAgentStore = defineStore('agent', () => {
     init,
     loadStatus,
     loadModels,
+    loadLoaded,
     loadConversations,
+    unload,
     open,
     startNew,
     send,
+    attach,
+    removeAttachment,
     stop,
     answerConfirmation,
     rename,
@@ -474,5 +720,6 @@ export const useAgentStore = defineStore('agent', () => {
     setMode,
     setModel,
     setEffort,
+    setOptions,
   }
 })

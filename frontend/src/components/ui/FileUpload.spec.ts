@@ -137,4 +137,26 @@ describe('FileUpload', () => {
     expect(wrapper.find('.upload__files').exists()).toBe(false)
     expect(wrapper.emitted('select')).toHaveLength(1)
   })
+
+  it('compacta: só o botão, com o nome do campo para o leitor de tela, e arrastar sobre ele ainda vale', async () => {
+    wrapper = mountUpload({ compact: true, multiple: true, buttonLabel: 'Anexar' })
+
+    expect(wrapper.classes()).toContain('upload--compact')
+    expect(wrapper.find('.field-label').exists()).toBe(false)
+    expect(wrapper.find('.upload__sr-only').text()).toBe('Roteiro')
+    expect(wrapper.find('[role="group"]').attributes('aria-labelledby')).toBe(wrapper.find('.upload__sr-only').attributes('id'))
+    expect(wrapper.find('button').text()).toBe('Anexar')
+    const dropped = file('a.txt')
+    await drop(wrapper, [dropped])
+    expect(wrapper.emitted('select')).toEqual([[[dropped]]])
+  })
+
+  it('a recusa por tipo usa a descrição legível quando há uma, no lugar da lista de extensões', async () => {
+    wrapper = mountUpload({ accept: '.txt,.md,.pdf', acceptLabel: 'texto (TXT, MD, PDF)' })
+    await drop(wrapper, [file('foto.exe')])
+
+    const alert = wrapper.find('[role="alert"]').text()
+    expect(alert).toContain('Tipos aceitos: texto (TXT, MD, PDF).')
+    expect(alert).not.toContain('.txt,.md')
+  })
 })
