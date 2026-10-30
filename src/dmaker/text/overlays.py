@@ -191,9 +191,13 @@ def wrap_tokens(
     size: float,
     max_width: float,
     spacing: float = 0,
-    measure: MeasureFn = fonts.measure,
+    measure: MeasureFn = fonts.measure_rendered,
 ) -> list[list[str]]:
-    """Quebra gulosa: cada linha leva palavras enquanto couber em `max_width` (palavra maior fica sozinha)."""
+    """Quebra gulosa: cada linha leva palavras enquanto couber em `max_width` (palavra maior fica sozinha).
+
+    A régua padrão é a do libass, que desenha o texto do ASS; quem quebra texto de outro desenhista (o cartão
+    do Pillow) passa a régua dele.
+    """
     rows: list[list[str]] = []
     current = [tokens[0]] if tokens else []
     for token in tokens[1:]:
@@ -213,8 +217,9 @@ def wrap_lines(
     size: float,
     max_width: float,
     spacing: float = 0,
-    measure: MeasureFn = fonts.measure,
+    measure: MeasureFn = fonts.measure_rendered,
 ) -> list[str]:
+    """`wrap_tokens` por parágrafo (`\\n` do texto vira linha nova); a régua padrão é a do libass."""
     lines: list[str] = []
     for paragraph in text.replace("\r", "").split("\n"):
         words = paragraph.split()
@@ -257,10 +262,11 @@ def _draw_rounded_box(block: TextBlock, align: Align, radius: float, padding: fl
     return rounded_box(block.line_widths, block.line_heights, align=align, radius=radius, padding=padding)
 
 
-# Formas de caixa por nome (`style.box_shape`). A caixa arredondada mede com as métricas do libass para
-# abraçar o texto; a de bloco segue com a medida antiga para não mexer nos textos já aprovados.
+# Formas de caixa por nome (`style.box_shape`). As duas medem com o libass, que é quem desenha o texto: só
+# assim a caixa abraça a linha com a margem configurada e a quebra respeita a largura permitida. (A de bloco
+# media com a célula do Pillow e sobrava uns 77 px de cada lado; ver DMK-45.)
 BOX_SHAPES: dict[str, BoxShape] = {
-    "block": BoxShape(fonts.measure, _draw_block_box),
+    "block": BoxShape(fonts.measure_rendered, _draw_block_box),
     "rounded": BoxShape(fonts.measure_rendered, _draw_rounded_box),
 }
 
