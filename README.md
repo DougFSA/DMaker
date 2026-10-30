@@ -49,6 +49,37 @@ dmaker doctor
 
 Passo a passo, extras (voz, lote, PDF) e atualização: capítulo "Instalação" do [manual](docs/MANUAL.md).
 
+## Subir a interface (backend e frontend)
+
+O backend é a API local em FastAPI (`src/dmaker/ui/server.py`), que o `dmaker ui` sobe. O frontend é a interface nova em Vue 3 (pasta `frontend/`) e só conversa com essa API. Precisa do `.venv` da instalação acima ativado e do Node.js 20.19 ou 22.12 em diante.
+
+**Para usar**, numa porta só: compile o front e suba o backend, que serve a interface nova em `/` e a clássica em `/classica`.
+
+```powershell
+cd frontend
+npm ci              # na primeira vez e quando o package-lock.json mudar
+npm run build       # gera src/dmaker/ui/dist/ (fica fora do git)
+cd ..
+dmaker ui           # http://127.0.0.1:8765; --port troca a porta, --no-browser não abre o navegador
+```
+
+Sem o build, `/` abre a interface clássica. Depois de um `git pull`, rode `npm run build` de novo: o `dmaker ui` já aberto passa a servir as telas novas sem reiniciar. `Ctrl+C` encerra.
+
+**Para desenvolver o front**, com a tela recarregando a cada mudança, use dois terminais:
+
+```powershell
+# terminal 1: o backend, na porta para onde o Vite repassa a API
+dmaker ui --port 8773 --no-browser
+
+# terminal 2: o frontend, em http://localhost:5174
+cd frontend
+npm run dev
+```
+
+O `npm run dev` repassa `/api` para `http://127.0.0.1:8773`. Para usar um backend em outra porta: `$env:DMAKER_API = "http://127.0.0.1:8765"; npm run dev`. Mudança no Python pede reiniciar o `dmaker ui`. Antes de dar uma mudança do front por pronta: `npm run lint`, `npm run typecheck`, `npm run test` e `npm run build`.
+
+Bom saber: o `dmaker render`, o `dmaker export` e o servidor MCP mandam o trabalho para a interface aberta e, se não houver nenhuma, sobem uma sozinhos em segundo plano na 8765. Use `--no-ui` para rodar só no terminal, ou `DMAKER_UI_URL` para apontar outro endereço.
+
 ## Primeiros passos
 
 ```powershell
