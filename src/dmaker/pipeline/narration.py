@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import config
-from ..filtergraph.voice import SpeechFinish, narration_concat_command, speech_finish_command
+from ..filtergraph.voice import SpeechFinish, narration_concat_plan, speech_finish_command
 from ..media.ffmpeg import FFmpegRunner
 from ..media.wavio import read_wav, wav_duration, write_wav
 from ..text.captions import Cue, to_srt
@@ -19,6 +19,7 @@ from ..voice.provenance import provenance_text
 from ..voice.script import Utterance, normalize_for_speech, parse_script
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
 from ..voice.watermark import Span, Watermarker, default_watermarker
+from .block_runner import block_workspace, run_steps
 
 PLAIN = SpeechFinish()  # a fala como saiu do modelo, sem acabamento
 
@@ -43,6 +44,23 @@ class NarrationCancelled(Exception):
 
 def no_pronunciation(_brand: str | None, _language: str | None) -> Lexicon:
     return Lexicon()
+
+
+def concat_narration(
+    runner: FFmpegRunner,
+    work_parent: Path,
+    parts: list[tuple[Path, float]],
+    out: Path,
+    total: float | None = None,
+    provenance: str = "",
+) -> None:
+    """Monta as partes (arquivo, pausa depois) em `out`; as muitas passam por blocos intermediários em `work_parent`.
+
+    Uma fala por `-i` estoura a linha de comando do Windows (WinError 206) lá pelas 160 falas; um capítulo
+    inteiro ou o livro com dezenas de capítulos passa disso. Até `MAX_INPUTS` partes o comando é um só, como sempre.
+    """
+    with block_workspace(work_parent) as work_dir:
+        run_steps(runner, narration_concat_plan(parts, out, work_dir, total=total, provenance=provenance))
 
 
 @dataclass(frozen=True)
@@ -303,7 +321,7 @@ class NarrationService:
         cues, total = cue_timeline(spans)
         out.parent.mkdir(parents=True, exist_ok=True)
         self.log("Montando a narração")
-        self.runner.run(narration_concat_command(parts, out, total=total, provenance=self.provenance()))
+        concat_narration(self.runner, self.cache_dir, parts, out, total, self.provenance())
         srt_path = self._write_srt(out, cues) if write_srt else None
         return NarrationResult(out, total, cues, srt_path)
 
