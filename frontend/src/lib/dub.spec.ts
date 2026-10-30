@@ -7,12 +7,14 @@ import {
   describeSpan,
   describeStems,
   describeStretch,
+  existingProjectPath,
   findProjectEntry,
   fitModeOf,
   formatGlossary,
   isNewSpeech,
   keepDbFrom,
   mediaKindOf,
+  overwriteConfirmation,
   parseGlossary,
   rowsChanged,
   rowsFrom,
@@ -193,5 +195,30 @@ describe('findProjectEntry', () => {
   it('arquivo que o projeto não usa não tem entrada', () => {
     expect(findProjectEntry([entry('D:/m/a.mp4')], 'D:/m/b.mp4')).toBeNull()
     expect(findProjectEntry([], 'D:/m/b.mp4')).toBeNull()
+  })
+})
+
+describe('preparar de novo uma dublagem que já existe', () => {
+  it('o caminho vem do corpo do 409 e qualquer outro corpo não traz nenhum', () => {
+    expect(existingProjectPath({ detail: 'Já existe.', path: 'X:/saida/dublagem/a.en.dub.json' })).toBe('X:/saida/dublagem/a.en.dub.json')
+    expect(existingProjectPath({ detail: 'Já existe.' })).toBeNull()
+    expect(existingProjectPath({ path: '' })).toBeNull()
+    expect(existingProjectPath({ path: 7 })).toBeNull()
+    expect(existingProjectPath('texto')).toBeNull()
+    expect(existingProjectPath(null)).toBeNull()
+  })
+
+  it('a pergunta cita a dublagem pelo nome do arquivo e diz o que se perde, sem travessão', () => {
+    const asked = overwriteConfirmation('X:\\saida\\dublagem\\a.en.dub.json')
+    expect(asked.title).toBe('Preparar a dublagem de novo?')
+    expect(asked.description).toContain('(a.en.dub.json)')
+    expect(asked.warning).toContain('apaga as traduções que você revisou e as falas que você travou')
+    expect(asked).toMatchObject({ confirmLabel: 'Preparar de novo', cancelLabel: 'Manter a dublagem', tone: 'danger' })
+    expect(JSON.stringify(asked)).not.toMatch(/[\u2013\u2014]/)
+  })
+
+  it('sem o caminho a pergunta continua clara', () => {
+    const asked = overwriteConfirmation(null)
+    expect(asked.description).toBe('Já existe uma dublagem preparada para este arquivo e este idioma.')
   })
 })

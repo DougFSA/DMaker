@@ -13,7 +13,9 @@ from dmaker.agent.llm import Reply, ToolCall
 from dmaker.agent.loop import AgentLoop
 from dmaker.agent.safety import (
     CONFIRMATION_RULES,
+    DUB_OVERWRITE_FLAG,
     REDOES_EXISTING_PROJECT,
+    REPLACES_EXISTING_DUB_PROJECT,
     ApproveAll,
     ConfirmationRequest,
     DenyAll,
@@ -308,7 +310,7 @@ def test_preparing_the_dubbing_of_a_video_that_already_has_one_asks_before_repla
     asked = ApproveAll()
     g = gate(asked, existing={VIDEO, default_dub_project()})
 
-    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en"}) is None
+    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": True}) is None
 
     (request,) = asked.asked
     assert request.tool == "dub_prepare" and request.kind == "action"
@@ -321,7 +323,10 @@ def test_an_explicit_dubbing_project_that_already_exists_asks_before_replacing_i
     asked = ApproveAll()
     g = gate(asked, existing={VIDEO, "C:/dub/minha.dub.json"})
 
-    g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/minha.dub.json"})
+    g.check(
+        "dub_prepare",
+        {"path": VIDEO, "target_language": "en", "project": "C:/dub/minha.dub.json", "overwrite": True},
+    )
 
     assert [r.question for r in asked.asked] == [
         "Já existe uma dublagem deste vídeo para en (C:/dub/minha.dub.json), e refazê-la apaga as traduções "
@@ -333,7 +338,10 @@ def test_the_explicit_project_is_the_destination_even_when_the_default_one_exist
     asked = ApproveAll()
     g = gate(asked, existing={VIDEO, default_dub_project()})
 
-    g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/outra.dub.json"})
+    g.check(
+        "dub_prepare",
+        {"path": VIDEO, "target_language": "en", "project": "C:/dub/outra.dub.json", "overwrite": True},
+    )
 
     assert asked.asked == []  # o padrão não será tocado: o destino é o outro arquivo
 
@@ -342,13 +350,51 @@ def test_preparing_a_dubbing_with_no_project_on_disk_asks_nothing():
     asked = ApproveAll()
     g = gate(asked, existing={VIDEO, default_dub_project("es")})  # há uma dublagem, mas para outro idioma
 
-    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en"}) is None
-    assert (
-        g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "project": "C:/dub/nova.json"})
-        is None
-    )
+    on = {
+        "path": VIDEO,
+        "target_language": "en",
+        "overwrite": True,
+    }  # a flag ligada num destino livre é inofensiva
+    assert g.check("dub_prepare", on) is None
+    assert g.check("dub_prepare", {**on, "project": "C:/dub/nova.json"}) is None
 
     assert asked.asked == []
+
+
+@pytest.mark.parametrize(
+    "flag", [{}, {"overwrite": False}, {"overwrite": None}, {"overwrite": "true"}, {"overwrite": 1}]
+)
+def test_preparing_a_dubbing_without_a_real_true_flag_never_asks_even_when_it_exists(flag):
+    """Sem a flag a ferramenta recusa sozinha o projeto que já existe: nada é substituído, não há o que perguntar."""
+    g = gate(ApproveAll(), existing={VIDEO, default_dub_project()})
+
+    assert g.confirmations("dub_prepare", {"path": VIDEO, "target_language": "en", **flag}) == []
+
+
+def test_the_dub_prepare_flag_is_a_boolean_of_the_mcp_tool_that_defaults_to_false():
+    """Contrato com o servidor MCP: o gate pergunta pelo argumento que a ferramenta tem de verdade."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    properties = tools["dub_prepare"].input_schema["properties"]
+
+    assert (
+        properties[DUB_OVERWRITE_FLAG]["type"] == "boolean"
+        and properties[DUB_OVERWRITE_FLAG]["default"] is False
+    )
+    assert {"dub_prepare"} == set(REPLACES_EXISTING_DUB_PROJECT)
+
+
+def test_a_flag_written_as_text_is_stopped_by_the_schema_before_it_could_reach_the_server():
+    """O servidor aceitaria "true" como sim; o esquema da ferramenta barra antes, e o gate nem chega a decidir."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    g = ToolGate(
+        schemas={"dub_prepare": tools["dub_prepare"].input_schema},
+        policy=ApproveAll(),
+        exists={VIDEO, default_dub_project()}.__contains__,
+    )
+
+    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": "true"})
+
+    assert text is not None and text.startswith("erro:") and "'overwrite' deve ser sim ou não" in text
 
 
 def test_the_dubbing_destination_comes_from_the_same_function_the_mcp_server_uses():
@@ -364,7 +410,7 @@ def test_the_dubbing_destination_comes_from_the_same_function_the_mcp_server_use
 def test_a_refused_dubbing_replacement_blocks_the_call_and_tells_the_model_not_to_retry():
     g = gate(DenyAll(), existing={VIDEO, default_dub_project()})
 
-    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en"})
+    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": True})
 
     assert text is not None and "não autorizou" in text and "Já existe uma dublagem" in text
     assert "Não execute esta ação" in text

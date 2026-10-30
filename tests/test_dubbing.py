@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dmaker.domain.dub import DubProject, load_dub_project, save_dub_project
+from dmaker.domain.dub import DubProject, DubProjectExists, load_dub_project, save_dub_project
 from dmaker.media.ffmpeg import FFmpegCommand
 from dmaker.pipeline.dub_stems import StemsOptions
 from dmaker.pipeline.dubbing import (
@@ -183,6 +183,69 @@ def test_prepare_refuses_bad_requests_before_working(dub: DubHarness, tmp_path: 
     with pytest.raises(Exception, match="fantasma"):
         dub.service.prepare(dub.src, "en", voice="fantasma")
     assert dub.base.isolation.calls == []
+
+
+def revised_project(dub: DubHarness) -> bytes:
+    """Prepara, revisa a primeira fala e a trava: o arquivo que preparar de novo não pode perder."""
+    revised = dub.prepare().edited("s1", text="Minha tradução revisada.", locked=True)
+    save_dub_project(revised, dub.project_path)
+    return dub.project_path.read_bytes()
+
+
+def test_prepare_refuses_a_project_that_already_exists_and_keeps_the_file_byte_for_byte(dub: DubHarness):
+    before = revised_project(dub)
+    dub.base.isolation.calls.clear()
+    dub.translator.calls.clear()
+
+    with pytest.raises(DubProjectExists) as refused:
+        dub.prepare()
+
+    assert refused.value.path == dub.project_path
+    assert str(dub.project_path) in str(refused.value)
+    assert "traduções que você revisou" in str(refused.value) and "falas que você travou" in str(
+        refused.value
+    )
+    assert dub.project_path.read_bytes() == before
+    # recusou antes dos minutos de trabalho: nem separou a voz nem chamou o tradutor
+    assert dub.base.isolation.calls == [] and dub.translator.calls == []
+
+
+def test_prepare_refuses_the_default_project_too_when_no_path_is_given(
+    dub: DubHarness, monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr("dmaker.config.OUTPUT_DIR", tmp_path / "output")
+    existing = default_project_path(dub.src, "en")
+    save_dub_project(dub.prepare(), existing)
+
+    with pytest.raises(DubProjectExists) as refused:
+        dub.service.prepare(dub.src, "en")
+
+    assert refused.value.path == existing
+
+
+def test_prepare_with_overwrite_replaces_the_project(dub: DubHarness):
+    revised_project(dub)
+
+    project = dub.prepare(overwrite=True)
+
+    assert [s.text for s in project.segments][0] == f"EN {S1}" and not project.segments[0].locked
+    assert load_dub_project(dub.project_path) == project
+
+
+def test_prepare_does_not_step_on_a_project_that_appeared_while_it_worked(dub: DubHarness):
+    """A preparação leva minutos: o `.dub.json` que outro pedido gravou nesse tempo não é pisado."""
+    other = DubProject(source="x.mp4", target_language="en", segments=[])
+
+    def translate_while_another_request_saves(*args, **kwargs):
+        save_dub_project(other, dub.project_path)
+        return [f"EN {S1}", f"EN {S2}", f"EN {S3}"]
+
+    dub.translator.translate = translate_while_another_request_saves
+
+    with pytest.raises(DubProjectExists):
+        dub.prepare()
+
+    assert load_dub_project(dub.project_path) == other
 
 
 def test_prepare_with_no_words_reports_no_speech(dub: DubHarness, monkeypatch):
@@ -611,7 +674,7 @@ def stretched_project(dub: DubHarness, mode: str, seconds: float = 5.5) -> DubPr
 
 def test_the_default_fit_mode_is_the_voice_and_a_new_project_keeps_the_choice(dub: DubHarness):
     assert dub.prepare().fit_mode == "voz"
-    chosen = dub.prepare(fit_mode="video")
+    chosen = dub.prepare(fit_mode="video", overwrite=True)  # preparar de novo por cima pede o sim explícito
     assert chosen.fit_mode == "video"
     assert load_dub_project(dub.project_path).fit_mode == "video"
     assert project_summary(chosen, dub.project_path)["fit_mode"] == "video"

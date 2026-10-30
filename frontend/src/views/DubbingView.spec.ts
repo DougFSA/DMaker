@@ -133,6 +133,39 @@ describe('DubbingView (/dublagem): preparar', () => {
     expect(buttonLabelled(wrapper, 'Preparar (transcrever e traduzir)').attributes('disabled')).toBeUndefined()
   })
 
+  it('com a dublagem já preparada, pergunta antes: o "Manter" não muda nada e o "Preparar de novo" prepara por cima', async () => {
+    server = stubDubServer({ project: null, existingDubbing: DUB_PATH })
+    const { wrapper } = await mountView()
+    const prepare = () => press(wrapper, 'Preparar (transcrever e traduzir)')
+
+    await prepare()
+    await flushPromises()
+    const asked = useConfirmStore().current
+    expect(asked?.options.title).toBe('Preparar a dublagem de novo?')
+    expect(asked?.options.warning).toContain('apaga as traduções que você revisou e as falas que você travou')
+    expect(asked?.options.description).toContain('entrevista.en.dub.json')
+    expect(wrapper.text()).not.toContain('Na fila...') // o andamento só aparece depois do sim
+
+    useConfirmStore().answer(false)
+    await flushPromises()
+    expect(callsTo(server.calls, 'POST', '/api/dub/prepare')).toHaveLength(1)
+    expect(FakeEventSource.instances).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Parado a pedido')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(buttonLabelled(wrapper, 'Preparar (transcrever e traduzir)').attributes('disabled')).toBeUndefined()
+
+    await prepare()
+    await flushPromises()
+    useConfirmStore().answer(true)
+    await flushPromises()
+    const prepares = callsTo(server.calls, 'POST', '/api/dub/prepare')
+    expect(prepares).toHaveLength(3)
+    expect(prepares[2]!.body).toMatchObject({ path: CLIP, overwrite: true })
+    expect(wrapper.text()).toContain('Na fila...')
+    await emitEnd(dubProject())
+    expect(wrapper.text()).toContain('Falas')
+  })
+
   it('sem escolher modo por pessoa, não manda a quantidade de pessoas', async () => {
     const { wrapper } = await mountView()
     await field(wrapper, 'Quantas pessoas falam').setValue('3')

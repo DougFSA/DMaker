@@ -797,7 +797,10 @@ com a revisão no meio, e o roteiro vive num projeto editável `<nome>.<idioma>.
    `keep_original_db` (ex.: -18: voz original por baixo, estilo voice-over; sem ele só a dublada), `brand`
    (dicionário de pronúncia). A diarização roda na CPU, sem conta nem token (sherpa-onnx; os modelos baixam
    para `cache/models/diarization` na primeira vez), em cerca de 0,3x a duração do áudio; `DMAKER_DIARIZATION=off`
-   a desliga (o padrão volta a ser `per_segment`).
+   a desliga (o padrão volta a ser `per_segment`). Se o `.dub.json` de destino já existe, preparar de novo
+   apagaria as traduções revisadas e as falas travadas, então `dub_prepare` (e `dub prepare`/`dub run` na CLI)
+   recusa; `overwrite=true` (`--overwrite` na CLI) prepara por cima, e só depois de o usuário confirmar. A API
+   (`POST /api/dub/prepare`) responde 409 com o caminho antes de criar o job, e a interface pergunta.
 2. **Revisar**: `dub_get(project)` lista as falas (`id`, tempo, `speaker`, `original`, `text`) e os `speakers`;
    `dub_update_segment(project, segment_id, text, locked, speaker)` corrige a tradução (aceita
    `[[termo|pronúncia]]`) e/ou troca quem fala ("Falante 2"): só aquela fala é sintetizada de novo; `locked=true`

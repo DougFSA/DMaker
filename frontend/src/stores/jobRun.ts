@@ -22,8 +22,10 @@ export function createJobRun<T>() {
   /**
    * Inicia o trabalho (`start` faz o POST que devolve o `job_id`) e espera o fim. Devolve o resultado, ou `null`
    * se falhou (o texto fica em `error`) ou parou a pedido (`cancelled`). Um segundo pedido durante o primeiro é ignorado.
+   * Se o `start` devolve `null`, a pessoa desistiu antes de o trabalho começar (disse "não" a uma pergunta): nada rodou,
+   * então não há erro nem "parado" a mostrar.
    */
-  async function run(start: () => Promise<JobStartResponse>): Promise<T | null> {
+  async function run(start: () => Promise<JobStartResponse | null>): Promise<T | null> {
     if (running.value) return null
     running.value = true
     label.value = QUEUED_LABEL
@@ -34,8 +36,13 @@ export function createJobRun<T>() {
     cancelled.value = false
     cancelling.value = false
     try {
-      const { job_id } = await start()
-      followed = followJob<T>(job_id, {
+      const started = await start()
+      if (!started) {
+        label.value = ''
+        startedAtMs.value = null
+        return null
+      }
+      followed = followJob<T>(started.job_id, {
         onProgress(progress) {
           if (progress.label) label.value = progress.label
           percent.value = progress.percent ?? null

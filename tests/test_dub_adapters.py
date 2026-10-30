@@ -11,9 +11,13 @@ from typer.testing import CliRunner
 
 import dmaker.mcp_server as mcp_server
 from dmaker import config
+from dmaker.agent.llm import Reply, ToolCall
+from dmaker.agent.loop import AgentLoop
+from dmaker.agent.safety import ConversationalConfirmation, DenyAll, ToolGate, output_targets
+from dmaker.agent.tools import McpToolHost
 from dmaker.cli import app
-from dmaker.domain.dub import load_dub_project, save_dub_project
-from tests.test_dubbing import DubHarness, text_taking
+from dmaker.domain.dub import DubProjectExists, load_dub_project, save_dub_project
+from tests.test_dubbing import S1, DubHarness, text_taking
 
 cli = CliRunner()
 
@@ -48,6 +52,70 @@ def test_cli_prepare_writes_the_project_and_prints_the_segment_table(wired: DubH
     assert "entrevista.en.dub.json" in result.output and "tempo de processamento" in result.output
     project = load_dub_project(default_project(tmp_path))
     assert project.target_language == "en" and len(project.segments) == 3
+
+
+def spoken(output: str) -> str:
+    """A saída do terminal numa linha só: o Rich quebra a mensagem onde a largura manda, e o texto continua o mesmo."""
+    return " ".join(output.split())
+
+
+def revise_default_project(tmp_path: Path) -> bytes:
+    """Corrige e trava a primeira fala da dublagem já preparada: o que preparar de novo não pode apagar."""
+    path = default_project(tmp_path)
+    save_dub_project(load_dub_project(path).edited("s1", text="Minha tradução.", locked=True), path)
+    return path.read_bytes()
+
+
+def test_cli_prepare_refuses_an_existing_dubbing_until_overwrite_is_asked(wired: DubHarness, tmp_path: Path):
+    command = ["dub", "prepare", str(wired.src), "--to", "en"]
+    assert cli.invoke(app, command).exit_code == 0
+    before = revise_default_project(tmp_path)
+    wired.base.isolation.calls.clear()
+
+    refused = cli.invoke(app, command)
+
+    assert refused.exit_code == 1
+    message = spoken(refused.output)
+    assert "Já existe uma dublagem preparada em" in message and "entrevista.en.dub.json" in message
+    assert "apaga as traduções que você revisou e as falas que você travou" in message
+    assert "Use --overwrite" in message
+    assert default_project(tmp_path).read_bytes() == before  # o arquivo não mudou
+    assert wired.base.isolation.calls == []  # e nem começou o trabalho de minutos
+
+    replaced = cli.invoke(app, [*command, "--overwrite"])
+
+    assert replaced.exit_code == 0, replaced.output
+    assert default_project(tmp_path).read_bytes() != before
+    assert load_dub_project(default_project(tmp_path)).segments[0].text == f"EN {S1}"
+
+
+def test_cli_prepare_into_a_new_project_asks_for_nothing(wired: DubHarness, tmp_path: Path):
+    result = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en"])
+
+    assert result.exit_code == 0, result.output
+    assert "overwrite" not in result.output and default_project(tmp_path).exists()
+
+
+def test_cli_run_refuses_an_existing_dubbing_before_synthesizing_anything(wired: DubHarness, tmp_path: Path):
+    assert cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en"]).exit_code == 0
+    before = revise_default_project(tmp_path)
+    out = tmp_path / "tudo.mp4"
+
+    refused = cli.invoke(app, ["dub", str(wired.src), "--to", "en", "--out", str(out)])
+
+    assert refused.exit_code == 1 and "Use --overwrite" in spoken(refused.output)
+    assert default_project(tmp_path).read_bytes() == before
+    assert wired.synthesizer.requests == [] and not out.exists()
+
+    replaced = cli.invoke(app, ["dub", "run", str(wired.src), "--to", "en", "--out", str(out), "--overwrite"])
+
+    assert replaced.exit_code == 0, replaced.output
+    assert default_project(tmp_path).read_bytes() != before and out.exists()
+
+
+def test_cli_lists_the_overwrite_option_in_prepare_and_run():
+    for command in ("prepare", "run"):
+        assert "--overwrite" in cli.invoke(app, ["dub", command, "--help"]).output
 
 
 def test_cli_prepare_passes_every_option_to_the_service(wired: DubHarness, tmp_path: Path):
@@ -270,6 +338,122 @@ def test_dub_retranslate_job_keeps_locked_segments(wired: DubHarness):
     assert [s["text"] for s in status["result"]["segments"]] == ["Fixa.", "Dois.", "Três."]
 
 
+def test_dub_prepare_refuses_an_existing_project_before_the_job_and_overwrite_replaces_it(
+    wired: DubHarness, tmp_path: Path
+):
+    assert finished(mcp_server.dub_prepare(str(wired.src), "en"))["status"] == "done"
+    before = revise_default_project(tmp_path)
+    started = len(mcp_server.jobs.list())
+
+    with pytest.raises(DubProjectExists, match="overwrite=true") as refused:
+        mcp_server.dub_prepare(str(wired.src), "en")
+
+    assert refused.value.path == default_project(tmp_path)
+    assert "apaga as traduções que você revisou" in str(refused.value)
+    assert len(mcp_server.jobs.list()) == started  # a recusa sai na chamada, antes de haver job
+    assert default_project(tmp_path).read_bytes() == before
+
+    status = finished(mcp_server.dub_prepare(str(wired.src), "en", overwrite=True))
+
+    assert status["status"] == "done", status.get("error")
+    assert default_project(tmp_path).read_bytes() != before
+
+
+def test_dub_prepare_refuses_an_existing_explicit_project_too(wired: DubHarness, tmp_path: Path):
+    target = tmp_path / "minha.dub.json"
+    assert finished(mcp_server.dub_prepare(str(wired.src), "en", project=str(target)))["status"] == "done"
+
+    with pytest.raises(DubProjectExists):
+        mcp_server.dub_prepare(str(wired.src), "en", project=str(target))
+    replaced = finished(mcp_server.dub_prepare(str(wired.src), "en", project=str(target), overwrite=True))
+    assert replaced["status"] == "done"
+
+
+def test_the_dub_files_the_tools_write_are_the_files_the_gate_asked_about(wired: DubHarness):
+    """Contrato de ponta a ponta: o vídeo e as trilhas que as ferramentas gravam sem destino são os do gate."""
+    wired.prepare()
+    arguments = {"project": str(wired.project_path)}
+
+    video = finished(mcp_server.dub_render(**arguments, draft=True))["result"]["output"]
+    folder = finished(mcp_server.dub_stems(**arguments, draft=True))["result"]["folder"]
+
+    assert video in output_targets("dub_render", arguments)
+    assert output_targets("dub_stems", arguments) == [folder]
+
+
+class _Script:
+    def __init__(self, replies):
+        self.replies = list(replies)
+
+    def chat(self, messages, tools):
+        return self.replies.pop(0)
+
+
+def agent_for_dub_prepare(policy) -> AgentLoop:
+    """O agente com o servidor MCP de verdade (o `dub_prepare` com dublês) e o gate de produção."""
+    host = McpToolHost(mcp_server.server, allowed=["dub_prepare"], argument_defaults={"wait_seconds": 30})
+    return AgentLoop(model=None, tools=host, system="s", gate=ToolGate(schemas={}, policy=policy))
+
+
+def say(loop: AgentLoop, replies: list[Reply], message: str) -> str:
+    loop.model = _Script(replies)
+    return loop.ask(message)
+
+
+def test_no_path_of_the_agent_replaces_a_dubbing_without_a_yes(wired: DubHarness, tmp_path: Path):
+    """O agente só substitui a dublagem com `overwrite=true` E um sim claro da pessoa; qualquer outro caminho falha."""
+    assert finished(mcp_server.dub_prepare(str(wired.src), "en"))["status"] == "done"
+    before = revise_default_project(tmp_path)
+    redo = {"path": str(wired.src), "target_language": "en", "overwrite": True}
+    plain = {"path": str(wired.src), "target_language": "en"}
+
+    def untouched() -> bool:
+        return default_project(tmp_path).read_bytes() == before
+
+    # 1. sem a flag: a ferramenta recusa sozinha e diz como pedir, sem que ninguém precise perguntar nada
+    loop = agent_for_dub_prepare(ConversationalConfirmation())
+    say(loop, [Reply("", [ToolCall("dub_prepare", plain)]), Reply("Já existe.")], "dubla para inglês")
+    refusal = next(m["content"] for m in loop._messages if m["role"] == "tool")
+    assert "Já existe uma dublagem preparada" in refusal and "overwrite=true" in refusal
+    assert untouched() and loop.gate.pending is None
+
+    # 2. com a flag e sem ninguém para perguntar: bloqueado
+    loop = agent_for_dub_prepare(DenyAll())
+    say(loop, [Reply("", [ToolCall("dub_prepare", redo)]), Reply("Não pude.")], "refaz por cima")
+    assert "não autorizou" in next(m["content"] for m in loop._messages if m["role"] == "tool")
+    assert untouched()
+
+    # 3. com a flag, por conversa: a pergunta fica pendente e nada muda até o sim
+    loop = agent_for_dub_prepare(ConversationalConfirmation())
+    say(
+        loop, [Reply("", [ToolCall("dub_prepare", redo)]), Reply("Posso refazer por cima?")], "refaz por cima"
+    )
+    assert loop.gate.pending is not None and untouched()
+
+    # 4. uma resposta que não é um sim limpo descarta a pendência e nada muda
+    say(loop, [Reply("Tudo bem, deixo como está.")], "Não, deixa como está.")
+    assert loop.gate.pending is None and untouched()
+    say(loop, [Reply("Preciso de um sim claro.")], "Sim")
+    assert untouched()  # o "sim" depois do "não" não ressuscita a chamada antiga
+
+    # 5. o sim claro executa a chamada guardada, e só então o arquivo muda
+    loop = agent_for_dub_prepare(ConversationalConfirmation())
+    say(
+        loop, [Reply("", [ToolCall("dub_prepare", redo)]), Reply("Posso refazer por cima?")], "refaz por cima"
+    )
+    say(loop, [Reply("Refeito.")], "Sim, pode refazer.")
+    assert not untouched()
+    assert load_dub_project(default_project(tmp_path)).segments[0].text == f"EN {S1}"
+
+
+def test_dub_prepare_overwrite_flag_is_a_boolean_that_defaults_to_false():
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    flag = tools["dub_prepare"].input_schema["properties"]["overwrite"]
+
+    assert flag["type"] == "boolean" and flag["default"] is False
+    assert "overwrite" in (tools["dub_prepare"].description or "")
+
+
 def test_dub_tools_reject_bad_calls_immediately(wired: DubHarness, tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         mcp_server.dub_prepare(str(tmp_path / "nada.mp4"), "en")
@@ -313,7 +497,8 @@ def test_cli_prepare_saves_the_fit_mode_in_the_project(wired: DubHarness, tmp_pa
     result = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--fit", "video"])
     assert result.exit_code == 0, result.output
     assert load_dub_project(default_project(tmp_path)).fit_mode == "video"
-    default = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en"])
+    # preparar de novo por cima pede `--overwrite`
+    default = cli.invoke(app, ["dub", "prepare", str(wired.src), "--to", "en", "--overwrite"])
     assert default.exit_code == 0 and load_dub_project(default_project(tmp_path)).fit_mode == "voz"
 
 

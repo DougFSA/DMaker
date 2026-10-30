@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
   api,
+  ApiError,
   errorMessage,
   type DubPrepareRequest,
   type DubProjectFile,
@@ -9,13 +10,17 @@ import {
   type DubRenderResult,
   type DubSegmentReport,
   type DubStemsResult,
+  type JobStartResponse,
   type VoiceOption,
 } from '@/api'
 import type { PickedMedia } from '@/components/media/MediaPicker.vue'
+import { useConfirm } from '@/composables/useConfirm'
 import {
   describeStems,
+  existingProjectPath,
   fitModeOf,
   keepDbFrom,
+  overwriteConfirmation,
   parseGlossary,
   rowsChanged,
   rowsFrom,
@@ -41,6 +46,7 @@ export interface DubOutcome extends DubRenderResult {
 export const useDubbingStore = defineStore('dubbing', () => {
   const workspace = useWorkspaceStore()
   const toasts = useToastsStore()
+  const confirm = useConfirm()
 
   // o formulário; seletores trabalham com texto, e `speakerModeOf`/`fitModeOf` estreitam na hora de enviar
   const media = ref<PickedMedia | null>(null)
@@ -69,6 +75,8 @@ export const useDubbingStore = defineStore('dubbing', () => {
   const stemsNote = ref('')
   const actionError = ref('')
   const saving = ref(false)
+  /** A pergunta "preparar de novo?" está na tela: ainda não há trabalho, mas nada mais se mexe. */
+  const asking = ref(false)
 
   const preparation = createJobRun<DubProjectSummary>()
   const retranslation = createJobRun<DubProjectSummary>()
@@ -76,7 +84,7 @@ export const useDubbingStore = defineStore('dubbing', () => {
   const stems = createJobRun<DubStemsResult>()
 
   const busy = computed(
-    () => saving.value || preparation.running || retranslation.running || generation.running || stems.running,
+    () => asking.value || saving.value || preparation.running || retranslation.running || generation.running || stems.running,
   )
   const sameLanguages = computed(() => sameLanguage(sourceLanguage.value, targetLanguage.value))
   const canPrepare = computed(() => !!media.value && !sameLanguages.value && !busy.value)
@@ -132,7 +140,23 @@ export const useDubbingStore = defineStore('dubbing', () => {
     }
   }
 
-  /** Transcreve, separa os falantes e traduz (job). No fim a tabela de falas aparece para revisar. */
+  /** Pergunta se pode preparar por cima da dublagem que já existe, com o que se perde à vista. */
+  async function confirmOverwrite(existingPath: string | null): Promise<boolean> {
+    asking.value = true
+    try {
+      return await confirm(overwriteConfirmation(existingPath))
+    } finally {
+      asking.value = false
+    }
+  }
+
+  /**
+   * Transcreve, separa os falantes e traduz (job). No fim a tabela de falas aparece para revisar.
+   *
+   * Se a dublagem já existe o servidor recusa (409) antes de começar o job: a recusa não é erro nem trabalho, então a
+   * pergunta acontece fora do andamento e só o sim repete o pedido com `overwrite`. O "não" não muda nada, nem o
+   * resultado que a tela já mostrava.
+   */
   async function prepare(): Promise<void> {
     const source = media.value
     if (!source || !canPrepare.value) return
@@ -148,10 +172,28 @@ export const useDubbingStore = defineStore('dubbing', () => {
       keep_original_db: keepDbFrom(keepDb.value),
       glossary: parseGlossary(glossary.value),
     }
-    outcome.value = null
-    stemsNote.value = ''
-    actionError.value = ''
-    const result = await preparation.run(() => api.dub.prepare(request))
+    /** O job começou: a dublagem nova toma o lugar do resultado antigo. */
+    const begun = (started: JobStartResponse): JobStartResponse => {
+      outcome.value = null
+      stemsNote.value = ''
+      actionError.value = ''
+      return started
+    }
+    const refusal = { exists: false, path: null as string | null }
+    let result = await preparation.run(async () => {
+      try {
+        return begun(await api.dub.prepare(request))
+      } catch (failure) {
+        if (!(failure instanceof ApiError) || failure.status !== 409) throw failure
+        refusal.exists = true
+        refusal.path = existingProjectPath(failure.detail)
+        return null // sem job: o pedido termina aqui, sem "na fila" nem erro
+      }
+    })
+    if (refusal.exists) {
+      if (!(await confirmOverwrite(refusal.path))) return
+      result = await preparation.run(async () => begun(await api.dub.prepare({ ...request, overwrite: true })))
+    }
     if (!result) return
     entry.value = source.entry
     entryProject.value = projectOf(source)

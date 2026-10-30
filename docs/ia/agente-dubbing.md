@@ -25,6 +25,7 @@ Pergunte antes, se faltar:
 - Termos que não se traduzem (marcas): vão em `--glossary`; as marcas do dicionário de pronúncia já são mantidas.
 - Se quer a voz original por baixo, estilo voice-over (`--keep-original -18`), ou só a dublada.
 - **Autorização** de quem fala: a dublagem clona a voz dela.
+- Se esse arquivo e idioma já têm dublagem preparada, preparar de novo apaga as traduções revisadas: só com `overwrite`.
 
 ### Pedido: "Dubla essa entrevista com duas vozes diferentes"
 

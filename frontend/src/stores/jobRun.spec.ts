@@ -77,6 +77,21 @@ describe('createJobRun', () => {
     expect(FakeEventSource.instances).toHaveLength(0)
   })
 
+  it('um início que devolve `null` é a pessoa desistindo: nada roda, nada é mostrado e o próximo pedido funciona', async () => {
+    const job = createJobRun<Output>()
+    await expect(job.run(() => Promise.resolve(null))).resolves.toBeNull()
+    expect(job.running).toBe(false)
+    expect(job.error).toBe('')
+    expect(job.cancelled).toBe(false)
+    expect(job.startedAtMs).toBeNull()
+    expect(FakeEventSource.instances).toHaveLength(0)
+
+    const pending = job.run(started())
+    await settle()
+    FakeEventSource.latest().emit({ kind: 'end', t: 1, status: 'done', error: null, result: { output: 'a' } })
+    await expect(pending).resolves.toEqual({ output: 'a' })
+  })
+
   it('parar a pedido marca `cancelled`, sem erro', async () => {
     const calls = stubFetch({ ok: true })
     const job = createJobRun<Output>()

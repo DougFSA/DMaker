@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dmaker import config
-from dmaker.domain.dub import load_dub_project
+from dmaker.domain.dub import load_dub_project, save_dub_project
 from dmaker.ui import server
 from dmaker.ui.voice_routes import VoiceServices, get_voice_services
 from dmaker.voice.lexicon_store import LexiconStore
@@ -93,6 +93,53 @@ def test_prepare_reports_stage_progress_by_sse(client, dub: DubHarness):
     assert labels[0].startswith("Separando") and any(
         label.startswith("Traduzindo a fala") for label in labels
     )
+
+
+def revise(path: Path) -> bytes:
+    """Corrige e trava a primeira fala da dublagem preparada: o que preparar de novo não pode apagar."""
+    save_dub_project(load_dub_project(path).edited("s1", text="Minha tradução.", locked=True), path)
+    return path.read_bytes()
+
+
+def test_prepare_an_existing_dubbing_answers_409_before_any_job_and_keeps_the_file(client, dub: DubHarness):
+    path = Path(prepared(client, dub)["project"])
+    before = revise(path)
+    jobs_before = len(server.jobs.list())
+    body = {"path": str(dub.src), "target_language": "en", "source_language": "pt"}
+
+    refused = client.post("/api/dub/prepare", json=body)
+
+    assert refused.status_code == 409
+    answer = refused.json()
+    assert answer["path"] == str(path)
+    assert str(path) in answer["detail"] and "apaga as traduções que você revisou" in answer["detail"]
+    assert "\u2014" not in answer["detail"]  # regra da marca: sem travessão no texto que a pessoa lê
+    assert len(server.jobs.list()) == jobs_before  # a recusa vem antes do job: ele só gravaria minutos depois
+    assert path.read_bytes() == before
+
+    explicit_no = client.post("/api/dub/prepare", json={**body, "overwrite": False})
+    assert explicit_no.status_code == 409 and path.read_bytes() == before
+
+
+def test_prepare_an_existing_dubbing_with_overwrite_runs_the_job_and_replaces_the_file(
+    client, dub: DubHarness
+):
+    path = Path(prepared(client, dub)["project"])
+    before = revise(path)
+
+    result = prepared(client, dub, overwrite=True)
+
+    assert Path(result["project"]) == path and path.read_bytes() != before
+    assert load_dub_project(path).segments[0].text == f"EN {S1}"
+    assert not load_dub_project(path).segments[0].locked
+
+
+def test_prepare_a_dubbing_that_does_not_exist_yet_needs_no_flag(client, dub: DubHarness):
+    result = prepared(
+        client, dub
+    )  # o `prepared` exige 200: nenhuma pergunta para quem prepara pela primeira vez
+
+    assert Path(result["project"]).exists()
 
 
 def test_prepare_validates_before_starting_a_job(client, dub: DubHarness, tmp_path: Path):
@@ -347,7 +394,8 @@ def test_prepare_keeps_the_fit_mode_and_the_summary_shows_it(client, dub: DubHar
     assert result["fit_mode"] == "video"
     assert load_dub_project(Path(result["project"])).fit_mode == "video"
     assert client.get("/api/dub/project", params={"path": result["project"]}).json()["fit_mode"] == "video"
-    assert prepared(client, dub)["fit_mode"] == "voz"  # sem escolher, o comportamento de sempre
+    # sem escolher, o comportamento de sempre (e preparar de novo por cima pede o `overwrite`)
+    assert prepared(client, dub, overwrite=True)["fit_mode"] == "voz"
     bad = client.post(
         "/api/dub/prepare",
         json={"path": str(dub.src), "target_language": "en", "fit_mode": "esticar"},

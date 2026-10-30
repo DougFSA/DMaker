@@ -44,6 +44,14 @@ describe('cliente da dublagem', () => {
     })
   })
 
+  it('prepara por cima só quando o pedido leva `overwrite`', async () => {
+    const fetch = stubFetch({ job_id: 'j2' })
+    await dubApi.prepare({ path: 'a.mp4', target_language: 'en', overwrite: true })
+    expect(fetch.last()).toMatchObject({ url: '/api/dub/prepare', method: 'POST', body: { path: 'a.mp4', overwrite: true } })
+    await dubApi.prepare({ path: 'a.mp4', target_language: 'en' })
+    expect(fetch.last().body).not.toHaveProperty('overwrite')
+  })
+
   it('salva as traduções com a trava e o falante de cada fala', async () => {
     const fetch = stubFetch({})
     await dubApi.saveProject({

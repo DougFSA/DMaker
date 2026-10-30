@@ -16,7 +16,8 @@ from dmaker.agent.safety import (
     is_affirmative,
 )
 from dmaker.agent.tools import ToolSpec
-from dmaker.pipeline.dubbing import default_project_path
+from dmaker.domain.dub import DubProject
+from dmaker.pipeline.dubbing import default_output_path, default_project_path
 
 RENDER = {"name_or_path": "meu-video"}
 
@@ -177,13 +178,21 @@ def test_a_confirmation_the_person_answered_is_not_asked_again_in_the_same_call(
 
 VIDEO = "C:/v/aula.mp4"
 DUB = {"path": VIDEO, "target_language": "en"}
+REDO = {
+    **DUB,
+    "overwrite": True,
+}  # refazer por cima: a ferramenta só o faz com a flag, e o gate só então pergunta
 
 
 class DubHost(Host):
     def specs(self):
         schema = {
             "type": "object",
-            "properties": {"path": {"type": "string"}, "target_language": {"type": "string"}},
+            "properties": {
+                "path": {"type": "string"},
+                "target_language": {"type": "string"},
+                "overwrite": {"type": "boolean"},
+            },
             "required": ["path", "target_language"],
         }
         return [ToolSpec("dub_prepare", "d", schema)]
@@ -210,7 +219,7 @@ def make_dub_loop(replies, project_on_disk: bool):
 
 def dub_call_then_question():
     return [
-        Reply("", [ToolCall("dub_prepare", DUB)]),
+        Reply("", [ToolCall("dub_prepare", REDO)]),
         Reply("Já existe uma dublagem deste vídeo. Posso refazê-la por cima?"),
     ]
 
@@ -224,7 +233,7 @@ def test_redoing_an_existing_dubbing_waits_for_the_yes_and_a_clear_yes_runs_the_
 
     answer = loop.ask("Sim, pode refazer.")
 
-    assert host.calls == [("dub_prepare", DUB)] and answer == "Refiz a dublagem."
+    assert host.calls == [("dub_prepare", REDO)] and answer == "Refiz a dublagem."
 
 
 def test_redoing_an_existing_dubbing_with_a_no_keeps_the_revised_translations():
@@ -244,6 +253,59 @@ def test_a_dubbing_of_a_new_video_runs_at_once_without_a_question_to_the_person(
     loop.ask("dubla o vídeo da aula para inglês")
 
     assert host.calls == [("dub_prepare", DUB)] and loop.gate.pending is None
+
+
+def test_a_call_without_the_flag_runs_at_once_and_the_tool_itself_refuses_what_already_exists():
+    """Sem `overwrite` nada é substituído, então não há o que perguntar: quem recusa é a ferramenta (DMK-43)."""
+    loop, host = make_dub_loop([Reply("", [ToolCall("dub_prepare", DUB)]), Reply("Já existe.")], True)
+
+    loop.ask("dubla o vídeo da aula para inglês")
+
+    assert host.calls == [("dub_prepare", DUB)] and loop.gate.pending is None
+
+
+# ---------- um sim vale para todas as perguntas da chamada ----------
+
+
+class DubRenderHost(Host):
+    def specs(self):
+        schema = {
+            "type": "object",
+            "properties": {"project": {"type": "string"}, "draft": {"type": "boolean"}},
+            "required": ["project"],
+        }
+        return [ToolSpec("dub_render", "d", schema)]
+
+
+def test_one_yes_answers_every_question_of_the_call_so_the_overwrite_is_never_silent():
+    """Gerar o vídeo final e sobrescrever o que já existe são duas perguntas: o "sim" da conversa cobre as duas."""
+    source = Path("origem") / "aula.mp4"
+    final = str(default_output_path(source, "en", ".mp4"))
+    project = DubProject(source=str(source), target_language="en", segments=[])
+    call = {"project": "aula.en.dub.json"}
+    host = DubRenderHost()
+    gate = ToolGate(
+        schemas={},
+        policy=ConversationalConfirmation(),
+        exists={final}.__contains__,
+        read_dub_project=lambda path: project,  # o `.dub.json` vem do leitor injetado, sem tocar o disco
+    )
+    loop = AgentLoop(
+        model=Script([Reply("", [ToolCall("dub_render", call)]), Reply("Posso?"), Reply("Pronto.")]),
+        tools=host,
+        system="s",
+        gate=gate,
+    )
+
+    loop.ask("gera a dublagem final")
+
+    assert host.calls == [] and gate.pending is not None
+    question = gate.pending.question
+    assert "gerar o vídeo dublado" in question and f"O arquivo '{final}' já existe" in question
+
+    loop.ask("Sim, pode gerar e sobrescrever.")
+
+    assert host.calls == [("dub_render", call)]
 
 
 # ---------- o que conta como sim ----------

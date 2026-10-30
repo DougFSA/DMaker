@@ -771,6 +771,69 @@ def _run_dub_pure(expression: str):
     return json.loads(result.stdout)
 
 
+def _run_dub_async(body: str):
+    """Roda o corpo de uma função assíncrona com as funções puras de dub.js e devolve o que ela retornou."""
+    script = (
+        "global.window = {};"
+        f"require({json.dumps(str(DUB))});"
+        "const pure = window.DMakerDub.pure;"
+        f"(async () => {{ {body} }})().then((value) => console.log(JSON.stringify(value)));"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+_DUB_EXISTS = (
+    'const exists = Object.assign(new Error("Já existe uma dublagem preparada em X/a.en.dub.json."),'
+    " {status: 409});"
+)
+
+
+@requires_node
+def test_dub_prepare_asks_before_replacing_and_only_a_yes_repeats_the_request_with_overwrite():
+    outcome = _run_dub_async(
+        _DUB_EXISTS
+        + """
+        const calls = [], questions = [];
+        const post = async (body) => { calls.push(body); if (!body.overwrite) throw exists; return {job_id: "j1"}; };
+        const yes = await pure.startPrepare({path: "a.mp4"}, post, (q) => { questions.push(q); return true; });
+        const afterYes = calls.splice(0);
+        const no = await pure.startPrepare({path: "a.mp4"}, post, (q) => { questions.push(q); return false; });
+        return {yes, afterYes, no, afterNo: calls, questions};
+        """
+    )
+    assert outcome["yes"] == {"job_id": "j1"}
+    assert outcome["afterYes"] == [{"path": "a.mp4"}, {"path": "a.mp4", "overwrite": True}]
+    assert outcome["no"] is None and outcome["afterNo"] == [{"path": "a.mp4"}]  # o "não" não repete nada
+    question = outcome["questions"][0]
+    assert "Já existe uma dublagem preparada em X/a.en.dub.json." in question
+    assert "Preparar de novo mesmo assim?" in question and "—" not in question
+
+
+@requires_node
+def test_dub_prepare_of_a_new_dubbing_asks_nothing_and_other_errors_are_not_swallowed():
+    outcome = _run_dub_async(
+        """
+        let asked = 0;
+        const fresh = await pure.startPrepare({path: "a.mp4"}, async () => ({job_id: "j9"}), () => { asked++; return true; });
+        const invalid = Object.assign(new Error("O idioma de destino precisa ser diferente."), {status: 400});
+        let status = null;
+        try { await pure.startPrepare({path: "a.mp4"}, async () => { throw invalid; }, () => { asked++; return true; }); }
+        catch (error) { status = error.status; }
+        return {fresh, asked, status};
+        """
+    )
+    assert outcome == {"fresh": {"job_id": "j9"}, "asked": 0, "status": 400}
+
+
+def test_dub_prepare_goes_through_the_confirmation_before_the_progress_box():
+    js = DUB.read_text(encoding="utf-8")
+    assert "overwrite: true" in js and "err.status !== 409" in js
+    # a pergunta vem antes de `runJob`: o andamento não pode aparecer enquanto a pessoa decide
+    assert js.index("await startPrepare(") < js.index('"dub-prepare-progress"')
+
+
 @requires_node
 def test_dub_glossary_is_split_trimmed_and_deduplicated():
     assert _run_dub_pure("pure.parseGlossary(' DMaker, medlycare\\nDMAKER ,, Ollama ')") == [

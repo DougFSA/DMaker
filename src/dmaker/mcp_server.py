@@ -2024,7 +2024,9 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
         "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). fit_mode decide o que fazer "
         "quando a fala traduzida não cabe no tempo da original: voz (padrão: avança na pausa e acelera a voz até "
         "~1,44x), video (a voz fica natural e o vídeo estica até 1,3x naquele trecho) ou misto (a voz acelera "
-        "até 1,15x e o vídeo estica no resto). Lento na CPU (separação de "
+        "até 1,15x e o vídeo estica no resto). Se o projeto `.dub.json` de destino já existe, a ferramenta "
+        "recusa, porque preparar de novo apaga as traduções revisadas e as falas travadas; overwrite=true "
+        "prepara por cima (só depois de o usuário confirmar). Lento na CPU (separação de "
         "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
     )
 )
@@ -2041,7 +2043,9 @@ def dub_prepare(
     fit_mode: Literal["voz", "video", "misto"] = "voz",
     wait_seconds: float = 0,
     num_speakers: int | None = None,
+    overwrite: bool = False,
 ) -> dict:
+    from .domain.dub import refuse_existing_project
     from .pipeline.dubbing import default_project_path
 
     if not Path(path).exists():
@@ -2051,7 +2055,12 @@ def dub_prepare(
     if voice:
         _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
     project_path = Path(project) if project else default_project_path(Path(path), target_language)
+    # a recusa sai já na chamada, e não como falha do job minutos depois
+    refuse_existing_project(
+        project_path, overwrite, "Para preparar de novo mesmo assim, chame dub_prepare com overwrite=true."
+    )
     options = {
+        "overwrite": overwrite,
         "source": source_language,
         "speaker_mode": speaker_mode,
         "num_speakers": num_speakers,
