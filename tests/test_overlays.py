@@ -33,15 +33,15 @@ def canvas() -> Canvas:
 def test_font_resolution_and_measure():
     ref = fonts.resolve("Poppins", "bold")
     assert ref.file.exists()
-    w, h = fonts.measure("MedlyCare", ref, 66)
-    assert 200 < w < 600 and h == 66
+    w, h = fonts.measure_rendered("MedlyCare", ref, 66)
+    assert 150 < w < 300 and h == 66
 
 
 def test_wrap_lines():
     ref = fonts.resolve("Poppins", "bold")
     lines = wrap_lines("uma frase bem comprida para quebrar em linhas", ref, 66, 500)
     assert len(lines) >= 2
-    assert all(fonts.measure(ln, ref, 66)[0] <= 500 for ln in lines)
+    assert all(fonts.measure_rendered(ln, ref, 66)[0] <= 500 for ln in lines)
 
 
 @pytest.mark.parametrize("role", ["hook", "title", "subtitle", "cta", "lower-third", "custom"])
@@ -190,7 +190,11 @@ def test_libass_cell_comes_from_the_os2_table_and_falls_back_to_the_hhea(monkeyp
     """O libass dimensiona o Fontsize por winAscent+winDescent (1,762 na Poppins), não pela hhea (1,4)."""
     ref = fonts.resolve("Poppins", "regular")
     assert fonts._libass_cell_ratio(str(ref.file)) == pytest.approx(1.762)
-    assert fonts.measure_rendered("agenda", ref, 72)[0] < 0.85 * fonts.measure("agenda", ref, 72)[0]
+    # o corpo que o libass desenha é o Fontsize dividido pela célula; o Pillow com o mesmo número como corpo
+    # (o cartão faz isso) desenha uma letra 1,76 vezes maior
+    assert fonts.measure_pillow("agenda", ref, 72)[0] == pytest.approx(
+        1.762 * fonts.measure_rendered("agenda", ref, 72)[0], rel=0.001
+    )
     fonts._libass_cell_ratio.cache_clear()
     fonts._libass_metrics.cache_clear()  # as medidas da tabela OS/2 também ficam em cache
     monkeypatch.setattr(fonts, "_sfnt_table", lambda file, tag: None)
@@ -215,19 +219,90 @@ def test_boxed_caption_is_byte_for_byte_what_it_was(canvas):
     ]
 
 
-def test_block_box_overlay_is_byte_for_byte_what_it_was(canvas):
-    """O `box` de texto (um retângulo em volta do bloco) segue medindo e desenhando como antes."""
+def test_block_box_overlay_measures_with_the_libass_ruler(canvas):
+    """O `box` de texto (um retângulo em volta do bloco) mede com a régua do libass, que é quem o desenha.
+
+    Era byte a byte o da medida antiga (Pillow com a célula da hhea), que supunha o texto 26% mais largo:
+    a caixa saía com 907 px e a linha quebrava em "texto". Com a medida real a mesma linha mede 758 px, cabe
+    até "para" (877 px permitidos) e a caixa encolhe para 810 = 758 + 2 x 26 de margem.
+    """
     doc = AssDoc(canvas.width, canvas.height)
     ov = TextOverlay(text="Sua agenda em um clique com muito texto para quebrar linhas", role="cta", end=4)
     add_text_overlay(doc, canvas, ov, 0)
     box, text = (e.line() for e in doc.events)
     assert box == (
         r"Dialogue: 10,0:00:00.00,0:00:04.00,T0,,0,0,0,,{\an5\move(540,1420,540,1360,0,320)\fad(200,200)"
-        r"\1c&H005A530C\1a&H00&\bord0\shad0\p1}m 30.0 0 l 877.0 0 b 893.6 0 907.0 13.4 907.0 30.0 "
-        r"l 907.0 130.0 b 907.0 146.6 893.6 160.0 877.0 160.0 l 30.0 160.0 b 13.4 160.0 0 146.6 0 130.0 "
+        r"\1c&H005A530C\1a&H00&\bord0\shad0\p1}m 30.0 0 l 780.0 0 b 796.5 0 810.0 13.4 810.0 30.0 "
+        r"l 810.0 130.0 b 810.0 146.6 796.5 160.0 780.0 160.0 l 30.0 160.0 b 13.4 160.0 0 146.6 0 130.0 "
         r"l 0 30.0 b 0 13.4 13.4 0 30.0 0{\p0}"
     )
-    assert text.endswith(r"}Sua agenda em um clique com muito texto\Npara quebrar linhas")
+    assert text.endswith(r"}Sua agenda em um clique com muito texto para\Nquebrar linhas")
+
+
+@pytest.mark.parametrize(
+    ("role", "text", "style"),
+    [
+        ("cta", "medlycare.com.br", {}),
+        ("cta", "Sua agenda em um clique com muito texto para quebrar linhas", {}),
+        ("title", "Sua agenda em um clique", {"box": True}),
+        ("lower-third", "Maria Souza", {}),
+    ],
+)
+def test_block_box_is_the_widest_line_plus_the_configured_margin(canvas, role, text, style):
+    """A caixa comum tem a largura da linha mais larga (medida pelo libass) mais a margem dos dois lados."""
+    doc = AssDoc(canvas.width, canvas.height)
+    ov = TextOverlay(text=text, role=role, style=style, end=4)
+    add_text_overlay(doc, canvas, ov, 0)
+    st = effective_style(ov, canvas.theme, None)
+    ref = fonts.resolve(st["font"] or canvas.theme.font_family, st["weight"])
+    rows = _rows(doc.events[-1].text)
+    widest = max(fonts.measure_rendered(row, ref, st["size"], st["spacing"])[0] for row in rows)
+    width, height = _drawing_size(_drawing(doc.events[0].text))
+    assert width == pytest.approx(widest + 2 * st["box_padding"], abs=0.1)
+    assert height == pytest.approx(len(rows) * st["size"] + 2 * st["box_padding"])
+
+
+def test_a_text_that_fits_the_allowed_width_stays_on_one_line(canvas):
+    """A linha de 876 px cabe nos 880,8 permitidos ao título (86% do quadro menos a margem): não quebra.
+
+    A medida antiga a dava como 26% mais larga (1.100 px) e a quebrava em duas linhas de ~80% da largura.
+    """
+    text = "Fale com a gente pelo WhatsApp hoje"
+    allowed = 1080 * 0.86 - 2 * 24
+    ref = fonts.resolve("Poppins", "bold")
+    assert 0.9 * allowed < fonts.measure_rendered(text, ref, 80)[0] <= allowed  # justo, mas dentro
+    for style in ({"box": True}, {}):
+        doc = AssDoc(canvas.width, canvas.height)
+        add_text_overlay(doc, canvas, TextOverlay(text=text, role="title", style=style, end=4), 0)
+        assert _rows(doc.events[-1].text) == [text]
+
+
+def test_measure_pillow_is_the_width_pillow_draws_with_that_body():
+    """O cartão desenha com `ImageFont.truetype(arquivo, tamanho)`: o tamanho é o corpo, sem a conversão do libass."""
+    from PIL import ImageFont
+
+    ref = fonts.resolve("Poppins", "bold")
+    text = "Sua agenda em um clique"
+    for body in (92, 183):
+        drawn = ImageFont.truetype(str(ref.file), body).getlength(text)
+        width, height = fonts.measure_pillow(text, ref, body)
+        assert width == pytest.approx(drawn, rel=0.01)  # a diferença é o arredondamento dos avanços (hinting)
+        assert height == body
+    assert fonts.measure_pillow(text, ref, 200)[0] == pytest.approx(
+        2 * fonts.measure_pillow(text, ref, 100)[0]
+    )
+    assert fonts.measure_pillow("HHH", ref, 100, spacing=5)[0] == pytest.approx(
+        fonts.measure_pillow("HHH", ref, 100)[0] + 10
+    )  # o espaçamento entra entre os caracteres
+
+
+def test_each_ruler_measures_what_its_artist_draws():
+    """O libass (ASS) e o Pillow (cartão) dão larguras bem diferentes para o mesmo número: nenhuma serve à outra."""
+    ref = fonts.resolve("Poppins", "bold")
+    text = "Atendimento humano"
+    rendered = fonts.measure_rendered(text, ref, 80)[0]
+    pillow = fonts.measure_pillow(text, ref, 80)[0]
+    assert pillow == pytest.approx(rendered * fonts._libass_cell_ratio(str(ref.file)), rel=0.001)
 
 
 def _two_line_cue() -> Cue:
