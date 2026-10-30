@@ -29,6 +29,15 @@ describe('http', () => {
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
+  it('manda o corpo como JSON nos PATCH', async () => {
+    const fetchMock = stubFetch(200, { id: 'c1' })
+    await http.patch('/api/agent/conversations/c1', { title: 'Novo nome' })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('PATCH')
+    expect(init.body).toBe('{"title":"Novo nome"}')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
   it('usa o detail em texto como mensagem do ApiError', async () => {
     stubFetch(404, { detail: 'Spec não encontrada' })
     const error = await http.get('/api/projects/x').catch((e: unknown) => e)

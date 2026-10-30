@@ -1,5 +1,6 @@
-/* Cliente tipado da API do DMaker: uma função por rota usada pela interface. As áreas grandes (voz, fala,
+/* Cliente tipado da API do DMaker: uma função por rota usada pela interface. As áreas grandes (agente, voz, fala,
    dublagem, fila, modelos e editor) vivem num arquivo cada e entram aqui só para compor o `api`. */
+import { agentApi } from './agent'
 import { dubApi } from './dub'
 import { editorApi } from './editor'
 import { http } from './http'
@@ -9,8 +10,6 @@ import { queueApi } from './queue'
 import { speechApi } from './speech'
 import { voiceApi } from './voice'
 import type {
-  AgentMessageResponse,
-  AgentStatus,
   AppState,
   AutoCutRequest,
   BatchListItem,
@@ -106,19 +105,7 @@ export const api = {
     overviewUrl: (brand?: string) => `/api/looks/sheet${brandQuery(brand)}`,
   },
 
-  agent: {
-    /** Motor, modelo, se o servidor do modelo responde e os kits de ferramentas. */
-    status: () => http.get<AgentStatus>('/api/agent/status'),
-    /** Manda uma mensagem; o agente responde num job, acompanhado pelo SSE de `jobs.eventsUrl`. */
-    send: (message: string, conversationId: string | null) =>
-      http.post<AgentMessageResponse>('/api/agent/messages', { message, conversation_id: conversationId }),
-    /** Responde ao botão de confirmação (render final, apagar, sobrescrever, autorização da voz). */
-    confirm: (conversationId: string, confirmationId: string, approve: boolean) =>
-      http.post<{ approved: boolean }>(
-        `/api/agent/confirmations/${enc(confirmationId)}?conversation_id=${enc(conversationId)}`,
-        { approve },
-      ),
-  },
+  agent: agentApi,
 
   infographics: {
     catalog: () => http.get<{ infographics: InfographicInfo[] }>('/api/infographics'),
@@ -158,6 +145,7 @@ export type { FollowedJob, FollowJobHandlers } from './follow'
 export { subscribeJson, subscribeSse } from './sse'
 export type { SseOptions, SseStatus, SseSubscription } from './sse'
 export type * from './types'
+export type * from './types/agent'
 export type * from './types/dub'
 export type * from './types/editor'
 export type * from './types/models'
