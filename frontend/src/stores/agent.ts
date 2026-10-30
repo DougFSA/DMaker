@@ -86,16 +86,9 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  /** Nova conversa: o servidor esquece o histórico e a tela começa vazia. */
-  async function reset(): Promise<void> {
+  /** Nova conversa: a tela começa vazia e esquece o id. A anterior continua salva no servidor (apagar é outra ação). */
+  function reset(): void {
     closeSource()
-    if (conversationId.value && !busy.value) {
-      try {
-        await api.agent.reset(conversationId.value)
-      } catch {
-        // a conversa pode já não existir no servidor (ele reiniciou); começar de novo é o que se quer mesmo assim
-      }
-    }
     items.value = []
     conversationId.value = null
     jobId.value = null

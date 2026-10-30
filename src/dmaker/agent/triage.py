@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .kits import DEFAULT_KIT, KITS, MAX_KITS_PER_REQUEST, Kit
-from .llm import ChatModel
+from .llm import ChatModel, reply_stoppable
+from .transport import ShouldStop
 
 TriageMethod = Literal["keywords", "previous", "model", "default"]
 
@@ -97,9 +98,13 @@ def parse_kit_names(reply: str, kits: Sequence[Kit] = KITS) -> tuple[str, ...]:
     return tuple(name for _, name in found)[:MAX_KITS_PER_REQUEST]
 
 
-def triage_by_model(request: str, chat: ChatModel, kits: Sequence[Kit] = KITS) -> Triage | None:
-    """Pergunta ao modelo qual kit serve; `None` se a resposta não cita nenhum kit conhecido."""
-    reply = chat.chat(triage_messages(request, kits), [])
+def triage_by_model(
+    request: str, chat: ChatModel, kits: Sequence[Kit] = KITS, should_stop: ShouldStop | None = None
+) -> Triage | None:
+    """Pergunta ao modelo qual kit serve; `None` se a resposta não cita nenhum kit conhecido (ou se pararam)."""
+    reply = reply_stoppable(chat, triage_messages(request, kits), [], should_stop)
+    if reply.interrupted:
+        return None
     names = parse_kit_names(reply.content, kits)
     return Triage(names, "model") if names else None
 
@@ -109,6 +114,7 @@ def triage(
     chat: ChatModel | None = None,
     previous: Sequence[str] = (),
     kits: Sequence[Kit] = KITS,
+    should_stop: ShouldStop | None = None,
 ) -> Triage:
     """Palavras primeiro; sem palavras, a resposta curta ("sim", "pode") continua no kit anterior; só então o
     modelo; se ele também não decide, o kit de edição, que é o caminho da maioria dos pedidos."""
@@ -118,7 +124,7 @@ def triage(
     if previous:
         return Triage(tuple(previous), "previous")
     if chat is not None:
-        by_model = triage_by_model(request, chat, kits)
+        by_model = triage_by_model(request, chat, kits, should_stop)
         if by_model is not None:
             return by_model
     return Triage((DEFAULT_KIT,), "default")
