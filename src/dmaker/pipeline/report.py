@@ -296,8 +296,11 @@ def _check_card_text(index: int, seg: CardSegment, layout: ProjectLayout) -> lis
     title_size = base * 0.085
     sub_size = base * 0.042
     max_w = W * 0.84 - (safe.left + safe.right)
-    title_lines = wrap_lines(seg.title, title_ref, title_size, max_w)
-    sub_lines = wrap_lines(seg.subtitle, body_ref, sub_size, max_w) if seg.subtitle else []
+    # o cartão é desenhado pelo Pillow (`visuals/cards.py`), então a conferência dele mede com a régua do Pillow
+    title_lines = wrap_lines(seg.title, title_ref, title_size, max_w, 0, fonts.measure_pillow)
+    sub_lines = (
+        wrap_lines(seg.subtitle, body_ref, sub_size, max_w, 0, fonts.measure_pillow) if seg.subtitle else []
+    )
     block_h = len(title_lines) * title_size * 1.18
     if sub_lines:
         block_h += sub_size * 0.6 + len(sub_lines) * sub_size * 1.35
@@ -310,7 +313,7 @@ def _check_card_text(index: int, seg: CardSegment, layout: ProjectLayout) -> lis
                 "título/subtítulo do cartão pode não caber na altura disponível",
             )
         )
-    widest = max((fonts.measure(ln, title_ref, title_size)[0] for ln in title_lines), default=0.0)
+    widest = max((fonts.measure_pillow(ln, title_ref, title_size)[0] for ln in title_lines), default=0.0)
     if widest > max_w + 1:
         findings.append(
             Finding(
