@@ -2,7 +2,7 @@
    enviar (funções puras). Quem decide de verdade é o servidor; a tela só avisa antes, para a pessoa não esperar um
    envio que ele vai recusar. */
 import type { AgentAttachment, AgentAttachmentSummary, AgentMode, AgentModel, AttachmentKind } from '@/api'
-import { imageModels, readsImages, usesTools } from './agentModels'
+import { imageModels, readsImages } from './agentModels'
 import { formatBytes } from './files'
 
 /** O máximo de anexos numa mensagem; o servidor recusa mais que isso (422). */
@@ -190,23 +190,23 @@ export interface AttachmentWarning {
   models: string[]
 }
 
-function imageWarning(model: AgentModel, mode: AgentMode, installed: AgentModel[]): AttachmentWarning {
+/** O que vale saber sobre os anexos e não segura o envio. */
+export interface AttachmentInfo {
+  code: 'image_as_file'
+  text: string
+}
+
+/** No modo Operar a imagem é também arquivo de trabalho: o modelo que não a enxerga ainda a recebe como caminho. */
+export const IMAGE_AS_FILE_TEXT = 'O modelo não vê a imagem, mas pode usá-la no vídeo.'
+
+/** Só a Conversa livre chega aqui: ali a imagem existe para o modelo olhar, então ele precisa enxergar. */
+function imageWarning(model: AgentModel, installed: AgentModel[]): AttachmentWarning {
   const seeing = imageModels(installed)
-  // quem opera o DMaker precisa de um modelo que também use ferramentas
-  const usable = mode === 'operate' ? seeing.filter(usesTools) : seeing
-  const names = (list: AgentModel[]) => list.map((item) => item.name).join(', ')
-  if (usable.length) {
-    return {
-      code: 'image_without_vision',
-      text: `O modelo ${model.name} não lê imagem. Escolha um modelo com o selo Imagem: ${names(usable)}.`,
-      models: usable.map((item) => item.name),
-    }
-  }
   if (seeing.length) {
     return {
       code: 'image_without_vision',
-      text: `O modelo ${model.name} não lê imagem, e nenhum modelo instalado lê imagem e opera o DMaker. Para falar da imagem, abra uma Conversa livre com um modelo de imagem (${names(seeing)}).`,
-      models: [],
+      text: `O modelo ${model.name} não lê imagem. Escolha um modelo com o selo Imagem: ${seeing.map((item) => item.name).join(', ')}.`,
+      models: seeing.map((item) => item.name),
     }
   }
   return {
@@ -218,7 +218,9 @@ function imageWarning(model: AgentModel, mode: AgentMode, installed: AgentModel[
 
 /**
  * O que impede a mensagem de seguir com estes anexos, como o servidor decidiria: imagem para um modelo que não lê
- * imagem e vídeo ou áudio numa Conversa livre. Só as fichas já no servidor contam. Enquanto houver aviso, o envio fica parado.
+ * imagem numa Conversa livre e vídeo ou áudio numa Conversa livre. Quem opera o DMaker usa a imagem também como arquivo,
+ * então ali o modelo sem visão não é barrado (ver `attachmentInfos`). Só as fichas já no servidor contam. Enquanto houver
+ * aviso, o envio fica parado.
  */
 export function attachmentWarnings(
   cards: AttachmentCard[],
@@ -228,8 +230,8 @@ export function attachmentWarnings(
 ): AttachmentWarning[] {
   const ready = cards.filter((card) => card.state === 'ready')
   const warnings: AttachmentWarning[] = []
-  if (model && !readsImages(model) && ready.some((card) => card.kind === 'image')) {
-    warnings.push(imageWarning(model, mode, installed))
+  if (mode === 'free' && model && !readsImages(model) && ready.some((card) => card.kind === 'image')) {
+    warnings.push(imageWarning(model, installed))
   }
   if (mode === 'free' && ready.some((card) => card.kind === 'media')) {
     warnings.push({
@@ -239,6 +241,19 @@ export function attachmentWarnings(
     })
   }
   return warnings
+}
+
+/** O que a pessoa deve saber antes de enviar e que não impede o envio: a imagem anexada a um modelo que não a enxerga, no modo Operar. */
+export function attachmentInfos(
+  cards: AttachmentCard[],
+  mode: AgentMode,
+  model: AgentModel | undefined,
+): AttachmentInfo[] {
+  const hasImage = cards.some((card) => card.state === 'ready' && card.kind === 'image')
+  if (mode === 'operate' && model && !readsImages(model) && hasImage) {
+    return [{ code: 'image_as_file', text: IMAGE_AS_FILE_TEXT }]
+  }
+  return []
 }
 
 /** Os modelos que o servidor sugeriu ao recusar uma imagem (`suggested_models` no corpo cru do 422). */

@@ -1,17 +1,23 @@
 <script setup lang="ts">
 /* O que fica acima da caixa de mensagem quando há anexos: as fichas dos arquivos, os avisos de antes de enviar (imagem
-   para um modelo que não lê imagem, vídeo numa Conversa livre) e o que a tela recusou ao escolher os arquivos. */
+   para um modelo que não lê imagem numa Conversa livre, vídeo numa Conversa livre), o que vale saber sem segurar o envio
+   (a imagem que o modelo não vê mas o vídeo pode usar, no modo Operar) e o que a tela recusou ao escolher os arquivos. */
 import AppButton from '@/components/ui/AppButton.vue'
-import type { AttachmentCard, AttachmentWarning } from '@/lib/agentAttachments'
+import type { AttachmentCard, AttachmentInfo, AttachmentWarning } from '@/lib/agentAttachments'
 import AgentAttachmentCard from './AgentAttachmentCard.vue'
 
-defineProps<{
-  cards: AttachmentCard[]
-  warnings: AttachmentWarning[]
-  /** O que a tela recusou ao escolher os arquivos; vazio quando nada. */
-  notice: string
-  conversationId: string | null
-}>()
+withDefaults(
+  defineProps<{
+    cards: AttachmentCard[]
+    warnings: AttachmentWarning[]
+    /** O que não segura o envio; vazio quando nada. */
+    infos?: AttachmentInfo[]
+    /** O que a tela recusou ao escolher os arquivos; vazio quando nada. */
+    notice: string
+    conversationId: string | null
+  }>(),
+  { infos: () => [] },
+)
 const emit = defineEmits<{ remove: [card: AttachmentCard]; 'use-model': [name: string] }>()
 </script>
 
@@ -26,6 +32,7 @@ const emit = defineEmits<{ remove: [card: AttachmentCard]; 'use-model': [name: s
         <AppButton v-for="name in warning.models" :key="name" size="sm" variant="secondary" @click="emit('use-model', name)">Usar {{ name }}</AppButton>
       </span>
     </div>
+    <p v-for="info in infos" :key="info.code" class="tray__note" data-tone="info" :data-code="info.code" role="status">{{ info.text }}</p>
     <p v-if="notice" class="tray__note" data-tone="warning" data-code="notice" role="status">{{ notice }}</p>
   </div>
 </template>
@@ -65,6 +72,11 @@ const emit = defineEmits<{ remove: [card: AttachmentCard]; 'use-model': [name: s
 .tray__note[data-tone='error'] {
   background: var(--color-error-bg);
   color: var(--color-error);
+}
+
+.tray__note[data-tone='info'] {
+  background: var(--color-info-bg);
+  color: var(--color-text);
 }
 
 .tray__actions {

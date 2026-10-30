@@ -383,7 +383,7 @@ describe('avisos de antes de enviar', () => {
     expect(agent.sendable).toBe(true)
   })
 
-  it('no modo Operar, sem nenhum modelo que leia imagem e opere, o aviso manda para a Conversa livre', async () => {
+  it('no modo Operar a imagem não segura o envio: o modelo sem visão só recebe a informação e a mensagem segue', async () => {
     stubWithAttachments({
       'GET /api/agent/models': MODELS_WITH_GEMMA,
       'POST /api/agent/conversations/c1/attachments': uploads(() => imageAttachment()),
@@ -393,8 +393,31 @@ describe('avisos de antes de enviar', () => {
 
     await agent.attach([file('foto.png')])
 
-    expect(agent.warnings[0]?.text).toContain('nenhum modelo instalado lê imagem e opera o DMaker')
-    expect(agent.warnings[0]?.models).toEqual([])
+    expect(agent.warnings).toEqual([])
+    expect(agent.infos).toEqual([{ code: 'image_as_file', text: 'O modelo não vê a imagem, mas pode usá-la no vídeo.' }])
+    expect(agent.sendable).toBe(true)
+    expect(await agent.send('cria um projeto com esta foto')).toBe(true)
+    expect(server.to('POST /api/agent/messages')[0]!.body).toMatchObject({ conversation_id: 'c1', attachments: ['a2'] })
+  })
+
+  it('trocar o modo do rascunho com a imagem anexada muda o aviso junto: Conversa livre segura, Operar só informa', async () => {
+    stubWithAttachments({
+      'GET /api/agent/models': MODELS_WITH_GEMMA,
+      'POST /api/agent/conversations/c1/attachments': uploads(() => imageAttachment()),
+    })
+    const agent = useAgentStore()
+    await agent.init()
+    await agent.attach([file('foto.png')])
+
+    await agent.setMode('free')
+    expect(agent.warnings.map((warning) => warning.code)).toEqual(['image_without_vision'])
+    expect(agent.infos).toEqual([])
+    expect(agent.sendable).toBe(false)
+
+    await agent.setMode('operate')
+    expect(agent.warnings).toEqual([])
+    expect(agent.infos).toHaveLength(1)
+    expect(agent.sendable).toBe(true)
   })
 
   it('o vídeo anexado no modo Operar e depois trocado para a Conversa livre segura o envio', async () => {
