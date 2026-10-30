@@ -8,13 +8,13 @@ qualquer chamada. As ferramentas são as do servidor MCP, as mesmas que o Claude
 from __future__ import annotations
 
 from .kits import BASE_TOOLS, EXCLUDED_TOOLS, KITS, Kit, kit_by_name
-from .llm import DEFAULT_OLLAMA_URL, OLLAMA_URL_ENV, ChatModel, OllamaChat, Reply, ToolCall
+from .llm import DEFAULT_OLLAMA_URL, OLLAMA_URL_ENV, ChatModel, OllamaChat, Reply, StreamingChat, ToolCall
 from .loop import AgentLoop
 from .openai_chat import OpenAICompatibleChat
 from .prompt import system_prompt
 from .safety import ConfirmationPolicy, ConfirmationRequest, ToolGate
 from .session import AgentSession
-from .settings import AgentSettings, build_chat, load_settings
+from .settings import AgentSettings, build_catalog, build_chat, load_settings
 from .tools import (
     AGENT_TOOLS,
     McpToolHost,
@@ -24,6 +24,7 @@ from .tools import (
     to_ollama_tools,
     truncate_result,
 )
+from .transport import ChatStreamError
 from .triage import Triage, triage
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "AgentSession",
     "AgentSettings",
     "ChatModel",
+    "ChatStreamError",
     "ConfirmationPolicy",
     "ConfirmationRequest",
     "Kit",
@@ -45,11 +47,13 @@ __all__ = [
     "OpenAICompatibleChat",
     "ProgressReportingHost",
     "Reply",
+    "StreamingChat",
     "ToolCall",
     "ToolGate",
     "ToolHost",
     "ToolSpec",
     "Triage",
+    "build_catalog",
     "build_chat",
     "kit_by_name",
     "load_settings",

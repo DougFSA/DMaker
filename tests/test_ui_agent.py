@@ -10,8 +10,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dmaker.agent import AgentSession, ConfirmationRequest
-from dmaker.agent.llm import Reply, ToolCall
-from dmaker.agent.settings import AgentSettings, SettingsError
+from dmaker.agent.catalog import CatalogError, EffortLevel, LoadedModel, ModelInfo
+from dmaker.agent.llm import Reply, ToolCall, same_model
+from dmaker.agent.memory import GIB, MemoryStatus
+from dmaker.agent.settings import AgentSettings, SettingsError, build_catalog
 from dmaker.agent.tools import ToolSpec
 from dmaker.pipeline.jobs import JobManager
 from dmaker.ui import agent_routes
@@ -73,12 +75,58 @@ class Env:
         return {"reachable": self.healthy, "model_installed": self.healthy}
 
 
+class FakeCatalog:
+    """O catálogo de modelos que a rota recebe por injeção: nada de Ollama de verdade."""
+
+    def __init__(self, models=(), loaded=(), failure: CatalogError | None = None, can_unload=True):
+        self.installed = list(models)
+        self.running = list(loaded)
+        self.failure = failure
+        self.can_unload = can_unload
+        self.unloaded: list[str] = []
+
+    def models(self):
+        if self.failure is not None:
+            raise self.failure
+        return self.installed
+
+    def loaded(self):
+        if self.failure is not None:
+            raise self.failure
+        return self.running
+
+    def unload(self, name):
+        if self.failure is not None:
+            raise self.failure
+        was_loaded = any(same_model(item.name, name) for item in self.running)
+        self.unloaded.append(name)
+        self.running = [item for item in self.running if not same_model(item.name, name)]
+        return was_loaded
+
+
+class FakeMemory:
+    def __init__(self, status: MemoryStatus | None):
+        self.status = status
+
+    def read(self):
+        return self.status
+
+
 @pytest.fixture
 def make_client():
-    def make(env: Env, loader=lambda: AgentSettings(model="modelo-x")):
+    def make(env: Env, loader=lambda: AgentSettings(model="modelo-x"), catalog=None, memory=None):
         manager = JobManager()
         app = FastAPI()
-        app.include_router(build_agent_router(manager, env.session, env.health, loader))
+        app.include_router(
+            build_agent_router(
+                manager,
+                env.session,
+                env.health,
+                loader,
+                catalog_factory=(lambda settings: catalog) if catalog is not None else build_catalog,
+                memory_probe=memory,
+            )
+        )
         return TestClient(app), manager
 
     return make
@@ -353,3 +401,206 @@ def test_the_real_ui_app_exposes_the_agent_routes():
     assert {"/api/agent/status", "/api/agent/messages", "/api/agent/confirmations/{confirmation_id}"} <= set(
         paths
     )
+
+
+# ---------- catálogo de modelos ----------
+
+OSS = ModelInfo(
+    "gpt-oss:20b",
+    int(12.8 * GIB),
+    family="gpt-oss",
+    capabilities=("tools", "thinking"),
+    context_length=131072,
+    effort_levels=(EffortLevel("low", "Baixo"), EffortLevel("medium", "Médio"), EffortLevel("high", "Alto")),
+    default_effort="medium",
+)
+QWEN = ModelInfo(
+    "qwen3:30b-a3b",
+    int(17.3 * GIB),
+    family="qwen3moe",
+    capabilities=("tools", "thinking"),
+    context_length=262144,
+    effort_levels=(EffortLevel("off", "Desligado"), EffortLevel("on", "Ligado")),
+    default_effort="on",
+)
+
+
+def test_models_lists_what_is_installed_with_the_fit_and_the_machine_memory(make_client):
+    catalog = FakeCatalog([OSS, QWEN])
+    client, _ = make_client(
+        Env([]), catalog=catalog, memory=FakeMemory(MemoryStatus(int(15.7 * GIB), int(9 * GIB)))
+    )
+
+    body = client.get("/api/agent/models").json()
+
+    assert body["engine"] == "ollama" and body["default_model"] == "modelo-x"
+    assert body["memory"] == {"total": int(15.7 * GIB), "available": int(9 * GIB)}
+    oss, qwen = body["models"]
+    assert oss == {
+        "name": "gpt-oss:20b",
+        "size": int(12.8 * GIB),
+        "family": "gpt-oss",
+        "capabilities": ["tools", "thinking"],
+        "context_length": 131072,
+        "effort_levels": [
+            {"value": "low", "label": "Baixo"},
+            {"value": "medium", "label": "Médio"},
+            {"value": "high", "label": "Alto"},
+        ],
+        "default_effort": "medium",
+        "fit": "tight",  # cabe na RAM, mas sobram menos de 1,5 GiB livres agora
+        "loaded": False,
+    }
+    assert qwen["fit"] == "too_big" and qwen["effort_levels"][1] == {"value": "on", "label": "Ligado"}
+
+
+def test_a_loaded_model_counts_as_fitting_and_is_flagged(make_client):
+    catalog = FakeCatalog([OSS, QWEN], loaded=[LoadedModel("gpt-oss:20b", int(11 * GIB), 0)])
+    client, _ = make_client(Env([]), catalog=catalog, memory=FakeMemory(MemoryStatus(int(15.7 * GIB), GIB)))
+
+    oss, qwen = client.get("/api/agent/models").json()["models"]
+
+    assert (oss["loaded"], oss["fit"]) == (True, "fits")
+    assert (qwen["loaded"], qwen["fit"]) == (False, "too_big")
+
+
+def test_without_a_memory_reading_the_fit_is_unknown_and_memory_is_null(make_client):
+    client, _ = make_client(Env([]), catalog=FakeCatalog([OSS]), memory=FakeMemory(None))
+
+    body = client.get("/api/agent/models").json()
+
+    assert body["memory"] is None and body["models"][0]["fit"] == "unknown"
+
+
+def test_the_list_survives_a_failure_reading_what_is_loaded(make_client):
+    class NoPs(FakeCatalog):
+        def loaded(self):
+            raise CatalogError("sem /api/ps")
+
+    client, _ = make_client(Env([]), catalog=NoPs([OSS]), memory=FakeMemory(None))
+
+    response = client.get("/api/agent/models")
+
+    assert response.status_code == 200 and response.json()["models"][0]["loaded"] is False
+
+
+def test_models_and_loaded_say_the_model_server_is_down_with_a_503(make_client):
+    down = FakeCatalog(failure=CatalogError("O Ollama não respondeu"))
+    client, _ = make_client(Env([]), catalog=down, memory=FakeMemory(None))
+
+    models = client.get("/api/agent/models")
+    loaded = client.get("/api/agent/loaded")
+
+    assert models.status_code == 503 and "não está respondendo" in models.json()["detail"]
+    assert loaded.status_code == 503
+
+
+def test_loaded_reports_what_is_in_memory_now(make_client):
+    running = LoadedModel("gpt-oss:20b", int(11 * GIB), 0, 16384, "2026-10-30T18:00:00-03:00")
+    client, _ = make_client(Env([]), catalog=FakeCatalog([OSS], loaded=[running]), memory=FakeMemory(None))
+
+    body = client.get("/api/agent/loaded").json()
+
+    assert body == {
+        "engine": "ollama",
+        "models": [
+            {
+                "name": "gpt-oss:20b",
+                "size": int(11 * GIB),
+                "size_vram": 0,
+                "context_length": 16384,
+                "expires_at": "2026-10-30T18:00:00-03:00",
+            }
+        ],
+    }
+
+
+def test_unload_takes_the_model_out_of_memory(make_client):
+    catalog = FakeCatalog([OSS], loaded=[LoadedModel("gpt-oss:20b", int(11 * GIB), 0)])
+    client, _ = make_client(Env([]), catalog=catalog, memory=FakeMemory(None))
+
+    first = client.post("/api/agent/unload", json={"model": "gpt-oss:20b"})
+    again = client.post("/api/agent/unload", json={"model": "gpt-oss:20b"})
+
+    assert first.json() == {"model": "gpt-oss:20b", "unloaded": True}
+    assert again.json() == {"model": "gpt-oss:20b", "unloaded": False}  # já não estava carregado
+    assert client.post("/api/agent/unload", json={"model": ""}).status_code == 422
+
+
+def test_unload_is_refused_while_a_turn_is_using_that_model(make_client):
+    env = Env([Reply("", [ToolCall("render_project", {"name_or_path": "x"})]), Reply("Renderizei.")])
+    catalog = FakeCatalog([OSS], loaded=[LoadedModel("modelo-x", int(9 * GIB), 0)])
+    client, manager = make_client(env, catalog=catalog, memory=FakeMemory(None))
+    started = client.post("/api/agent/messages", json={"message": "renderiza o projeto x"}).json()
+    job = manager.get(started["job_id"])
+    deadline = time.time() + 10
+    while "confirmation_request" not in kinds(job) and time.time() < deadline:
+        time.sleep(0.02)
+    request = next(event for event in job.events if event["kind"] == "confirmation_request")
+
+    busy = client.post("/api/agent/unload", json={"model": "modelo-x"})
+    other = client.post("/api/agent/unload", json={"model": "outro-modelo"})
+    client.post(
+        f"/api/agent/confirmations/{request['id']}",
+        params={"conversation_id": started["conversation_id"]},
+        json={"approve": True},
+    )
+    wait_for(job)
+    after = client.post("/api/agent/unload", json={"model": "modelo-x"})
+
+    assert busy.status_code == 409 and "usando esse modelo" in busy.json()["detail"]
+    assert other.status_code == 200 and other.json()["unloaded"] is False
+    assert catalog.unloaded == ["outro-modelo", "modelo-x"]  # o modelo ocupado não foi tocado enquanto rodava
+    assert after.json() == {"model": "modelo-x", "unloaded": True}
+
+
+def test_unload_is_a_clear_error_on_engines_that_cannot_do_it(make_client):
+    client, _ = make_client(Env([]), catalog=FakeCatalog([], can_unload=False), memory=FakeMemory(None))
+
+    response = client.post("/api/agent/unload", json={"model": "x"})
+
+    assert response.status_code == 400 and "não descarrega" in response.json()["detail"]
+
+
+def test_unload_of_an_unknown_model_keeps_the_servers_404(make_client):
+    missing = FakeCatalog(failure=CatalogError("sem esse modelo", status=404))
+    client, _ = make_client(Env([]), catalog=missing, memory=FakeMemory(None))
+
+    assert client.post("/api/agent/unload", json={"model": "x"}).status_code == 404
+
+
+def test_the_openai_engine_lists_models_without_sizes_capabilities_or_levels(make_client):
+    catalog = FakeCatalog([ModelInfo("servido", None)], can_unload=False)
+    client, _ = make_client(
+        Env([]),
+        loader=lambda: AgentSettings(engine="openai", model="servido", url="http://127.0.0.1:8080"),
+        catalog=catalog,
+        memory=FakeMemory(MemoryStatus(int(15.7 * GIB), int(9 * GIB))),
+    )
+
+    body = client.get("/api/agent/models").json()
+
+    assert body["engine"] == "openai" and body["default_model"] == "servido"
+    assert body["models"] == [
+        {
+            "name": "servido",
+            "size": None,
+            "family": "",
+            "capabilities": [],
+            "context_length": None,
+            "effort_levels": [],
+            "default_effort": None,
+            "fit": "unknown",
+            "loaded": False,
+        }
+    ]
+    assert client.get("/api/agent/loaded").json() == {"engine": "openai", "models": []}
+
+
+def test_the_real_ui_app_exposes_the_model_routes():
+    from dmaker.ui import server
+
+    with TestClient(server.app) as client:
+        paths = client.get("/openapi.json").json()["paths"]
+
+    assert {"/api/agent/models", "/api/agent/loaded", "/api/agent/unload"} <= set(paths)

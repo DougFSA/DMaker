@@ -288,3 +288,32 @@ def test_build_chat_picks_the_engine_without_a_fixed_model_name():
     assert (
         isinstance(openai, OpenAICompatibleChat) and openai.model == "m2" and openai.base_url.endswith(":2")
     )
+
+
+def test_the_reasoning_effort_also_accepts_a_switch_for_models_that_only_turn_it_on_or_off():
+    assert load_settings(env={"DMAKER_AGENT_THINK": "true"}).think is True
+    assert load_settings(env={"DMAKER_AGENT_THINK": " Sim "}).think is True
+    assert load_settings(env={"DMAKER_AGENT_THINK": "false"}).think is False
+    assert load_settings(env={"DMAKER_AGENT_THINK": "não"}).think is False
+    assert load_settings(env={"DMAKER_AGENT_THINK": ""}).think is None
+    assert build_chat(load_settings(env={"DMAKER_AGENT_THINK": "false"})).think is False
+
+
+def test_temperature_and_seed_come_from_the_environment_and_reach_both_engines():
+    env = {"DMAKER_AGENT_TEMPERATURE": "0.4", "DMAKER_AGENT_SEED": "123"}
+
+    settings = load_settings(env=env)
+
+    assert (settings.temperature, settings.seed) == (0.4, 123)
+    ollama = build_chat(settings)
+    openai = build_chat(load_settings(env={**env, "DMAKER_AGENT_ENGINE": "openai"}))
+    assert (ollama.temperature, ollama.seed) == (0.4, 123)
+    assert (openai.temperature, openai.seed) == (0.4, 123)
+    assert load_settings(env={}).temperature is None and load_settings(env={}).seed is None
+
+
+def test_a_bad_temperature_or_seed_names_the_variable_to_fix():
+    with pytest.raises(SettingsError, match="DMAKER_AGENT_TEMPERATURE"):
+        load_settings(env={"DMAKER_AGENT_TEMPERATURE": "quente"})
+    with pytest.raises(SettingsError, match="DMAKER_AGENT_SEED"):
+        load_settings(env={"DMAKER_AGENT_SEED": "1.5"})
