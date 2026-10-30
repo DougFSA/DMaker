@@ -38,6 +38,11 @@ export function jobDestination(job: FinishedJob): JobDestination | null {
   return null
 }
 
+/** O turno de uma conversa com o agente (o job começa por "agente:"): a tela Agente já mostra o fim dele. */
+export function isAgentTurn(job: Pick<FinishedJob, 'description'>): boolean {
+  return /^agente:/i.test(job.description)
+}
+
 /** O download de modelo já tem o próprio aviso ("Modelo baixado"), dado pela tela; o aviso global só duplicaria. */
 export function announcesItself(job: Pick<FinishedJob, 'description'>): boolean {
   return /^baixar modelo/i.test(job.description)

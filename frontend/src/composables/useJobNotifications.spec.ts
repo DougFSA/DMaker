@@ -1,7 +1,7 @@
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, type EffectScope } from 'vue'
+import { effectScope, ref, type EffectScope } from 'vue'
 import type { Router } from 'vue-router'
 import { FakeEventSource } from '@/test/fetch'
 import { useJobsStore } from '@/stores/jobs'
@@ -9,9 +9,11 @@ import { useToastsStore } from '@/stores/toasts'
 import { useJobNotifications } from './useJobNotifications'
 
 let scope: EffectScope
-const router = { push: vi.fn() } as unknown as Router
+const currentRoute = ref<{ name: string }>({ name: 'projects' })
+const router = { push: vi.fn(), currentRoute } as unknown as Router
 
 beforeEach(() => {
+  currentRoute.value = { name: 'projects' }
   setActivePinia(createPinia())
   FakeEventSource.reset()
   vi.stubGlobal('EventSource', FakeEventSource)
@@ -69,6 +71,26 @@ describe('avisos de fim de job', () => {
     await finishJob('cancelled', null, { ready: 2, total: 5 })
     expect(lastToast()).toMatchObject({ tone: 'info', title: 'Parado', description: 'Narração: roteiro curto' })
     expect(useToastsStore().items.map((toast) => toast.title)).not.toContain('O job falhou')
+  })
+
+  it('o fim de um turno do agente não ganha aviso na própria tela Agente, que já mostra a resposta', async () => {
+    currentRoute.value = { name: 'agent' }
+    await finishJob('done', null, { answer: 'ok' }, 'agente: renderiza o x')
+    useJobsStore().track('j2', { description: 'agente: outro pedido' })
+    FakeEventSource.latest().emit({ kind: 'end', t: 9, status: 'cancelled', error: null, result: { interrupted: true } })
+    await flushPromises()
+    expect(useToastsStore().items).toHaveLength(0)
+  })
+
+  it('em outra tela, o turno do agente que terminou leva de volta ao Agente', async () => {
+    await finishJob('done', null, { answer: 'ok' }, 'agente: renderiza o x')
+    expect(lastToast()?.action?.label).toBe('Abrir Agente')
+  })
+
+  it('na tela Agente, um job que não é do agente continua avisando', async () => {
+    currentRoute.value = { name: 'agent' }
+    await finishJob('done', null, { ready: 3, total: 3 }, 'narração (Ana, 40 caracteres)')
+    expect(lastToast()?.title).toBe('Concluído')
   })
 
   it('um job que falhou avisa com a primeira linha do erro', async () => {

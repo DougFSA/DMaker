@@ -7,15 +7,24 @@ import { summarizeArguments, type ToolItem } from '@/lib/agent'
 
 const props = defineProps<{ tool: ToolItem }>()
 
-const STATE_TEXT = { running: 'rodando', done: 'pronta', blocked: 'barrada', error: 'com erro' } as const
+const STATE_TEXT = {
+  running: 'rodando',
+  done: 'pronta',
+  blocked: 'barrada',
+  error: 'com erro',
+  interrupted: 'interrompida',
+} as const
 const STATE_TONE: Record<ToolItem['state'], BadgeTone> = {
   running: 'info',
   done: 'success',
   blocked: 'warning',
   error: 'error',
+  interrupted: 'warning',
 }
 
 const args = computed(() => summarizeArguments(props.tool.arguments))
+/** O resultado inteiro só vale abrir quando tem mais do que a primeira linha que já está na tela. */
+const hasMore = computed(() => props.tool.result.trim() !== '' && props.tool.result.trim() !== props.tool.detail)
 </script>
 
 <template>
@@ -33,6 +42,10 @@ const args = computed(() => summarizeArguments(props.tool.arguments))
     />
     <p v-if="tool.state === 'running' && tool.label" class="step__label">{{ tool.label }}</p>
     <p v-if="tool.detail" class="step__detail">{{ tool.detail }}</p>
+    <details v-if="hasMore" class="step__more">
+      <summary>Ver o resultado</summary>
+      <pre class="step__result">{{ tool.result }}</pre>
+    </details>
   </div>
 </template>
 
@@ -65,6 +78,10 @@ const args = computed(() => summarizeArguments(props.tool.arguments))
   border-left-color: var(--color-error);
 }
 
+.step[data-state='interrupted'] {
+  border-left-color: var(--color-warning);
+}
+
 .step__head {
   display: flex;
   align-items: center;
@@ -87,5 +104,21 @@ const args = computed(() => summarizeArguments(props.tool.arguments))
 .step__args {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+.step__more summary {
+  cursor: pointer;
+  color: var(--color-text-soft);
+  font-size: var(--text-xs);
+}
+
+.step__result {
+  max-height: 12rem;
+  margin-top: var(--space-1);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

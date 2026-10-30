@@ -8,6 +8,13 @@ const props = defineProps<{ confirmation: ConfirmationItem }>()
 const emit = defineEmits<{ answer: [confirmationId: string, approve: boolean] }>()
 
 const labels = confirmationLabels(props.confirmation.type)
+
+/** A pergunta que ficou sem resposta (o DMaker foi fechado) não confirma nada: o texto diz isso em vez de "você não confirmou". */
+const ANSWER_TEXT = {
+  approved: 'Você confirmou',
+  refused: 'Você não confirmou',
+  unconfirmed: 'Não confirmada',
+} as const
 </script>
 
 <template>
@@ -22,7 +29,7 @@ const labels = confirmationLabels(props.confirmation.type)
       </AppButton>
     </div>
     <AppBadge v-else :tone="confirmation.state === 'approved' ? 'success' : 'neutral'">
-      {{ confirmation.state === 'approved' ? 'Você confirmou' : 'Você não confirmou' }}
+      {{ ANSWER_TEXT[confirmation.state] }}
     </AppBadge>
   </div>
 </template>
@@ -39,7 +46,8 @@ const labels = confirmationLabels(props.confirmation.type)
 }
 
 .ask[data-state='approved'],
-.ask[data-state='refused'] {
+.ask[data-state='refused'],
+.ask[data-state='unconfirmed'] {
   border-color: var(--color-border);
   background: var(--color-surface);
 }
