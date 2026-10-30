@@ -34,7 +34,9 @@ from ..domain.dub import (
     SpeakerMode,
     save_dub_project,
 )
+from ..filtergraph.blocks import GraphStep
 from ..filtergraph.dub import DubClip, dub_mix_command
+from ..filtergraph.dub_blocks import premix_dub_clips
 from ..filtergraph.dub_stems import dub_stems_command
 from ..filtergraph.speech_edit import corrected_suffix
 from ..filtergraph.voice import SpeechFinish
@@ -65,6 +67,7 @@ from ..voice.reference import ReferenceSpan, choose_speaker_reference
 from ..voice.script import normalize_for_speech
 from ..voice.speakers import assign_speakers, label_words, speaker_names
 from ..voice.synth import SpeechSynthesizer, VoiceRequest
+from .block_runner import block_workspace, run_steps
 from .dub_stems import DubStems, StemsOptions, stem_outputs, zip_stems
 from .isolation import IsolationService
 from .narration import NarrationService
@@ -675,19 +678,21 @@ class DubbingService:
         graph_file = self.cache_dir / "dub" / f"{folder.name}.graph.txt"
         retime = synthesis.retime
         duration = info.duration if retime.is_identity else retime.total_seconds
-        built = dub_stems_command(
-            synthesis.stems.background,
-            synthesis.stems.vocals,
-            synthesis.clips,
-            outputs,
-            graph_file,
-            info.duration,
-            retime,
-            provenance=self._provenance(synthesis),
-        )
-        graph_file.parent.mkdir(parents=True, exist_ok=True)
-        graph_file.write_text(built.graph, encoding="utf-8")
-        self.runner.run(built.command)
+        # centenas de falas não cabem como um `-i` cada na linha de comando do Windows: as muitas passam antes por
+        # uma pré-mixagem em blocos, e o comando das trilhas recebe só os blocos
+        with block_workspace(self.cache_dir / "dub") as work_dir:
+            premix = premix_dub_clips(synthesis.clips, work_dir)
+            built = dub_stems_command(
+                synthesis.stems.background,
+                synthesis.stems.vocals,
+                premix.items,
+                outputs,
+                graph_file,
+                info.duration,
+                retime,
+                provenance=self._provenance(synthesis),
+            )
+            run_steps(self.runner, [*premix.steps, GraphStep(built.command, built.graph, graph_file)])
         stems = DubStems(folder, outputs, duration, project.keep_original_db)
         if options.make_zip:
             stems = replace(stems, zip_path=zip_stems(stems))
@@ -823,23 +828,24 @@ class DubbingService:
     ) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         graph_file = self.cache_dir / "dub" / f"{out.stem}.graph.txt"
-        mix = dub_mix_command(
-            src,
-            stems.background,
-            clips,
-            out,
-            graph_file,
-            info.duration,
-            info.has_video,
-            original_voice=stems.vocals if project.keep_original_db is not None else None,
-            original_voice_db=project.keep_original_db if project.keep_original_db is not None else -18.0,
-            retime=retime,
-            fps=info.fps,
-            provenance=provenance,
-        )
-        graph_file.parent.mkdir(parents=True, exist_ok=True)
-        graph_file.write_text(mix.graph, encoding="utf-8")
-        self.runner.run(mix.command)
+        # as muitas falas passam antes por uma pré-mixagem em blocos (ver `_write_stems`)
+        with block_workspace(self.cache_dir / "dub") as work_dir:
+            premix = premix_dub_clips(clips, work_dir)
+            mix = dub_mix_command(
+                src,
+                stems.background,
+                premix.items,
+                out,
+                graph_file,
+                info.duration,
+                info.has_video,
+                original_voice=stems.vocals if project.keep_original_db is not None else None,
+                original_voice_db=project.keep_original_db if project.keep_original_db is not None else -18.0,
+                retime=retime,
+                fps=info.fps,
+                provenance=provenance,
+            )
+            run_steps(self.runner, [*premix.steps, GraphStep(mix.command, mix.graph, graph_file)])
 
     @staticmethod
     def _write_srt(
