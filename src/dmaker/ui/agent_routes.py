@@ -3,8 +3,9 @@
 Adaptador fino sobre `agent.AgentSession`. Cada mensagem do usuário vira um job (o mesmo `JobManager` e o mesmo
 SSE de `/api/jobs/{id}/events` dos renders): o agente emite os eventos (kit escolhido, ferramenta chamada, andamento,
 resposta) e a tela os mostra. A confirmação do que é longo ou difícil de desfazer vira um evento
-`confirmation_request` e um botão; o job espera a resposta em `/api/agent/confirmations/{id}`. O motor e as
-ferramentas entram por injeção, então os testes usam um modelo falso.
+`confirmation_request` e um botão; o job espera a resposta em `/api/agent/confirmations/{id}`. Também mora aqui o
+catálogo de modelos (`/api/agent/models`, `/loaded`, `/unload`): o que está instalado, o que está na memória e se
+cabe. O motor, as ferramentas, o catálogo e a leitura da memória entram por injeção, então os testes usam falsos.
 """
 
 from __future__ import annotations
@@ -19,9 +20,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..agent import AgentSession, ConfirmationRequest, ProgressReportingHost, build_chat, load_settings
+from ..agent.catalog import CatalogError, ModelCatalog, model_entries
 from ..agent.kits import KITS, kit_tool_names
+from ..agent.llm import same_model
+from ..agent.memory import MemoryProbe, WindowsMemoryProbe
 from ..agent.session import server_tool_names
-from ..agent.settings import AgentSettings, SettingsError
+from ..agent.settings import AgentSettings, SettingsError, build_catalog
 from ..agent.tools import DEFAULT_WAIT_SECONDS, McpToolHost, ToolHost
 from ..pipeline.jobs import Job, JobManager
 
@@ -37,6 +41,10 @@ class MessageBody(BaseModel):
 
 class ConfirmationAnswer(BaseModel):
     approve: bool
+
+
+class UnloadBody(BaseModel):
+    model: str = Field(min_length=1)
 
 
 @dataclass
@@ -111,10 +119,12 @@ class Conversation:
     relay: TurnRelay
     session: AgentSession
     running: Job | None = None
+    model: str = ""  # o modelo que este turno usa: descarregá-lo no meio da resposta derrubaria a conversa
 
 
 SessionFactory = Callable[[TurnRelay, AgentSettings], AgentSession]
 Health = Callable[[AgentSettings], dict]
+CatalogFactory = Callable[[AgentSettings], ModelCatalog]
 
 
 def running_mcp_jobs() -> list[dict]:
@@ -172,10 +182,16 @@ def build_agent_router(
     session_factory: SessionFactory = default_session_factory,
     health: Health = default_health,
     settings_loader: Callable[[], AgentSettings] = load_settings,
+    catalog_factory: CatalogFactory = build_catalog,
+    memory_probe: MemoryProbe | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["agente local"])
     conversations: dict[str, Conversation] = {}
+    catalogs: dict[
+        tuple[str, str], ModelCatalog
+    ] = {}  # um por servidor: o detalhe de cada modelo fica guardado
     lock = threading.Lock()
+    probe = memory_probe or WindowsMemoryProbe()
 
     def settings() -> AgentSettings:
         try:
@@ -188,9 +204,27 @@ def build_agent_router(
             if conversation_id and conversation_id in conversations:
                 return conversations[conversation_id]
             relay = TurnRelay()
-            created = Conversation(uuid.uuid4().hex[:10], relay, session_factory(relay, current))
+            created = Conversation(
+                uuid.uuid4().hex[:10], relay, session_factory(relay, current), model=current.model
+            )
             conversations[created.id] = created
             return created
+
+    def catalog_for(current: AgentSettings) -> ModelCatalog:
+        with lock:
+            key = (current.engine, current.url)
+            if key not in catalogs:
+                catalogs[key] = catalog_factory(current)
+            return catalogs[key]
+
+    def catalog_failure(exc: CatalogError, current: AgentSettings) -> HTTPException:
+        """O servidor fora do ar é 503 (como em `/messages`); a recusa dele mantém o código quando faz sentido."""
+        if exc.status is None:
+            return HTTPException(
+                status_code=503,
+                detail=f"O modelo local não está respondendo em {current.url}. Abra o {current.engine_label}.",
+            )
+        return HTTPException(status_code=exc.status if exc.status in (400, 404) else 502, detail=str(exc))
 
     @router.get("/api/agent/status")
     def status() -> dict:
@@ -205,6 +239,61 @@ def build_agent_router(
             "kits": kit_summaries(),
             **state,
         }
+
+    @router.get("/api/agent/models")
+    def models() -> dict:
+        current = settings()
+        catalog = catalog_for(current)
+        try:
+            installed = catalog.models()
+        except CatalogError as exc:
+            raise catalog_failure(exc, current) from exc
+        try:
+            running = catalog.loaded()
+        except (
+            CatalogError
+        ):  # a lista é o que importa; sem saber o que está carregado, ninguém conta como "cabe"
+            running = []
+        memory = probe.read()
+        return {
+            "engine": current.engine,
+            "default_model": current.model,
+            "memory": memory.to_dict() if memory is not None else None,
+            "models": model_entries(installed, running, memory),
+        }
+
+    @router.get("/api/agent/loaded")
+    def loaded() -> dict:
+        current = settings()
+        try:
+            running = catalog_for(current).loaded()
+        except CatalogError as exc:
+            raise catalog_failure(exc, current) from exc
+        return {"engine": current.engine, "models": [item.to_dict() for item in running]}
+
+    @router.post("/api/agent/unload")
+    def unload(body: UnloadBody) -> dict:
+        current = settings()
+        catalog = catalog_for(current)
+        if not catalog.can_unload:
+            raise HTTPException(status_code=400, detail="Este motor não descarrega modelos.")
+        with lock:  # segurar a trava impede que um turno comece com o modelo no meio de ser descarregado
+            busy = any(
+                item.running is not None
+                and item.running.status == "running"
+                and same_model(item.model, body.model)
+                for item in conversations.values()
+            )
+            if busy:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Uma conversa está usando esse modelo agora. Espere a resposta terminar ou pare-a antes de descarregar.",
+                )
+            try:
+                was_loaded = catalog.unload(body.model)
+            except CatalogError as exc:
+                raise catalog_failure(exc, current) from exc
+        return {"model": body.model, "unloaded": was_loaded}
 
     @router.post("/api/agent/messages")
     def send_message(body: MessageBody) -> dict:
