@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { announcesItself, jobDestination } from './jobDestination'
+import { announcesItself, isAgentTurn, jobDestination } from './jobDestination'
 
 const renderResult = { output: 'output/a.mp4', preset: 'instagram/reels', output_url: '/api/file?path=a.mp4' }
 
@@ -51,5 +51,14 @@ describe('announcesItself', () => {
   it('só o download de modelo, que a tela de Modelos já avisa', () => {
     expect(announcesItself({ description: 'baixar modelo (Whisper)' })).toBe(true)
     expect(announcesItself({ description: 'narração (Ana, 10 caracteres)' })).toBe(false)
+  })
+})
+
+describe('isAgentTurn', () => {
+  it('só o job que começa por "agente:" é um turno de conversa com o agente', () => {
+    expect(isAgentTurn({ description: 'agente: corta as pausas' })).toBe(true)
+    expect(isAgentTurn({ description: 'Agente: corta as pausas' })).toBe(true)
+    expect(isAgentTurn({ description: 'narração do agente' })).toBe(false)
+    expect(isAgentTurn({ description: 'meu: render final' })).toBe(false)
   })
 })

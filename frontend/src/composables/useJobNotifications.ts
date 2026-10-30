@@ -1,7 +1,7 @@
 import { onScopeDispose } from 'vue'
 import type { Router } from 'vue-router'
 import { batchResultOf } from '@/lib/batches'
-import { announcesItself, jobDestination } from '@/lib/jobDestination'
+import { announcesItself, isAgentTurn, jobDestination } from '@/lib/jobDestination'
 import { useJobsStore, type JobView } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
 
@@ -12,6 +12,8 @@ export function useJobNotifications(router: Router): void {
   const toasts = useToastsStore()
 
   const stop = jobs.onJobEnd((job: JobView) => {
+    // quem está na tela Agente já vê o fim do turno (a resposta, o erro ou "interrompida"): o aviso só repetiria
+    if (isAgentTurn(job) && router.currentRoute.value.name === 'agent') return
     const batch = job.status === 'done' ? batchResultOf(job.result) : null
     if (batch?.status === 'paused') {
       // o lote parou a pedido (ou sobrou vídeo pendente): não é conclusão nem falha
