@@ -1,5 +1,6 @@
 <script setup lang="ts">
-/* Andamento ao vivo de um job do projeto: barra do comando atual, tempo decorrido e as últimas linhas do log. */
+/* Andamento ao vivo de um job do projeto: as etapas do render (deduzidas do log), a barra do comando atual, o tempo
+   decorrido e as últimas linhas do log. */
 import { computed } from 'vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -9,6 +10,7 @@ import ProgressBar from '@/components/ui/ProgressBar.vue'
 import { useNow } from '@/composables/useNow'
 import { formatClock } from '@/lib/format'
 import { renderResultsFromJob } from '@/lib/outputs'
+import { renderStages } from '@/lib/renderStages'
 import type { RenderResult } from '@/api'
 import type { JobView } from '@/stores/jobs'
 
@@ -21,6 +23,7 @@ const elapsed = computed(() => formatClock(((props.job.finishedAtMs ?? now.value
 const recentLog = computed(() => props.job.log.slice(-4))
 const results = computed(() => (props.job.status === 'done' ? renderResultsFromJob(props.job.result) : []))
 const percent = computed(() => props.job.progress?.percent ?? null)
+const stages = computed(() => renderStages(props.job.log, props.job.progress, props.job.status === 'done'))
 const errorLine = computed(() => props.job.error?.split('\n')[0] ?? '')
 </script>
 
@@ -33,6 +36,15 @@ const errorLine = computed(() => props.job.error?.split('\n')[0] ?? '')
     </template>
 
     <div v-if="job.status === 'running'" class="live">
+      <ol v-if="stages.length" class="stages" aria-label="Etapas do render">
+        <li v-for="stage in stages" :key="stage.key" :class="['stage', `stage--${stage.status}`]" :aria-current="stage.status === 'current' ? 'step' : undefined">
+          <AppIcon v-if="stage.status === 'done'" name="check" :size="14" />
+          <span v-else class="stage__dot" aria-hidden="true" />
+          <span>{{ stage.label }}</span>
+          <span v-if="stage.detail" class="stage__detail">{{ stage.detail }}</span>
+          <span class="visually-hidden">{{ stage.status === 'done' ? ', feita' : stage.status === 'current' ? ', em andamento' : ', por fazer' }}</span>
+        </li>
+      </ol>
       <ProgressBar :value="percent" :label="`Progresso de ${job.description}`" />
       <div class="live__meta">
         <span>{{ job.progress?.label || 'Preparando' }}</span>
@@ -79,6 +91,50 @@ const errorLine = computed(() => props.job.error?.split('\n')[0] ?? '')
   display: flex;
   gap: var(--space-3);
   font-size: var(--text-sm);
+  color: var(--color-text-soft);
+}
+
+.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.stage {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.stage--done {
+  color: var(--color-success);
+}
+
+.stage--current {
+  font-weight: 600;
+  color: var(--color-accent-text);
+}
+
+.stage__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  margin: 0 0.1875rem;
+  border: 1.5px solid currentcolor;
+  border-radius: 50%;
+}
+
+.stage--current .stage__dot {
+  background: currentcolor;
+}
+
+.stage__detail {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-soft);
 }
 
