@@ -32,10 +32,7 @@ defineProps<{ collapsed: boolean }>()
           :title="collapsed ? item.label : undefined"
         >
           <AppIcon :name="item.icon" />
-          <template v-if="!collapsed">
-            <span class="nav__label">{{ item.label }}</span>
-            <span v-if="!item.ready" class="nav__soon">em breve</span>
-          </template>
+          <span v-if="!collapsed" class="nav__label">{{ item.label }}</span>
           <span v-else class="visually-hidden">{{ item.label }}</span>
         </RouterLink>
       </li>
@@ -130,16 +127,6 @@ defineProps<{ collapsed: boolean }>()
 
 .nav__label {
   flex: 1;
-}
-
-.nav__soon {
-  padding: 0.05rem 0.5rem;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-hover);
-  color: var(--color-text-muted);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .nav__classic {

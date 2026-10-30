@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /* A narração pronta: o player, os dados, Baixar e Inserir no projeto aberto. A posição da inserção é um campo
-   ("Começa em"): em branco vale o fim da última narração que o projeto já tem. */
+   ("Começa em"): em branco vale o cursor do editor, se ele está com o projeto aberto, ou o fim da última narração que
+   o projeto já tem. */
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -23,7 +24,12 @@ const toasts = useToastsStore()
 const player = ref<InstanceType<typeof MediaPlayer> | null>(null)
 
 const meta = computed(() => [props.item.voiceName, formatDuration(props.item.duration), `velocidade ${speedLabel(props.item.speed)}`])
-const defaultText = computed(() => formatSeconds(narration.defaultStart))
+const defaultText = computed(() => formatSeconds(narration.cursorStart ?? narration.defaultStart))
+const startHint = computed(() =>
+  narration.cursorStart === null
+    ? 'Em branco, a narração entra depois da última que o projeto já tem.'
+    : 'Em branco, a narração entra onde está o cursor do editor.',
+)
 
 // "Ouvir" do histórico: a narração escolhida toca; o navegador pode recusar (autoplay) e então o player fica à vista
 watch(
@@ -62,7 +68,7 @@ watch(
           :min="0"
           :step="0.1"
           :placeholder="defaultText"
-          hint="Em branco, a narração entra depois da última que o projeto já tem."
+          :hint="startHint"
         />
         <div class="insert__action">
           <AppButton

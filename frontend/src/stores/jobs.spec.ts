@@ -183,4 +183,73 @@ describe('useJobsStore', () => {
     FakeEventSource.instances[0]!.emit({ kind: 'end', t: 4, status: 'cancelled', error: null, result: null })
     expect(jobs.jobs['j1']!.status).toBe('cancelled')
   })
+
+  describe('job que a CLI ou o MCP pediu para mostrar (focus)', () => {
+    /** O servidor passa a devolver esta lista a partir da próxima consulta. */
+    function serverNow(list: JobSnapshot[]): void {
+      stubJobsApi(list)
+    }
+
+    it('o que já existia ao abrir a interface não puxa a tela', async () => {
+      serverNow([snapshot({ focus: true })])
+      const jobs = useJobsStore()
+      const focused = vi.fn()
+      jobs.onJobFocus(focused)
+      await jobs.refresh()
+      await jobs.refresh()
+      expect(focused).not.toHaveBeenCalled()
+    })
+
+    it('um job novo com focus e projeto avisa uma vez só', async () => {
+      serverNow([])
+      const jobs = useJobsStore()
+      const focused = vi.fn()
+      jobs.onJobFocus(focused)
+      await jobs.refresh()
+
+      serverNow([snapshot({ job_id: 'remoto', focus: true, project: 'demo' })])
+      await jobs.refresh()
+      await jobs.refresh()
+      expect(focused).toHaveBeenCalledTimes(1)
+      expect(focused.mock.calls[0]![0]).toMatchObject({ id: 'remoto', project: 'demo' })
+    })
+
+    it('job novo sem focus (da própria interface) ou sem projeto não puxa a tela', async () => {
+      serverNow([])
+      const jobs = useJobsStore()
+      const focused = vi.fn()
+      jobs.onJobFocus(focused)
+      await jobs.refresh()
+
+      serverNow([snapshot({ job_id: 'a', focus: false }), snapshot({ job_id: 'b', focus: true, project: null })])
+      await jobs.refresh()
+      expect(focused).not.toHaveBeenCalled()
+    })
+
+    it('com vários novos, vale o que está rodando; senão, o último', async () => {
+      serverNow([])
+      const jobs = useJobsStore()
+      const focused = vi.fn()
+      jobs.onJobFocus(focused)
+      await jobs.refresh()
+
+      serverNow([
+        snapshot({ job_id: 'rodando', focus: true, project: 'um' }),
+        snapshot({ job_id: 'pronto', focus: true, project: 'dois', status: 'done' }),
+      ])
+      await jobs.refresh()
+      expect(focused.mock.calls[0]![0]).toMatchObject({ id: 'rodando' })
+    })
+
+    it('quem deixou de ouvir não é mais avisado', async () => {
+      serverNow([])
+      const jobs = useJobsStore()
+      const focused = vi.fn()
+      jobs.onJobFocus(focused)()
+      await jobs.refresh()
+      serverNow([snapshot({ job_id: 'novo', focus: true })])
+      await jobs.refresh()
+      expect(focused).not.toHaveBeenCalled()
+    })
+  })
 })

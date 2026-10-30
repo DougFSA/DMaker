@@ -242,7 +242,7 @@ describe('tela Agente', () => {
     const { NAV_ITEMS } = await import('@/navigation')
     const item = NAV_ITEMS.find((entry) => entry.key === 'agent')
 
-    expect(item).toMatchObject({ label: 'Agente', to: '/agente', ready: true })
+    expect(item).toMatchObject({ label: 'Agente', to: '/agente' })
     const router = createAppRouter(createMemoryHistory())
     expect(router.resolve('/agente').name).toBe('agent')
   })

@@ -10,9 +10,9 @@ import {
   type ShortcutId,
 } from '@/lib/keymap'
 import { useEditorStore } from '@/stores/editor'
-import { useEditorPanelsStore } from '@/stores/editorPanels'
 import { useKeymapStore, type ShortcutHandler } from '@/stores/keymap'
 import { usePlayerStore } from '@/stores/player'
+import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import { useEditorActions } from './useEditorActions'
@@ -27,11 +27,11 @@ export function useEditorShortcuts(): void {
   const timeline = useTimelineStore()
   const keymap = useKeymapStore()
   const toasts = useToastsStore()
-  const panels = useEditorPanelsStore()
+  const layout = useScreenLayoutStore()
   const actions = useEditorActions()
 
   const noMediaPanel = () =>
-    toasts.push({ tone: 'error', title: panels.isHidden('media') ? MEDIA_PANEL_HIDDEN : NEEDS_MEDIA_PANEL })
+    toasts.push({ tone: 'error', title: layout.isHidden('media') ? MEDIA_PANEL_HIDDEN : NEEDS_MEDIA_PANEL })
 
   const handlers: Record<ShortcutId, ShortcutHandler> = {
     play_pause: () => player.toggle(),

@@ -10,7 +10,6 @@ import type {
   TemplateParam,
   TransitionCatalog,
 } from '@/api'
-import { NAV_ITEMS } from '@/navigation'
 import { createAppRouter } from '@/router'
 import { useJobsStore } from '@/stores/jobs'
 import { useThemeStore } from '@/stores/theme'
@@ -83,7 +82,7 @@ describe('ProgressBar', () => {
 })
 
 describe('SidebarNav', () => {
-  it('lista as áreas na ordem e marca as futuras como em breve', async () => {
+  it('lista as áreas na ordem, todas prontas, e deixa a interface clássica só no rodapé', async () => {
     const wrapper = await mountWithRouter(SidebarNav, { collapsed: false })
     const labels = wrapper.findAll('.nav__label').map((node) => node.text())
     expect(labels).toEqual([
@@ -100,9 +99,10 @@ describe('SidebarNav', () => {
       'Infográficos',
       'Agente',
     ])
-    // cada frente do DMK-38 tira o selo da sua área trocando `ready` em navigation.ts; o teste acompanha
-    expect(wrapper.findAll('.nav__soon')).toHaveLength(NAV_ITEMS.filter((item) => !item.ready).length)
-    expect(wrapper.find('a[href="/classica"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('em breve')
+    // o único caminho para a clássica é o link do rodapé
+    expect(wrapper.findAll('a[href="/classica"]')).toHaveLength(1)
+    expect(wrapper.find('.nav__classic').attributes('href')).toBe('/classica')
   })
 
   it('recolhida, esconde os rótulos mas mantém o texto para leitor de tela', async () => {

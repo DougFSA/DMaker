@@ -26,6 +26,7 @@ import {
   type NarrationEntry,
 } from '@/lib/narration'
 import { formatSecondsPrecise, voiceLabel } from '@/lib/speech'
+import { useEditorStore } from './editor'
 import { useToastsStore } from './toasts'
 import { useVoiceStore } from './voice'
 import { useWorkspaceStore } from './workspace'
@@ -84,6 +85,7 @@ export const useNarrationStore = defineStore('narration', () => {
   const voices = useVoiceStore()
   const toasts = useToastsStore()
   const workspace = useWorkspaceStore()
+  const editor = useEditorStore()
 
   const text = ref('')
   const speed = ref(1)
@@ -131,7 +133,13 @@ export const useNarrationStore = defineStore('narration', () => {
   const insertNote = ref('')
   const queueing = ref(false)
 
-  const startAt = computed(() => Math.max(0, insertStart.value ?? defaultStart.value))
+  /** O editor tem o projeto aberto agora: o cursor dele marca o ponto de inserção e a inserção passa por ele. */
+  const editorHoldsProject = computed(
+    () => !!workspace.currentProject && editor.name === workspace.currentProject && editor.status === 'ready',
+  )
+  /** A posição do cursor do editor, em segundos; nulo quando o editor não está com o projeto aberto. */
+  const cursorStart = computed(() => (editorHoldsProject.value ? Math.round(editor.playhead * 100) / 100 : null))
+  const startAt = computed(() => Math.max(0, insertStart.value ?? cursorStart.value ?? defaultStart.value))
   const canGenerate = computed(
     () => text.value.trim() !== '' && !job.running && seedProblem(seed.value) === '' && scriptProblem(text.value) === '',
   )
@@ -349,9 +357,16 @@ export const useNarrationStore = defineStore('narration', () => {
     insertNote.value = ''
     const start = startAt.value
     try {
-      const detail = await api.projects.get(project)
       const inserted = buildNarrationItem(item, start)
-      await api.editor.saveProject(project, withNarration(detail.spec, inserted))
+      if (editorHoldsProject.value && editor.spec) {
+        // o editor é a fonte da verdade enquanto está com o projeto aberto: gravar por fora deixaria a cópia dele
+        // velha, e o próximo Salvar apagaria a narração
+        editor.replaceSpec(withNarration(editor.spec, inserted))
+        if (!(await editor.save())) throw new Error(editor.saveError || 'o projeto não foi salvo')
+      } else {
+        const detail = await api.projects.get(project)
+        await api.editor.saveProject(project, withNarration(detail.spec, inserted))
+      }
       insertNote.value = `Narração inserida em ${formatSecondsPrecise(inserted.start)} s do projeto ${project}.`
       toasts.push({ tone: 'success', title: 'Narração inserida', description: insertNote.value })
       insertStart.value = null
@@ -407,6 +422,7 @@ export const useNarrationStore = defineStore('narration', () => {
     playStamp,
     insertStart,
     defaultStart,
+    cursorStart,
     startAt,
     inserting,
     insertNote,

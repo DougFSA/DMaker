@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AppCard class="timeline" title="Linha do tempo" flush>
+  <AppCard class="timeline" flush>
     <template #actions>
       <TimelineTimecode v-if="view" />
     </template>
@@ -402,7 +402,8 @@ onBeforeUnmount(() => {
 
 .timeline__scroll {
   position: relative;
-  max-height: min(70vh, 34rem);
+  /* o layout de tela define a variável como `none`: a altura vem do encaixe do painel */
+  max-height: var(--editor-timeline-height, min(70vh, 34rem));
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--color-bg-soft);

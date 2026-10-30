@@ -20,6 +20,8 @@ export interface JobView {
 }
 
 export type JobEndListener = (job: JobView) => void
+/** Quem quer saber de um job que a CLI ou o MCP disparou pedindo que a interface o mostre (`focus`). */
+export type JobFocusListener = (job: JobView) => void
 
 const POLL_INTERVAL_MS = 3000
 const LOG_LIMIT = 200
@@ -36,6 +38,10 @@ export const useJobsStore = defineStore('jobs', () => {
 
   const sources = new Map<string, EventSource>()
   const endListeners = new Set<JobEndListener>()
+  const focusListeners = new Set<JobFocusListener>()
+  /** Os jobs que a interface já viu na lista do servidor; o `focus` só vale para o que aparece depois. */
+  const seenOnServer = new Set<string>()
+  let seeded = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
   const list = computed(() =>
@@ -56,6 +62,12 @@ export const useJobsStore = defineStore('jobs', () => {
   function onJobEnd(listener: JobEndListener): () => void {
     endListeners.add(listener)
     return () => endListeners.delete(listener)
+  }
+
+  /** Avisa quando a CLI ou o MCP dispara um job pedindo `focus`: a interface deve abrir o projeto dele sozinha. */
+  function onJobFocus(listener: JobFocusListener): () => void {
+    focusListeners.add(listener)
+    return () => focusListeners.delete(listener)
   }
 
   function closeSource(id: string): void {
@@ -181,6 +193,20 @@ export const useJobsStore = defineStore('jobs', () => {
     for (const job of Object.values(jobs.value)) {
       if (job.status !== 'running' && !present.has(job.id)) delete jobs.value[job.id]
     }
+    announceFocus(snapshots)
+  }
+
+  /**
+   * A primeira consulta só anota o que já existia (abrir a interface não deve pular para um render antigo). Nas
+   * seguintes, o job novo com `focus` e projeto avisa os ouvintes; havendo vários, vale o que está rodando.
+   */
+  function announceFocus(snapshots: JobSnapshot[]): void {
+    const fresh = seeded ? snapshots.filter((snapshot) => snapshot.focus && snapshot.project && !seenOnServer.has(snapshot.job_id)) : []
+    for (const snapshot of snapshots) seenOnServer.add(snapshot.job_id)
+    seeded = true
+    const target = fresh.find((snapshot) => snapshot.status === 'running') ?? fresh.at(-1)
+    const view = target ? jobs.value[target.job_id] : undefined
+    if (view) for (const listener of focusListeners) listener(view)
   }
 
   function startPolling(intervalMs: number = POLL_INTERVAL_MS): void {
@@ -216,6 +242,7 @@ export const useJobsStore = defineStore('jobs', () => {
     finishedCount,
     forProject,
     onJobEnd,
+    onJobFocus,
     track,
     refresh,
     startPolling,

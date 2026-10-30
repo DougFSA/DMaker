@@ -2,9 +2,11 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, type SpecDocument } from '@/api'
 import { replaceSourceOps, type MediaEntry } from '@/lib/media'
+import { useEditorStore } from './editor'
 
 /** "Usar no projeto": troca um arquivo por outro (a fala corrigida, a voz trocada, o vídeo dublado) no projeto e salva. */
 export const useSourceReplacementStore = defineStore('sourceReplacement', () => {
+  const editor = useEditorStore()
   const busy = ref(false)
 
   /**
@@ -15,6 +17,14 @@ export const useSourceReplacementStore = defineStore('sourceReplacement', () => 
   async function replace(project: string, entry: MediaEntry, newPath: string): Promise<number> {
     busy.value = true
     try {
+      if (editor.name === project && editor.status === 'ready' && editor.spec) {
+        // o editor é a fonte da verdade enquanto está com o projeto aberto: gravar por fora deixaria a cópia dele
+        // velha, e o próximo Salvar desfaria a troca
+        const planned = replaceSourceOps(editor.spec, entry, newPath)
+        if (planned.length === 0) return 0
+        if (!(await editor.applyOps(planned)) || !(await editor.save())) throw new Error(editor.saveError || 'a troca não foi salva')
+        return planned.length
+      }
       const detail = await api.projects.get(project)
       let spec: SpecDocument = detail.spec
       const operations = replaceSourceOps(spec, entry, newPath)

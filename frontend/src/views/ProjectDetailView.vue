@@ -22,7 +22,6 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { CLASSIC_UI_PATH } from '@/navigation'
 import { playableFromOutput, playableFromRender } from '@/lib/outputs'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
@@ -182,7 +181,6 @@ watch(() => props.name, load, { immediate: true })
           Abrir no editor para corrigir
         </AppButton>
         <AppButton to="/projetos" :variant="invalidSpec ? 'secondary' : 'primary'">Voltar para Projetos</AppButton>
-        <AppButton :href="CLASSIC_UI_PATH">Abrir a interface clássica</AppButton>
       </EmptyState>
     </AppCard>
 
@@ -203,10 +201,6 @@ watch(() => props.name, load, { immediate: true })
         <AppButton :to="{ name: 'editor', params: { name: detail.name } }">
           <AppIcon name="film" :size="18" />
           Abrir no editor
-        </AppButton>
-        <AppButton variant="ghost" :href="`${CLASSIC_UI_PATH}#project=${encodeURIComponent(detail.name)}`">
-          <AppIcon name="external" :size="18" />
-          Abrir na clássica
         </AppButton>
         <AppButton variant="primary" @click="renderOpen = true">
           <AppIcon name="play" :size="18" />

@@ -2,8 +2,9 @@
 
 Uso (de dentro da pasta do DMaker, com o extra `docs` e o Chromium instalados):
 
-    # 1. uma pasta de dados só para a captura, com projetos de mídia sintética (nunca os seus projetos reais)
-    $env:DMAKER_DATA_DIR = "C:\\temp\\dados-captura"
+    # 1. uma pasta de dados só para a captura, com projetos de mídia sintética (nunca os seus projetos reais), de
+    #    caminho curto e fora da sua pasta de usuário: o caminho aparece nas telas, e a foto não pode ter o seu nome
+    $env:DMAKER_DATA_DIR = "C:\\dm\\cap"
     # 2. a interface nessa pasta, numa porta que não seja a 8765 (a do uso diário)
     python -m dmaker.cli ui --port 8769 --no-browser
     # 3. em outra janela
@@ -11,7 +12,9 @@ Uso (de dentro da pasta do DMaker, com o extra `docs` e o Chromium instalados):
 
 Os nomes dos projetos usados (`quick_gravacao`, `entrevista-corte`, o lote `semana`) vêm da tarefa "Fazer um Reel"
 e das tarefas de corte e de lote do manual: seguir o manual numa pasta de dados limpa os cria. A captura da Fila
-mostra o que a fila da pasta de dados tem na hora: deixe nela um item pronto, um rodando e alguns esperando.
+mostra o que a fila da pasta de dados tem na hora: deixe nela um item pronto, um rodando e alguns esperando, e
+tire essa foto com `--only ui-fila.png` numa pasta de dados só da fila (sem o worker rodando, para o item não andar).
+As do editor (`ui-editor.png` e `ui-editor-layout.png`) abrem o projeto `quick_gravacao` numa janela de 1440 px.
 """
 
 from __future__ import annotations
@@ -96,6 +99,17 @@ def _show_models(page: Any) -> None:
     )
 
 
+def _editor_ready(page: Any) -> None:
+    """Dá tempo à vista da linha do tempo, às miniaturas e à mixagem do som, que chegam depois da abertura."""
+    _settle(page, 5000)
+
+
+def _open_layout_menu(page: Any) -> None:
+    _editor_ready(page)
+    page.get_by_role("button", name="Layout da tela").click()
+    _settle(page, 800)
+
+
 def _open_tab(tab: str, scroll_to: str | None = None) -> Callable[[Any], None]:
     def prepare(page: Any) -> None:
         page.locator(f'button[data-tab="{tab}"]').click()
@@ -119,6 +133,8 @@ def shots(sheet: str) -> list[Shot]:
         Shot("ui-voz-vozes.png", "/voz", height=1250, prepare=_fill_clone_voice),
         Shot("ui-voz-narracao.png", "/voz/narracao", height=1000, prepare=_fill_narration),
         Shot("ui-fila.png", "/fila", height=900, prepare=lambda page: _settle(page, 2500)),
+        Shot("ui-editor.png", "/editor/quick_gravacao", width=1440, height=980, prepare=_editor_ready),
+        Shot("ui-editor-layout.png", "/editor/quick_gravacao", width=1440, height=980, prepare=_open_layout_menu),
         Shot("ui-modelos.png", "/modelos", height=1300, prepare=_show_models),
         Shot("classica-linha-do-tempo.png", "/classica#project=quick_gravacao", prepare=lambda page: _settle(page, 3500)),
         Shot("classica-voz.png", "/classica", height=900, prepare=_open_tab("voice", "#voice-clone-consent")),

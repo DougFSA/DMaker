@@ -5,6 +5,7 @@ import { contextWithDurations, type FakeAudioContext } from '@/test/audioContext
 import { FakeEventSource } from '@/test/fetch'
 import { callsTo } from '@/test/speechServer'
 import { NARRATION_RESULT, PROJECT, stubVoiceServer, TIMELINE_WITH_NARRATION, utterance, type VoiceServer } from '@/test/voiceServer'
+import { useEditorStore } from './editor'
 import { useNarrationStore } from './narration'
 import { useToastsStore } from './toasts'
 import { useWorkspaceStore } from './workspace'
@@ -435,6 +436,53 @@ describe('inserir no projeto aberto', () => {
     const narration = await withResult({ timeline: null })
     await narration.refreshDefaultStart()
     expect(narration.defaultStart).toBe(0)
+  })
+
+  describe('com o editor aberto no mesmo projeto', () => {
+    async function withEditor(options: Parameters<typeof stubVoiceServer>[0] = {}) {
+      const narration = await withResult({ timeline: TIMELINE_WITH_NARRATION, ...options })
+      const editor = useEditorStore()
+      await editor.open(PROJECT)
+      await flushPromises()
+      return { narration, editor }
+    }
+
+    it('o cursor do editor é a posição quando o campo está em branco', async () => {
+      const { narration, editor } = await withEditor()
+      editor.setPlayhead(4.256)
+      expect(narration.cursorStart).toBe(4.26)
+      expect(narration.startAt).toBe(4.26)
+    })
+
+    it('uma posição escrita à mão vale mais que o cursor', async () => {
+      const { narration, editor } = await withEditor()
+      editor.setPlayhead(4)
+      narration.insertStart = 1.5
+      expect(narration.startAt).toBe(1.5)
+    })
+
+    it('insere pelo editor: a cópia dele recebe a narração, e o salvar grava junto', async () => {
+      const { narration, editor } = await withEditor()
+      editor.setPlayhead(6)
+      expect(await narration.insertIntoProject(narration.current!)).toBe(true)
+
+      const saved = callsTo(server.calls, 'PUT', `/api/projects/${PROJECT}`)[0]!.body as {
+        audio: { narration: { start: number }[] }
+      }
+      expect(saved.audio.narration).toHaveLength(1)
+      expect(saved.audio.narration[0]!.start).toBe(6)
+      expect((editor.spec?.audio as { narration: unknown[] }).narration).toHaveLength(1)
+      expect(editor.dirty).toBe(false)
+    })
+
+    it('com o editor em outro projeto, o cursor dele não vale', async () => {
+      server = stubVoiceServer({ timeline: TIMELINE_WITH_NARRATION })
+      useWorkspaceStore().openProject(PROJECT)
+      const editor = useEditorStore()
+      editor.setPlayhead(7)
+      const narration = await ready()
+      expect(narration.cursorStart).toBeNull()
+    })
   })
 
   it('sem projeto aberto, diz para abrir um e não chama o servidor', async () => {

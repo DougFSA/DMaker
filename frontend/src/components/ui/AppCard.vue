@@ -13,10 +13,10 @@ withDefaults(
 
 <template>
   <section :class="['card', { 'card--interactive': interactive, 'card--flush': flush }]">
-    <header v-if="title || $slots.actions || $slots.header" class="card__header">
+    <header v-if="title || subtitle || $slots.actions || $slots.header" class="card__header">
       <slot name="header">
-        <div class="card__heading">
-          <h3 class="card__title">{{ title }}</h3>
+        <div v-if="title || subtitle" class="card__heading">
+          <h3 v-if="title" class="card__title">{{ title }}</h3>
           <p v-if="subtitle" class="card__subtitle">{{ subtitle }}</p>
         </div>
       </slot>
@@ -73,6 +73,7 @@ withDefaults(
   display: flex;
   flex-shrink: 0;
   gap: var(--space-2);
+  margin-left: auto;
 }
 
 .card__body {

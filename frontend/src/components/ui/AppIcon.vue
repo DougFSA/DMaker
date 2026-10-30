@@ -32,6 +32,7 @@ export type IconName =
   | 'sparkles'
   | 'arrow-left'
   | 'copy'
+  | 'grip'
 
 const paths: Record<IconName, string> = {
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -63,6 +64,7 @@ const paths: Record<IconName, string> = {
   sparkles: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
   'arrow-left': 'M19 12H5M11 6l-6 6 6 6',
   copy: 'M9 9h11v11H9zM5 15V5a1 1 0 0 1 1-1h10',
+  grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
 }
 
 const props = withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 20 })

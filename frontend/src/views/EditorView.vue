@@ -23,7 +23,6 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useEditorShortcuts } from '@/composables/useEditorShortcuts'
 import { renderResultsFromJob } from '@/lib/outputs'
 import { readStored, writeStored } from '@/lib/storage'
-import { CLASSIC_UI_PATH } from '@/navigation'
 import { useEditorStore } from '@/stores/editor'
 import { useJobsStore } from '@/stores/jobs'
 
@@ -116,7 +115,6 @@ function showRendered(_result: RenderResult): void {
         :description="editor.loadError"
       >
         <AppButton to="/editor" variant="primary">Escolher outro projeto</AppButton>
-        <AppButton :href="`${CLASSIC_UI_PATH}#project=${encodeURIComponent(name)}`">Abrir na interface clássica</AppButton>
       </EmptyState>
     </AppCard>
 

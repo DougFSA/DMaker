@@ -43,6 +43,22 @@
   color: var(--color-accent-text);
 }
 
+/* telas estreitas: as abas quebram a linha em vez de sumirem atrás de uma rolagem escondida */
+@media (max-width: 720px) {
+  .tabs__list {
+    flex-wrap: wrap;
+    width: 100%;
+    overflow-x: visible;
+    border-radius: var(--radius-lg);
+  }
+
+  .tabs__tab {
+    flex: 1 1 auto;
+    min-height: 2.5rem;
+    padding: 0 var(--space-3);
+  }
+}
+
 .tabs__tab:disabled,
 .tabs__tab[data-disabled] {
   opacity: 0.5;

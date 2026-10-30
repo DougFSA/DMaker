@@ -2,8 +2,8 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { projectSpec, timelineView } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
-import { useEditorPanelsStore } from '@/stores/editorPanels'
 import { useKeymapStore } from '@/stores/keymap'
+import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import TimelineToolbar from './TimelineToolbar.vue'
@@ -147,13 +147,14 @@ describe('encaixe, ripple e zoom', () => {
 describe('painéis e atalhos', () => {
   it('F e M mostram e escondem os painéis Filtros e Mídia, e a escolha fica guardada', async () => {
     await mountToolbar()
-    const panels = useEditorPanelsStore()
+    const panels = useScreenLayoutStore()
     expect(button('Filtros')?.attributes('aria-pressed')).toBe('true')
     await button('Filtros')?.trigger('click')
     expect(panels.isHidden('filters')).toBe(true)
     expect(button('Filtros')?.attributes('aria-pressed')).toBe('false')
     await button('Mídia')?.trigger('click')
-    expect(JSON.parse(window.localStorage.getItem('dmaker.editor.hiddenPanels') ?? '[]').sort()).toEqual(['filters', 'media'])
+    const stored = JSON.parse(window.localStorage.getItem('dmaker.layout.current') ?? '{}') as { layout: { hidden: string[] } }
+    expect(stored.layout.hidden.sort()).toEqual(['filters', 'media', 'progress'])
     await button('Filtros')?.trigger('click')
     expect(panels.isHidden('filters')).toBe(false)
   })

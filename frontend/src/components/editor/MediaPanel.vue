@@ -115,7 +115,7 @@ function onItemKeydown(event: KeyboardEvent, entry: MediaEntry): void {
 </script>
 
 <template>
-  <AppCard class="media" title="Mídia" flush>
+  <AppCard class="media" flush>
     <EmptyState v-if="!editor.spec" icon="film" title="Sem projeto aberto" description="A mídia aparece quando o projeto abrir." />
 
     <template v-else>
