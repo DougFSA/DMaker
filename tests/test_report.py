@@ -238,6 +238,24 @@ def test_check_text_safe_zone_flags_tall_card_title(tmp_path):
     assert any("não caber na altura" in f.message for f in findings)
 
 
+def test_check_text_safe_zone_measures_a_card_with_the_width_the_card_draws(tmp_path):
+    """O cartão é desenhado pelo Pillow, que usa o tamanho como corpo da letra: "Desenvolvimento" ocupa 832 px
+    numa área de 697 e sai cortada. A conferência a media pela conta da célula do libass (594 px) e deixava passar."""
+
+    def findings(title: str) -> list[Finding]:
+        spec = {
+            "name": "p",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [{"type": "card", "title": title, "duration": 3}],
+            "audio": {"normalize": "off"},
+        }
+        project = _project(tmp_path, spec)
+        return check_text_safe_zone(project, _layout(project, make_prober({})))
+
+    assert any("mais larga que a área" in f.message for f in findings("Desenvolvimento"))
+    assert findings("Agenda inteligente") == []  # quebra em duas linhas que cabem
+
+
 # ---------- check_text_pacing ----------
 
 
