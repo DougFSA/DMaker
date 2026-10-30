@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -359,8 +359,9 @@ def _unless_draft(arguments: Mapping[str, Any]) -> bool:
     return arguments.get("draft") is not True
 
 
-def _overwrite_requested(arguments: Mapping[str, Any]) -> bool:
-    return arguments.get("overwrite") is True or arguments.get("replace") is True
+def flag_is_on(arguments: Mapping[str, Any], flag: str) -> bool:
+    """A flag de sobrescrita ligada de fato (`true`): um texto ou um número que o modelo mandou não conta."""
+    return arguments.get(flag) is True
 
 
 def _removes_content(arguments: Mapping[str, Any]) -> bool:
@@ -394,14 +395,6 @@ CONFIRMATION_RULES: tuple[ConfirmationRule, ...] = (
     ConfirmationRule("resume_batch", "retomar o lote e gerar os vídeos que faltam (pode levar muito tempo)"),
     ConfirmationRule("dub_render", "gerar o vídeo dublado (leva vários minutos)", _unless_draft),
     ConfirmationRule("dub_stems", "gerar as trilhas separadas da dublagem (leva vários minutos)"),
-    ConfirmationRule(
-        "autocut", "refazer um projeto que já existe, apagando o corte anterior", _overwrite_requested
-    ),
-    ConfirmationRule(
-        "cut_pauses_and_caption",
-        "refazer um projeto que já existe, apagando o corte anterior",
-        _overwrite_requested,
-    ),
     ConfirmationRule("edit_project", "apagar um trecho ou uma sobreposição do projeto", _removes_content),
     ConfirmationRule("pronunciation", "apagar uma pronúncia cadastrada", _removes_pronunciation),
     ConfirmationRule(
@@ -411,10 +404,21 @@ CONFIRMATION_RULES: tuple[ConfirmationRule, ...] = (
     ),
 )
 
+# Ferramentas que refazem um projeto pelo nome e, com a flag de sobrescrita ligada, apagam o corte anterior:
+# ferramenta -> (argumento do nome, argumento da flag). Sem a flag o próprio servidor recusa o nome que já existe
+# (`AutoCutService.validate`); com ela, `overwrite=true` num nome livre é inofensivo. A pergunta exige então as duas
+# coisas, a flag ligada e o projeto de fato no disco: uma pergunta à toa ensina a pessoa a dizer sim sem ler.
+REDOES_EXISTING_PROJECT: dict[str, tuple[str, str]] = {
+    "autocut": ("name", "overwrite"),
+    "cut_pauses_and_caption": ("name", "overwrite"),
+}
 # Ferramentas que criam um projeto pelo nome e, se ele já existe, escrevem por cima: confirmam nesse caso.
 PROJECT_NAME_ARGUMENT: dict[str, str] = {"new_from_template": "name", "build_explainer_video": "name"}
+# Ferramentas que gravam um arquivo e, se ele já existe, o substituem: confirmam nesse caso. O destino é o `out` ou
+# o `out_dir` da chamada ou, sem eles, o padrão de cada ferramenta (`DEFAULT_OUTPUTS`, abaixo).
 OVERWRITES_EXISTING_OUTPUT = (
     "synthesize_speech",
+    "fix_speech",
     "convert_voice",
     "isolate_vocals",
     "dub_render",
@@ -423,6 +427,114 @@ OVERWRITES_EXISTING_OUTPUT = (
 # Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, se ele já existe, o substituem inteiro, com as
 # traduções que a pessoa revisou: confirmam só nesse caso.
 REPLACES_EXISTING_DUB_PROJECT = frozenset({"dub_prepare"})
+
+
+# ---------- destino padrão ----------
+#
+# Sem `out`, a ferramenta grava num lugar que ela mesma escolhe. Cada função abaixo devolve esses arquivos chamando
+# as funções que o servidor MCP usa (importadas aqui dentro para o gate continuar leve, e lendo o `config` na hora),
+# então nenhuma regra de nome é copiada: se o servidor mudar a pasta ou o nome, a pergunta acompanha. Ficam de fora
+# `dub_render` e `dub_stems`, cujo destino sai do conteúdo do `.dub.json` (o vídeo e o idioma), que o gate não lê.
+
+
+def _float_or_none(value: Any) -> float | None:
+    """Um tempo em segundos como o servidor o recebe: o número do modelo chega como `float` (o `5` vira `5.0`)."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"tempo inválido: {value!r}")
+    return float(value)
+
+
+def _text_argument(arguments: Mapping[str, Any], name: str) -> str | None:
+    value = arguments.get(name)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _narration_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    text = _text_argument(arguments, "text")
+    if text is None:
+        return []
+    from ..pipeline.voices import default_narration_path
+
+    return [str(default_narration_path(text))]
+
+
+def _suffix_candidates(source: Path) -> list[str]:
+    """As extensões que o arquivo corrigido pode ter: depende de o original ter imagem, que só o `probe` do servidor
+    sabe, então vale cada resposta possível (quase sempre uma só existe no disco)."""
+    from ..filtergraph.speech_edit import corrected_suffix
+
+    return list(dict.fromkeys(corrected_suffix(source.suffix, has_video) for has_video in (True, False)))
+
+
+def _speech_fix_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    path = _text_argument(arguments, "path")
+    if path is None:
+        return []
+    from ..pipeline.speech_fix import default_output_path
+
+    source = Path(path)
+    return [str(default_output_path(source, suffix)) for suffix in _suffix_candidates(source)]
+
+
+def _voice_conversion_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    path, voice = _text_argument(arguments, "path"), _text_argument(arguments, "voice")
+    if path is None or voice is None:
+        return []
+    from ..pipeline.voice_conversion import ConversionRequest, default_output_path
+
+    try:
+        request = ConversionRequest(
+            Path(path), voice, _float_or_none(arguments.get("start")), _float_or_none(arguments.get("end"))
+        )
+    except (TypeError, ValueError):
+        return []  # pedido inválido: a ferramenta o recusa sozinha, antes de gravar
+    return [str(default_output_path(request, suffix)) for suffix in _suffix_candidates(request.src)]
+
+
+def _isolation_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    path = _text_argument(arguments, "path")
+    if path is None:
+        return []
+    from ..pipeline.isolation import DEFAULT_EXPORT_FORMAT, EXPORT_ROLES, default_export_dir, export_name
+
+    try:
+        start, end = _float_or_none(arguments.get("start")), _float_or_none(arguments.get("end"))
+    except TypeError:
+        return []
+    audio_format = str(arguments.get("format") or DEFAULT_EXPORT_FORMAT)
+    folder = default_export_dir()
+    return [str(folder / export_name(Path(path), role, audio_format, start, end)) for role, _ in EXPORT_ROLES]
+
+
+# Ferramenta -> os arquivos que ela grava quando a chamada não traz o `out` nem o `out_dir`.
+DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
+    "synthesize_speech": _narration_outputs,
+    "fix_speech": _speech_fix_outputs,
+    "convert_voice": _voice_conversion_outputs,
+    "isolate_vocals": _isolation_outputs,
+}
+
+
+def output_targets(tool: str, arguments: Mapping[str, Any]) -> list[str]:
+    """Onde a ferramenta grava: o `out` ou o `out_dir` da chamada ou, sem eles, o destino padrão dela."""
+    given = [value for name in OUTPUT_ARGUMENTS if isinstance(value := arguments.get(name), str) and value]
+    if given:
+        return given
+    default_outputs = DEFAULT_OUTPUTS.get(tool)
+    return default_outputs(arguments) if default_outputs else []
+
+
+def overwrite_question(existing: Sequence[str]) -> str:
+    if len(existing) == 1:
+        return f"O arquivo '{existing[0]}' já existe. Posso sobrescrevê-lo?"
+    listed = ", ".join(f"'{path}'" for path in existing)
+    return f"Os arquivos {listed} já existem. Posso sobrescrevê-los?"
+
+
+def redo_project_question(name: str) -> str:
+    return f'Posso refazer o projeto "{name}", apagando o corte anterior?'
 
 
 def dub_project_target(arguments: Mapping[str, Any]) -> str | None:
@@ -460,23 +572,19 @@ def path_exists(path: str) -> bool:
     return Path(path).exists()
 
 
-def no_project(name: str) -> bool:
-    """O padrão sem disco: nenhum projeto existe (quem usa de verdade injeta `projects.project_path`)."""
-    return False
-
-
 @dataclass
 class ToolGate:
     """Junta as três barreiras. `check` devolve `None` quando a chamada pode seguir, ou o texto que volta ao modelo.
 
     O disco (`exists`, `project_exists`) e a pessoa (`policy`) entram por injeção, para o teste não tocar nada real.
+    Sem `project_exists` o gate não sabe quais projetos existem: a pergunta de refazer um corte então sai sempre.
     """
 
     schemas: Mapping[str, Mapping[str, Any]]
     policy: ConfirmationPolicy = field(default_factory=DenyAll)
     known_paths: KnownPaths = field(default_factory=KnownPaths)
     exists: Callable[[str], bool] = path_exists
-    project_exists: Callable[[str], bool] = no_project
+    project_exists: Callable[[str], bool] | None = None
     rules: tuple[ConfirmationRule, ...] = CONFIRMATION_RULES
     pending: PendingCall | None = None  # a chamada que a política adiou, à espera do sim da pessoa
 
@@ -509,6 +617,10 @@ class ToolGate:
                 )
         return None
 
+    def project_may_exist(self, name: str) -> bool:
+        """Se o projeto existe; sem `project_exists` não há como saber, e supor que sim é o lado seguro."""
+        return self.project_exists is None or self.project_exists(name)
+
     def confirmations(self, tool: str, arguments: Mapping[str, Any]) -> list[ConfirmationRequest]:
         """Tudo que precisa de um sim da pessoa antes desta chamada, na ordem em que será perguntado."""
         requests = []
@@ -520,16 +632,29 @@ class ToolGate:
                     else f"Posso {rule.reason}?"
                 )
                 requests.append(ConfirmationRequest(tool, arguments, question, rule.kind))
+        redo = REDOES_EXISTING_PROJECT.get(tool)
+        if redo:
+            redo_name, redo_flag = redo
+            project = arguments.get(redo_name)
+            if (
+                flag_is_on(arguments, redo_flag)
+                and isinstance(project, str)
+                and project
+                and self.project_may_exist(project)
+            ):
+                requests.append(ConfirmationRequest(tool, arguments, redo_project_question(project)))
         name_argument = PROJECT_NAME_ARGUMENT.get(tool)
-        if name_argument and self.project_exists(str(arguments.get(name_argument, ""))):
+        if (
+            name_argument
+            and self.project_exists is not None
+            and self.project_exists(str(arguments.get(name_argument, "")))
+        ):
             question = f"O projeto '{arguments[name_argument]}' já existe. Posso sobrescrevê-lo?"
             requests.append(ConfirmationRequest(tool, arguments, question))
         if tool in OVERWRITES_EXISTING_OUTPUT:
-            for name in OUTPUT_ARGUMENTS:
-                target = arguments.get(name)
-                if isinstance(target, str) and target and self.exists(target):
-                    question = f"O arquivo '{target}' já existe. Posso sobrescrevê-lo?"
-                    requests.append(ConfirmationRequest(tool, arguments, question))
+            existing = [target for target in output_targets(tool, arguments) if self.exists(target)]
+            if existing:
+                requests.append(ConfirmationRequest(tool, arguments, overwrite_question(existing)))
         if tool in REPLACES_EXISTING_DUB_PROJECT:
             target = dub_project_target(arguments)
             if target and self.exists(target):
