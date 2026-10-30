@@ -22,6 +22,7 @@ from dmaker.text.captions import Word
 from dmaker.text.translate import Line
 from dmaker.voice.pronunciation import Lexicon
 from dmaker.voice.watermark import delay_on_detector_grid
+from tests.conftest import WINDOWS_LINE_LIMIT, command_line_length
 from tests.test_speech_fix import Harness
 
 
@@ -70,8 +71,8 @@ class FakeTranslator:
 class DubHarness:
     """A mesma bancada da correção de fala (fakes de Whisper, Demucs e OmniVoice) com um tradutor falso."""
 
-    def __init__(self, tmp_path: Path, words: list[Word] = WORDS):
-        self.base = Harness(tmp_path, words=words)
+    def __init__(self, tmp_path: Path, words: list[Word] = WORDS, duration: float = 40.0):
+        self.base = Harness(tmp_path, duration=duration, words=words)
         self.translator = FakeTranslator()
         self.service = DubbingService(
             self.translator,
@@ -126,6 +127,28 @@ class DubHarness:
 @pytest.fixture
 def dub(tmp_path: Path) -> DubHarness:
     return DubHarness(tmp_path)
+
+
+LONG_SENTENCES = 150  # passa das 64 falas por comando: a mixagem e as trilhas montam em blocos
+
+
+@pytest.fixture
+def long_dub(tmp_path: Path) -> DubHarness:
+    """Uma dublagem de 150 frases, uma a cada 6 s, num arquivo de 15 minutos."""
+    words = [
+        word
+        for index in range(LONG_SENTENCES)
+        for word in sentence(f"Frase {index} da dublagem longa de teste.", 2.0 + index * 6.0)
+    ]
+    return DubHarness(tmp_path, words=words, duration=LONG_SENTENCES * 6.0 + 40.0)
+
+
+def block_commands(dub: DubHarness) -> list[FFmpegCommand]:
+    return [c for c in dub.commands if c.label.startswith("dublagem, bloco")]
+
+
+def leftover_workspaces(tmp_path: Path) -> list[Path]:
+    return list((tmp_path / "speech" / "dub").glob("montagem-*"))
 
 
 # ---------- preparar ----------
@@ -226,6 +249,20 @@ def test_render_mixes_background_and_each_clip_at_its_position_and_copies_the_vi
     assert "adelay=delays=14000:all=1" in graph
     assert "amix=inputs=4" in graph  # fundo + 3 falas
     assert "[original]" not in graph
+
+
+def test_a_long_dubbing_premixes_the_clips_in_blocks_and_every_command_fits_the_windows_line(
+    long_dub: DubHarness, tmp_path: Path
+):
+    project = long_dub.prepare()
+    assert len(project.segments) == LONG_SENTENCES
+    long_dub.service.render(load_dub_project(long_dub.project_path), long_dub.out)
+    assert len(block_commands(long_dub)) == 3  # 150 falas em blocos de 50
+    assert max(command_line_length(c.args) for c in long_dub.commands) < WINDOWS_LINE_LIMIT
+    (mix,) = long_dub.mix_commands()
+    assert mix.args.count("-i") == 5  # o vídeo, o fundo e os 3 blocos no lugar das 150 falas
+    assert "amix=inputs=4:duration=first:normalize=0" in long_dub.graph()  # o fundo e os 3 blocos
+    assert leftover_workspaces(tmp_path) == []
 
 
 def test_each_segment_clones_the_voice_around_itself(dub: DubHarness):
@@ -378,6 +415,16 @@ def test_export_stems_runs_one_command_with_the_clips_of_the_render(dub: DubHarn
     assert "adelay=delays=2000:all=1" in graph and "adelay=delays=14000:all=1" in graph
     assert "amix=inputs=3:duration=longest" in graph  # só as 3 falas dubladas
     assert command.total == 40.0
+
+
+def test_the_stems_of_a_long_dubbing_premix_the_clips_in_blocks_too(long_dub: DubHarness, tmp_path: Path):
+    long_dub.service.export_stems(long_dub.prepare(), StemsOptions(out_dir=tmp_path / "trilhas"))
+    assert len(block_commands(long_dub)) == 3
+    (command,) = long_dub.labeled("trilhas")
+    assert max(command_line_length(c.args) for c in long_dub.commands) < WINDOWS_LINE_LIMIT
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "amix=inputs=3:duration=longest:normalize=0" in graph  # os 3 blocos, não as 150 falas
+    assert leftover_workspaces(tmp_path) == []
 
 
 def test_export_stems_reuses_the_speech_already_synthesized_by_the_render(dub: DubHarness):
