@@ -9,6 +9,7 @@ import type {
   NoticeCode,
   NoticeLevel,
 } from '@/api'
+import type { AttachmentCard } from './agentAttachments'
 
 export type ToolState = 'running' | 'done' | 'blocked' | 'error' | 'interrupted'
 export type ConfirmationState = 'pending' | 'approved' | 'refused' | 'unconfirmed'
@@ -17,6 +18,8 @@ export interface UserItem {
   kind: 'user'
   id: string
   text: string
+  /** Os arquivos que seguiram com a mensagem; a chave só existe quando houve anexo. */
+  attachments?: AttachmentCard[]
 }
 export interface KitsItem {
   kind: 'kits'

@@ -30,6 +30,33 @@ describe('itemsFromTranscript', () => {
     expect(items[4]).toMatchObject({ kind: 'answer', interrupted: false, streaming: false })
   })
 
+  it('a mensagem enviada com anexos traz as fichas, sem texto nem imagem', () => {
+    const items = itemsFromTranscript([
+      {
+        kind: 'user',
+        id: 'e1',
+        text: 'Veja os anexos.',
+        at: '2026-10-30T12:00:00.000+00:00',
+        attachments: [
+          { id: 'a1', kind: 'text', name: 'roteiro.docx', size: 2048, chars: 800, total_chars: 5000, truncated: true },
+          { id: 'a2', kind: 'image', name: 'foto.png', size: 100 },
+        ],
+      },
+    ])
+
+    expect(items[0]).toMatchObject({ kind: 'user', text: 'Veja os anexos.' })
+    const user = items[0] as Extract<(typeof items)[number], { kind: 'user' }>
+    expect(user.attachments?.map((card) => [card.name, card.kind, card.state, card.truncated])).toEqual([
+      ['roteiro.docx', 'text', 'ready', true],
+      ['foto.png', 'image', 'ready', false],
+    ])
+  })
+
+  it('a mensagem sem anexo não ganha a chave attachments', () => {
+    const items = itemsFromTranscript([{ kind: 'user', id: 'e1', text: 'oi', at: 'x', attachments: [] }])
+    expect(items[0]).toEqual({ kind: 'user', id: 'e1', text: 'oi' })
+  })
+
   it('a resposta parada guarda a marca de interrompida', () => {
     const items = itemsFromTranscript([{ kind: 'answer', id: 'e2', text: 'O cinema,', interrupted: true }])
     expect(items[0]).toMatchObject({ kind: 'answer', text: 'O cinema,', interrupted: true })

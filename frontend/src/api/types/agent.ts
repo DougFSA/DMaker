@@ -71,6 +71,46 @@ export interface AgentOptions {
   seed?: number | null
 }
 
+/**
+ * O que o servidor faz de cada tipo de anexo: `image` segue ao modelo como imagem, `media` (vídeo e áudio) e `sheet`
+ * entram como caminho no texto, `text` (documento) entra como bloco de texto.
+ */
+export type AttachmentKind = 'image' | 'media' | 'sheet' | 'text'
+
+/** A prévia de uma planilha anexada: as primeiras linhas. */
+export interface AgentSheetPreview {
+  columns: string[]
+  rows: string[][]
+  rows_total: number
+  columns_total: number
+}
+
+/** Um anexo que ainda espera a mensagem (POST /conversations/{id}/attachments e `pending_attachments` do detalhe). */
+export interface AgentAttachment {
+  id: string
+  kind: AttachmentKind
+  name: string
+  size: number
+  /** Vídeo, áudio e planilha: o caminho no computador, que entra no texto da mensagem. */
+  path?: string
+  /** Texto: quantos caracteres vão ao modelo com o contexto de agora, e quantos o arquivo tem. */
+  chars?: number
+  total_chars?: number
+  truncated?: boolean
+  preview?: AgentSheetPreview | { excerpt: string }
+}
+
+/** A ficha que a transcrição guarda na mensagem enviada: só a referência, nunca o texto nem a imagem. */
+export interface AgentAttachmentSummary {
+  id: string
+  kind: AttachmentKind
+  name: string
+  size: number
+  chars?: number | null
+  total_chars?: number | null
+  truncated?: boolean
+}
+
 /** Uma linha da lista de conversas (GET /api/agent/conversations), a mais recente primeiro. */
 export interface AgentConversationSummary {
   id: string
@@ -93,7 +133,7 @@ export type NoticeCode = 'history_trimmed' | 'interrupted' | 'unfinished' | 'sav
 
 /** A transcrição que o servidor guarda e a tela desenha com os mesmos componentes do turno ao vivo. */
 export type TranscriptEntry =
-  | { kind: 'user'; id: string; text: string; at: string }
+  | { kind: 'user'; id: string; text: string; at: string; attachments?: AgentAttachmentSummary[] }
   | { kind: 'kits'; id: string; kits: string[]; method: string }
   | { kind: 'thinking'; id: string; text: string }
   | {
@@ -125,6 +165,8 @@ export interface AgentConversationDetail extends AgentConversationSummary {
   mode_locked: boolean
   /** O job do turno em andamento, quando a página foi recarregada no meio de uma resposta. */
   running_job_id: string | null
+  /** Os anexos já enviados ao servidor que esperam a mensagem; sobrevivem a recarregar a página e a reiniciar o DMaker. */
+  pending_attachments: AgentAttachment[]
   transcript: TranscriptEntry[]
 }
 
@@ -142,6 +184,8 @@ export interface AgentMessageRequest {
   /** Sem a chave o esforço continua; `null` volta ao padrão do modelo. */
   effort?: string | null
   options?: AgentOptions
+  /** Os ids dos anexos desta mensagem (no máximo 8); exige `conversation_id` e uma mensagem com ao menos um caractere. */
+  attachments?: string[]
 }
 
 /** Corpo de PATCH /api/agent/conversations/{id}: só muda o que vier. */
@@ -159,6 +203,29 @@ export interface AgentConversationCreate {
   model?: string
   effort?: string | null
   options?: AgentOptions
+}
+
+/** Um modelo carregado na memória agora (GET /api/agent/loaded, só no Ollama). */
+export interface AgentLoadedModel {
+  name: string
+  /** Bytes que o modelo ocupa na memória, e quantos deles estão na placa de vídeo. */
+  size: number
+  size_vram: number
+  context_length: number | null
+  /** Quando o Ollama descarrega o modelo sozinho, em ISO. */
+  expires_at: string | null
+}
+
+export interface AgentLoaded {
+  engine: AgentEngine
+  models: AgentLoadedModel[]
+}
+
+/** O corpo cru do 422 de uma mensagem com imagem para um modelo que não enxerga. */
+export interface AgentVisionRefusal {
+  detail: string
+  error: string
+  suggested_models: string[]
 }
 
 /** As etapas do `status`: o que o agente está fazendo agora. */

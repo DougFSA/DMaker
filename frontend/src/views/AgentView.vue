@@ -4,6 +4,8 @@
    Render final, apagar, sobrescrever e clonar voz esperam um clique de confirmação. As conversas ficam salvas no
    servidor e a lista fica ao lado (numa gaveta, em tela estreita). */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import AgentAdvanced from '@/components/agent/AgentAdvanced.vue'
+import AgentAttachmentTray from '@/components/agent/AgentAttachmentTray.vue'
 import AgentChatBar from '@/components/agent/AgentChatBar.vue'
 import AgentComposer from '@/components/agent/AgentComposer.vue'
 import AgentConversationList from '@/components/agent/AgentConversationList.vue'
@@ -15,7 +17,9 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import FileUpload from '@/components/ui/FileUpload.vue'
 import { useConfirm } from '@/composables/useConfirm'
+import { ATTACHMENT_ACCEPT, ATTACHMENT_ACCEPT_LABEL } from '@/lib/agentAttachments'
 import { formatBytes, sortModels } from '@/lib/agentModels'
 import { useAgentStore } from '@/stores/agent'
 
@@ -90,9 +94,32 @@ async function confirmMemory(): Promise<boolean> {
 
 async function submit(): Promise<void> {
   const text = draft.value
-  if (!text.trim() || agent.busy || !agent.canSend) return
+  // uma mensagem pode seguir só com anexos: a loja escreve "Veja o anexo." quando o campo está vazio
+  if ((!text.trim() && !agent.pendingCount) || agent.busy || !agent.sendable) return
   if (agent.confirmsMemory && !(await confirmMemory())) return
   if (await agent.send(text)) draft.value = ''
+}
+
+/** Os arquivos escolhidos no botão Anexar sobem na hora; a lista do botão volta a ficar vazia para a próxima escolha. */
+const picked = ref<File[]>([])
+function onPicked(files: File[]): void {
+  picked.value = []
+  void agent.attach(files)
+}
+
+/** Descarregar durante uma resposta: o servidor recusa o modelo em uso, então a tela avisa antes de tentar. */
+async function unloadModel(name: string): Promise<void> {
+  if (agent.busy) {
+    const accepted = await confirm({
+      title: 'Descarregar o modelo durante uma resposta?',
+      description: `O agente está respondendo. O DMaker não descarrega o modelo ${name} enquanto uma resposta o usa: pare a resposta antes.`,
+      confirmLabel: 'Tentar mesmo assim',
+      cancelLabel: 'Cancelar',
+      tone: 'danger',
+    })
+    if (!accepted) return
+  }
+  await agent.unload(name)
 }
 
 async function openConversation(id: string): Promise<void> {
@@ -179,7 +206,22 @@ function startNew(): void {
             @update:mode="agent.setMode($event)"
             @update:model="agent.setModel($event)"
             @update:effort="agent.setEffort($event)"
-          />
+          >
+            <template #advanced>
+              <AgentAdvanced
+                :engine="agent.engine"
+                :model="agent.selectedModel"
+                :options="agent.options"
+                :disabled="agent.busy"
+                :loaded="agent.loaded?.models ?? null"
+                :unloading="agent.unloading"
+                :unload-error="agent.unloadError"
+                @update:options="agent.setOptions($event)"
+                @unload="unloadModel"
+                @open="agent.loadLoaded()"
+              />
+            </template>
+          </AgentChatBar>
 
           <section ref="chat" class="chat" aria-label="Conversa com o agente" aria-live="polite" :aria-busy="agent.busy" @scroll="onScroll">
             <EmptyState
@@ -198,22 +240,61 @@ function startNew(): void {
               </ul>
             </EmptyState>
 
-            <AgentTranscript :items="agent.items" :kits="kits" @answer="(id, approve) => agent.answerConfirmation(id, approve)" />
+            <AgentTranscript
+              :items="agent.items"
+              :kits="kits"
+              :conversation-id="agent.conversationId"
+              @answer="(id, approve) => agent.answerConfirmation(id, approve)"
+            />
 
             <AgentStatusLine v-if="agent.busy" :stage="agent.stage" :stopping="agent.stopping" :waiting="!!agent.waitingForYou" />
           </section>
 
-          <p v-if="agent.error && !agent.problem" class="failure" role="alert">{{ agent.error }}</p>
+          <div v-if="agent.error && !agent.problem" class="failure" role="alert">
+            <p>{{ agent.error }}</p>
+            <span v-if="agent.suggestedModels.length" class="failure__models">
+              <AppButton v-for="name in agent.suggestedModels" :key="name" size="sm" variant="secondary" @click="agent.setModel(name)">
+                Usar {{ name }}
+              </AppButton>
+            </span>
+          </div>
 
           <AgentComposer
             v-model="draft"
             :placeholder="placeholder"
             :busy="agent.busy"
             :stopping="agent.stopping"
-            :ready="agent.canSend"
+            :ready="agent.sendable"
+            :has-attachments="agent.pendingCount > 0"
             @submit="submit"
             @stop="agent.stop()"
-          />
+            @attach="agent.attach($event)"
+          >
+            <template v-if="agent.attachmentCards.length || agent.warnings.length || agent.attachNotice" #above>
+              <AgentAttachmentTray
+                :cards="agent.attachmentCards"
+                :warnings="agent.warnings"
+                :notice="agent.attachNotice"
+                :conversation-id="agent.conversationId"
+                @remove="agent.removeAttachment($event)"
+                @use-model="agent.setModel($event)"
+              />
+            </template>
+            <template #actions>
+              <FileUpload
+                v-model="picked"
+                compact
+                multiple
+                label="Anexar arquivos"
+                button-label="Anexar"
+                :accept="ATTACHMENT_ACCEPT"
+                :accept-label="ATTACHMENT_ACCEPT_LABEL"
+                :show-list="false"
+                :disabled="agent.busy"
+                @select="onPicked"
+              />
+            </template>
+          </AgentComposer>
 
           <details v-if="kits.length && agent.mode === 'operate'" class="kit-list">
             <summary>O que o agente sabe fazer</summary>
@@ -321,9 +402,17 @@ function startNew(): void {
 }
 
 .failure {
+  display: grid;
   flex: none;
+  gap: var(--space-2);
   margin-top: var(--space-3);
   color: var(--color-error);
+}
+
+.failure__models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .kit-list {

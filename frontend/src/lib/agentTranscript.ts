@@ -2,6 +2,7 @@
    salva e a que acabou de chegar serem desenhadas pelos mesmos componentes. */
 import type { TranscriptEntry } from '@/api'
 import type { ChatItem } from './agent'
+import { cardOfSummary } from './agentAttachments'
 
 /**
  * Cada entrada vira um item com o mesmo id. A confirmação sem resposta (`unconfirmed`), a ferramenta que o
@@ -12,7 +13,12 @@ export function itemsFromTranscript(entries: TranscriptEntry[]): ChatItem[] {
   for (const entry of entries) {
     switch (entry.kind) {
       case 'user':
-        items.push({ kind: 'user', id: entry.id, text: entry.text })
+        items.push({
+          kind: 'user',
+          id: entry.id,
+          text: entry.text,
+          ...(entry.attachments?.length ? { attachments: entry.attachments.map(cardOfSummary) } : {}),
+        })
         break
       case 'kits':
         items.push({ kind: 'kits', id: entry.id, kits: entry.kits, method: entry.method })

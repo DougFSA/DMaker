@@ -3,18 +3,29 @@
 import type { AgentKit } from '@/api'
 import { kitTitle, type ChatItem } from '@/lib/agent'
 import AppBadge from '@/components/ui/AppBadge.vue'
+import AgentAttachmentCard from './AgentAttachmentCard.vue'
 import AgentConfirmation from './AgentConfirmation.vue'
 import AgentNotice from './AgentNotice.vue'
 import AgentThinking from './AgentThinking.vue'
 import AgentToolStep from './AgentToolStep.vue'
 
-defineProps<{ items: ChatItem[]; kits: AgentKit[] }>()
+defineProps<{
+  items: ChatItem[]
+  kits: AgentKit[]
+  /** A conversa desenhada: é por ela que a miniatura de uma imagem enviada se busca. */
+  conversationId?: string | null
+}>()
 const emit = defineEmits<{ answer: [confirmationId: string, approve: boolean] }>()
 </script>
 
 <template>
   <template v-for="item in items" :key="item.id">
-    <p v-if="item.kind === 'user'" class="bubble bubble--user">{{ item.text }}</p>
+    <div v-if="item.kind === 'user'" class="sent">
+      <ul v-if="item.attachments?.length" class="sent__files" aria-label="Arquivos enviados com a mensagem">
+        <AgentAttachmentCard v-for="card in item.attachments" :key="card.key" :card="card" :conversation-id="conversationId ?? null" />
+      </ul>
+      <p class="bubble bubble--user">{{ item.text }}</p>
+    </div>
     <p v-else-if="item.kind === 'kits'" class="kits">
       Kit: {{ item.kits.map((name) => kitTitle(name, kits)).join(' e ') }}
     </p>
@@ -44,8 +55,26 @@ const emit = defineEmits<{ answer: [confirmationId: string, approve: boolean] }>
   overflow-wrap: anywhere;
 }
 
-.bubble--user {
+/* a mensagem da pessoa: os arquivos que seguiram com ela ficam logo acima do texto, do mesmo lado */
+.sent {
+  display: grid;
   align-self: flex-end;
+  gap: var(--space-2);
+  justify-items: end;
+  max-width: min(46rem, 100%);
+}
+
+.sent__files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bubble--user {
   background: var(--color-accent-bg);
   color: var(--color-accent-text);
 }

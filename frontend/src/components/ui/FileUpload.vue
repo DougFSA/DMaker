@@ -21,8 +21,12 @@ const props = withDefaults(
     buttonLabel?: string
     /** Mostra a lista de arquivos escolhidos com o botão de remover de cada um. */
     showList?: boolean
+    /** Só o botão, sem a área tracejada e sem o texto de apoio (cabe numa barra de ações); arrastar sobre ele ainda vale. */
+    compact?: boolean
+    /** Como a recusa por tipo descreve o que se aceita, no lugar da lista do `accept` (que pode ser longa). */
+    acceptLabel?: string
   }>(),
-  { accept: '', showList: true },
+  { accept: '', showList: true, compact: false },
 )
 
 const files = defineModel<File[]>({ default: () => [] })
@@ -43,7 +47,7 @@ function receive(list: File[]): void {
 
   const problems: string[] = []
   if (rejected.length) {
-    problems.push(`Não aceitei ${rejected.map((file) => file.name).join(', ')}. Tipos aceitos: ${props.accept}.`)
+    problems.push(`Não aceitei ${rejected.map((file) => file.name).join(', ')}. Tipos aceitos: ${props.acceptLabel ?? props.accept}.`)
   }
   if (tooBig.length && props.maxBytes !== undefined) {
     problems.push(`${tooBig.map((file) => file.name).join(', ')}: maior que ${formatBytes(props.maxBytes)}.`)
@@ -76,8 +80,8 @@ function remove(index: number): void {
 </script>
 
 <template>
-  <div class="upload">
-    <span :id="labelId" class="field-label">{{ label }}</span>
+  <div :class="['upload', { 'upload--compact': compact }]">
+    <span :id="labelId" :class="compact ? 'upload__sr-only' : 'field-label'">{{ label }}</span>
     <div
       :class="['upload__zone', { 'is-dragging': dragging, 'is-inactive': inactive }]"
       role="group"
@@ -225,5 +229,31 @@ function remove(index: number): void {
 .upload__problem {
   font-size: var(--text-xs);
   color: var(--color-error);
+}
+
+/* compacto: só o botão, para a barra de ações de uma caixa de mensagem; o nome do campo fica para quem usa leitor de tela */
+.upload__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.upload--compact .upload__zone {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.upload--compact .upload__zone.is-dragging {
+  background: var(--color-accent-bg);
+}
+
+.upload--compact .upload__icon,
+.upload--compact .upload__prompt {
+  display: none;
 }
 </style>
