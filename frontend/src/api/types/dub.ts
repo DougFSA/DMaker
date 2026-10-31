@@ -24,6 +24,11 @@ export interface DubPrepareRequest {
   keep_original_db?: number | null
   glossary?: string[]
   fit_mode?: DubFitMode
+  /**
+   * Prepara por cima de uma dublagem que já existe, apagando as traduções revisadas e as falas travadas. Sem isso o
+   * servidor responde 409 com o caminho dela (`{ detail, path }`) e a tela pergunta antes de repetir com `true`.
+   */
+  overwrite?: boolean
 }
 
 export interface DubSegment {

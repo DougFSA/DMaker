@@ -43,7 +43,13 @@ export interface DubServerOptions extends SpeechServerOptions {
   project?: DubProjectSummary | null
   /** Faz o salvar falhar com esta mensagem. */
   saveError?: string
+  /** O caminho de uma dublagem que já existe: preparar sem `overwrite: true` recebe o 409 do servidor. */
+  existingDubbing?: string
 }
+
+/** O que o servidor diz quando a dublagem já existe (`ui/dub_routes.py`): o texto e o caminho. */
+export const EXISTING_DETAIL =
+  'Já existe uma dublagem preparada em X:/saida/dublagem/entrevista.en.dub.json. Preparar de novo grava por cima dela e apaga as traduções que você revisou e as falas que você travou.'
 
 export interface DubServer {
   calls: ServerCall[]
@@ -98,6 +104,9 @@ export function stubDubServer(options: DubServerOptions = {}): DubServer {
           }),
         }
         return reply(server.project)
+      }
+      if (path === '/api/dub/prepare' && options.existingDubbing && body?.overwrite !== true) {
+        return reply({ detail: EXISTING_DETAIL, path: options.existingDubbing }, 409)
       }
       if (/^\/api\/dub\/(prepare|retranslate|render|stems)$/.test(path ?? '')) {
         if (options.startReply) return reply(options.startReply.body, options.startReply.status)

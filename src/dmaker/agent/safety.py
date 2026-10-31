@@ -15,9 +15,12 @@ import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from jsonschema import Draft202012Validator
+
+if TYPE_CHECKING:
+    from ..domain.dub import DubProject
 
 ConfirmationKind = Literal["action", "voice_consent"]
 
@@ -385,8 +388,9 @@ class ConfirmationRule:
 
 # Preparar a dublagem (transcrever e traduzir) não está aqui: gera um projeto editável e, num vídeo novo, só o
 # `dub_render`, que produz o vídeo, pede o sim; pedir nos dois obrigaria a pessoa a confirmar duas vezes o mesmo
-# pedido. O caso que muda é refazer a dublagem de um vídeo que já tem projeto: aí o `dub_prepare` escreve por cima
-# e perde as traduções revisadas, e quem pergunta é `REPLACES_EXISTING_DUB_PROJECT` (abaixo), não esta lista.
+# pedido. O caso que muda é refazer a dublagem de um vídeo que já tem projeto: com `overwrite=true`, o `dub_prepare`
+# escreve por cima e perde as traduções revisadas, e quem pergunta é `REPLACES_EXISTING_DUB_PROJECT` (abaixo), não
+# esta lista.
 CONFIRMATION_RULES: tuple[ConfirmationRule, ...] = (
     ConfirmationRule("render_project", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
     ConfirmationRule("quick_edit", "gerar o vídeo final (leva alguns minutos)", _unless_preview),
@@ -424,17 +428,20 @@ OVERWRITES_EXISTING_OUTPUT = (
     "dub_render",
     "dub_stems",
 )
-# Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, se ele já existe, o substituem inteiro, com as
-# traduções que a pessoa revisou: confirmam só nesse caso.
+# Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, com a flag de sobrescrita ligada, o substituem
+# inteiro, com as traduções que a pessoa revisou. Sem a flag o próprio servidor recusa o projeto que já existe
+# (`DubProjectExists`), então a pergunta exige as duas coisas: a flag e o arquivo de fato no disco.
 REPLACES_EXISTING_DUB_PROJECT = frozenset({"dub_prepare"})
+DUB_OVERWRITE_FLAG = "overwrite"
 
 
 # ---------- destino padrão ----------
 #
 # Sem `out`, a ferramenta grava num lugar que ela mesma escolhe. Cada função abaixo devolve esses arquivos chamando
 # as funções que o servidor MCP usa (importadas aqui dentro para o gate continuar leve, e lendo o `config` na hora),
-# então nenhuma regra de nome é copiada: se o servidor mudar a pasta ou o nome, a pergunta acompanha. Ficam de fora
-# `dub_render` e `dub_stems`, cujo destino sai do conteúdo do `.dub.json` (o vídeo e o idioma), que o gate não lê.
+# então nenhuma regra de nome é copiada: se o servidor mudar a pasta ou o nome, a pergunta acompanha. O destino do
+# `dub_render` e do `dub_stems` sai do conteúdo do `.dub.json` (o vídeo e o idioma): o gate o lê por um leitor
+# injetado (`ToolGate.read_dub_project`) e entrega o projeto às funções de `DUB_PROJECT_OUTPUTS`.
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -508,6 +515,35 @@ def _isolation_outputs(arguments: Mapping[str, Any]) -> list[str]:
     return [str(folder / export_name(Path(path), role, audio_format, start, end)) for role, _ in EXPORT_ROLES]
 
 
+DubProjectReader = Callable[[str], "DubProject | None"]
+
+
+def read_dub_project(path: str) -> DubProject | None:
+    """O `.dub.json` do disco, ou `None` se não existe ou não abre: aí a ferramenta recusa sozinha, sem gravar nada."""
+    from ..domain.dub import load_dub_project
+
+    try:
+        return load_dub_project(Path(path))
+    except (OSError, ValueError):  # o erro de validação do pydantic também é um ValueError
+        return None
+
+
+def _dub_render_outputs(project: DubProject) -> list[str]:
+    """O vídeo (ou áudio) dublado do projeto: a extensão depende de o original ter imagem, que só o `probe` do
+    servidor sabe, então vale cada resposta possível (como no `fix_speech`)."""
+    from ..pipeline.dubbing import default_output_path
+
+    source = Path(project.source)
+    return [str(default_output_path(source, project.target_language, s)) for s in _suffix_candidates(source)]
+
+
+def _dub_stems_outputs(project: DubProject) -> list[str]:
+    """A pasta das trilhas separadas, ao lado da dublagem."""
+    from ..pipeline.dubbing import default_stems_dir
+
+    return [str(default_stems_dir(Path(project.source), project.target_language))]
+
+
 # Ferramenta -> os arquivos que ela grava quando a chamada não traz o `out` nem o `out_dir`.
 DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "synthesize_speech": _narration_outputs,
@@ -515,15 +551,29 @@ DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "convert_voice": _voice_conversion_outputs,
     "isolate_vocals": _isolation_outputs,
 }
+# O mesmo, para as ferramentas cujo destino padrão sai do projeto de dublagem (o argumento `project`).
+DUB_PROJECT_OUTPUTS: dict[str, Callable[[DubProject], list[str]]] = {
+    "dub_render": _dub_render_outputs,
+    "dub_stems": _dub_stems_outputs,
+}
 
 
-def output_targets(tool: str, arguments: Mapping[str, Any]) -> list[str]:
+def output_targets(
+    tool: str, arguments: Mapping[str, Any], read_project: DubProjectReader = read_dub_project
+) -> list[str]:
     """Onde a ferramenta grava: o `out` ou o `out_dir` da chamada ou, sem eles, o destino padrão dela."""
     given = [value for name in OUTPUT_ARGUMENTS if isinstance(value := arguments.get(name), str) and value]
     if given:
         return given
     default_outputs = DEFAULT_OUTPUTS.get(tool)
-    return default_outputs(arguments) if default_outputs else []
+    if default_outputs:
+        return default_outputs(arguments)
+    dub_outputs = DUB_PROJECT_OUTPUTS.get(tool)
+    project_path = _text_argument(arguments, "project")
+    if dub_outputs is None or project_path is None:
+        return []
+    project = read_project(project_path)
+    return dub_outputs(project) if project else []
 
 
 def overwrite_question(existing: Sequence[str]) -> str:
@@ -576,8 +626,9 @@ def path_exists(path: str) -> bool:
 class ToolGate:
     """Junta as três barreiras. `check` devolve `None` quando a chamada pode seguir, ou o texto que volta ao modelo.
 
-    O disco (`exists`, `project_exists`) e a pessoa (`policy`) entram por injeção, para o teste não tocar nada real.
-    Sem `project_exists` o gate não sabe quais projetos existem: a pergunta de refazer um corte então sai sempre.
+    O disco (`exists`, `project_exists`, `read_dub_project`) e a pessoa (`policy`) entram por injeção, para o teste
+    não tocar nada real. Sem `project_exists` o gate não sabe quais projetos existem: a pergunta de refazer um corte
+    então sai sempre.
     """
 
     schemas: Mapping[str, Mapping[str, Any]]
@@ -585,6 +636,7 @@ class ToolGate:
     known_paths: KnownPaths = field(default_factory=KnownPaths)
     exists: Callable[[str], bool] = path_exists
     project_exists: Callable[[str], bool] | None = None
+    read_dub_project: DubProjectReader = read_dub_project  # o `.dub.json` de onde sai o destino da dublagem
     rules: tuple[ConfirmationRule, ...] = CONFIRMATION_RULES
     pending: PendingCall | None = None  # a chamada que a política adiou, à espera do sim da pessoa
 
@@ -601,13 +653,17 @@ class ToolGate:
         absent = missing_paths(arguments, self.exists, self.known_paths)
         if absent:
             return ask_user_about_paths(absent)
-        for request in self.confirmations(tool, arguments):
+        requests = self.confirmations(tool, arguments)
+        for position, request in enumerate(requests):
             try:
                 approved = self.policy.confirm(request)
             except ConfirmationDeferred:
-                self.pending = PendingCall(tool, dict(arguments), request.question)
+                # Um "sim" executa a chamada inteira, sem passar de novo pelo gate: a pessoa precisa ter ouvido
+                # todas as perguntas que ainda faltavam (gerar o vídeo e sobrescrever o que já existe), não só a primeira.
+                question = " ".join(asked.question for asked in requests[position:])
+                self.pending = PendingCall(tool, dict(arguments), question)
                 return (
-                    f"Aguardando o sim do usuário: {request.question} "
+                    f"Aguardando o sim do usuário: {question} "
                     "Faça essa pergunta a ele, curta, e espere a resposta; não chame a ferramenta de novo agora."
                 )
             if not approved:
@@ -652,10 +708,11 @@ class ToolGate:
             question = f"O projeto '{arguments[name_argument]}' já existe. Posso sobrescrevê-lo?"
             requests.append(ConfirmationRequest(tool, arguments, question))
         if tool in OVERWRITES_EXISTING_OUTPUT:
-            existing = [target for target in output_targets(tool, arguments) if self.exists(target)]
+            targets = output_targets(tool, arguments, self.read_dub_project)
+            existing = [target for target in targets if self.exists(target)]
             if existing:
                 requests.append(ConfirmationRequest(tool, arguments, overwrite_question(existing)))
-        if tool in REPLACES_EXISTING_DUB_PROJECT:
+        if tool in REPLACES_EXISTING_DUB_PROJECT and flag_is_on(arguments, DUB_OVERWRITE_FLAG):
             target = dub_project_target(arguments)
             if target and self.exists(target):
                 requests.append(

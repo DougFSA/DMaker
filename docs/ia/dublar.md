@@ -18,6 +18,7 @@ Você tem um vídeo falado em português (ou outro idioma) e quer a versão em i
 - Termos que não se traduzem (marcas): vão em `--glossary`; as marcas do dicionário de pronúncia já são mantidas.
 - Se quer a voz original por baixo, estilo voice-over (`--keep-original -18`), ou só a dublada.
 - **Autorização** de quem fala: a dublagem clona a voz dela.
+- Se esse arquivo e idioma já têm dublagem preparada, preparar de novo apaga as traduções revisadas: só com `overwrite`.
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
@@ -37,6 +38,8 @@ dmaker dub prepare gravacao.mp4 --to en --from pt
 dmaker dub render output\dublagem\gravacao.en.dub.json --draft
 ```
 
+Com o projeto já existente, `dub prepare` e `dub run` recusam; `--overwrite` prepara por cima.
+
 Para fazer os dois passos de uma vez, sem revisar: `dmaker dub gravacao.mp4 --to en`. O projeto `output\dublagem\gravacao.en.dub.json` é um JSON editável: corrija o campo `text` de cada fala à mão, ou use `dmaker dub retranslate <projeto>` para traduzir de novo só as falas sem a trava (`locked`). A tradução aceita `[[termo|pronúncia]]`.
 
 O vídeo sai em `output\dublagem\<nome>.<idioma>.<ext>` com a legenda `.srt`. `--draft` usa 8 passos de síntese (metade do tempo, mais áspero); `--steps 32` é o máximo.
@@ -48,6 +51,7 @@ Ouça o vídeo dublado e leia o `.srt`. Cada fala tem um `status` no relatório 
 ## Erros comuns
 
 - **"Ollama não está rodando"**: abra o aplicativo ou `ollama serve`, e baixe o modelo (`ollama pull gpt-oss:20b`).
+- **"Já existe uma dublagem preparada"**: continue por ela (`dub render <projeto>`), ou refaça com `--overwrite` (`overwrite: true` no `dub_prepare`) e perca as traduções revisadas.
 - **A fala traduzida não cabe**: encurte a tradução da fala, ou use o modo que estica o vídeo (tarefa "Dublar esticando o vídeo onde a fala não cabe").
 - **Duas pessoas, uma voz só**: veja "Dublar com mais de uma pessoa falando".
 - **Muito lento**: use `--draft` para conferir e a versão final só no fim.

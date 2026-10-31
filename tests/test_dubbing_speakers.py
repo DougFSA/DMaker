@@ -76,9 +76,9 @@ def test_prepare_diarizes_the_voice_stem_at_16k_and_passes_the_requested_count(d
 
 def test_the_turns_are_cached_per_stem_and_per_requested_count(dub: DubHarness):
     dub.prepare()
-    dub.prepare()
+    dub.prepare(overwrite=True)  # preparar de novo por cima pede o sim explícito
     assert len(dub.diarizer.calls) == 1
-    dub.prepare(num_speakers=2)
+    dub.prepare(num_speakers=2, overwrite=True)
     assert len(dub.diarizer.calls) == 2
 
 
@@ -122,7 +122,7 @@ def test_per_speaker_without_a_diarizer_and_a_count_in_other_modes_are_refused(
 
 def test_the_old_modes_do_not_diarize(dub: DubHarness):
     for mode in ("per_segment", "single"):
-        project = dub.prepare(speaker_mode=mode)
+        project = dub.prepare(speaker_mode=mode, overwrite=True)  # o mesmo projeto preparado duas vezes
         assert project.speakers == [] and all(s.speaker is None for s in project.segments)
     assert dub.diarizer.calls == []
 

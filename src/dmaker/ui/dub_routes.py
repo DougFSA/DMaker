@@ -11,16 +11,18 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config
 from ..domain.dub import (
     PROJECT_SUFFIX,
     DubProject,
+    DubProjectExists,
     FitMode,
     SpeakerMode,
     load_dub_project,
+    refuse_existing_project,
     save_dub_project,
 )
 from ..media.ffmpeg import SubprocessRunner
@@ -56,6 +58,8 @@ class PrepareRequest(BaseModel):
     keep_original_db: float | None = Field(default=None, le=0)
     glossary: list[str] = Field(default_factory=list, max_length=100)
     fit_mode: FitMode = "voz"
+    # Preparar de novo uma dublagem que já existe apaga as traduções revisadas: só com o sim explícito da pessoa.
+    overwrite: bool = False
 
 
 class SegmentEdit(BaseModel):
@@ -169,6 +173,7 @@ def _run_prepare(job: Job, services: VoiceServices, req: PrepareRequest, source:
             project_path=path,
             on_progress=_cancellable_progress(job),
             fit_mode=req.fit_mode,
+            overwrite=req.overwrite,
         )
     return _summary(project, path)
 
@@ -243,8 +248,8 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         files = sorted(folder.glob(f"*{PROJECT_SUFFIX}"), key=lambda p: p.stat().st_mtime, reverse=True)
         return [{"path": str(path), "name": path.name} for path in files] if folder.is_dir() else []
 
-    @router.post("/prepare")
-    def prepare(req: PrepareRequest, services: Services) -> dict:
+    @router.post("/prepare", response_model=None)  # sem modelo: devolve o job ou, se já existe, a recusa 409
+    def prepare(req: PrepareRequest, services: Services) -> dict | JSONResponse:
         source = media_file(req.path)
         if req.source_language.split("-")[0] == req.target_language.split("-")[0]:
             raise HTTPException(
@@ -253,6 +258,11 @@ def build_dub_router(jobs: JobManager) -> APIRouter:
         if req.voice:
             existing_voice(services.library, req.voice)
         path = default_project_path(source, req.target_language)
+        # O job só grava minutos depois: a recusa tem que sair aqui, antes dele, para a tela perguntar e repetir.
+        try:
+            refuse_existing_project(path, req.overwrite)
+        except DubProjectExists as exc:
+            return JSONResponse(status_code=409, content={"detail": str(exc), "path": str(exc.path)})
         job = jobs.start(
             f"dublagem: preparar ({source.name})",
             lambda job: _run_prepare(job, services, req, source, path),

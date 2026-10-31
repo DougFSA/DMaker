@@ -32,6 +32,7 @@ from ..domain.dub import (
     DubSpeaker,
     FitMode,
     SpeakerMode,
+    refuse_existing_project,
     save_dub_project,
 )
 from ..filtergraph.blocks import GraphStep
@@ -300,17 +301,21 @@ class DubbingService:
         on_progress: ProgressReport | None = None,
         fit_mode: FitMode = "voz",
         num_speakers: int | None = None,
+        overwrite: bool = False,
     ) -> DubProject:
         """Transcreve, parte em frases e traduz `src`; grava o projeto editável e o devolve.
 
         Sem `speaker_mode`, vale `per_speaker` (uma voz por pessoa) quando há diarizador, e `per_segment` quando
-        não há. `num_speakers` força a quantidade de pessoas na diarização.
+        não há. `num_speakers` força a quantidade de pessoas na diarização. Se o projeto de destino já existe,
+        recusa (`DubProjectExists`) a não ser que `overwrite`, porque gravar por cima apaga as traduções revisadas.
         """
         report = on_progress or (lambda _label, _fraction: None)
         if not src.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {src}")
         if source.split("-")[0] == target.split("-")[0]:
             raise ValueError("O idioma de destino precisa ser diferente do idioma de origem.")
+        destination = project_path or default_project_path(src, target)
+        refuse_existing_project(destination, overwrite)  # antes dos minutos de trabalho, não depois
         mode = self._resolved_mode(speaker_mode, num_speakers)
         if voice:
             self.library.get(voice)  # falha já aqui, e não minutos depois, se a voz não existe
@@ -357,7 +362,9 @@ class DubbingService:
         )
         with self._stage(timings, "Tradução"):
             project = self._translated(project, 0.65, 0.98, report)
-        saved = save_dub_project(project, project_path or default_project_path(src, target))
+        # a preparação leva minutos: se outro pedido gravou o mesmo projeto nesse tempo, ele não é pisado
+        refuse_existing_project(destination, overwrite)
+        saved = save_dub_project(project, destination)
         report("Projeto de dublagem gravado", 1.0)
         self.log(f"Projeto gravado em {saved}")
         return project

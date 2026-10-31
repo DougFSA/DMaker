@@ -11,14 +11,19 @@ import dmaker.mcp_server as mcp_server
 from dmaker import config
 from dmaker.agent.safety import (
     DEFAULT_OUTPUTS,
+    DUB_PROJECT_OUTPUTS,
     OVERWRITES_EXISTING_OUTPUT,
     ApproveAll,
     DenyAll,
     ToolGate,
     output_targets,
+    read_dub_project,
 )
+from dmaker.domain.dub import DubProject, save_dub_project
 from dmaker.media.ffmpeg import FFmpegCommand, RecordingRunner
-from dmaker.pipeline import isolation, speech_fix, voice_conversion, voices
+from dmaker.pipeline import dubbing, isolation, speech_fix, voice_conversion, voices
+from dmaker.pipeline.dubbing import default_output_path as dub_output_path
+from dmaker.pipeline.dubbing import default_stems_dir
 from dmaker.pipeline.isolation import DEFAULT_EXPORT_FORMAT, IsolationService, default_export_dir, export_name
 from dmaker.pipeline.speech_fix import default_output_path as speech_fix_output_path
 from dmaker.pipeline.voice_conversion import ConversionRequest
@@ -278,10 +283,136 @@ def test_the_stems_the_tool_writes_are_the_files_the_gate_asked_about(fake_isola
     assert [r.question for r in asked.asked] == [question(*predicted)]
 
 
-# ---------- o gate usa a função da ferramenta, não uma cópia ----------
+# ---------- dublagem: o destino sai do .dub.json ----------
 
-
+PROJECT = "C:/dub/aula.en.dub.json"
 SENTINEL = Path("C:/outro/lugar.wav")
+
+
+def dub_project(source: str = VIDEO, target: str = "en") -> DubProject:
+    return DubProject(source=source, target_language=target, segments=[])
+
+
+def dub_gate(policy=None, existing=(), project: DubProject | None = None) -> ToolGate:
+    """O gate com um disco falso e um leitor que só conhece o `PROJECT`: nenhum arquivo real é tocado."""
+    return ToolGate(
+        schemas={},
+        policy=policy or DenyAll(),
+        exists=set(existing).__contains__,
+        read_dub_project=lambda path: project if path == PROJECT else None,
+    )
+
+
+def test_a_draft_dub_render_asks_when_the_default_video_already_exists():
+    """Era a lacuna: o rascunho não pede o sim de gerar e, sem destino conhecido, gravava por cima calado."""
+    target = str(dub_output_path(Path(VIDEO), "en", ".mp4"))
+    asked = ApproveAll()
+    g = dub_gate(asked, existing={target}, project=dub_project())
+
+    assert g.check("dub_render", {"project": PROJECT, "draft": True}) is None
+
+    assert [r.question for r in asked.asked] == [question(target)]
+
+
+def test_a_final_dub_render_asks_to_generate_and_then_to_overwrite():
+    target = str(dub_output_path(Path(VIDEO), "en", ".mp4"))
+    asked = ApproveAll()
+    g = dub_gate(asked, existing={target}, project=dub_project())
+
+    g.check("dub_render", {"project": PROJECT})
+
+    assert [r.question for r in asked.asked] == [
+        "Posso gerar o vídeo dublado (leva vários minutos)?",
+        question(target),
+    ]
+
+
+def test_a_dub_render_into_a_free_destination_asks_nothing_in_draft():
+    asked = ApproveAll()
+    g = dub_gate(asked, existing={"C:/dub/outra-coisa.mp4"}, project=dub_project())
+
+    assert g.check("dub_render", {"project": PROJECT, "draft": True}) is None
+
+    assert asked.asked == []
+
+
+def test_an_audio_dubbing_asks_about_the_audio_file_and_both_extensions_are_looked_at():
+    """A extensão depende de o original ter imagem, que só o `probe` do servidor sabe: vale cada resposta possível."""
+    as_audio = str(dub_output_path(Path(AUDIO), "en", ".wav"))
+    asked = ApproveAll()
+    g = dub_gate(asked, existing={as_audio}, project=dub_project(source=AUDIO))
+
+    g.check("dub_render", {"project": PROJECT, "draft": True})
+
+    assert [r.question for r in asked.asked] == [question(as_audio)]
+    both = [str(dub_output_path(Path(VIDEO), "en", suffix)) for suffix in (".mp4", ".wav")]
+    assert output_targets("dub_render", {"project": PROJECT}, lambda path: dub_project()) == both
+
+
+def test_a_dub_render_with_out_asks_about_the_out_and_never_reads_the_project():
+    def unreadable(path: str):
+        raise AssertionError("com `out` o destino já está dito: não há projeto a ler")
+
+    targets = output_targets("dub_render", {"project": PROJECT, "out": "C:/saidas/pronto.mp4"}, unreadable)
+
+    assert targets == ["C:/saidas/pronto.mp4"]
+
+
+def test_dub_stems_without_out_dir_asks_when_the_default_folder_exists():
+    folder = str(default_stems_dir(Path(VIDEO), "en"))
+    asked = ApproveAll()
+    dub_gate(asked, existing={folder}, project=dub_project()).check("dub_stems", {"project": PROJECT})
+
+    assert [r.question for r in asked.asked][1:] == [
+        question(folder)
+    ]  # depois da pergunta de gerar as trilhas
+
+    elsewhere = ApproveAll()
+    dub_gate(elsewhere, existing={folder}, project=dub_project()).check(
+        "dub_stems", {"project": PROJECT, "out_dir": "C:/saidas/trilhas"}
+    )
+
+    assert (
+        len(elsewhere.asked) == 1 and "gerar as trilhas" in elsewhere.asked[0].question
+    )  # o padrão não é tocado
+
+
+def test_a_project_the_gate_cannot_read_has_no_destination_and_the_tool_refuses_by_itself():
+    """Sem projeto a ferramenta falha ao abrir o `.dub.json`, antes de gravar qualquer coisa: o gate não pergunta."""
+    asked = ApproveAll()
+    g = dub_gate(asked, existing={str(dub_output_path(Path(VIDEO), "en", ".mp4"))}, project=None)
+
+    assert g.check("dub_render", {"project": PROJECT, "draft": True}) is None
+    assert g.check("dub_render", {"draft": True}) is None  # sem `project` não há de onde ler
+
+    assert asked.asked == []
+
+
+def test_the_real_reader_gives_the_project_from_disk_and_none_when_it_cannot_open_it(tmp_path):
+    saved = tmp_path / "aula.en.dub.json"
+    project = dub_project()
+    save_dub_project(project, saved)
+    broken = tmp_path / "quebrado.dub.json"
+    broken.write_text("{ não é json", encoding="utf-8")
+
+    assert read_dub_project(str(saved)) == project
+    assert read_dub_project(str(broken)) is None
+    assert read_dub_project(str(tmp_path / "nada.dub.json")) is None
+
+
+@pytest.mark.parametrize(
+    ("tool", "function"), [("dub_render", "default_output_path"), ("dub_stems", "default_stems_dir")]
+)
+def test_the_gate_asks_the_function_of_the_dub_service_for_the_destination(monkeypatch, tool, function):
+    """O destino da dublagem vem das funções que o `DubbingService` usa: se mudarem, a pergunta acompanha."""
+    monkeypatch.setattr(dubbing, function, lambda *args, **kwargs: SENTINEL)
+
+    targets = output_targets(tool, {"project": PROJECT}, lambda path: dub_project())
+
+    assert targets and all(str(SENTINEL) == target for target in targets)
+
+
+# ---------- o gate usa a função da ferramenta, não uma cópia ----------
 
 
 @pytest.mark.parametrize(
@@ -324,10 +455,11 @@ def test_every_mcp_tool_with_an_output_argument_is_watched_by_the_gate():
     assert with_output == set(OVERWRITES_EXISTING_OUTPUT)
 
 
-def test_the_tools_with_a_default_destination_are_known_and_the_two_without_one_are_on_record():
-    """`dub_render` e `dub_stems` decidem o destino pelo conteúdo do `.dub.json`: ficam sem destino padrão no gate."""
+def test_every_tool_the_gate_watches_has_a_default_destination():
+    """`dub_render` e `dub_stems` decidem o destino pelo conteúdo do `.dub.json`: o gate o lê por um leitor injetado."""
     assert set(DEFAULT_OUTPUTS) <= set(OVERWRITES_EXISTING_OUTPUT)
-    assert set(OVERWRITES_EXISTING_OUTPUT) - set(DEFAULT_OUTPUTS) == {"dub_render", "dub_stems"}
+    assert set(DUB_PROJECT_OUTPUTS) == {"dub_render", "dub_stems"}
+    assert set(DEFAULT_OUTPUTS) | set(DUB_PROJECT_OUTPUTS) == set(OVERWRITES_EXISTING_OUTPUT)
 
 
 def test_the_default_audio_format_of_the_gate_is_the_one_of_the_mcp_tool():

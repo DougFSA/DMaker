@@ -2,10 +2,11 @@ import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PickedMedia } from '@/components/media/MediaPicker.vue'
+import { useConfirmStore } from '@/stores/confirm'
 import { DUB_PATH, dubProject, renderResult, stubDubServer, type DubServer } from '@/test/dubServer'
 import { FakeEventSource } from '@/test/fetch'
 import { callsTo, CLIP } from '@/test/speechServer'
-import { useDubbingStore } from './dubbing'
+import { useDubbingStore, type DubOutcome } from './dubbing'
 
 let server: DubServer
 
@@ -87,6 +88,83 @@ describe('useDubbingStore: preparar', () => {
     await again
     expect(dub.entry).toBeNull()
     expect(dub.entryProject).toBeNull()
+  })
+
+  describe('quando a dublagem já existe', () => {
+    const preparing = async () => {
+      server = stubDubServer({ existingDubbing: DUB_PATH, project: null })
+      const dub = useDubbingStore()
+      dub.media = PICKED
+      const pending = dub.prepare()
+      await flushPromises()
+      return { dub, pending }
+    }
+
+    it('o servidor recusa (409), a pessoa vê o que se perde e o sim repete o pedido com `overwrite`', async () => {
+      const { dub, pending } = await preparing()
+      const prepares = () => callsTo(server.calls, 'POST', '/api/dub/prepare')
+      expect(prepares()).toHaveLength(1)
+      expect(prepares()[0]!.body).not.toHaveProperty('overwrite')
+
+      const asked = useConfirmStore().current
+      expect(asked?.options.title).toBe('Preparar a dublagem de novo?')
+      expect(asked?.options.description).toContain('entrevista.en.dub.json')
+      expect(asked?.options.warning).toContain('apaga as traduções que você revisou')
+      expect(dub.preparation.running).toBe(false) // não há job: a pergunta vem antes do andamento
+      expect(dub.busy).toBe(true) // e, com ela na tela, nada mais se mexe
+
+      useConfirmStore().answer(true)
+      await flushPromises()
+      expect(prepares()).toHaveLength(2)
+      expect(prepares()[1]!.body).toMatchObject({ path: CLIP, overwrite: true })
+
+      await finish(dubProject())
+      await pending
+      expect(dub.project?.project).toBe(DUB_PATH)
+      expect(dub.preparation.error).toBe('')
+    })
+
+    it('o não deixa tudo como está: um pedido só, sem job, sem erro, sem "parado a pedido" e com o resultado antigo à vista', async () => {
+      server = stubDubServer({ existingDubbing: DUB_PATH, project: null })
+      const dub = useDubbingStore()
+      dub.media = PICKED
+      dub.outcome = { ...(renderResult() as unknown as DubOutcome), stamp: 1 }
+      const pending = dub.prepare()
+      await flushPromises()
+
+      useConfirmStore().answer(false)
+      await pending
+      expect(dub.outcome?.stamp).toBe(1)
+
+      expect(callsTo(server.calls, 'POST', '/api/dub/prepare')).toHaveLength(1)
+      expect(FakeEventSource.instances).toHaveLength(0)
+      expect(dub.project).toBeNull()
+      expect(dub.preparation.running).toBe(false)
+      expect(dub.preparation.error).toBe('')
+      expect(dub.preparation.cancelled).toBe(false)
+      expect(dub.busy).toBe(false)
+      expect(dub.canPrepare).toBe(true)
+    })
+
+    it('outro erro do servidor não vira pergunta: aparece como erro', async () => {
+      server = stubDubServer({ startReply: { status: 404, body: { detail: 'Arquivo não encontrado.' } } })
+      const dub = useDubbingStore()
+      dub.media = PICKED
+      await dub.prepare()
+      expect(useConfirmStore().current).toBeNull()
+      expect(dub.preparation.error).toBe('Arquivo não encontrado.')
+    })
+
+    it('uma dublagem nova não pergunta nada', async () => {
+      const dub = useDubbingStore()
+      dub.media = PICKED
+      const pending = dub.prepare()
+      await flushPromises()
+      expect(useConfirmStore().current).toBeNull()
+      await finish(dubProject())
+      await pending
+      expect(dub.project?.project).toBe(DUB_PATH)
+    })
   })
 
   it('a preparação cancelada não abre projeto nenhum', async () => {

@@ -12,8 +12,10 @@ import type {
   DubStemsResult,
   DubStretchedSegment,
 } from '@/api'
+import { baseName } from './format'
 import { formatSeconds, formatSecondsPrecise } from './speech'
 import type { MediaEntry } from './media'
+import type { ConfirmOptions } from '@/stores/confirm'
 
 /** Passos de síntese do modo rascunho (`DRAFT_STEPS` do servidor): metade do tempo, voz um pouco menos refinada. */
 export const DRAFT_STEPS = 8
@@ -218,4 +220,25 @@ const normalizePath = (path: string): string => path.replace(/\\/g, '/').toLower
 export function findProjectEntry(entries: readonly MediaEntry[], source: string): MediaEntry | null {
   const wanted = normalizePath(source)
   return entries.find((entry) => normalizePath(entry.path) === wanted) ?? null
+}
+
+/** O caminho da dublagem que já existe, no corpo do 409 de "preparar" (`{ detail, path }`); `null` se o corpo não o traz. */
+export function existingProjectPath(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || !('path' in body)) return null
+  const { path } = body as { path: unknown }
+  return typeof path === 'string' && path ? path : null
+}
+
+/** A pergunta de preparar de novo uma dublagem que já existe: diz qual é e o que se perde (sem volta). */
+export function overwriteConfirmation(existingPath: string | null): ConfirmOptions {
+  const which = existingPath ? ` (${baseName(existingPath)})` : ''
+  return {
+    title: 'Preparar a dublagem de novo?',
+    description: `Já existe uma dublagem preparada para este arquivo e este idioma${which}.`,
+    warning:
+      'Preparar de novo grava por cima dela e apaga as traduções que você revisou e as falas que você travou. Isso não tem como desfazer.',
+    confirmLabel: 'Preparar de novo',
+    cancelLabel: 'Manter a dublagem',
+    tone: 'danger',
+  }
 }
