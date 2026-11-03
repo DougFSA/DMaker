@@ -147,6 +147,21 @@ def test_build_explainer_measures_the_recording_only_when_the_ends_are_missing()
     assert created[1]["gravacao"] == "C:/g.mp4"
 
 
+def test_build_explainer_keeps_the_sounds_of_each_subject_when_it_splits_the_recording():
+    created: list[dict] = []
+    sounds = [{"som": "whoosh"}, {"som": "ding", "em": 1.5}]
+
+    def create(template, name, params):
+        created.append(params)
+        return "projeto"
+
+    build_explainer(
+        "exp", "C:/g.mp4", [{"sons": sounds}, {}], None, lambda path: SimpleNamespace(duration=8.0), create
+    )
+
+    assert created[0]["assuntos"][0]["sons"] == sounds and "sons" not in created[0]["assuntos"][1]
+
+
 def test_cut_summary_is_compact_and_points_to_the_next_step():
     result = {
         "project": "corte",

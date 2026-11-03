@@ -917,16 +917,17 @@ Você grava uma explicação de frente para a câmera e tem uma imagem ou infogr
 
 - A gravação (vertical ou horizontal) e a duração dela.
 - Os assuntos, em ordem: o segundo em que cada um termina (`fim`), o fundo (`escuro`, `claro`, `bege`, uma cor `#RRGGBB` ou uma imagem), a imagem de cada um, se houver, e o infográfico, se houver (`infografico`: `{"nome": "contador", "parametros": {"ate": 10000}}`, um dos modelos da tarefa "Pôr um infográfico animado no vídeo"). O fim do último assunto é a duração da gravação.
+- Os sons de cada assunto, se quiser (`sons`: `[{"som": "whoosh", "em": 0, "volume": 1}]`): `som` é um nome de `dmaker sfx list`, `em` são os segundos desde o começo do assunto (0 se omitido, até o fim dele) e `volume` vai de 0 a 1,5 (1 é o padrão). Cabe um som no meio, como o `ding` do contador.
 
 #### Pela IA
 
-Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com um contador até 10.000, assunto 3 até 60 s com uma barra até 95 de 400." A IA usa a receita `build_explainer_video`, que cria o projeto pelo modelo `explicativo` e já devolve a duração e os avisos; sem o `fim` dos assuntos, ela divide a gravação em partes iguais. Depois gera a prévia.
+Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1.png`, assunto 2 até 40 s com um contador até 10.000 e um ding aos 8 s dele, assunto 3 até 60 s com uma barra até 95 de 400, e um whoosh na entrada de cada um." A IA usa a receita `build_explainer_video`, que cria o projeto pelo modelo `explicativo` e já devolve a duração e os avisos; sem o `fim` dos assuntos, ela divide a gravação em partes iguais. Depois gera a prévia.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "build_explainer_video", "arguments": {"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png"}, {"fim": 40, "fundo": "bege", "infografico": {"nome": "contador", "parametros": {"ate": 10000, "prefixo": "+ de R$"}}}, {"fim": 60, "fundo": "claro", "infografico": {"nome": "barra", "parametros": {"valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400}}}]}, "para": "criar o projeto e conferir duração e avisos"},
+  {"tool": "build_explainer_video", "arguments": {"name": "meu-explicativo", "recording": "C:/videos/gravacao.mp4", "subjects": [{"fim": 20, "fundo": "escuro", "imagem": "C:/imagens/assunto1.png", "sons": [{"som": "whoosh"}]}, {"fim": 40, "fundo": "bege", "infografico": {"nome": "contador", "parametros": {"ate": 10000, "prefixo": "+ de R$"}}, "sons": [{"som": "whoosh"}, {"som": "ding", "em": 8}]}, {"fim": 60, "fundo": "claro", "infografico": {"nome": "barra", "parametros": {"valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400}}}]}, "para": "criar o projeto e conferir duração e avisos"},
   {"tool": "render_project", "arguments": {"name_or_path": "meu-explicativo", "preview": true}, "para": "gerar a prévia"}
 ]
 ```
@@ -938,7 +939,7 @@ Diga: "Explicativo com `gravacao.mp4` de 60 s: assunto 1 até 20 s com `assunto1
 #### Pela CLI
 
 ```powershell
-dmaker new-from-template explicativo meu-explicativo --param gravacao=gravacao.mp4 --params-json '{"assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "assunto1.png"}, {"fim": 40, "fundo": "bege", "imagem": "assunto2.png"}, {"fim": 60, "fundo": "claro"}]}'
+dmaker new-from-template explicativo meu-explicativo --param gravacao=gravacao.mp4 --params-json '{"assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "assunto1.png", "sons": [{"som": "whoosh"}]}, {"fim": 40, "fundo": "bege", "imagem": "assunto2.png"}, {"fim": 60, "fundo": "claro"}]}'
 dmaker validate projects\meu-explicativo\spec.json
 dmaker render projects\meu-explicativo\spec.json --preview
 ```
@@ -947,11 +948,12 @@ Opções do modelo: `foco` (ponto do rosto que o quadro mantém visível; padrã
 
 #### Como conferir
 
-O quadro do rosto e a área de cima ficam dentro da zona segura do Reels. `dmaker validate` avisa se a gravação é mais curta que o fim do último assunto. Na prévia, confira que o fundo troca no segundo certo e que a fala segue contínua.
+O quadro do rosto e a área de cima ficam dentro da zona segura do Reels. `dmaker validate` avisa se a gravação é mais curta que o fim do último assunto. Na prévia, confira que o fundo troca no segundo certo, que a fala segue contínua e que cada som toca no começo do assunto (ou no `em` dele).
 
 #### Se der errado
 
 - **Aviso de gravação mais curta**: o `fim` do último assunto passa da duração do arquivo; corrija o número.
+- **Erro `assunto N, som M`**: o nome do `som` não está na biblioteca (a mensagem lista os disponíveis) ou o `em` passa do fim do assunto.
 - **Rosto cortado**: ajuste `foco` (em gravação vertical o rosto fica no terço de cima).
 - **Imagem fora do lugar**: ela entra inteira e centrada na região `topo`, sem distorcer; use uma imagem com a proporção da área de cima.
 - **Aviso `overlays[N].data...` no `validate`**: um parâmetro do infográfico de um assunto está fora do esquema do modelo; a mensagem diz qual e o que é aceito.
@@ -1151,7 +1153,7 @@ A entrada de um infográfico, a troca de fundo ou o fim de uma contagem pedem um
 
 #### Pela IA
 
-Diga: "Põe um whoosh aos 12,4 segundos no `meu-reel`." A IA acrescenta o efeito em `audio.sfx` e gera a prévia. O efeito não abaixa a música e fica abaixo da voz; um `riser` deve começar 1,6 s antes da revelação.
+Diga: "Põe um whoosh aos 12,4 segundos no `meu-reel`." A IA acrescenta o efeito em `audio.sfx` e gera a prévia. O efeito não abaixa a música e fica abaixo da voz; um `riser` deve começar 1,6 s antes da revelação. No vídeo explicativo os sons vão no próprio assunto (`sons`), sem editar o projeto depois: veja "Fazer um vídeo explicativo".
 
 #### Chamadas das ferramentas
 
@@ -2559,6 +2561,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-43 | Preparar de novo uma dublagem que já existe pede confirmação: a CLI recusa sem `--overwrite` (`dub prepare` e `dub run`), a API responde 409 antes de começar, a interface nova e a clássica perguntam o que se perde, o `dub_prepare` ganha `overwrite` e o agente só refaz com esse parâmetro e o seu sim. O agente também pergunta antes de gravar por cima do vídeo dublado e das trilhas no lugar padrão, inclusive no rascunho | "Dublar um vídeo para outro idioma", "Usando com LLM local (Ollama)" |
 | DMK-44 | No modo **Operar** da tela **Agente**, a imagem anexada também é arquivo de trabalho: o agente a usa no vídeo pelo caminho dela (`Arquivo anexado: <caminho>`), mesmo com um modelo que não enxerga, que só recebe um aviso em vez de ser barrado; na **Conversa livre** nada muda | "Usando com LLM local (Ollama)" |
 | DMK-45 | A caixa de fundo dos textos (`box`, o padrão do `cta` e do `lower-third`) abraça a linha com a margem configurada, igual dos dois lados, e a linha só quebra na largura permitida; um projeto já aprovado, renderizado de novo, sai com a caixa mais justa e a linha mais longa. A conferência (QA) do cartão passou a medir a largura que o cartão desenha | "Deixar a legenda em caixa arredondada" |
+| DMK-46 | Sons por assunto no vídeo explicativo: cada assunto aceita `sons` (uma lista de `{som, em, volume}` com os efeitos da biblioteca, `em` em segundos desde o começo do assunto), e o modelo os põe em `audio.sfx` no tempo do vídeo, com o som de entrada e um som no meio do assunto (o `ding` do contador); nome de som que não existe e `em` fora do assunto dão erro claro; `build_explainer_video` aceita o mesmo campo | "Fazer um vídeo explicativo" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -3080,7 +3083,7 @@ São 64 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto), `text`\* (texto), `voice` (texto), `start` (número, padrão 0.0), `language` (texto, padrão pt), `speed` (número, padrão 1.0), `seed` (inteiro), `captions` (sim ou não, padrão sim).
 - **`cut_pauses_and_caption`**: Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts).
   Parâmetros: `source`\* (texto), `name`\* (texto), `intensity` ("suave" ou "normal" ou "agressiva", padrão normal), `preset` (texto, padrão instagram/reels), `brand` (texto), `language` (texto, padrão pt), `model` (texto, padrão small), `overwrite` (sim ou não, padrão não), `wait_seconds` (número, padrão 1800).
-- **`build_explainer_video`**: Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' (segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' (caminho) e 'infografico' ({"nome": "contador", "parametros": {...}}, ver list_infographics): 'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os outros são opcionais.
+- **`build_explainer_video`**: Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' (segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' (caminho), 'infografico' ({"nome": "contador", "parametros": {...}}, ver list_infographics) e 'sons' (lista de {"som": "whoosh", "em": 0, "volume": 1}: som = um efeito da biblioteca, whoosh, whip, pop, click, riser, impact, ding; em = segundos desde o começo do assunto, 0 se omitido, nunca depois do fim dele; volume de 0 a 1.5, 1 é o nível padrão, opcional; vira audio.sfx no tempo do vídeo): 'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os outros são opcionais.
   Parâmetros: `name`\* (texto), `recording`\* (texto), `subjects`\* (lista de objeto), `captions` (sim ou não, padrão sim), `caption_mode` (texto), `brand` (texto).
 - **`isolate_vocals`**: Isola a voz: separa a fala (voice) da música e do ruído de fundo (background) de um vídeo ou áudio, ou de um trecho dele (start/end em segundos no arquivo), com o Demucs local.
   Parâmetros: `path`\* (texto), `start` (número), `end` (número), `out_dir` (texto), `format` ("wav" ou "mp3", padrão wav), `wait_seconds` (número, padrão 0).

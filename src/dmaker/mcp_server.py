@@ -22,6 +22,7 @@ from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
 from .pipeline.recipes import preview_notice
 from .pipeline.remote import RenderDispatcher, UIClient
+from .sfx.synth import library_names
 
 GUIDE_PATH = config.PACKAGE_DIR / "resources" / "guide.md"
 
@@ -1699,7 +1700,10 @@ def cut_pauses_and_caption(
         "assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, "
         "new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' "
         "(segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' "
-        '(caminho) e \'infografico\' ({"nome": "contador", "parametros": {...}}, ver list_infographics): '
+        '(caminho), \'infografico\' ({"nome": "contador", "parametros": {...}}, ver list_infographics) e '
+        '\'sons\' (lista de {"som": "whoosh", "em": 0, "volume": 1}: som = um efeito da biblioteca, '
+        f"{', '.join(library_names())}; em = segundos desde o começo do assunto, 0 se omitido, nunca depois do "
+        "fim dele; volume de 0 a 1.5, 1 é o nível padrão, opcional; vira audio.sfx no tempo do vídeo): "
         "'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os "
         "outros são opcionais. Devolve o resumo do projeto (duração e avisos). caption_mode: rounded, karaoke, "
         "classic ou boxed."

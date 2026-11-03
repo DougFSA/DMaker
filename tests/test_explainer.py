@@ -3,13 +3,35 @@ reel, com o quadro do rosto e a área de cima dentro da zona segura do Reels."""
 
 from __future__ import annotations
 
-import pytest
+import asyncio
+import dataclasses
+import json
 
-from dmaker.domain.explainer import background_segment, hex_tone, plan_topics, prepare_explainer
+import pytest
+from pydantic import ValidationError
+
+from dmaker import mcp_server
+from dmaker.domain.explainer import (
+    background_segment,
+    hex_tone,
+    plan_sounds,
+    plan_topics,
+    prepare_explainer,
+)
 from dmaker.domain.presets import get_preset
 from dmaker.domain.regions import region_pixels
-from dmaker.domain.spec import CardSegment, ImageOverlay, ImageSegment, Project, VideoOverlay
+from dmaker.domain.sfx import plan_sfx
+from dmaker.domain.spec import (
+    SFX_VOLUME_MAX,
+    CardSegment,
+    ImageOverlay,
+    ImageSegment,
+    Project,
+    SfxCue,
+    VideoOverlay,
+)
 from dmaker.domain.templates import TemplateError, find_template, render_template
+from dmaker.sfx import library_names
 
 THREE = [
     {"fim": 20, "fundo": "escuro", "imagem": "a.png"},
@@ -207,3 +229,195 @@ def test_template_text_is_free_of_dashes():
     template = find_template("explicativo")
     raw = template.path.read_text(encoding="utf-8")
     assert "—" not in raw and "–" not in raw
+
+
+# ---------- sons por assunto (DMK-46) ----------
+
+FAKE_LIBRARY = ("whoosh", "pop", "ding")  # biblioteca falsa: o plano puro não depende dos arquivos de som
+
+
+def test_a_topic_sound_plays_at_the_start_of_the_topic_plus_em():
+    cues = plan_sounds([{"som": "whoosh"}, {"som": "ding", "em": 8.5}], 2, 20.0, 20.0, FAKE_LIBRARY)
+    assert cues == [{"sound": "whoosh", "at": 20.0}, {"sound": "ding", "at": 28.5}]
+
+
+def test_volume_goes_through_only_when_given_and_null_means_omitted():
+    cues = plan_sounds(
+        [{"som": "pop", "volume": 0.8}, {"som": "pop", "volume": None, "em": None}],
+        1,
+        0.0,
+        10.0,
+        FAKE_LIBRARY,
+    )
+    assert cues == [{"sound": "pop", "at": 0.0, "volume": 0.8}, {"sound": "pop", "at": 0.0}]
+
+
+def test_the_name_ignores_case_and_spaces_and_the_cue_keeps_the_library_spelling():
+    assert plan_sounds([{"som": " Ding "}], 1, 3.0, 5.0, FAKE_LIBRARY) == [{"sound": "ding", "at": 3.0}]
+
+
+def test_em_may_reach_the_end_of_the_topic_but_not_pass_it():
+    assert plan_sounds([{"som": "pop", "em": 20}], 2, 20.0, 20.0, FAKE_LIBRARY)[0]["at"] == 40.0
+    with pytest.raises(
+        ValueError, match=r"assunto 2, som 1: `em` \(20.5 s\) cai fora do assunto, que dura 20 s"
+    ):
+        plan_sounds([{"som": "pop", "em": 20.5}], 2, 20.0, 20.0, FAKE_LIBRARY)
+
+
+def test_the_absolute_time_has_no_floating_point_noise():
+    cue = plan_sounds([{"som": "pop", "em": 0.2}], 3, 20.1, 5.0, FAKE_LIBRARY)[0]
+    assert cue["at"] == 20.3  # 20.1 + 0.2 em ponto flutuante dá 20.299999999999997
+
+
+@pytest.mark.parametrize("raw", [None, []])
+def test_a_topic_without_sounds_plans_nothing(raw):
+    assert plan_sounds(raw, 1, 0.0, 5.0, FAKE_LIBRARY) == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("whoosh", "assunto 1: `sons` precisa ser uma lista"),
+        (["whoosh"], "assunto 1, som 1: esperava um objeto"),
+        ([{"em": 1}], "assunto 1, som 1: `som` é obrigatório"),
+        ([{"som": "  "}], "`som` é obrigatório"),
+        ([{"som": 3}], "`som` é obrigatório"),
+        ([{"som": "pop"}, {"som": "pop", "tempo": 1}], "assunto 1, som 2: campo.*desconhecido.*tempo"),
+        ([{"som": "pop", "em": "cedo"}], "`em` precisa ser um número"),
+        ([{"som": "pop", "em": True}], "`em` precisa ser um número"),
+        ([{"som": "pop", "em": float("nan")}], "`em` precisa ser um número"),
+        ([{"som": "pop", "em": -1}], r"`em` \(-1 s\) cai fora do assunto"),
+        ([{"som": "pop", "volume": "alto"}], "`volume` precisa ser um número de 0 a 1.5"),
+        ([{"som": "pop", "volume": 1.6}], "`volume` precisa ser um número de 0 a 1.5"),
+        ([{"som": "pop", "volume": -0.1}], "`volume` precisa ser um número de 0 a 1.5"),
+    ],
+)
+def test_sound_errors_say_the_topic_the_sound_and_what_is_wrong(raw, message):
+    with pytest.raises(ValueError, match=message):
+        plan_sounds(raw, 1, 0.0, 5.0, FAKE_LIBRARY)
+
+
+def test_an_unknown_sound_lists_the_available_ones():
+    with pytest.raises(ValueError) as error:
+        plan_sounds([{"som": "pop"}, {"som": "apito"}], 3, 0.0, 5.0, FAKE_LIBRARY)
+    assert str(error.value) == (
+        'assunto 3, som 2: o som "apito" não existe na biblioteca de efeitos (disponíveis: whoosh, pop, ding)'
+    )
+
+
+@pytest.mark.parametrize("volume", [0, 0.5, 1, SFX_VOLUME_MAX, SFX_VOLUME_MAX + 0.01, -0.01, 2])
+def test_the_volume_limit_is_the_one_of_audio_sfx(volume):
+    """`sons` e `audio.sfx` recusam o mesmo volume: o limite mora num lugar só."""
+    try:
+        SfxCue(sound="pop", at=0, volume=volume)
+        valid = True
+    except ValidationError:
+        valid = False
+    try:
+        plan_sounds([{"som": "pop", "volume": volume}], 1, 0.0, 5.0, FAKE_LIBRARY)
+        planned = True
+    except ValueError:
+        planned = False
+    assert planned == valid
+
+
+def test_topics_carry_their_sounds_and_the_library_is_injectable():
+    topics = plan_topics(
+        [
+            {"fim": 10, "sons": [{"som": "whoosh"}]},
+            {"fim": 30, "sons": [{"som": "ding", "em": 5}]},
+            {"fim": 40},
+        ],
+        FAKE_LIBRARY,
+    )
+    assert [t["sons"] for t in topics] == [
+        [{"sound": "whoosh", "at": 0.0}],
+        [{"sound": "ding", "at": 15.0}],
+        [],
+    ]
+    with pytest.raises(ValueError, match="assunto 1, som 1"):
+        plan_topics([{"fim": 10, "sons": [{"som": "click"}]}], FAKE_LIBRARY)
+
+
+def test_every_library_sound_is_accepted_by_default():
+    sounds = [{"som": name} for name in library_names()]
+    [topic] = plan_topics([{"fim": 5, "sons": sounds}])
+    assert [cue["sound"] for cue in topic["sons"]] == list(library_names())
+
+
+def test_prepare_explainer_joins_every_topic_sound_in_video_time_for_audio_sfx():
+    params = prepare_explainer(
+        {
+            "gravacao": "g.mp4",
+            "assuntos": [
+                {"fim": 20, "sons": [{"som": "whoosh"}, {"som": "ding", "em": 8}]},
+                {"fim": 40, "sons": [{"som": "pop", "volume": 0.7}]},
+            ],
+        }
+    )
+    assert params["sfx"] == [
+        {"sound": "whoosh", "at": 0.0},
+        {"sound": "ding", "at": 8.0},
+        {"sound": "pop", "at": 20.0, "volume": 0.7},
+    ]
+    assert prepare_explainer({"gravacao": "g.mp4", "assuntos": THREE})["sfx"] == []
+
+
+def _sounds_topics() -> list[dict]:
+    return [
+        {"fim": 20, "fundo": "escuro", "sons": [{"som": "whoosh"}, {"som": "ding", "em": 8}]},
+        {"fim": 40, "fundo": "bege", "sons": [{"som": "pop", "volume": 0.7}]},
+        {"fim": 60, "fundo": "claro", "sons": [{"som": "click", "em": 3}, {"som": "riser", "em": 13.5}]},
+    ]
+
+
+def test_template_turns_the_topic_sounds_into_audio_sfx_at_video_time():
+    project = _render(assuntos=_sounds_topics())
+    assert [(cue.sound, cue.at, cue.volume) for cue in project.audio.sfx] == [
+        ("whoosh", 0, 1),
+        ("ding", 8, 1),
+        ("pop", 20, 0.7),
+        ("click", 43, 1),
+        ("riser", 53.5, 1),
+    ]
+    assert project.audio.normalize == "two-pass"  # o resto do bloco de áudio do modelo fica como era
+    planned = plan_sfx(project, [])  # sem transições no modelo: o plano é só o `audio.sfx`
+    assert [(item.sound, item.at) for item in planned] == [(c.sound, c.at) for c in project.audio.sfx]
+
+
+def test_a_topic_without_sounds_gives_the_same_saved_spec_as_before_sounds_existed():
+    """Prova de "sai como hoje": o modelo sem a chave `sfx` (como era) e o de agora geram o mesmo JSON salvo."""
+    template = find_template("explicativo")
+    body = json.loads(json.dumps(template.body))
+    del body["audio"]["sfx"]
+    legacy = dataclasses.replace(template, body=body)
+    params = {"gravacao": "gravacao.mp4", "assuntos": THREE}
+
+    def saved(model) -> str:
+        project = Project.model_validate({**render_template(model, params), "name": "igual"})
+        return project.model_dump_json(indent=2, exclude_none=True)
+
+    assert saved(template) == saved(legacy)
+    assert _render().audio.sfx == []
+
+
+def test_template_reports_an_unknown_sound_as_a_template_error_with_the_available_names():
+    template = find_template("explicativo")
+    topics = [{"fim": 5}, {"fim": 9, "sons": [{"som": "apito"}]}]
+    with pytest.raises(TemplateError, match=r'explicativo.*assunto 2, som 1.*"apito".*disponíveis: whoosh'):
+        render_template(template, {"gravacao": "g.mp4", "assuntos": topics})
+
+
+def test_the_template_example_renders_with_its_sounds():
+    template = find_template("explicativo")
+    project = Project.model_validate(
+        render_template(template, {"gravacao": "g.mp4", "assuntos": template.params["assuntos"].example})
+    )
+    assert [(cue.sound, cue.at) for cue in project.audio.sfx] == [("whoosh", 0), ("ding", 8), ("pop", 20)]
+
+
+def test_the_mcp_recipe_documents_sons_and_every_library_sound():
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    description = tools["build_explainer_video"].description
+    assert "'sons'" in description and "audio.sfx" in description
+    assert all(name in description for name in library_names())
