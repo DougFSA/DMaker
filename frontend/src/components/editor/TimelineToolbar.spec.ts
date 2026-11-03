@@ -73,7 +73,7 @@ describe('os botões de edição', () => {
     await button('Remover')?.trigger('click')
     await flushPromises()
     expect(edits()).toHaveLength(0)
-    expect(useToastsStore().items.map((toast) => toast.title)).toContain('Selecione um trecho ou sobreposição para remover.')
+    expect(useToastsStore().items.map((toast) => toast.title)).toContain('Selecione um trecho, sobreposição ou marcador para remover.')
   })
 
   it('Remover tira o trecho selecionado e a seleção some junto', async () => {

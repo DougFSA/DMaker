@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* A barra de ferramentas da linha do tempo: cortar, remover, lift, duplicar, aparar, encaixe, zoom e os botões de
+/* A barra de ferramentas da linha do tempo: cortar, remover, lift, duplicar, aparar, marcador, encaixe, zoom e os botões de
    painéis (F filtros, M mídia) e de atalhos. Cada botão chama o mesmo comando do atalho de teclado dele, e o balão
    mostra a tecla (que muda se a pessoa trocou o atalho). */
 import { computed } from 'vue'
@@ -46,6 +46,9 @@ function hint(text: string, id: ShortcutId): string {
       </AppButton>
       <AppButton size="sm" :disabled="!ready" :title="hint('Aparar a saída até o cursor', 'trim_out')" @click="actions.trimTo('out')">
         Aparar saída
+      </AppButton>
+      <AppButton size="sm" :disabled="!ready" :title="hint('Criar um marcador no cursor', 'add_marker')" @click="actions.addMarker()">
+        Marcador
       </AppButton>
     </div>
 

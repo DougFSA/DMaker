@@ -427,6 +427,7 @@ OVERWRITES_EXISTING_OUTPUT = (
     "isolate_vocals",
     "dub_render",
     "dub_stems",
+    "markers_export",
 )
 # Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, com a flag de sobrescrita ligada, o substituem
 # inteiro, com as traduções que a pessoa revisou. Sem a flag o próprio servidor recusa o projeto que já existe
@@ -515,6 +516,17 @@ def _isolation_outputs(arguments: Mapping[str, Any]) -> list[str]:
     return [str(folder / export_name(Path(path), role, audio_format, start, end)) for role, _ in EXPORT_ROLES]
 
 
+def _markers_export_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """O `.txt` dos marcadores em `output/<projeto>-marcadores.txt`. Com o caminho de uma spec no lugar do nome, o nome
+    do projeto só sai de abrir o arquivo: o gate não adivinha e a ferramenta grava sozinha."""
+    name = _text_argument(arguments, "name")
+    if name is None or name.endswith(".json"):
+        return []
+    from ..pipeline.markers import default_export_path
+
+    return [str(default_export_path(name))]
+
+
 DubProjectReader = Callable[[str], "DubProject | None"]
 
 
@@ -550,6 +562,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "fix_speech": _speech_fix_outputs,
     "convert_voice": _voice_conversion_outputs,
     "isolate_vocals": _isolation_outputs,
+    "markers_export": _markers_export_outputs,
 }
 # O mesmo, para as ferramentas cujo destino padrão sai do projeto de dublagem (o argumento `project`).
 DUB_PROJECT_OUTPUTS: dict[str, Callable[[DubProject], list[str]]] = {

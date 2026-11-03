@@ -50,9 +50,9 @@ describe('a janela de atalhos', () => {
     expect(dialog?.textContent).toContain('Clique numa tecla para trocá-la')
   })
 
-  it('lista os 34 atalhos em seis categorias, cada um com a tecla', async () => {
+  it('lista os 37 atalhos em seis categorias, cada um com a tecla', async () => {
     await openDialog()
-    expect(document.body.querySelectorAll('[data-shortcut]')).toHaveLength(34)
+    expect(document.body.querySelectorAll('[data-shortcut]')).toHaveLength(37)
     const titles = Array.from(document.body.querySelectorAll('h3')).map((heading) => heading.textContent)
     expect(titles).toEqual(['Reprodução', 'Navegação', 'Edição', 'Mídia', 'Visualização', 'Geral'])
     expect(keyButton('play_pause')?.textContent?.trim()).toBe('Espaço')

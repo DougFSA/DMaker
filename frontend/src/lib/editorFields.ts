@@ -234,6 +234,18 @@ export const AUDIO_FIELDS: FieldDef[] = [
 
 export const AUDIO_TRACK_VOLUME_FIELD: FieldDef = num('AudioTrack', 'volume', 'Volume')
 
+/* ---------- marcadores ---------- */
+
+/** Os campos de um marcador (a trilha MK): o texto e o grupo valem sempre; o instante ou as duas pontas da região,
+ * conforme o tipo dele. A cor é um seletor próprio na tela, porque o schema só a conhece como texto. */
+export const MARKER_FIELDS = {
+  text: text('Marker', 'text', 'Texto', { optional: true, placeholder: 'o que este ponto marca' }),
+  group: text('Marker', 'group', 'Grupo (trilha)', { optional: true, placeholder: 'trilha padrão' }),
+  at: num('Marker', 'at', 'Instante (s)', { min: 0 }),
+  start: num('Marker', 'start', 'Início (s)', { min: 0 }),
+  end: num('Marker', 'end', 'Fim (s)', { min: 0 }),
+}
+
 /** O campo do schema que o `FieldDef` aponta. */
 export function propOf(field: FieldDef): string {
   return field.prop ?? (field.key.split('.').pop() as string)

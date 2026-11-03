@@ -85,6 +85,9 @@ def test_lists_tools_and_prompt():
         "pause_batch",
         "batch_status",
         "search_manual",
+        "markers_import",
+        "markers_export",
+        "markers_regular",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources

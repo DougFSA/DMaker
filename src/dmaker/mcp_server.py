@@ -240,21 +240,29 @@ def validate_project(name_or_path: str) -> dict:
 @server.tool(
     description=(
         "Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, "
-        "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate "
-        'e set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"). `op` é um dict com '
-        '"type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}.'
+        "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, "
+        'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed") e marker_add/marker_set/marker_remove '
+        '(marcadores). `op` é um dict com "type" e os parâmetros da operação, ex.: '
+        '{"type": "split", "index": 1, "at": 2.5}. Onde a operação pede um instante (`at` do split, '
+        '`start`/`end` do overlay_span) vale "marker:<texto>", o instante de um marcador (com grupo: '
+        '"marker:<grupo>/<texto>"); no split, sem `index`, corta o trecho que contém o marcador. Cortar, remover, '
+        "aparar ou mover trechos desloca os marcadores junto; um marcador que estava num trecho removido some, e o "
+        "aviso vem em `edit_warnings`."
     )
 )
 def edit_project(name: str, op: dict) -> dict:
-    from .pipeline.edits import apply_edit
+    from .pipeline.edits import apply_edit_report
     from .pipeline.projects import load_project, summarize
     from .pipeline.projects import save_project as _save
 
     project = load_project(name)
-    new_project = apply_edit(project, op)
-    path = _save(new_project)
-    summary = summarize(new_project)
-    return {"spec_path": str(path), **_summary_dict(summary)}
+    report = apply_edit_report(project, op)
+    path = _save(report.project)
+    summary = summarize(report.project)
+    result = {"spec_path": str(path), **_summary_dict(summary)}
+    if report.warnings:
+        result["edit_warnings"] = report.warnings
+    return result
 
 
 @server.tool(
@@ -262,7 +270,8 @@ def edit_project(name: str, op: dict) -> dict:
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
         "NAR narrações (duração real quando já sintetizadas, senão estimada), "
-        "MUS música, CC legendas), com o intervalo de cada item já calculado."
+        "MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de "
+        "cada item já calculado."
     )
 )
 def timeline_view(name: str) -> dict:
@@ -273,6 +282,103 @@ def timeline_view(name: str) -> dict:
     project = load_project(name)
     durations = view_narration_durations(project)
     return project_timeline_view(project, durations).to_dict()
+
+
+# ---------- marcadores (trilha MK) ----------
+
+
+def _markers_tool_error(exc: Exception) -> Exception:
+    """Erro previsto dos marcadores (arquivo ausente, nome ambíguo, intervalo ruim): a mensagem chega ao cliente."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    return ToolError(str(exc))
+
+
+def _markers_summary(result: Any) -> dict:
+    return {
+        "project": result.project.name,
+        "added": result.added,
+        "markers_total": len(result.project.markers),
+        "warnings": result.warnings,
+    }
+
+
+@server.tool(
+    description=(
+        "Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por "
+        "tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, "
+        "também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK). `replace` "
+        "troca o que o grupo já tinha; sem ele os marcadores entram no fim. Os tempos são do vídeo final. "
+        "Linha ilegível é pulada com aviso."
+    )
+)
+def markers_import(name: str, file: str, group: str = "", replace: bool = False) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import import_labels
+
+    try:
+        return _markers_summary(import_labels(name, Path(file), group, replace))
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "Exporta os marcadores do projeto para o `.txt` do Audacity (início, fim e texto, com seis casas e "
+        "ponto decimal; o instante repete o tempo nas duas colunas). `group` escolhe uma trilha (vazio = a "
+        "padrão); sem ele saem todos. Sem `out`, grava em output/<projeto>-marcadores.txt. `newline`: auto "
+        "(a do sistema, como o Audacity), lf ou crlf. Importar o arquivo de volta dá os mesmos marcadores."
+    )
+)
+def markers_export(
+    name: str,
+    out: str | None = None,
+    group: str | None = None,
+    newline: Literal["auto", "lf", "crlf"] = "auto",
+) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import export_labels
+
+    try:
+        exported = export_labels(name, Path(out) if out else None, group, newline)
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+    return {"path": str(exported.path), "count": exported.count}
+
+
+@server.tool(
+    description=(
+        "Marcadores regulares (como o Regular Interval Labels do Audacity): a cada `interval` segundos OU em "
+        "`parts` partes iguais, de `start` até `end` (padrão: o vídeo inteiro), numerados com `prefix`, a "
+        "partir de `first_number` e com `digits` casas (prefixo 'Parte ' dá 'Parte 1', 'Parte 2'). `kind`: "
+        "region (cada marcador cobre o intervalo) ou instant (marca o começo). 60 s a cada 15 s dá 4 "
+        "marcadores. `replace` troca o que o grupo já tinha."
+    )
+)
+def markers_regular(
+    name: str,
+    interval: float | None = None,
+    parts: int | None = None,
+    start: float = 0.0,
+    end: float | None = None,
+    prefix: str = "",
+    first_number: int = 1,
+    digits: int = 1,
+    group: str = "",
+    color: str | None = None,
+    kind: Literal["region", "instant"] = "region",
+    replace: bool = False,
+) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import add_regular_markers
+
+    try:
+        result = add_regular_markers(
+            name, interval, parts, start, end, prefix, first_number, digits, group, color, kind, replace
+        )
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+    return _markers_summary(result)
 
 
 @server.tool(

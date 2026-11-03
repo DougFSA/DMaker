@@ -390,6 +390,28 @@ describe('operações da linha do tempo', () => {
     expect(store.dirty).toBe(false)
   })
 
+  it('os marcadores que o corte apagou viram um aviso cada, e o desfazer traz a spec de antes', async () => {
+    const warnings = [
+      'O marcador "palavrão" em 11,5 s estava dentro do trecho removido e foi apagado.',
+      'O marcador "R" de 22 a 38 s estava dentro do trecho removido e foi apagado.',
+    ]
+    serve({ 'POST /api/projects/demo/edit': { ...afterSplit, edit_warnings: warnings } })
+    const store = await opened()
+    expect(await store.applyOp({ type: 'remove', index: 1 })).toBe(true)
+    const toasts = useToastsStore().items
+    expect(toasts.map((toast) => toast.title)).toEqual(warnings)
+    expect(toasts.every((toast) => toast.tone === 'info')).toBe(true)
+    store.undo()
+    expect((store.get('timeline') as unknown[]).length).toBe(2)
+  })
+
+  it('sem marcador apagado, nenhum aviso aparece', async () => {
+    serve({ 'POST /api/projects/demo/edit': { ...afterSplit, edit_warnings: [] } })
+    const store = await opened()
+    await store.applyOp({ type: 'split', index: 0, at: 1 })
+    expect(useToastsStore().items).toEqual([])
+  })
+
   it('erro do servidor avisa, devolve false e não mexe na spec', async () => {
     serve({ 'POST /api/projects/demo/edit': reply(400, { detail: 'corte fora do trecho' }) })
     const store = await opened()

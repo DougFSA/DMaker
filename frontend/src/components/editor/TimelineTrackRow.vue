@@ -14,6 +14,7 @@ import {
 } from '@/lib/timeline'
 import { waveformEligible } from '@/lib/waveform'
 import TimelineItemBlock from './TimelineItemBlock.vue'
+import TimelineMarkerBlock from './TimelineMarkerBlock.vue'
 
 const props = defineProps<{
   track: TimelineTrack
@@ -77,15 +78,27 @@ function buttonTitle(field: TrackToggle): string {
         :style="{ left: `${span.start * pxPerSec}px`, width: `${Math.max(2, (span.end - span.start) * pxPerSec)}px` }"
         :title="`Transição: ${span.type}`"
       />
-      <TimelineItemBlock
-        v-for="item in visibleItems"
-        :key="item.id"
-        :item="item"
-        :track-id="track.id"
-        :px-per-sec="pxPerSec"
-        :selected="selected.has(item.id)"
-        :waveform="waveformEligible(track, item)"
-      />
+      <template v-if="track.kind === 'markers'">
+        <TimelineMarkerBlock
+          v-for="item in visibleItems"
+          :key="item.id"
+          :item="item"
+          :track-id="track.id"
+          :px-per-sec="pxPerSec"
+          :selected="selected.has(item.id)"
+        />
+      </template>
+      <template v-else>
+        <TimelineItemBlock
+          v-for="item in visibleItems"
+          :key="item.id"
+          :item="item"
+          :track-id="track.id"
+          :px-per-sec="pxPerSec"
+          :selected="selected.has(item.id)"
+          :waveform="waveformEligible(track, item)"
+        />
+      </template>
     </div>
   </div>
 </template>
