@@ -5,7 +5,7 @@ description: Desenvolvimento no DMaker com economia de tokens: o Opus (sessão p
 
 # dmaker-dev: planejar com Opus, implementar com Sonnet
 
-Objetivo: entregar features/bugs do DMaker (`D:\DMaker`) gastando poucos tokens na sessão principal. O Opus entende o pedido, planeja com precisão e revisa; agentes **Sonnet** escrevem o código e os testes. Os padrões de `D:\DMaker\CLAUDE.md` valem para todos (SOLID, injeção de dependência, testes junto de cada mudança, código limpo em português/inglês, ruff + pytest verdes).
+Objetivo: entregar features/bugs do DMaker (a raiz do clone) gastando poucos tokens na sessão principal. O Opus entende o pedido, planeja com precisão e revisa; agentes **Sonnet** escrevem o código e os testes. Os padrões do `CLAUDE.md` da raiz valem para todos (SOLID, injeção de dependência, testes junto de cada mudança, código limpo em português/inglês, ruff + pytest verdes).
 
 ## Relação com o fluxo do Jira
 
@@ -43,8 +43,8 @@ Fora do escopo: <o que não fazer>
 ## Template do prompt para o agente Sonnet
 
 ```
-Você vai implementar uma mudança no DMaker, editor de vídeos por comando em D:\DMaker (Python 3.13, venv em .venv).
-Leia D:\DMaker\CLAUDE.md antes de tudo: a arquitetura em pacotes e os padrões (SOLID, injeção de dependência,
+Você vai implementar uma mudança no DMaker, editor de vídeos por comando, no clone em <pasta do clone> (Python 3.13, venv em .venv).
+Leia o CLAUDE.md dessa pasta antes de tudo: a arquitetura em pacotes e os padrões (SOLID, injeção de dependência,
 teste junto de cada mudança, código limpo, mensagens em português, identificadores em inglês) são obrigatórios.
 
 Contexto: <2 a 5 linhas do que existe hoje e onde>

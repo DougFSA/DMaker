@@ -26,13 +26,23 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
   conserta algo que nunca foi lançado. Se ele mudou o que a entrada original
   promete, ajuste a entrada original.
 - Feche a versão na `develop` **antes** do merge para a `main`; fechar depois
-  duplica a seção.
+  duplica a seção. No mesmo commit, suba o `__version__` de `src/dmaker/__init__.py`
+  para `X.0.0` (o `tests/test_version.py` reprova se a versão do pacote não for a da
+  última `## vX` fechada).
 - Sem travessão em texto de tela e em mensagens; vale para o que as linhas
   descrevem (o cabeçalho de versão é a única exceção, por convenção do formato).
 
 ---
 
 ## [Não lançado]
+
+### Fixed
+
+- **DMK-48**: o DMaker e o servidor MCP só funcionavam na máquina antiga, porque o clone estava citado por um caminho fixo de unidade: o `.mcp.json` mandava rodar o `dmaker.exe` desse caminho (por isso o MCP não conectava nas outras máquinas, `CONNECTION_CLOSED`), e skills, agentes, `_comum`, manual, README e `scripts/capturar_manual.py` repetiam o mesmo caminho. O `.mcp.json` agora sobe pelo `cmd` e lê o `CLAUDE_PROJECT_DIR`, que o Claude Code põe no ambiente do servidor (o `.mcp.json` só expande variáveis do ambiente do próprio Claude Code, onde ela não existe): entra na raiz do clone e roda o `.venv\Scripts\dmaker.exe mcp` dele, sem caminho absoluto, em qualquer pasta (conferido com `&`, parênteses, acento e espaço no caminho) e com mensagem se não achar o `.venv`. As instruções partem da raiz do clone, e nos worktrees a pasta principal sai de `git rev-parse --git-common-dir`. Três modelos traziam uma música padrão que só existia em outra máquina (o caminho de uma pasta de usuário, num deles): `casamento-pascom` (`trilha`), `pessoal-vlog-reel` e `reel-medlycare-depoimento` (`musica`) passam a exigir o arquivo de música, sem padrão. O `dmaker --version` saía com código 2 e "Missing command", porque era um parâmetro comum do callback e o Typer exige o comando antes de rodar o callback: virou opção eager e imprime `dmaker 2.0.0`. A versão do pacote era `0.1.0` desde o primeiro commit; agora é `2.0.0` (a da tag `v2`), com uma fonte só, o `__version__`, que o `pyproject.toml` lê. Um teste reprova caminho de máquina nos arquivos versionados, e outro a versão fora do formato `X.Y.Z` ou diferente da última versão fechada neste arquivo.
+
+### Pré-requisitos na máquina
+
+- **DMK-48**: numa sessão nova do Claude Code aberta na raiz do clone, aprovar o servidor MCP `dmaker` se o Claude Code pedir; uma sessão aberta num worktree, que não tem `.venv`, não conecta o servidor. Os modelos `casamento-pascom`, `pessoal-vlog-reel` e `reel-medlycare-depoimento` agora exigem a música ao criar o projeto (`trilha` no casamento, `musica` nos outros): quem contava com a música padrão passa o arquivo. Não precisa reinstalar nada: o `dmaker --version` lê o `__version__`; `pip install -e .` só atualiza a versão que o pip mostra.
 
 ## v2 — 2026-11-03
 

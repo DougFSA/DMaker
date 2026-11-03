@@ -289,10 +289,10 @@
     },
     {
       "id": "casamento-duas-cameras",
-      "request": "Monta o vídeo do casamento de Ana & Carlos, data 15.08.2026, com a câmera do altar em {altar} e a lateral em {lateral}",
-      "fixtures": {"altar": {"kind": "folder"}, "lateral": {"kind": "folder"}},
+      "request": "Monta o vídeo do casamento de Ana & Carlos, data 15.08.2026, com a câmera do altar em {altar}, a lateral em {lateral} e a música {trilha}",
+      "fixtures": {"altar": {"kind": "folder"}, "lateral": {"kind": "folder"}, "trilha": {"kind": "audio"}},
       "oracle": [
-        {"call": "new_from_template", "arguments": {"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "{altar}", "camera_lateral": "{lateral}", "nomes": ["Ana & Carlos"], "data": "15.08.2026"}}},
+        {"call": "new_from_template", "arguments": {"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "{altar}", "camera_lateral": "{lateral}", "nomes": ["Ana & Carlos"], "data": "15.08.2026", "trilha": "{trilha}"}}},
         {"call": "plan_multicam", "arguments": {"name_or_path": "casamento-ana-carlos"}},
         {"answer": "O projeto casamento-ana-carlos foi montado e o corte automático das duas câmeras foi planejado."}
       ],

@@ -1,8 +1,14 @@
 {
   "mcpServers": {
     "dmaker": {
-      "command": "D:\\DMaker\\.venv\\Scripts\\dmaker.exe",
-      "args": ["mcp"]
+      "command": "cmd",
+      "args": [
+        "/d",
+        "/v:on",
+        "/s",
+        "/c",
+        "cd /d !CLAUDE_PROJECT_DIR! 2>nul & if exist .venv\\Scripts\\dmaker.exe (.venv\\Scripts\\dmaker.exe mcp) else (>&2 echo DMaker MCP: .venv\\Scripts\\dmaker.exe nao existe em !cd!. Abra o Claude Code na raiz de um clone que tenha a pasta .venv; veja a instalacao no README. & exit /b 1)"
+      ]
     }
   }
 }

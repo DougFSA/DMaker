@@ -143,11 +143,21 @@ def _print_ui_result(result: dict) -> None:
         console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
-@app.callback()
-def _main(version: Annotated[bool, typer.Option("--version", help="Mostra a versão.")] = False) -> None:
-    if version:
+def _show_version(requested: bool) -> None:
+    """Imprime a versão e encerra: roda como opção eager, antes de o Typer exigir um comando."""
+    if requested:
         console.print(f"dmaker {__version__}")
         raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_show_version, is_eager=True, help="Mostra a versão."),
+    ] = False,
+) -> None:
+    """Callback do app: existe para hospedar a opção global `--version`."""
 
 
 # ---------- ambiente ----------

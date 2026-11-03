@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from dmaker import config
 from dmaker.config import TEMPLATES_DIR
 from dmaker.domain.spec import Project
 from dmaker.domain.templates import (
@@ -294,3 +295,68 @@ def test_param_example_shows_up_in_the_summary_and_in_the_loaded_template():
     assert "exemplo:" in template_summary(explicativo) and '"fundo": "escuro"' in template_summary(
         explicativo
     )
+
+
+# ---------- a música dos modelos é obrigatória: nenhum aponta para um arquivo de outra máquina (DMK-48) ----------
+
+# modelo -> o parâmetro que recebe a música
+MUSIC_PARAMS = {
+    "casamento-pascom": "trilha",
+    "pessoal-vlog-reel": "musica",
+    "reel-medlycare-depoimento": "musica",
+}
+
+
+@pytest.mark.parametrize(("template_name", "param"), MUSIC_PARAMS.items())
+def test_music_is_a_required_path_with_no_default(template_name, param):
+    music = find_template(template_name).params[param]
+    assert music.required is True
+    assert music.default is None
+    assert music.type == "path"
+
+
+@pytest.mark.parametrize(("template_name", "param"), MUSIC_PARAMS.items())
+def test_creating_the_project_without_the_music_names_the_missing_param(template_name, param, tmp_path):
+    from dmaker.pipeline.projects import project_from_template
+
+    template = find_template(template_name)
+    params = _params_with_fakes(template, tmp_path)
+    params.pop(param)
+    with pytest.raises(TemplateError) as excinfo:
+        project_from_template(template_name, "sem-musica", params, folder=tmp_path / "sem-musica")
+    assert str(excinfo.value) == f'faltam parâmetros obrigatórios para o template "{template_name}": {param}'
+    assert not (tmp_path / "sem-musica").exists()  # nada foi criado pela metade
+
+
+@pytest.mark.parametrize(("template_name", "param"), MUSIC_PARAMS.items())
+def test_creating_the_project_with_the_music_uses_that_file(template_name, param, tmp_path):
+    from dmaker.pipeline.projects import project_from_template
+
+    template = find_template(template_name)
+    params = _params_with_fakes(template, tmp_path)
+    assert params[param]  # o valor de teste do parâmetro obrigatório é a música
+    project = project_from_template(template_name, "com-musica", params, folder=tmp_path / "com-musica")
+    assert project.audio.music is not None and project.audio.music.src == params[param]
+    assert (tmp_path / "com-musica" / "spec.json").exists()
+
+
+def test_cli_without_the_music_fails_saying_which_param_is_missing():
+    from typer.testing import CliRunner
+
+    from dmaker.cli import app
+
+    result = CliRunner().invoke(
+        app, ["new-from-template", "pessoal-vlog-reel", "viagem", "--param", "videos=a.mp4"]
+    )
+    assert result.exit_code == 1
+    assert "musica" in result.output and "obrigatórios" in result.output
+    assert not (config.PROJECTS_DIR / "viagem").exists()
+
+
+def test_the_listing_marks_the_music_as_required_for_the_ai():
+    from dmaker.pipeline.projects import describe_templates
+
+    listed = {item["name"]: item["params"] for item in describe_templates()}
+    for template_name, param in MUSIC_PARAMS.items():
+        assert listed[template_name][param]["required"] is True
+        assert listed[template_name][param]["default"] is None

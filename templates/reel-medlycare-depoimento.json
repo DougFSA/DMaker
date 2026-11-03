@@ -25,6 +25,11 @@
       "description": "Título do cartão de encerramento (chamada para ação)",
       "default": "Teste grátis por 3 meses, sem cartão",
       "type": "text"
+    },
+    "musica": {
+      "description": "Trilha suave de fundo: o arquivo de música (obrigatório, não há música padrão)",
+      "type": "path",
+      "required": true
     }
   },
   "name": "medlycare-depoimento-reel",
@@ -61,7 +66,7 @@
     "style": { "mode": "karaoke", "max_words": 4, "uppercase": true }
   },
   "audio": {
-    "music": { "src": "D:/musicas/trilha-suave.mp3", "volume": 0.15, "ducking": true, "fade_out": 2 },
+    "music": { "src": "{{musica}}", "volume": 0.15, "ducking": true, "fade_out": 2 },
     "normalize": "two-pass"
   }
 }

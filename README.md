@@ -37,11 +37,11 @@ Detalhes no capítulo "Usando com LLM local (Ollama)" do [manual](docs/MANUAL.md
 
 ## Instalação rápida (Windows)
 
-Precisa de Python 3.11 ou mais novo e de internet na primeira vez (FFmpeg, ~110 MB, e a fonte). No PowerShell:
+Precisa de Python 3.11 ou mais novo e de internet na primeira vez (FFmpeg, ~110 MB, e a fonte). A pasta do clone pode ser qualquer uma, em qualquer unidade: o DMaker e o servidor MCP não dependem de onde ela está. No PowerShell, na pasta onde você guarda os seus projetos:
 
 ```powershell
-git clone https://github.com/DougFSA/DMaker.git D:\DMaker
-cd D:\DMaker
+git clone https://github.com/DougFSA/DMaker.git
+cd DMaker
 .\scripts\setup.ps1
 .\.venv\Scripts\Activate.ps1
 dmaker doctor
@@ -89,7 +89,7 @@ dmaker ajuda "como dublo um vídeo para inglês?"
 dmaker manual export                        # o manual em PDF e HTML de página única, em output/manual
 ```
 
-Com o Claude Code aberto nesta pasta, basta pedir em português: "faz um reel de 30 segundos desse vídeo, com legenda e logo". O servidor MCP (`dmaker mcp`) já vem ligado pelo `.mcp.json`.
+Com o Claude Code aberto nesta pasta, basta pedir em português: "faz um reel de 30 segundos desse vídeo, com legenda e logo". O servidor MCP (`dmaker mcp`) já vem ligado pelo `.mcp.json`, que usa o `.venv` da pasta aberta (sem caminho para editar); na primeira vez numa sessão nova, o Claude Code pede para você aprovar o servidor `dmaker`.
 
 ## Para quem desenvolve
 

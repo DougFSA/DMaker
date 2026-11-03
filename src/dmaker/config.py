@@ -1,4 +1,5 @@
-"""Caminhos do projeto. Tudo fica dentro da pasta raiz (D:/DMaker por padrão)."""
+"""Caminhos do projeto. Tudo fica dentro da pasta raiz, que é a do clone (ou a de `DMAKER_HOME`); os dados
+gerados vão para `DMAKER_DATA_DIR` quando definido."""
 
 from __future__ import annotations
 

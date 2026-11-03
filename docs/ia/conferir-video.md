@@ -23,7 +23,7 @@ Antes de entregar qualquer vídeo, e sempre que algo parecer estranho (texto cor
 3. `qa_report`: conferir o projeto e o arquivo
    Argumentos de exemplo: `{"name_or_path": "meu-reel", "output": false}`
 4. `contact_sheet`: só se o QA apontar algo: grade de quadros
-   Argumentos de exemplo: `{"video": "C:/dmaker/output/meu-reel__instagram-reels__preview.mp4"}`
+   Argumentos de exemplo: `{"video": "C:/videos/meu-reel__instagram-reels__preview.mp4"}`
 
 ## Equivalente na CLI
 
