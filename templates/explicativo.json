@@ -8,12 +8,12 @@
       "required": true
     },
     "assuntos": {
-      "description": "Os assuntos em ordem, emendados (o início de cada um é o fim do anterior): fim em segundos; fundo opcional (escuro, claro, bege, uma cor #RRGGBB ou o caminho de uma imagem; sem ele os fundos se alternam); imagem opcional, que entra na região topo durante o assunto; infografico opcional ({nome, parametros}: um modelo de list_infographics, como o contador ou a barra, que anima na região topo durante o assunto). O fim do último assunto é a duração do vídeo.",
+      "description": "Os assuntos em ordem, emendados (o início de cada um é o fim do anterior): fim em segundos; fundo opcional (escuro, claro, bege, uma cor #RRGGBB ou o caminho de uma imagem; sem ele os fundos se alternam); imagem opcional, que entra na região topo durante o assunto; infografico opcional ({nome, parametros}: um modelo de list_infographics, como o contador ou a barra, que anima na região topo durante o assunto); sons opcionais (lista de {som, em, volume}: som é um nome da biblioteca de efeitos, como whoosh, pop, click, riser, whip, impact ou ding; em são os segundos desde o começo do assunto, 0 se omitido, e não passa do fim dele; volume vai de 0 a 1.5, sendo 1 o nível padrão). O fim do último assunto é a duração do vídeo.",
       "type": "list",
       "required": true,
       "example": [
-        { "fim": 20, "fundo": "escuro", "infografico": { "nome": "contador", "parametros": { "ate": 10000, "prefixo": "+ de R$" } } },
-        { "fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png" },
+        { "fim": 20, "fundo": "escuro", "infografico": { "nome": "contador", "parametros": { "ate": 10000, "prefixo": "+ de R$" } }, "sons": [{ "som": "whoosh" }, { "som": "ding", "em": 8 }] },
+        { "fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png", "sons": [{ "som": "pop", "volume": 0.8 }] },
         { "fim": 60, "fundo": "claro", "infografico": { "nome": "barra", "parametros": { "valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400 } } }
       ]
     },
@@ -103,5 +103,5 @@
       "follow_background": false
     }
   },
-  "audio": { "normalize": "two-pass" }
+  "audio": { "normalize": "two-pass", "sfx": "{{sfx}}" }
 }
