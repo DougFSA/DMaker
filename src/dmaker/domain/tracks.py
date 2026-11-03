@@ -1,6 +1,6 @@
-"""Estado de trilha (mudo, oculto, bloqueado) da vista multitrilha da interface, aplicado à spec.
+"""Estado de trilha (mudo, solo, ganho, pan, oculto, bloqueado) da vista multitrilha, aplicado à spec.
 
-`apply_track_state` existe porque, como no Shotcut, mudar ou ocultar uma trilha no editor precisa
+`apply_track_state` existe porque, como no Shotcut e no Audacity, mudar ou ocultar uma trilha no editor precisa
 valer tanto para a prévia ao vivo quanto para o RENDER final: sem isso, o usuário silenciaria uma
 faixa na interface e ela continuaria audível no vídeo exportado. `locked` é só da interface (trava
 seleção/arraste dos itens da trilha) e não muda nada aqui."""
@@ -8,8 +8,12 @@ seleção/arraste dos itens da trilha) e não muda nada aqui."""
 from __future__ import annotations
 
 from .markers import marker_groups, marker_track_id
-from .spec import HtmlOverlay, ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
+from .spec import ClipSegment, HtmlOverlay, ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
 from .timeline import stack_lanes
+
+# Uma trilha de efeitos sonoros "muda" vira este ganho: a spec não tem como dizer -infinito, e 120 dB abaixo está
+# bem abaixo do que qualquer saída de 16 ou 24 bits consegue guardar
+SILENT_GAIN_DB = -120.0
 
 
 def video_overlay_lanes(project: Project) -> dict[int, int]:
@@ -29,8 +33,9 @@ def video_overlay_lanes(project: Project) -> dict[int, int]:
 
 def known_track_ids(project: Project) -> set[str]:
     """ids de trilha que fazem sentido para esta spec (as mesmas que `build_timeline_view`
-    mostraria): usado pelo lint para avisar de um id desconhecido em `project.tracks`."""
-    ids = {"V1", "A1", "TX", "GR", "CC", "MUS"}
+    mostraria): usado pelo lint para avisar de um id desconhecido em `project.tracks`. A `SFX` não aparece na vista,
+    mas guarda o ganho, o pan e o mudo do barramento dos efeitos sonoros."""
+    ids = {"V1", "A1", "TX", "GR", "CC", "MUS", "SFX"}
     ids.update(f"A{2 + i}" for i in range(len(project.audio.tracks)))
     if project.audio.narration:
         ids.add("NAR")
@@ -42,15 +47,42 @@ def known_track_ids(project: Project) -> set[str]:
     return ids
 
 
+def audio_track_ids(project: Project) -> list[str]:
+    """As trilhas de áudio do projeto, na ordem da vista: o som dos clipes (A1), as faixas externas (A2...),
+    narração, voz gravada, música e o barramento dos efeitos sonoros. É o conjunto em que o solo vale."""
+    ids = ["A1", *(f"A{2 + i}" for i in range(len(project.audio.tracks)))]
+    if project.audio.narration:
+        ids.append("NAR")
+    if project.audio.voiceover:
+        ids.append("VO")
+    if project.audio.music is not None:
+        ids.append("MUS")
+    ids.append("SFX")
+    return ids
+
+
+def silenced_audio_tracks(project: Project) -> set[str]:
+    """As trilhas de áudio que não soam: as mudas e, havendo alguma em solo, todas as que não estão em solo (como no
+    Audacity). É a única regra de solo: a vista e o render leem daqui, e a prévia e o vídeo nunca discordam."""
+    tracks = project.tracks
+    ids = audio_track_ids(project)
+    soloed = {track_id for track_id in ids if track_id in tracks and tracks[track_id].solo}
+    return {track_id for track_id in ids if _muted(tracks, track_id) or (soloed and track_id not in soloed)}
+
+
 def apply_track_state(project: Project) -> Project:
-    """Spec equivalente com o mudo/oculto de `project.tracks` já embutido nos campos que o render
+    """Spec equivalente com o mudo/solo/ganho/pan/oculto de `project.tracks` já embutido nos campos que o render
     realmente olha, para o resto do pipeline não precisar saber que trilhas da interface existem:
 
-    - A1 muda -> `audio.mute_clips = True` (mudo do áudio de cada clipe da V1).
-    - A<n> muda, n>=2 -> remove `audio.tracks[n-2]` (a faixa externa some da mixagem).
-    - MUS muda -> `audio.music = None`.
-    - NAR muda -> `audio.narration = []` (as narrações somem da mixagem e das legendas).
-    - VO muda -> `audio.voiceover = []` (os arquivos de voz gravada somem da mixagem).
+    - A1 muda -> `audio.mute_clips = True` (mudo do áudio de cada clipe da V1); o ganho e o pan dela entram no
+      `volume` e no `pan` de cada clipe.
+    - A<n> muda, n>=2 -> remove `audio.tracks[n-2]` (a faixa externa some da mixagem); o ganho e o pan entram
+      no `volume` e no `pan` da faixa.
+    - MUS muda -> `audio.music = None`; NAR muda -> `audio.narration = []`; VO muda -> `audio.voiceover = []`;
+      o ganho e o pan entram no `volume` e no `pan` de cada item.
+    - SFX muda -> `audio.sfx_gain_db` cai para -120 dB; o ganho e o pan entram em `sfx_gain_db` e `sfx_pan`.
+    - Solo: com alguma trilha de áudio em solo, as outras trilhas de áudio contam como mudas
+      (`silenced_audio_tracks`).
     - CC oculta -> `captions.enabled = False`.
     - TX oculta -> remove as sobreposições de texto.
     - GR oculta -> remove as sobreposições de imagem e de composição HTML e a barra de progresso.
@@ -59,28 +91,51 @@ def apply_track_state(project: Project) -> Project:
     - V1 oculta é ignorada (é a linha do tempo principal; não há como renderizar sem ela) e
       `locked` nunca muda o render, só a edição na interface.
 
-    Nunca modifica `project`; devolve o mesmo objeto quando não há nada a aplicar."""
+    O ganho em dB multiplica o `volume` do item e o pan soma ao do item, preso a -1..1. Nunca modifica
+    `project`; devolve o mesmo objeto quando não há nada a aplicar."""
     tracks = project.tracks
     if not tracks:
         return project
 
+    silenced = silenced_audio_tracks(project)
     audio = project.audio
-    a1 = tracks.get("A1")
-    if a1 and a1.muted and not audio.mute_clips:
-        audio = audio.model_copy(update={"mute_clips": True})
+    timeline = project.timeline
 
-    remaining_tracks = [track for i, track in enumerate(audio.tracks) if not _muted(tracks, f"A{2 + i}")]
-    if len(remaining_tracks) != len(audio.tracks):
+    a1 = tracks.get("A1")
+    if "A1" in silenced and not audio.mute_clips:
+        audio = audio.model_copy(update={"mute_clips": True})
+    if a1 and (a1.gain_db or a1.pan):
+        timeline = [_mixed(seg, a1) if isinstance(seg, ClipSegment) else seg for seg in timeline]
+
+    remaining_tracks = [
+        _mixed(track, tracks.get(f"A{2 + i}"))
+        for i, track in enumerate(audio.tracks)
+        if f"A{2 + i}" not in silenced
+    ]
+    if remaining_tracks != audio.tracks:
         audio = audio.model_copy(update={"tracks": remaining_tracks})
 
-    if _muted(tracks, "MUS") and audio.music is not None:
-        audio = audio.model_copy(update={"music": None})
+    if audio.music is not None:
+        music = None if "MUS" in silenced else _mixed(audio.music, tracks.get("MUS"))
+        if music is not audio.music:
+            audio = audio.model_copy(update={"music": music})
 
-    if _muted(tracks, "NAR") and audio.narration:
-        audio = audio.model_copy(update={"narration": []})
+    if audio.narration:
+        narration = [] if "NAR" in silenced else [_mixed(item, tracks.get("NAR")) for item in audio.narration]
+        if narration != audio.narration:
+            audio = audio.model_copy(update={"narration": narration})
 
-    if _muted(tracks, "VO") and audio.voiceover:
-        audio = audio.model_copy(update={"voiceover": []})
+    if audio.voiceover:
+        voiceover = [] if "VO" in silenced else [_mixed(item, tracks.get("VO")) for item in audio.voiceover]
+        if voiceover != audio.voiceover:
+            audio = audio.model_copy(update={"voiceover": voiceover})
+
+    sfx = tracks.get("SFX")
+    if "SFX" in silenced or (sfx and (sfx.gain_db or sfx.pan)):
+        gain = SILENT_GAIN_DB if "SFX" in silenced else audio.sfx_gain_db + (sfx.gain_db if sfx else 0.0)
+        pan = _summed_pan(audio.sfx_pan, sfx.pan if sfx else 0.0)
+        if (gain, pan) != (audio.sfx_gain_db, audio.sfx_pan):
+            audio = audio.model_copy(update={"sfx_gain_db": gain, "sfx_pan": pan})
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:
@@ -104,11 +159,36 @@ def apply_track_state(project: Project) -> Project:
             and not (isinstance(ov, VideoOverlay) and lanes.get(i) in hidden_lanes)
         ]
 
-    if audio is project.audio and captions is project.captions and overlays is project.overlays:
+    if (
+        audio is project.audio
+        and captions is project.captions
+        and overlays is project.overlays
+        and timeline is project.timeline
+    ):
         return project
-    updated = project.model_copy(update={"audio": audio, "captions": captions, "overlays": overlays})
+    updated = project.model_copy(
+        update={"audio": audio, "captions": captions, "overlays": overlays, "timeline": timeline}
+    )
     updated.base_dir = project.base_dir
     return updated
+
+
+def _summed_pan(first: float, second: float) -> float:
+    """O pan de um item mais o da trilha dele, preso ao intervalo -1..1."""
+    return max(-1.0, min(1.0, first + second))
+
+
+def _mixed(item, state):
+    """O item com o ganho e o pan da trilha embutidos (o ganho em dB multiplica o `volume`). Sem ganho nem pan na
+    trilha devolve o próprio item, para a spec seguir idêntica."""
+    if state is None or not (state.gain_db or state.pan):
+        return item
+    update = {}
+    if state.gain_db:
+        update["volume"] = item.volume * 10 ** (state.gain_db / 20)
+    if state.pan:
+        update["pan"] = _summed_pan(item.pan, state.pan)
+    return item.model_copy(update=update)
 
 
 def _muted(tracks: dict, track_id: str) -> bool:

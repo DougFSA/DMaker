@@ -31,6 +31,7 @@ from ..domain.spec import ClipSegment, Project
 from ..domain.time_map import TimeMap, shift_markers
 from ..media.ffmpeg import FFmpegError
 from ..media.probe import probe
+from .audio_edit_ops import AUDIO_OPERATIONS
 from .context import Prober
 from .edit_time import EDIT_TIME_MAPS, EditChange, owned_intervals
 from .layout import OriginAggregate, aggregate_by_origin, project_layout
@@ -171,6 +172,9 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     "marker_add": _op_marker_add,
     "marker_set": _op_marker_set,
     "marker_remove": _op_marker_remove,
+    # edição de onda (silenciar, cortar, envelope, canais, colar, dividir, juntar, aparar, deslocar, trilha): não
+    # mexem na imagem nem na duração do vídeo, então não declaram tempo e os marcadores ficam onde estão
+    **AUDIO_OPERATIONS,
 }
 
 

@@ -73,9 +73,10 @@ export function targetMayGrow(targets: readonly AudioEffectTarget[], targetKey: 
   return targets.find((target) => target.target === targetKey)?.may_grow === true
 }
 
-/** Os efeitos que o menu "+ Efeito" oferece neste lugar. */
+/** Os efeitos que o menu "+ Efeito" oferece neste lugar: os que dependem de uma seleção ou de uma curva (Cortar,
+ *  Envelope) nascem da edição de onda, não de um clique no menu. */
 export function effectsFor(effects: readonly AudioEffectInfo[], mayGrow: boolean): AudioEffectInfo[] {
-  return effects.filter((info) => mayGrow || !info.changes_duration)
+  return effects.filter((info) => !info.needs_selection && (mayGrow || !info.changes_duration))
 }
 
 /**

@@ -30,6 +30,7 @@ class PreparedVoiceFile:
     duration: float  # quanto do arquivo toca, já aparado por `offset` e `end`
     volume: float
     source: str = ""  # `src` como a spec o escreveu, para a chave de cache e as mensagens
+    pan: float = 0.0  # equilíbrio esquerda/direita (`VoiceoverClip.pan`)
 
     @property
     def end(self) -> float:
@@ -65,10 +66,12 @@ def prepare_voice_files(
         )
         if done is not None:
             prepared.append(
-                PreparedVoiceFile(done.path, clip.start, 0.0, done.duration, clip.volume, clip.src)
+                PreparedVoiceFile(done.path, clip.start, 0.0, done.duration, clip.volume, clip.src, clip.pan)
             )
         else:
-            prepared.append(PreparedVoiceFile(path, clip.start, clip.offset, length, clip.volume, clip.src))
+            prepared.append(
+                PreparedVoiceFile(path, clip.start, clip.offset, length, clip.volume, clip.src, clip.pan)
+            )
     return prepared
 
 
@@ -102,7 +105,7 @@ def voice_file_warnings(project: Project, total: float, playtimes: Sequence[floa
         playtime = playtimes[index] if index < len(playtimes) else None
         if playtime is None:
             continue
-        if any(effect.changes_duration for _, effect in active_effects(clip.effects)):
+        if any(effect.alters_duration() for _, effect in active_effects(clip.effects)):
             warnings.append(
                 f"{where}: com os efeitos, o áudio toca por {playtime:.1f}s (o Repetir o alonga)."
             )

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .. import config
 from ..domain.audio_effects import EffectBase, active_effects, chain_duration, chain_signature
+from ..domain.audio_shift import shifted_window
 from ..domain.spec import ClipSegment
 from ..filtergraph.audio_effects import (
     Measure,
@@ -29,7 +30,7 @@ from ..filtergraph.audio_effects import (
 )
 from ..filtergraph.common import Inputs
 from ..filtergraph.mezzanine import uses_camera_audio
-from ..filtergraph.pip import ResolvedVideoOverlay
+from ..filtergraph.pip import ResolvedVideoOverlay, pip_audio_window
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner
 from .cache_key import cache_key
 from .context import RenderContext
@@ -48,7 +49,8 @@ class AudioItem:
     """O que recebe a cadeia: `duration` segundos do arquivo `path` a partir de `start` (na faixa `stream`).
 
     `origin` entra na chave quando o arquivo não identifica sozinho o que há nele (o áudio isolado de um trecho
-    de câmera, por exemplo)."""
+    de câmera, por exemplo). `lead` completa o começo com silêncio: o item dura `duration`, dos quais `lead` são
+    silêncio e o resto vem do arquivo."""
 
     path: Path
     duration: float
@@ -56,6 +58,9 @@ class AudioItem:
     start: float = 0.0
     stream: int = 0
     origin: str = ""
+    lead: float = (
+        0.0  # silêncio antes de o arquivo começar, dentro do item (som deslocado para antes do arquivo)
+    )
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,9 @@ class EffectProcessor:
             round(item.duration, 3),
             item.origin,
             chain_signature(item.effects),
+            *(
+                [round(item.lead, 3)] if item.lead else []
+            ),  # fora da chave sem deslocamento: cache antigo vale
         )
 
     def process(self, item: AudioItem) -> ProcessedAudio | None:
@@ -114,13 +122,13 @@ class EffectProcessor:
 
     def _inputs(self, item: AudioItem) -> Inputs:
         inputs = Inputs()
-        inputs.add(item.path, "-ss", f"{max(item.start, 0):.3f}", "-t", f"{item.duration:.3f}")
+        inputs.add(item.path, "-ss", f"{max(item.start, 0):.3f}", "-t", f"{item.duration - item.lead:.3f}")
         return inputs
 
     def _render(self, item: AudioItem, out: Path) -> None:
         measures = self._measures(item)
         inputs = self._inputs(item)
-        lines = [ingress_line(0, item.stream, "[fx_in]")]
+        lines = [ingress_line(0, item.stream, "[fx_in]", item.lead)]
         lines += chain_lines("[fx_in]", "[fx_out]", item.effects, item.duration, measures)
         out.parent.mkdir(parents=True, exist_ok=True)
         staging = out.with_name(f"{out.stem}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}{out.suffix}")
@@ -143,7 +151,7 @@ class EffectProcessor:
                 continue
             before = item.effects[:index]
             reaching = chain_duration(before, item.duration)
-            lines = [ingress_line(0, item.stream, "[fx_in]")]
+            lines = [ingress_line(0, item.stream, "[fx_in]", item.lead)]
             lines += chain_lines("[fx_in]", "[fx_pre]", before, item.duration, measures)
             lines += measure_lines("[fx_pre]", "[fx_meas]", span_samples(effect, reaching))
             args = [
@@ -187,11 +195,16 @@ def clip_camera_audio(
     if not active_effects(segment.effects) or info is None or not uses_camera_audio(segment, info):
         return None
     effects = tuple(segment.effects)
+    # com o som deslocado a janela do item começa antes (ou depois) da imagem; sem deslocamento é a de sempre
+    window = shifted_window(in_point, segment.speed, segment.audio_offset) if segment.audio_offset else None
     if isolated is not None:
-        item = AudioItem(isolated, length, effects, origin="isolado")
+        item = AudioItem(isolated, length, effects, origin="isolado", lead=window.lead if window else 0.0)
     else:
         assert source.path is not None
-        item = AudioItem(source.path, length, effects, max(in_point, 0.0), source.audio_stream)
+        start = window.read_from if window else max(in_point, 0.0)
+        item = AudioItem(
+            source.path, length, effects, start, source.audio_stream, lead=window.lead if window else 0.0
+        )
     done = effect_processor(ctx).process(item)
     return done.path if done else None
 
@@ -254,6 +267,9 @@ def processed_pips(ctx: RenderContext, pips: Sequence[ResolvedVideoOverlay]) -> 
         effects = tuple(pip.overlay.effects)
         if not (pip.has_audio and pip.overlay.volume > 0 and active_effects(effects)):
             continue
-        item = AudioItem(pip.path, pip.duration, effects, max(pip.in_point, 0.0), pip.audio_stream)
+        window = pip_audio_window(pip)
+        item = AudioItem(
+            pip.path, pip.duration, effects, window.read_from, pip.audio_stream, lead=window.lead
+        )
         done = effect_processor(ctx).process(item)
         pip.audio_path = done.path if done else None

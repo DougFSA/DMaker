@@ -15,13 +15,15 @@ from .registry import SAMPLE_RATE, EffectRequest, build_effect
 SEAM_SECONDS = 0.010
 
 
-def ingress_line(input_index: int, stream: int, out: str) -> str:
+def ingress_line(input_index: int, stream: int, out: str, lead: float = 0.0) -> str:
     """A entrada de um item: a faixa de áudio `stream` do arquivo, com o tempo zerado e no formato da mixagem
     (48 kHz, estéreo, ponto flutuante). Em ponto flutuante o ganho passa de 0 dBFS sem cortar a onda, e é isso
-    que deixa o Amplificar e o Normalizar medirem e corrigirem depois."""
+    que deixa o Amplificar e o Normalizar medirem e corrigirem depois. `lead` é o silêncio, em segundos, antes de
+    o arquivo começar (o som deslocado de um clipe cuja fonte ainda não tinha som)."""
+    delay = f",adelay={round(lead * SAMPLE_RATE)}S:all=1" if lead > 0 else ""
     return (
         f"[{input_index}:a:{stream}]asetpts=PTS-STARTPTS,aresample={SAMPLE_RATE},"
-        f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo{out}"
+        f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo{delay}{out}"
     )
 
 
@@ -55,6 +57,10 @@ def chain_lines(
 
 def apply_effect(request: EffectRequest) -> list[str]:
     """O efeito no sinal todo, ou só no intervalo dele quando tem `start`/`end`, com a emenda curta nas bordas."""
+    if (
+        request.effect.owns_interval
+    ):  # o Cortar e o Envelope leem o próprio intervalo (ver `EffectBase.owns_interval`)
+        return build_effect(request)
     span = request.effect.span(request.duration)
     if span is None:
         return build_effect(request)
@@ -65,7 +71,7 @@ def apply_effect(request: EffectRequest) -> list[str]:
         return build_effect(request)
     if last - first < 2:  # nada a processar: um intervalo vazio deixa o som como está
         return request.chain("anull")
-    if request.effect.changes_duration:
+    if request.effect.alters_duration():
         return _spliced(request, first, last, total)
     return _crossfaded(request, first, last, total)
 

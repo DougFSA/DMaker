@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
     @update:model-value="onDiscrete"
   />
   <!-- a caixa de marcar ocupa a linha inteira da grade: o rótulo e a dica são longos para a coluna do número -->
-  <div v-else class="check-cell" :data-effect-param="param.name">
+  <div v-else-if="param.kind === 'boolean'" class="check-cell" :data-effect-param="param.name">
     <AppCheckbox
       :label="param.label"
       :model-value="stored === true"

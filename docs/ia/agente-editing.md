@@ -4,7 +4,7 @@ Criar o vídeo (reel, short, story, explicativo), cortar pausas e vícios, edita
 
 ## Ferramentas deste kit
 
-`probe_media`, `job_status`, `search_manual`, `list_templates`, `new_from_template`, `quick_edit`, `build_explainer_video`, `autocut`, `cut_pauses_and_caption`, `list_cuts`, `undo_cut`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `audio_effects`, `timeline_view`, `render_project`, `export_project`, `qa_report`, `presets`, `brands`.
+`probe_media`, `job_status`, `search_manual`, `list_templates`, `new_from_template`, `quick_edit`, `build_explainer_video`, `autocut`, `cut_pauses_and_caption`, `list_cuts`, `undo_cut`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `undo_edit`, `redo_edit`, `audio_effects`, `timeline_view`, `render_project`, `export_project`, `qa_report`, `presets`, `brands`.
 
 ## Pedidos e as chamadas certas
 

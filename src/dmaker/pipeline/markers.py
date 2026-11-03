@@ -14,6 +14,7 @@ from ..domain.markers import MarkerError, regular_markers
 from ..domain.spec import Marker, Project
 from ..media.probe import probe
 from .context import Prober
+from .edit_history import EditHistory
 from .layout import project_layout, to_presentation
 from .projects import load_project, project_path, save_project
 
@@ -62,6 +63,12 @@ def read_labels_file(file: Path) -> str:
         ) from exc
 
 
+def _record(before: Project, after: Project, name_or_path: str | Path, label: str) -> None:
+    """Guarda o estado de antes no histórico de edições (`undo_edit` desfaz a importação ou os marcadores regulares)."""
+    spec_path = project_path(name_or_path)
+    EditHistory(before.base_dir or spec_path.parent, spec_path=spec_path).record(before, after, label)
+
+
 def import_labels(
     name_or_path: str | Path, file: Path, group: str = "", replace: bool = False
 ) -> MarkersResult:
@@ -71,6 +78,7 @@ def import_labels(
     parsed = parse_labels(read_labels_file(file), group.strip())
     kept = [marker for marker in project.markers if not (replace and marker.group == group.strip())]
     updated = project.model_copy(update={"markers": [*kept, *parsed.markers]})
+    _record(project, updated, name_or_path, f"Importar marcadores de {file.name}")
     save_project(updated, project_path(name_or_path).parent)
     return MarkersResult(updated, len(parsed.markers), parsed.warnings)
 
@@ -133,5 +141,6 @@ def add_regular_markers(
     )
     kept = [marker for marker in project.markers if not (replace and marker.group == group.strip())]
     updated = project.model_copy(update={"markers": [*kept, *created]})
+    _record(project, updated, name_or_path, "Marcadores regulares")
     save_project(updated, project_path(name_or_path).parent)
     return MarkersResult(updated, len(created))

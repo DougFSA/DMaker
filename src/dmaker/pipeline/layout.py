@@ -92,6 +92,8 @@ class OriginAggregate:
     spans: list[tuple[float, float]]
     sources: list[Source]
     media_limits: list[float | None]
+    # o layout físico de onde esta visão saiu: as edições de áudio precisam da sessão (faixas externas) e da sonda
+    physical: ProjectLayout | None = None
 
 
 def aggregate_by_origin(project: Project, layout: ProjectLayout) -> OriginAggregate:
@@ -136,7 +138,7 @@ def aggregate_by_origin(project: Project, layout: ProjectLayout) -> OriginAggreg
             )
         )
         media_limits.append(limit)
-    return OriginAggregate(durations, spans, sources, media_limits)
+    return OriginAggregate(durations, spans, sources, media_limits, layout)
 
 
 def to_presentation(project: Project, layout: ProjectLayout) -> ProjectLayout:

@@ -242,6 +242,12 @@ FIELD_NOTES: dict[str, str] = {
     "Region.height": "Altura, em fração do quadro.",
     # cadeia de efeitos de áudio (ver "Edição de áudio")
     "*.effects": "Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele.",
+    "ClipSegment.audio_offset": "Desloca o som do trecho em relação à imagem, em segundos da linha do tempo: positivo atrasa o som, negativo adianta. O som pode vir de fora de `start` e `end` na fonte; onde a fonte não tem som, sai silêncio.",
+    "VideoOverlay.audio_offset": "Desloca o som do picture-in-picture em relação à imagem dele, em segundos: positivo atrasa o som.",
+    "AudioTrack.audio_offset": "Desloca a faixa externa em relação à sessão, em segundos da gravação: positivo atrasa o som da faixa (corrige um gravador que começou adiantado).",
+    "*.pan": "Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele.",
+    "AudioSettings.sfx_gain_db": "Ganho em dB do barramento dos efeitos sonoros (a trilha SFX); fica no padrão na spec e é o que `tracks.SFX` vira no render.",
+    "AudioSettings.sfx_pan": "Equilíbrio do barramento dos efeitos sonoros, de -1 a 1.",
     "AudioSettings.master_effects": "Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima.",
     # audiograma, áudio como voz e texto atrás da pessoa
     "AudioSettings.voiceover": "Arquivos de áudio (corte de podcast, áudio de WhatsApp) que viram a voz do vídeo, sem trecho de vídeo.",
@@ -298,6 +304,9 @@ FIELD_NOTES: dict[str, str] = {
     "PhaseRuleSpec.main": "Câmera principal só nesta fase.",
     "PhaseRuleSpec.cadence": "Cadência de troca só nesta fase.",
     "PhaseRuleSpec.max_duration": "Quanto a fase pode durar, em segundos.",
+    "TrackState.gain_db": "Ganho da trilha de áudio, em dB (como o controle de ganho do cabeçalho de trilha do Audacity). Vale na prévia e no render.",
+    "TrackState.pan": "Equilíbrio da trilha de áudio, de -1 (tudo à esquerda) a 1 (tudo à direita); com -1 o canal direito fica em silêncio.",
+    "TrackState.solo": "Solo: com alguma trilha de áudio em solo, as outras trilhas de áudio ficam mudas (na prévia e no render).",
     "TrackState.muted": "Trilha de áudio muda (vale no render).",
     "TrackState.hidden": "Trilha oculta (vale no render).",
     "TrackState.locked": "Trilha bloqueada: só a interface respeita.",

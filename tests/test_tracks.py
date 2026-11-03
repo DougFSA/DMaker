@@ -143,7 +143,7 @@ def test_known_track_ids_covers_fixed_and_dynamic_ids():
 
 def test_known_track_ids_minimal_project_has_no_dynamic_ids():
     ids = known_track_ids(make_project())
-    assert ids == {"V1", "A1", "TX", "GR", "CC", "MUS"}
+    assert ids == {"V1", "A1", "TX", "GR", "CC", "MUS", "SFX"}
 
 
 def test_nar_track_exists_only_with_narration_and_muting_it_removes_the_narrations():

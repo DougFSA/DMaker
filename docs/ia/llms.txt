@@ -40,6 +40,9 @@
 ## Edição de áudio
 
 - [Aplicar efeitos de áudio em um item ou no master](efeitos-de-audio.md): Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original.
+- [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](reparar-o-som.md): Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo.
+- [Copiar, colar, dividir e juntar trechos de áudio](colar-trechos-de-audio.md): Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo.
+- [Desfazer e refazer uma edição](desfazer-edicao.md): Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto.
 
 ## Tarefas de dublagem e modelos
 

@@ -4,11 +4,14 @@ e a interface listarem os efeitos com os parâmetros, as faixas e as unidades. E
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Literal, get_args
+from typing import Any, Literal, get_args, get_origin
+
+from pydantic_core import to_jsonable_python
 
 from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 
-ParamKind = Literal["number", "integer", "boolean", "choice"]
+# "points" é uma lista de pontos `{at, db}` (a curva do envelope): a interface a desenha, não a escreve em um campo
+ParamKind = Literal["number", "integer", "boolean", "choice", "points"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ class EffectInfo:
     summary: str
     changes_duration: bool
     parameters: tuple[ParamInfo, ...]
+    # só existe com uma seleção ou uma curva (Cortar, Envelope): o menu genérico da interface não o oferece
+    needs_selection: bool = False
 
     def to_dict(self) -> dict:
         return _plain(asdict(self))
@@ -51,6 +56,8 @@ def _plain(value: Any) -> Any:
 
 
 def _kind(annotation: Any) -> ParamKind:
+    if get_origin(annotation) is list:
+        return "points"
     if is_literal(annotation):
         return "choice"
     if annotation is bool:
@@ -80,7 +87,7 @@ def _param_info(name: str, cls: type[EffectBase]) -> ParamInfo:
         label=str(extra.get("label", name)),
         kind=_kind(annotation),
         unit=str(extra.get("unit", "")),
-        default=field.default,
+        default=to_jsonable_python(field.get_default(call_default_factory=True)),
         minimum=low,
         maximum=high,
         hint=field.description or "",
@@ -97,6 +104,7 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         summary=cls.summary,
         changes_duration=cls.changes_duration,
         parameters=tuple(_param_info(name, cls) for name in own),
+        needs_selection=cls.needs_selection,
     )
 
 

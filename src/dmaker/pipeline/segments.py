@@ -11,6 +11,7 @@ from typing import Protocol
 
 from PIL import Image
 
+from ..domain.audio_shift import shifted_window
 from ..domain.looks import UnknownLookError, effective_look_name, resolve_look
 from ..domain.presets import SafeZone
 from ..domain.spec import CardSegment, ClipSegment, ColorAdjust, ImageSegment, Segment
@@ -85,6 +86,11 @@ def segment_look(index: int, segment: Segment, ctx: RenderContext) -> ColorAdjus
 def _look_part(look: ColorAdjust | None) -> dict | None:
     """O look entra na chave pelo conteúdo, não pelo nome: mudar um look da marca invalida os trechos dele."""
     return look.model_dump(mode="json") if look is not None else None
+
+
+def pan_key_part(pan: float) -> tuple[float, ...]:
+    """O pan de uma faixa para a chave do mezanino: só quando existe, para a chave de um projeto sem pan não mudar."""
+    return (pan,) if pan else ()
 
 
 def _default_variant(ctx: RenderContext) -> str:
@@ -166,6 +172,7 @@ class CameraAudio:
 
     path: Path
     isolate: Callable[[], Stems]
+    lead: float = 0.0  # silêncio antes do áudio isolado, com o som deslocado para antes do começo do arquivo
 
     @property
     def key(self) -> str:
@@ -186,13 +193,20 @@ def isolate_camera_audio(
     isolator, path, stream = ctx.isolator, source.path, source.audio_stream
     start = max(in_point, 0.0)
     end = start + max(duration * segment.speed, 0.01)
+    lead = 0.0
+    if segment.audio_offset:
+        # o som deslocado vem de outro trecho da fonte: separa a voz ou o fundo dele, e o silêncio que antecede o
+        # arquivo (som pedido antes do começo dele) fica por conta de quem monta o ramo de áudio
+        window = shifted_window(in_point, segment.speed, segment.audio_offset)
+        start, lead = window.read_from, window.lead
+        end = start + max(duration * segment.speed - lead, 0.01)
     stems = isolator.stems_for(path, start, end, stream)
 
     def isolate() -> Stems:
         report = progress_logger(ctx.log, f"isolando a voz do {_label(index, ctx)}")
         return isolator.isolate(path, start, end, stream, report)
 
-    return CameraAudio(stems.vocals if segment.audio_mode == "voice" else stems.background, isolate)
+    return CameraAudio(stems.vocals if segment.audio_mode == "voice" else stems.background, isolate, lead)
 
 
 class ClipPreparer:
@@ -228,7 +242,7 @@ class ClipPreparer:
             mode,
             theme_part,
             in_point,
-            [(str(t.path), t.in_point, t.volume, t.audio_stream) for t in tracks],
+            [(str(t.path), t.in_point, t.volume, t.audio_stream, *pan_key_part(t.pan)) for t in tracks],
             matted.path.name if matted else None,  # o nome carrega a chave do recorte
             camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
         )
@@ -250,12 +264,16 @@ class ClipPreparer:
                 rect = fit_rect(info.width, info.height, W, H, segment.reframe.margin)
                 save_card(render_backdrop(ctx.theme, W, H, segment.reframe.variant, index, rect), backdrop)
         camera_path = camera_audio.path if camera_audio else None
+        camera_lead = camera_audio.lead if camera_audio else 0.0
         if _needs_render(out, ctx):
             # os efeitos do clipe: o som da câmera (ou a voz isolada) entra no mezanino já processado
             length = max(duration * segment.speed, 0.01)
-            camera_path = (
-                clip_camera_audio(ctx, segment, source, in_point, length, camera_path) or camera_path
-            )
+            processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path)
+            if processed is not None:
+                camera_path, camera_lead = (
+                    processed,
+                    0.0,
+                )  # o silêncio inicial já vem dentro do arquivo processado
         command = clip_mezzanine(
             segment,
             info,
@@ -269,6 +287,7 @@ class ClipPreparer:
             tracks=tracks,
             audio_stream=source.audio_stream,
             camera_audio=camera_path,
+            camera_lead=camera_lead,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
             look=look,

@@ -216,7 +216,7 @@ Qualquer item com som tem uma lista ordenada `effects`: o clipe (`timeline[i].ef
 inteira tem `audio.master_effects` (depois de música, voz e efeitos sonoros e antes da normalização final). O
 catálogo (tipos, parâmetros, unidades e faixas, nos nomes do Audacity) vem da ferramenta `audio_effects`; hoje:
 `amplify` (`gain_db`, `prevent_clipping`), `normalize` (`peak_db`, `remove_dc`, `stereo_independent`), `invert`,
-`reverse` e `repeat` (`times`, as passagens no total: 2 dobra). Todo efeito tem `enabled` (liga e desliga sem
+`reverse`, `repeat` (`times`, as passagens no total: 2 dobra) e os de edição de onda `silence`, `cut`, `envelope` (`points`: `at` e `db`) e `channels` (`mode`). Todo efeito tem `enabled` (liga e desliga sem
 apagar) e `start`/`end` (intervalo em segundos do item; fora dele o som passa intacto, com emenda de 10 ms).
 O arquivo original nunca muda: o item tratado fica em cache e o render e a prévia usam o mesmo.
 
@@ -226,6 +226,35 @@ O arquivo original nunca muda: o item tratado fica em cache e o render e a prév
   `audio.music` ou `audio.master`). A ordem conta: normalizar depois de amplificar mede o som já amplificado.
 - `repeat` muda a duração e só vale em voz gravada e em música; nos outros a spec o recusa dizendo onde vale.
   Com ele, a vista da linha do tempo (trilha `VO`) e o `validate_project` mostram a duração nova.
+
+### Edição de onda, ganho e pan por trilha, desfazer e refazer
+
+O `edit_project` também faz o que o Audacity faz numa seleção, sempre sem mexer na imagem e sem sobrescrever o
+arquivo. `target` é o item (o mesmo de `audio_effect`) e `start`, `end` e `at` são **segundos do vídeo final**, como
+na `timeline_view`; em qualquer um vale `marker:<texto>` (e `region: "marker:<texto>"` pega começo e fim de uma região).
+
+- `audio_silence` (`start`, `end`): zera o intervalo, com emenda de 10 ms; é o efeito `silence`.
+- `audio_cut` (`start`, `end`): tira o intervalo e o resto recua. No clipe, no PiP e na narração o fim completa com
+  silêncio (a duração é presa à imagem); na voz gravada e na música o item encolhe, e a voz gravada seguinte recua.
+  Faixa externa e `audio.master` não se cortam.
+- `audio_envelope` (`points`: `[{"at": 10, "db": 0}, {"at": 12, "db": -12}]`): volume por pontos, retas em dB; pontos
+  novos entram na curva do item. "Subir a música no fim" é um envelope em `audio.music` (tempo do arquivo da música).
+- `audio_channels` (`mode`: `mono`, `swap`, `left`, `right`; `start`/`end` opcionais): a lapela só de um lado é `left`.
+- `audio_paste` (`at`; `start`/`end` do trecho, ou o item todo) e `audio_duplicate`: copiam o som de um clipe, PiP,
+  voz gravada ou música como uma **voz gravada nova**, no mesmo arquivo, com o volume, o pan e os efeitos recortados.
+  `audio_split` (`at`) e `audio_join` (`with` opcional) valem só para a voz gravada; `audio_trim` apara fora da
+  seleção (na voz gravada encolhe o trecho do arquivo; nos outros, silencia o resto).
+- Efeito que troca o tempo (`repeat`, `reverse`, `cut`) impede dividir, aparar e copiar o trecho; clipe de fonte com
+  `parts` não aceita edição por intervalo; copiar de clipe com `speed` diferente de 1 é recusado.
+- `audio_shift` (`delta` ou `to`, segundos): `audio_offset` no clipe, no PiP e na faixa externa (positivo atrasa o som
+  em relação à imagem; o som pode vir de fora de `start`/`end`); `start` na voz gravada e na narração.
+- `audio_split_stereo`: o item vira dois, `left` e `right` (na faixa externa, duas trilhas com pan duro).
+- `track_set` (`track`: `A1`, `A2`..., `MUS`, `NAR`, `VO`, `SFX`; `gain_db`, `pan` de -1 a 1, `muted`, `solo`): fica em
+  `tracks` da spec e vale na prévia e no render. Com alguma trilha de áudio em solo, as outras ficam mudas.
+
+Toda edição do `edit_project` (e as de marcadores) entra no histórico do projeto, na pasta `history`: `undo_edit`
+desfaz a última e devolve a spec **byte a byte** como estava, `redo_edit` refaz (uma edição nova esvazia o refazer)
+e `edit_history` lista os passos; são até 50. O `undo_cut` segue valendo e também entra no histórico.
 
 ### Transições
 

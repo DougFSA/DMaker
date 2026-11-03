@@ -51,7 +51,7 @@ from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia, media_references
 from .narration import NarrationService
-from .segments import PreparedSegment, cache_key, isolate_camera_audio
+from .segments import PreparedSegment, cache_key, isolate_camera_audio, pan_key_part
 from .sfx import SfxTrack, leveled_effects
 from .sync import OffsetFinder
 from .track_slices import track_slices
@@ -95,6 +95,8 @@ def piece_recipe(segment: Segment) -> dict:
                 "audio_fade",
                 "audio_mode",
                 "effects",
+                "audio_offset",
+                "pan",
             },
         )
     return {"type": segment.type, "duration": getattr(segment, "duration", None)}
@@ -382,7 +384,10 @@ class PreviewAudioBuilder:
             source.audio_stream,
             in_point,
             f"{duration:.3f}",
-            [(str(t.path), t.in_point, t.volume, t.audio_stream, file_stamp(t.path)) for t in tracks],
+            [
+                (str(t.path), t.in_point, t.volume, t.audio_stream, file_stamp(t.path), *pan_key_part(t.pan))
+                for t in tracks
+            ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
         )
         out = ctx.cache_dir / f"{key}.wav"
@@ -391,8 +396,14 @@ class PreviewAudioBuilder:
         if camera_audio is not None:
             camera_audio.isolate()  # separa a voz (ou o fundo) só se o pedaço precisa ser feito
         camera_path = camera_audio.path if camera_audio else None
+        camera_lead = camera_audio.lead if camera_audio else 0.0
         length = max(duration * segment.speed, 0.01)  # tempo de fonte que o trecho consome
-        camera_path = clip_camera_audio(ctx, segment, source, in_point, length, camera_path) or camera_path
+        processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path)
+        if processed is not None:
+            camera_path, camera_lead = (
+                processed,
+                0.0,
+            )  # o silêncio inicial já vem dentro do arquivo processado
         command = clip_audio_piece(
             segment,
             info,
@@ -403,6 +414,7 @@ class PreviewAudioBuilder:
             tracks=tracks,
             audio_stream=source.audio_stream,
             camera_audio=camera_path,
+            camera_lead=camera_lead,
         )
         return out, command
 
@@ -442,6 +454,7 @@ class PreviewAudioBuilder:
                     narration.volume,
                     result.duration,
                     effects=tuple(narration.effects),
+                    pan=narration.pan,
                 )
             )
         return prepared

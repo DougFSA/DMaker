@@ -12,6 +12,7 @@ from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
 from .audio_effects import Measure, chain_lines
 from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
+from .mix import pan_filter
 from .sfx import SfxInput, sfx_streams
 
 
@@ -199,6 +200,13 @@ def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]")
     return f"{cur_a}loudnorm=I={target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11:print_format=json{out}"
 
 
+def _balance(item: object) -> list[str]:
+    """O filtro de equilíbrio esquerda/direita de uma narração ou voz gravada (nenhum, quando o pan é neutro). Lê
+    `pan` com `getattr` porque quem satisfaz os protocolos de entrada pode não ter o campo."""
+    balance = pan_filter(getattr(item, "pan", 0.0))
+    return [balance] if balance else []
+
+
 def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[NarrationInput]) -> list[str]:
     """Uma entrada por narração, em 48 kHz estéreo (como o resto da mixagem), com ganho e atrasada até o
     instante em que começa. Narração sem volume não gera entrada."""
@@ -211,6 +219,7 @@ def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[Nar
             "aformat=sample_fmts=fltp:channel_layouts=stereo",
             f"volume={narration.volume:.3f}",
         ]
+        chain += _balance(narration)
         if narration.start > 0:
             # na grade de 20 ms do detector da marca d'água da voz (ver `voice/watermark.py`)
             chain.append(f"adelay={delay_on_detector_grid(narration.start)}:all=1")
@@ -235,6 +244,7 @@ def voice_file_streams(lines: list[str], inputs: Inputs, files: Sequence[VoiceFi
             "aformat=sample_fmts=fltp:channel_layouts=stereo",
             f"volume={voice.volume:.3f}",
         ]
+        chain += _balance(voice)
         if voice.start > 0:
             chain.append(f"adelay={int(round(voice.start * 1000))}:all=1")
         label = f"[vf{index}]"
@@ -275,6 +285,7 @@ def music_stream(
             "aresample=48000",
             "aformat=sample_fmts=fltp:channel_layouts=stereo",
             f"volume={music.volume:.3f}",
+            *([balance] if (balance := pan_filter(music.pan)) else []),
         ]
         if span.fade_in:
             chain.append(f"afade=t=in:st=0:d={span.fade_in:.3f}")

@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from .audio_effects import rebase_effect_dicts
 from .spec import ClipSegment, Project, Segment
 
 MIN_SEGMENT_DURATION = 0.1  # segundos; nenhum trecho pode ficar mais curto que isso
@@ -64,6 +65,11 @@ def split_segment(project: Project, index: int, at: float, durations: list[float
             first["end"] = split_point
             second["start"] = split_point
             # second["end"] continua o mesmo do original (pode ser None: até o fim da mídia)
+            if original.get("effects"):  # os intervalos dos efeitos seguem o som para a metade a que ele foi
+                first["effects"] = rebase_effect_dicts(original["effects"], 0.0, at * speed)
+                second["effects"] = rebase_effect_dicts(
+                    original["effects"], at * speed, (duration - at) * speed
+                )
         else:
             first["duration"] = at
             second["duration"] = duration - at
@@ -134,6 +140,8 @@ def trim_segment(
                 new_start = start + delta * speed
                 new_start = min(max(new_start, 0.0), end - MIN_SEGMENT_DURATION * speed)
                 seg["start"] = new_start
+                if seg.get("effects") and new_start != start:  # o tempo do item parte do começo do trecho
+                    seg["effects"] = rebase_effect_dicts(seg["effects"], new_start - start, end - new_start)
             else:
                 new_end = end + delta * speed
                 upper = media_duration if media_duration is not None else new_end
