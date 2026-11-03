@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from pydantic import ValidationError
@@ -18,23 +18,38 @@ from . import __version__, config
 from .domain.models import format_size
 from .domain.presets import get_preset, list_presets
 
-app = typer.Typer(
+
+def _console_utf8() -> None:
+    """Põe o stdout e o stderr em UTF-8: redirecionados, o Windows os abre em cp1252 e o Rich cai para ASCII.
+
+    Mantém o tratamento de erro de cada fluxo (`errors`): o stderr segue sem estourar com um caractere raro.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors=stream.errors)
+        except (AttributeError, ValueError):
+            pass
+
+
+class _Utf8Typer(typer.Typer):
+    """App que põe o console em UTF-8 ao ser chamado, não ao ser importado nem num `@app.callback()`.
+
+    O `--help`, o `--version` e os erros de uso saem antes do corpo de qualquer callback, e o Typer guarda só
+    um por app; já a chamada do app é a única porta por onde todos eles passam, e um teste que importa
+    `dmaker.cli` (ou usa o `CliRunner`) não a atravessa, então a codificação do processo dele não muda.
+    """
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        _console_utf8()
+        return super().__call__(*args, **kwargs)
+
+
+app = _Utf8Typer(
     help="DMaker: editor de vídeos curtos por comando (Instagram, Facebook, YouTube, TikTok, WhatsApp).",
     no_args_is_help=True,
     rich_markup_mode="rich",
     add_completion=False,
 )
-
-
-@app.callback()
-def _console_utf8() -> None:
-    """Acentos no console do Windows: só quando a CLI roda de verdade, não ao importar o módulo
-    (um teste que importa `dmaker.cli` não pode mudar a codificação do stderr do processo)."""
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8")
-        except (AttributeError, ValueError):
-            pass
 
 
 console = Console()
@@ -157,7 +172,7 @@ def _main(
         typer.Option("--version", callback=_show_version, is_eager=True, help="Mostra a versão."),
     ] = False,
 ) -> None:
-    """Callback do app: existe para hospedar a opção global `--version`."""
+    """Callback do app: existe para hospedar a opção global `--version`; o Typer guarda só um por app."""
 
 
 # ---------- ambiente ----------
