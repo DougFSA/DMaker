@@ -1100,9 +1100,53 @@ def test_entry_sounds_of_a_text_and_a_transition_play_in_the_render(tmp_path):
 
 def test_a_project_without_sfx_keeps_its_audio_bit_for_bit(speech_clip, tmp_path):
     """Sem `sfx` (nem ausente nem lista vazia) o grafo de áudio é o de antes e a saída é a mesma amostra a amostra.
-    Só voz (sem música): com ducking o ffmpeg varia de um render para outro, sem relação com este recurso."""
+    Só voz (sem música): o caso com música e ducking tem o teste próprio logo abaixo (DMK-47)."""
     import numpy as np
 
     plain = _render(_speech_project(speech_clip, tmp_path, "sfx_igual"), tmp_path / "a.mp4")
     empty = _render(_speech_project(speech_clip, tmp_path, "sfx_igual_vazio", sfx=[]), tmp_path / "b.mp4")
     assert np.array_equal(_decode_audio(plain, tmp_path), _decode_audio(empty, tmp_path))
+
+
+# ---------- o mesmo projeto, o mesmo áudio (DMK-47) ----------
+
+
+@pytest.fixture(scope="module")
+def tone_clip_8s(tmp_path_factory) -> Path:
+    """Vídeo de 8 s com um tom de 440 Hz (AAC): longo o bastante para a corrida do fim do ducking aparecer."""
+    from dmaker.media import ffmpeg
+
+    clip = tmp_path_factory.mktemp("tom") / "tom.mp4"
+    ffmpeg.run(
+        ["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-f", "lavfi", "-i", "sine=frequency=440"]
+        + ["-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"]
+        + [str(clip)],
+        quiet=True,
+    )
+    return clip
+
+
+@pytest.mark.parametrize("ducking", [True, False])
+def test_rendering_the_same_project_again_gives_the_same_audio_from_start_to_end(
+    tone_clip_8s, synthetic_media, tmp_path, ducking
+):
+    """Antes, com ducking, os últimos 0,15 s variavam de um render para outro (até 52 níveis de 16 bits): o
+    `sidechaincompress` jogava fora, no fim, o que sobrava na fila de uma entrada, e quanto sobrava dependia de
+    uma corrida entre threads. O fade-out é zero para a música chegar inteira ao fim e qualquer pedaço perdido
+    aparecer; o loudness é medido em duas passadas, como no render de verdade. O áudio decodificado é comparado
+    inteiro, sem tolerância: são seis renders do mesmo projeto (no código antigo o teste reprovou em oito de
+    oito execuções; com um clipe de 3 s, só em cinco de oito, por isso os 8 s)."""
+    music = {"src": str(synthetic_media["music"]), "volume": 0.3, "ducking": ducking, "fade_out": 0.0}
+    project = Project.model_validate(
+        {
+            "name": f"mesmo_audio_{ducking}",
+            "output": {"preset": "instagram/reels", "quality": "draft"},
+            "timeline": [{"type": "clip", "src": str(tone_clip_8s), "reframe": {"mode": "pad"}}],
+            "audio": {"music": music, "normalize": "two-pass"},
+        }
+    )
+    project.base_dir = tmp_path
+    decoded = [_decode_audio(_render(project, tmp_path / f"r{k}.mp4"), tmp_path) for k in range(6)]
+    assert len({len(audio) for audio in decoded}) == 1
+    for other in decoded[1:]:
+        assert np.array_equal(decoded[0], other)
