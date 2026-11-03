@@ -13,7 +13,12 @@ export type RenderChoice =
 
 type Mode = RenderChoice['kind']
 
-const props = defineProps<{ projectName: string; busy?: boolean }>()
+const props = defineProps<{
+  projectName: string
+  busy?: boolean
+  /** O modo que o diálogo mostra ao abrir (o editor tem um botão para cada); sem ele, vale o último escolhido. */
+  initialMode?: Mode
+}>()
 const emit = defineEmits<{ submit: [choice: RenderChoice] }>()
 const open = defineModel<boolean>('open', { default: false })
 
@@ -38,6 +43,7 @@ const submitLabel = computed(() =>
 watch(open, (isOpen) => {
   if (!isOpen) return
   failure.value = ''
+  if (props.initialMode) mode.value = props.initialMode
   void catalog.load().catch(() => undefined)
 })
 

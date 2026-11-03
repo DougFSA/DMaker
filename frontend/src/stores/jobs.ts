@@ -15,9 +15,13 @@ export interface JobView {
   log: string[]
   /** Resultado do job (ex.: o RenderResult), só chega pelo evento final do SSE. */
   result: unknown
+  /** O trabalho aceita ser parado (`cancel`): hoje só os de voz e áudio. Ausente vale como não. */
+  cancellable?: boolean
 }
 
 export type JobEndListener = (job: JobView) => void
+/** Quem quer saber de um job que a CLI ou o MCP disparou pedindo que a interface o mostre (`focus`). */
+export type JobFocusListener = (job: JobView) => void
 
 const POLL_INTERVAL_MS = 3000
 const LOG_LIMIT = 200
@@ -34,6 +38,10 @@ export const useJobsStore = defineStore('jobs', () => {
 
   const sources = new Map<string, EventSource>()
   const endListeners = new Set<JobEndListener>()
+  const focusListeners = new Set<JobFocusListener>()
+  /** Os jobs que a interface já viu na lista do servidor; o `focus` só vale para o que aparece depois. */
+  const seenOnServer = new Set<string>()
+  let seeded = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
   const list = computed(() =>
@@ -54,6 +62,12 @@ export const useJobsStore = defineStore('jobs', () => {
   function onJobEnd(listener: JobEndListener): () => void {
     endListeners.add(listener)
     return () => endListeners.delete(listener)
+  }
+
+  /** Avisa quando a CLI ou o MCP dispara um job pedindo `focus`: a interface deve abrir o projeto dele sozinha. */
+  function onJobFocus(listener: JobFocusListener): () => void {
+    focusListeners.add(listener)
+    return () => focusListeners.delete(listener)
   }
 
   function closeSource(id: string): void {
@@ -93,6 +107,9 @@ export const useJobsStore = defineStore('jobs', () => {
       case 'end':
         finish(job, event.status, event.error, event.result)
         break
+      case 'utterance':
+        // fala pronta da narração: quem toca a prévia ao vivo é `followJob`, a barra de jobs não precisa dela
+        break
     }
   }
 
@@ -110,11 +127,13 @@ export const useJobsStore = defineStore('jobs', () => {
         error: snapshot.error,
         log: [],
         result: null,
+        cancellable: !!snapshot.cancellable,
       }
       return
     }
-    // um job registrado por track() ainda não sabia o projeto nem a descrição
+    // um job registrado por track() ainda não sabia o projeto, a descrição nem se aceita ser parado
     existing.project ??= snapshot.project
+    existing.cancellable ||= !!snapshot.cancellable
     if (existing.description === PENDING_DESCRIPTION) existing.description = snapshot.description
     if (snapshot.status !== 'running') {
       finish(existing, snapshot.status, snapshot.error, existing.result)
@@ -138,6 +157,7 @@ export const useJobsStore = defineStore('jobs', () => {
         error: null,
         log: [],
         result: null,
+        cancellable: false,
       }
     }
     const source = new EventSource(api.jobs.eventsUrl(id))
@@ -173,6 +193,20 @@ export const useJobsStore = defineStore('jobs', () => {
     for (const job of Object.values(jobs.value)) {
       if (job.status !== 'running' && !present.has(job.id)) delete jobs.value[job.id]
     }
+    announceFocus(snapshots)
+  }
+
+  /**
+   * A primeira consulta só anota o que já existia (abrir a interface não deve pular para um render antigo). Nas
+   * seguintes, o job novo com `focus` e projeto avisa os ouvintes; havendo vários, vale o que está rodando.
+   */
+  function announceFocus(snapshots: JobSnapshot[]): void {
+    const fresh = seeded ? snapshots.filter((snapshot) => snapshot.focus && snapshot.project && !seenOnServer.has(snapshot.job_id)) : []
+    for (const snapshot of snapshots) seenOnServer.add(snapshot.job_id)
+    seeded = true
+    const target = fresh.find((snapshot) => snapshot.status === 'running') ?? fresh.at(-1)
+    const view = target ? jobs.value[target.job_id] : undefined
+    if (view) for (const listener of focusListeners) listener(view)
   }
 
   function startPolling(intervalMs: number = POLL_INTERVAL_MS): void {
@@ -185,6 +219,11 @@ export const useJobsStore = defineStore('jobs', () => {
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = null
     for (const id of [...sources.keys()]) closeSource(id)
+  }
+
+  /** Pede ao servidor que pare o job; o estado vira `cancelled` quando o evento final chega pelo SSE. */
+  async function cancel(id: string): Promise<void> {
+    await api.jobs.cancel(id)
   }
 
   async function clearFinished(): Promise<void> {
@@ -203,10 +242,12 @@ export const useJobsStore = defineStore('jobs', () => {
     finishedCount,
     forProject,
     onJobEnd,
+    onJobFocus,
     track,
     refresh,
     startPolling,
     stopPolling,
+    cancel,
     clearFinished,
   }
 })

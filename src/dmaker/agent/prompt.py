@@ -1,47 +1,76 @@
-"""Prompt de sistema do agente local: corpo da skill do DMaker mais regras curtas para um modelo pequeno."""
+"""Prompt de sistema do agente local: regras essenciais curtas mais o manual do kit escolhido.
+
+A skill inteira pesava o contexto de um modelo pequeno. Agora o prompt é só o que vale sempre (as regras
+abaixo) e o manual curto de cada kit, gerado por `dmaker manual build` das mesmas tarefas do manual; o resto o
+modelo consulta com a ferramenta `search_manual`. Montar o prompt é função pura: o carregador do manual entra
+por parâmetro.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable, Sequence
 
-from .. import config
+from .kits import Kit, kit_by_name
 
-DEFAULT_SKILL_PATH = config.ROOT / ".claude" / "skills" / "dmaker" / "SKILL.md"
+ESSENTIAL_RULES = """Você opera o DMaker, um editor de vídeos curtos, pelas ferramentas que recebeu.
 
-EXTRA_RULES = """## Regras extras para o agente local
+## Regras
 
-- Responda sempre em português do Brasil.
-- Use sempre uma ferramenta para agir ou conferir algo, nunca suponha o resultado de um render, de uma
-  validação ou de uma leitura de legendas sem checar com a ferramenta correspondente.
-- Nunca invente caminho de arquivo (vídeo, foto, áudio, projeto): se não souber onde está, pergunte ao
-  usuário em vez de chutar.
-- Fluxo padrão: list_templates para escolher um template, new_from_template para criar o projeto,
-  validate_project para conferir, render_project(preview=true) para uma prévia rápida, qa_report para
-  ler os avisos automáticos, corrigir com edit_project/fix_captions quando precisar e só então
-  render_project final.
-- Chame uma ferramenta por vez e espere o resultado antes de decidir o próximo passo.
-- Ao terminar um render ou uma exportação, diga ao usuário o caminho do arquivo mp4 gerado.
-- Casamento da paróquia (PASCOM): use o template `casamento-pascom` com `camera_altar` (pasta da Canon)
-  e `camera_lateral` (pasta do celular), a lista de nomes dos casais e a data; depois de criar o
-  projeto, chame `plan_multicam` antes de validar ou renderizar.
-- Se faltar a lista de nomes dos casais ou a data da cerimônia, pergunte ao usuário em vez de inventar.
-- Nunca invente o caminho de uma pasta de câmera: sem a pasta, pergunte onde estão os arquivos.
+- Responda sempre em português do Brasil, curto e direto, sem travessão.
+- Para agir ou conferir qualquer coisa, chame uma ferramenta. Nunca suponha o resultado de um render, de uma
+  validação ou de uma leitura. Chame uma ferramenta por vez e espere o resultado.
+- Nunca invente caminho de arquivo, nome de projeto, voz ou template: se não souber, pergunte ao usuário. Os
+  caminhos do manual são só exemplos.
+- Se o pedido já traz o que a tarefa precisa (o arquivo, o projeto, o texto), execute na hora: não pergunte o que
+  está no pedido nem o que tem valor padrão (começar em 0 s, idioma português, voz automática, qualquer opção
+  não citada). Pergunte só o que falta de essencial e não tem padrão, uma pergunta curta de cada vez.
+- O resultado de cada ferramenta traz os nomes e caminhos do passo seguinte (`spec_path`, `project`, `output`):
+  use exatamente esses valores, sem inventar outro.
+- Se uma ferramenta devolver erro, leia a mensagem, corrija o argumento e tente de novo. Se falhar outra vez,
+  conte ao usuário o que aconteceu.
+- Render final, exportação, apagar e sobrescrever exigem o sim do usuário, e quem pergunta é o sistema: chame a
+  ferramenta direto, sem pedir confirmação por conta própria. Se ele recusar, não faça de outro jeito; diga o que
+  ficou sem fazer.
+- Só clone uma voz se o usuário disser que o dono da voz autorizou.
+- Fluxo padrão de um vídeo: criar o projeto, validar, gerar a prévia (preview), ler o relatório de QA e só
+  então pedir o render final.
+- Se o pedido não cabe nas ferramentas que você tem, diga isso em vez de improvisar. Dúvida sobre como fazer
+  algo: use `search_manual`.
+- Ao terminar um render ou uma exportação, diga ao usuário o caminho do arquivo gerado.
 """
 
-
-def _strip_frontmatter(text: str) -> str:
-    """Remove o bloco YAML (entre as duas linhas `---`) do início da SKILL.md; sobra só o corpo."""
-    if not text.startswith("---"):
-        return text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return text
-    return text[end + len("\n---") :].lstrip("\n")
+ManualLoader = Callable[[str], "str | None"]
 
 
-def system_prompt(skill_path: Path | None = None, extra_rules: str | None = None) -> str:
-    """Corpo da skill (sem frontmatter) mais as regras extras: prompt de sistema passado ao `AgentLoop`."""
-    path = skill_path or DEFAULT_SKILL_PATH
-    body = _strip_frontmatter(path.read_text(encoding="utf-8")).strip() if path.exists() else ""
-    rules = (extra_rules if extra_rules is not None else EXTRA_RULES).strip()
-    return f"{body}\n\n{rules}\n" if body else f"{rules}\n"
+def kit_manual_id(kit: Kit) -> str:
+    """O nome do arquivo de `docs/ia` do kit, sem a extensão (`agente-editing`)."""
+    return f"agente-{kit.name}"
+
+
+def default_manual_loader(name: str) -> str | None:
+    """Lê o arquivo de `docs/ia` (ou a cópia empacotada, numa instalação comum), só na hora de montar o prompt."""
+    from ..manual import files
+
+    return files.read_ia_doc(name)
+
+
+def system_prompt(
+    kit_names: Sequence[str],
+    manual_loader: ManualLoader | None = None,
+    extra_rules: str | None = None,
+) -> str:
+    """As regras essenciais mais o manual de cada kit escolhido, na ordem dada."""
+    load = manual_loader or default_manual_loader
+    rules = (extra_rules if extra_rules is not None else ESSENTIAL_RULES).strip()
+    parts = [rules]
+    for name in kit_names:
+        kit = kit_by_name(name)
+        manual = load(kit_manual_id(kit))
+        parts.append(manual.strip() if manual else f"# Kit {kit.title}\n\n{kit.description}")
+    return "\n\n".join(parts) + "\n"
+
+
+def task_prompt(task_manual: str, extra_rules: str | None = None) -> str:
+    """O prompt para executar uma tarefa do manual escolhida de antemão (`dmaker ajuda` oferece): as regras mais o arquivo da tarefa."""
+    rules = (extra_rules if extra_rules is not None else ESSENTIAL_RULES).strip()
+    return f"{rules}\n\n## Manual da tarefa\n\n{task_manual.strip()}\n"

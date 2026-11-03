@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -90,6 +91,16 @@ def ffmpeg_available() -> bool:
 
 
 requires_ffmpeg = pytest.mark.skipif(not ffmpeg_available(), reason="ffmpeg não instalado (dmaker setup)")
+
+
+# O limite da linha de comando do Windows e o pior caso de verdade: o ffmpeg num caminho do tamanho do MAX_PATH (260).
+WINDOWS_LINE_LIMIT = 32767
+WORST_EXECUTABLE = "X:\\" + "f" * 240 + "\\ffmpeg.exe"
+
+
+def command_line_length(args: list[str]) -> int:
+    """Tamanho da linha de comando que o Windows recebe para esses argumentos (o `list2cmdline` é o que o `Popen` monta)."""
+    return len(subprocess.list2cmdline([WORST_EXECUTABLE, *ffmpeg.GLOBAL_FLAGS, *args]))
 
 
 def concat_commands(runner) -> list[list[str]]:

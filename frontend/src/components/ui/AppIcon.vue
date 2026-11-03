@@ -31,6 +31,14 @@ export type IconName =
   | 'upload'
   | 'sparkles'
   | 'arrow-left'
+  | 'copy'
+  | 'grip'
+  | 'edit'
+  | 'trash'
+  | 'stop'
+  | 'image'
+  | 'paperclip'
+  | 'table'
 
 const paths: Record<IconName, string> = {
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -61,6 +69,14 @@ const paths: Record<IconName, string> = {
   upload: 'M12 16V5M7 9l5-5 5 5M5 20h14',
   sparkles: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
   'arrow-left': 'M19 12H5M11 6l-6 6 6 6',
+  copy: 'M9 9h11v11H9zM5 15V5a1 1 0 0 1 1-1h10',
+  grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
+  edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  stop: 'M7 7h10v10H7z',
+  image: 'M4 5h16v14H4zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM4 17l5-5 4 4 3-3 4 4',
+  paperclip: 'M20 11.5l-8.2 8.2a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8',
+  table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',
 }
 
 const props = withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 20 })

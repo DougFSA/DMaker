@@ -97,12 +97,18 @@ def queue_event_stream(
     interval: float = EVENTS_INTERVAL_S,
     keepalive: float = EVENTS_KEEPALIVE_S,
     sleep: Callable[[float], None] = time.sleep,
+    snapshot: Callable[[], dict] | None = None,
 ) -> Iterator[str]:
-    """Quadros SSE da fila: a fila inteira quando muda e um comentário de vida a cada `keepalive` segundos."""
+    """Quadros SSE da fila: a fila inteira quando muda e um comentário de vida a cada `keepalive` segundos.
+
+    `snapshot` devolve a foto a mandar; sem ele vale `service.view()`. A rota passa a foto com o aviso de
+    executor ativo, que a tela precisa também no fluxo e não só na primeira leitura.
+    """
+    take = snapshot or service.view
     last: str | None = None
     quiet = 0.0
     while True:
-        payload = json.dumps(service.view(), ensure_ascii=False)
+        payload = json.dumps(take(), ensure_ascii=False)
         if payload != last:
             last, quiet = payload, 0.0
             yield f"data: {payload}\n\n"
@@ -148,7 +154,9 @@ def build_queue_router() -> APIRouter:
     @router.get("/events")
     def queue_events(service: Queue) -> StreamingResponse:
         return StreamingResponse(
-            queue_event_stream(service), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+            queue_event_stream(service, snapshot=lambda: _view(service)),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
         )
 
     @router.post("")

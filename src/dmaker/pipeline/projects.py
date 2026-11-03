@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import config
+from ..domain.atomic_file import content_revision, read_bytes_retrying
 from ..domain.brand import Theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import (
@@ -22,12 +23,15 @@ from ..domain.spec import (
     TextOverlay,
     Transition,
 )
-from ..domain.templates import find_template, list_templates, render_template, template_summary
+from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
+from ..media.browser import browser_problem
 from ..media.probe import probe
 from .context import Prober
+from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
+from .voicefiles import voice_file_playtimes
 from .voiceover import known_voices
 
 
@@ -52,6 +56,31 @@ def load_project(name_or_path: str | Path) -> Project:
     if not path.exists():
         raise FileNotFoundError(f"Spec não encontrada: {path}")
     return Project.load(path)
+
+
+def load_project_with_revision(name_or_path: str | Path) -> tuple[Project, str]:
+    """O projeto e a revisão dos MESMOS bytes lidos: se o arquivo mudar no meio, a revisão ainda é a do que foi
+    carregado, e a interface percebe a diferença na próxima conferência."""
+    path = project_path(name_or_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Spec não encontrada: {path}")
+    data = read_bytes_retrying(path)
+    return Project.from_bytes(data, path.parent.resolve()), content_revision(data)
+
+
+def spec_revision(name_or_path: str | Path) -> str | None:
+    """A revisão do `spec.json` no disco, ou None se ele não existe. Não valida a spec: serve também para o
+    arquivo que o schema atual já não aceita."""
+    path = project_path(name_or_path)
+    try:
+        return content_revision(read_bytes_retrying(path))
+    except FileNotFoundError:
+        return None
+
+
+def project_revision(project: Project) -> str:
+    """A revisão que o `spec.json` de `project` terá depois de `save_project` (a gravação escreve `to_bytes`)."""
+    return content_revision(project.to_bytes())
 
 
 def save_project(project: Project, folder: Path | None = None) -> Path:
@@ -106,7 +135,9 @@ def summarize(
         infos,
         [s.offset for s in presentation.sources],
         known_voices=known_voices(project),
+        voiceover_playtimes=voice_file_playtimes(project, prober),
     )
+    warnings += html_warnings(project, browser_problem)
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)
@@ -197,11 +228,28 @@ def quick_project(
     )
 
 
-def project_from_template(template_name: str, name: str, params: dict, folder: Path | None = None) -> Project:
+def with_media_durations(template: Template, params: dict, prober: Prober = probe) -> dict:
+    """`params` com a duração do arquivo de áudio ou vídeo nos parâmetros que o modelo declara com `duration_of`
+    e o pedido omitiu (o modelo "audiograma" assim dispensa o `duracao`). Arquivo ausente falha dizendo qual."""
+    filled = dict(params)
+    for name, param in template.params.items():
+        source = filled.get(param.duration_of) if param.duration_of else None
+        if name in filled or not isinstance(source, str):
+            continue
+        path = Path(source).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f'arquivo não encontrado em "{param.duration_of}": {source}')
+        filled[name] = round(prober(path).duration, 3)
+    return filled
+
+
+def project_from_template(
+    template_name: str, name: str, params: dict, folder: Path | None = None, prober: Prober = probe
+) -> Project:
     """Monta um projeto a partir de um template (`templates/*.json`) e parâmetros, sem exigir a spec
     inteira: o jeito preferido de criar projetos quando um template já cobre o que se quer editar."""
     template = find_template(template_name)
-    spec = dict(render_template(template, params))
+    spec = dict(render_template(template, with_media_durations(template, params, prober)))
     spec["name"] = name
     project = Project.model_validate(spec)
     save_project(project, folder)
@@ -222,7 +270,8 @@ def describe_templates() -> list[dict]:
                         "description": p.description,
                         "type": p.type,
                         "default": p.default,
-                        "required": p.required,
+                        "required": p.required and not p.duration_of,  # o motor mede o arquivo quando omitido
+                        "example": p.example,
                     }
                     for name, p in t.params.items()
                 },

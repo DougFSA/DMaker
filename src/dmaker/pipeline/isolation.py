@@ -23,6 +23,8 @@ from ..media.separation import DemucsSeparator, ProgressCallback, Stems, VocalSe
 
 RECIPE_VERSION = "i1"  # muda quando a extração ou a montagem dos stems mudam (invalida o cache)
 AudioFormat = Literal["wav", "mp3"]
+DEFAULT_EXPORT_FORMAT: AudioFormat = "wav"
+EXPORT_SUBDIR = "isolamento"
 EXPORT_ROLES = (("voz", "vocals"), ("fundo", "background"))
 PROGRESS_STEP = 20  # percentual entre uma linha de progresso e a seguinte no log do render
 
@@ -138,7 +140,7 @@ class IsolationService:
         self,
         src: Path,
         out_dir: Path,
-        audio_format: AudioFormat = "wav",
+        audio_format: AudioFormat = DEFAULT_EXPORT_FORMAT,
         start: float | None = None,
         end: float | None = None,
         audio_stream: int = 0,
@@ -157,6 +159,11 @@ class IsolationService:
                 self.runner.run(convert_stem(source, target, label=f"{role} em {audio_format}"))
             written[attribute] = target
         return Stems(written["vocals"], written["background"])
+
+
+def default_export_dir() -> Path:
+    """Pasta da voz e do fundo exportados quando a pessoa não escolhe uma; lê a saída do config na hora."""
+    return config.OUTPUT_DIR / EXPORT_SUBDIR
 
 
 def export_name(

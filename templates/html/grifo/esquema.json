@@ -1,0 +1,74 @@
+{
+  "title": "Grifo à mão",
+  "description": "Um traço feito à mão que se desenha em volta de uma palavra ou de uma área: círculo, sublinhado, marca-texto ou risco. Com `palavra`, circula essa palavra da legenda no momento em que ela é dita.",
+  "size": [600, 220],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.55, "height": 0.1 },
+  "duration": 3,
+  "example": { "tipo": "circulo", "palavra": "frio" },
+  "caption_anchor": { "word": "palavra", "occurrence": "ocorrencia", "hold": "permanencia", "margin": "recuo" },
+  "params": {
+    "tipo": {
+      "type": "choice",
+      "label": "Tipo de grifo",
+      "default": "circulo",
+      "options": ["circulo", "sublinhado", "marca-texto", "risco"]
+    },
+    "palavra": {
+      "type": "text",
+      "label": "Palavra da legenda",
+      "description": "A palavra a grifar. O grifo aparece quando ela é dita e ocupa o lugar dela na legenda. Vazio, o grifo ocupa a área do modelo.",
+      "default": "",
+      "max_length": 40
+    },
+    "ocorrencia": {
+      "type": "integer",
+      "label": "Qual vez que a palavra aparece",
+      "description": "1 é a primeira vez que a palavra é dita (depois do início da composição), 2 é a segunda, e assim por diante.",
+      "default": 1,
+      "min": 1,
+      "max": 50
+    },
+    "permanencia": {
+      "type": "choice",
+      "label": "Até quando fica",
+      "description": "linha deixa o grifo enquanto a linha da legenda está na tela; palavra o tira quando a palavra termina.",
+      "default": "linha",
+      "options": ["linha", "palavra"]
+    },
+    "recuo": {
+      "type": "number",
+      "label": "Folga em volta (px)",
+      "description": "O espaço entre a palavra e a borda da área do modelo, para o traço caber.",
+      "default": 32,
+      "min": 0,
+      "max": 400
+    },
+    "espessura": {
+      "type": "number",
+      "label": "Espessura do traço (px)",
+      "default": 6,
+      "min": 1,
+      "max": 30
+    },
+    "passadas": {
+      "type": "integer",
+      "label": "Passadas do traço",
+      "description": "Quantas vezes o traço passa sobre si mesmo (2 dá o jeito de caneta rabiscando).",
+      "default": 2,
+      "min": 1,
+      "max": 4
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo desenhando (s)",
+      "default": 0.7,
+      "min": 0.1,
+      "max": 10
+    },
+    "cor": {
+      "type": "color",
+      "label": "Cor do traço",
+      "default": "accent"
+    }
+  }
+}

@@ -9,7 +9,7 @@ import { baseName, formatSizeMb } from '@/lib/format'
 
 export type BrowseMode = 'file' | 'files' | 'dir'
 
-const props = defineProps<{ mode: BrowseMode; title?: string }>()
+const props = defineProps<{ mode: BrowseMode; title?: string; kind?: 'media' | 'sheet' }>()
 const emit = defineEmits<{ select: [paths: string[]] }>()
 const open = defineModel<boolean>('open', { default: false })
 
@@ -32,7 +32,7 @@ async function go(path: string): Promise<void> {
   loading.value = true
   failure.value = ''
   try {
-    listing.value = await api.files.browse(path || undefined)
+    listing.value = await api.files.browse(path || undefined, props.kind)
     lastFolder = listing.value.path
   } catch (error) {
     failure.value = errorMessage(error)

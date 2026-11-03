@@ -292,3 +292,51 @@ def test_audio_mode_is_in_the_json_schema():
     schema = Project.model_json_schema()
     clip = schema["$defs"]["ClipSegment"]["properties"]["audio_mode"]
     assert clip["enum"] == ["original", "voice", "background"] and clip["default"] == "original"
+
+
+def test_flat_card_needs_no_title_but_a_plain_card_still_does():
+    flat = Project.model_validate(
+        {**MINIMAL, "timeline": [{"type": "card", "flat": True, "background": "#F1E8D8"}]}
+    )
+    assert flat.timeline[0].flat and flat.timeline[0].title == ""
+    with pytest.raises(ValidationError, match="flat"):
+        Project.model_validate({**MINIMAL, "timeline": [{"type": "card"}]})
+    assert (
+        Project.model_validate({**MINIMAL, "timeline": [{"type": "card", "title": "a"}]}).timeline[0].flat
+        is False
+    )
+
+
+def test_regions_and_their_users_are_in_the_json_schema():
+    """O que a spec aceita, o que o MCP publica (`spec_schema`) e a interface leem é o mesmo esquema."""
+    schema = Project.model_json_schema()
+    defs = schema["$defs"]
+    assert set(defs["Region"]["properties"]) == {"x", "y", "width", "height"}
+    assert "regions" in schema["properties"]
+    for overlay in ("TextOverlay", "ImageOverlay", "VideoOverlay"):
+        assert "region" in defs[overlay]["properties"], overlay
+    assert {"x", "y"} <= set(defs["ImageOverlay"]["properties"])
+    assert "focus" in defs["VideoOverlay"]["properties"]
+    assert "flat" in defs["CardSegment"]["properties"]
+    assert defs["CaptionStyle"]["properties"]["follow_background"]["default"] is True
+
+
+def test_specs_written_before_regions_validate_and_dump_the_same_overlays():
+    spec = {
+        **MINIMAL,
+        "overlays": [
+            {"type": "image", "src": "logo", "position": "top-right"},
+            {"type": "video", "src": "cam.mp4", "x": 0.5, "y": 0.5},
+        ],
+    }
+    project = Project.model_validate(spec)
+    assert project.regions == {} and project.overlays[0].x is None and project.overlays[1].focus == (0.5, 0.5)
+    again = Project.model_validate_json(project.model_dump_json(exclude_none=True))
+    assert again == project  # salvar e reabrir (o que o projeto faz) não muda nada
+
+
+def test_video_focus_must_stay_inside_the_source():
+    with pytest.raises(ValidationError, match="focus"):
+        Project.model_validate(
+            {**MINIMAL, "overlays": [{"type": "video", "src": "a.mp4", "focus": [0.5, 1.4]}]}
+        )

@@ -9,6 +9,7 @@ from pathlib import Path
 from ..domain.spec import CardSegment, ClipSegment, Project, VideoOverlay
 from ..media.probe import MediaInfo
 from .context import Prober
+from .missing import MissingMedia
 from .partsync import PartOffsets
 
 EPS = 1e-6  # tolerância de ponto flutuante ao conferir cobertura contínua entre partes
@@ -36,14 +37,41 @@ class Source:
         return session_time - self.offset
 
 
+def part_name(name: str, k: int) -> str:
+    """Nome interno da parte `k` de uma fonte com `parts` (`nome#k`): a chave dela na sessão."""
+    return f"{name}#{k}"
+
+
+def physical_source_names(project: Project, name: str) -> list[str]:
+    """Nomes, na sessão, dos arquivos que uma fonte da spec grava: uma entrada por parte quando ela
+    tem `parts`, ou o próprio nome. É a regra que o render usa para partir as faixas externas
+    (`expand_parts`) e que a vista de linha do tempo reaproveita para achar a faixa de cada parte."""
+    ref = project.sources.get(name)
+    if ref is not None and ref.parts:
+        return [part_name(name, k) for k in range(len(ref.parts))]
+    return [name]
+
+
+def _probe_present(path: Path, prober: Prober, missing: MissingMedia | None, error: str) -> MediaInfo:
+    """Mede o arquivo. Se ele não existe: falha com `error`, ou, quando o editor tolera arquivo ausente
+    (`missing`), devolve o substituto dele."""
+    if path.exists():
+        return prober(path)
+    if missing is None or not missing.covers(path):
+        raise FileNotFoundError(error)
+    return missing.stand_in(path)
+
+
 def resolve_session(
     project: Project,
     prober: Prober,
     offsets: dict[str, float],
     part_offsets: PartOffsets | None = None,
+    missing: MissingMedia | None = None,
 ) -> dict[str, Source]:
     """Fontes nomeadas (câmeras e gravadores) com seus deslocamentos. Fonte com `parts` vira uma
-    entrada por parte, com nome interno `nome#k` (o início de cada uma vem de `part_offsets`)."""
+    entrada por parte, com nome interno `nome#k` (o início de cada uma vem de `part_offsets`).
+    `missing` deixa o editor abrir o projeto com um arquivo ausente (ver `pipeline/missing.py`)."""
     part_offsets = part_offsets or {}
     session: dict[str, Source] = {}
     for name, ref in project.sources.items():
@@ -53,24 +81,28 @@ def resolve_session(
                 raise ValueError(f"sources.{name}: sincronização das partes não foi calculada")
             for k, (filename, start) in enumerate(zip(ref.parts, starts, strict=True)):
                 path = project.resolve(filename)
-                if not path.exists():
-                    raise FileNotFoundError(
-                        f"sources.{name}: parte {k} não encontrada: {filename} (procurado em {path})"
-                    )
-                key = f"{name}#{k}"
-                session[key] = Source(path, prober(path), start, ref.audio_stream, key)
+                info = _probe_present(
+                    path,
+                    prober,
+                    missing,
+                    f"sources.{name}: parte {k} não encontrada: {filename} (procurado em {path})",
+                )
+                key = part_name(name, k)
+                session[key] = Source(path, info, start, ref.audio_stream, key)
             continue
         path = project.resolve(ref.src)
-        if not path.exists():
-            raise FileNotFoundError(
-                f"sources.{name}: arquivo não encontrado: {ref.src} (procurado em {path})"
-            )
-        session[name] = Source(path, prober(path), offsets.get(name, 0.0), ref.audio_stream, name)
+        info = _probe_present(
+            path, prober, missing, f"sources.{name}: arquivo não encontrado: {ref.src} (procurado em {path})"
+        )
+        session[name] = Source(path, info, offsets.get(name, 0.0), ref.audio_stream, name)
     return session
 
 
 def resolve_sources(
-    project: Project, prober: Prober, session: dict[str, Source] | None = None
+    project: Project,
+    prober: Prober,
+    session: dict[str, Source] | None = None,
+    missing: MissingMedia | None = None,
 ) -> list[Source]:
     session = session or {}
     sources: list[Source] = []
@@ -87,9 +119,9 @@ def resolve_sources(
             sources.append(source)
             continue
         path = project.resolve(seg.src)
-        if not path.exists():
-            raise FileNotFoundError(f"timeline[{i}]: fonte não encontrada: {seg.src} (procurado em {path})")
-        info = prober(path)
+        info = _probe_present(
+            path, prober, missing, f"timeline[{i}]: fonte não encontrada: {seg.src} (procurado em {path})"
+        )
         if isinstance(seg, ClipSegment):
             if info.is_image:
                 raise ValueError(f'timeline[{i}]: {seg.src} é uma imagem; use "type": "image".')
@@ -103,7 +135,7 @@ def _coverage(session: dict[str, Source], name: str, count: int) -> list[tuple[f
     """Intervalo (início, fim) de cada parte de `name` no relógio da sessão, na ordem das partes."""
     spans = []
     for k in range(count):
-        source = session[f"{name}#{k}"]
+        source = session[part_name(name, k)]
         assert source.info is not None
         spans.append((source.offset, source.offset + source.info.duration))
     return spans
@@ -138,7 +170,7 @@ def _split_clip_over_parts(
     return [
         segment.model_copy(
             update={
-                "source": f"{name}#{k}",
+                "source": part_name(name, k),
                 "start": piece_start,
                 "end": piece_end,
                 "transition": segment.transition if i == 0 else None,
@@ -196,8 +228,8 @@ def expand_parts(
     for track in project.audio.tracks:
         if track.source in parted:
             tracks.extend(
-                track.model_copy(update={"source": f"{track.source}#{k}"})
-                for k in range(len(coverage[track.source]))
+                track.model_copy(update={"source": physical})
+                for physical in physical_source_names(project, track.source)
             )
         else:
             tracks.append(track)
@@ -206,7 +238,7 @@ def expand_parts(
     for overlay in project.overlays:
         if isinstance(overlay, VideoOverlay) and overlay.source in parted:
             k = _overlay_part(overlay, coverage[overlay.source], warn)
-            overlays.append(overlay.model_copy(update={"source": f"{overlay.source}#{k}"}))
+            overlays.append(overlay.model_copy(update={"source": part_name(overlay.source, k)}))
         else:
             overlays.append(overlay)
 

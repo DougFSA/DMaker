@@ -10,6 +10,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Column, Table
 from typer.core import TyperGroup
 
@@ -71,7 +72,7 @@ def _print_result(result) -> None:
     if result.captions_file:
         console.print(f"  legendas: {result.captions_file}")
     for w in result.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 def _print_qa_summary(spec: Path, project, preset: str | None, output: Path) -> None:
@@ -139,7 +140,7 @@ def _print_ui_result(result: dict) -> None:
     if result.get("captions_file"):
         console.print(f"  legendas: {result['captions_file']}")
     for w in result.get("warnings") or []:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 @app.callback()
@@ -155,11 +156,21 @@ def _main(version: Annotated[bool, typer.Option("--version", help="Mostra a vers
 @app.command()
 def doctor(
     hw: Annotated[bool, typer.Option(help="Testa encoders de hardware (nvenc/amf/qsv).")] = True,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Confere se tudo que as funções usam já está baixado e mostra o que falha sem rede.",
+        ),
+    ] = False,
 ) -> None:
-    """Verifica FFmpeg, fontes, marcas e dependências opcionais."""
+    """Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet."""
     from .domain.brand import available_brands
     from .media import fonts
 
+    if offline:
+        _doctor_offline()
+        return
     console.print(f"[bold]DMaker {__version__}[/bold]  raiz: {config.ROOT}")
     exe = config.find_tool("ffmpeg")
     if not exe or not config.find_tool("ffprobe"):
@@ -173,6 +184,8 @@ def doctor(
             f"  libass: {'sim' if caps.libass else '[red]NÃO (texto e legendas não funcionam)[/red]'}"
         )
         needed = ["xfade", "acrossfade", "loudnorm", "sidechaincompress", "ass", "tile", "lut3d"]
+        # transições de movimento: zoom, desfoque, tira de quadros, luz gerada por expressão e comandos por quadro
+        needed += ["perspective", "gblur", "hstack", "vstack", "geq", "sendcmd", "gradients"]
         missing = [f for f in needed if not caps.has_filter(f)]
         console.print(
             f"  filtros: {'ok' if not missing else '[red]faltam: ' + ', '.join(missing) + '[/red]'}"
@@ -194,6 +207,14 @@ def doctor(
         console.print("  faster-whisper: ok (legendas automáticas)")
     except ImportError:
         console.print("  faster-whisper: [yellow]não instalado[/yellow] (pip install -e .[captions])")
+    from .media.browser import browser_problem
+
+    problem = browser_problem()
+    console.print(
+        "  playwright e Chromium: ok (composição em HTML)"
+        if problem is None
+        else "  playwright e Chromium: [yellow]faltam[/yellow] (composição em HTML: dmaker setup --html)"
+    )
     try:
         import mcp  # noqa: F401
 
@@ -208,9 +229,42 @@ def doctor(
         console.print(f"  {name}: {d}")
 
 
+def _doctor_offline() -> None:
+    """O relatório de "funciona sem internet?": cada item com onde procurei e o comando para baixar."""
+    from .agent.offline import DiskOfflineProbe, build_report, render_report
+    from .agent.settings import SettingsError, load_settings
+
+    try:
+        settings = load_settings()
+    except SettingsError as exc:
+        _fail(str(exc))
+    report = build_report(settings, DiskOfflineProbe())
+    for line in render_report(report):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    if not report.ready:
+        raise typer.Exit(code=1)
+
+
 @app.command()
-def setup(force: Annotated[bool, typer.Option(help="Baixa de novo mesmo se já existir.")] = False) -> None:
-    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa."""
+def setup(
+    force: Annotated[bool, typer.Option(help="Baixa de novo mesmo se já existir.")] = False,
+    html: Annotated[
+        bool,
+        typer.Option(
+            "--html",
+            help="Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).",
+        ),
+    ] = False,
+) -> None:
+    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium."""
+    from .setup_tools import install_chromium
+
+    if html:
+        try:
+            install_chromium()
+        except RuntimeError as exc:
+            _fail(escape(str(exc)))  # a mensagem traz `[html]`, que o Rich leria como marcação
+        return
     from .media.matting import ensure_model, model_path
     from .setup_tools import install_ffmpeg, install_fonts
 
@@ -357,7 +411,7 @@ def new_from_template_cmd(
         f"({s.total:.1f}s, {len(s.segments)} trechos)"
     )
     for w in s.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 def _coerce_param(template, key: str, value: str):
@@ -400,7 +454,134 @@ def plan(
     for label, at in result.phases:
         console.print(f"  {_format_mmss(at)}  {label}", markup=False, highlight=False)
     for w in result.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
+
+
+def _format_clock(seconds: float) -> str:
+    return f"{int(seconds // 60):02d}:{seconds % 60:04.1f}"
+
+
+def _print_cut_report(report) -> None:
+    """Resumo e tabela do que foi cortado (tempos na gravação original), para conferir antes de renderizar."""
+    from .voice.cut_plan import REASON_LABELS
+
+    removed = report.removed_seconds
+    percent = 100 * removed / report.duration if report.duration else 0.0
+    by_reason = (
+        ", ".join(f"{n} {REASON_LABELS.get(r, r)}" for r, n in report.counts().items()) or "nenhum corte"
+    )
+    console.print(
+        f"[green]{report.duration:.1f}s -> {report.duration_after:.1f}s[/green] "
+        f"({percent:.0f}% a menos, intensidade {report.intensity}): {by_reason}"
+    )
+    if not report.cuts:
+        return
+    table = Table(
+        Column("#", justify="right"),
+        "Início",
+        "Fim",
+        Column("Duração", justify="right"),
+        "Motivo",
+        "Palavras",
+    )
+    for cut in report.cuts:
+        mark = " (desfeito)" if cut.undone else ""
+        table.add_row(
+            str(cut.id),
+            _format_clock(cut.start),
+            _format_clock(cut.end),
+            f"{cut.duration:.2f}s",
+            REASON_LABELS.get(cut.reason, cut.reason) + mark,
+            cut.text,
+            style="dim" if cut.undone else None,
+        )
+    console.print(table)
+
+
+@app.command()
+def autocut(
+    source: Annotated[Path, typer.Argument(help="Gravação falada (vídeo ou áudio).")],
+    name: Annotated[
+        str | None, typer.Option(help="Nome do projeto (padrão: nome do arquivo + -corte).")
+    ] = None,
+    intensity: Annotated[
+        str,
+        typer.Option(
+            help="suave (só pausas) | normal (pausas e vícios) | agressiva (inclui frases repetidas)."
+        ),
+    ] = "normal",
+    min_pause: Annotated[float, typer.Option(help="Pausa (s) acima da qual vira corte.")] = 0.5,
+    breath: Annotated[float, typer.Option(help="Silêncio (s) mantido antes e depois de cada fala.")] = 0.15,
+    preset: Annotated[str, typer.Option()] = "instagram/reels",
+    brand: Annotated[str | None, typer.Option()] = None,
+    captions: Annotated[bool, typer.Option(help="Legendas automáticas seguindo a fala cortada.")] = True,
+    language: Annotated[str, typer.Option(help="Idioma da fala (pt, en, es...).")] = "pt",
+    model: Annotated[str, typer.Option(help="Whisper: tiny | base | small | medium | large-v3")] = "small",
+    device: Annotated[str, typer.Option(help="cpu | cuda")] = "cpu",
+    overwrite: Annotated[bool, typer.Option(help="Refaz o projeto se ele já existir.")] = False,
+) -> None:
+    """Corta as pausas, os vícios e as frases repetidas de uma gravação falada. Cria um projeto com os clipes
+    já cortados e mostra a lista do que saiu (tempo e motivo) para conferir antes de renderizar."""
+    from .pipeline.autocut import AutoCutRequest, default_autocut_service
+    from .voice.cut_plan import CutOptions
+
+    project_name = name or f"{source.stem}-corte"
+    try:
+        request = AutoCutRequest(
+            source=source,
+            name=project_name,
+            options=CutOptions(intensity=intensity, min_pause=min_pause, breath=breath),  # type: ignore[arg-type]
+            preset=preset,
+            brand=brand,
+            captions=captions,
+            language=language,
+            model=model,
+            device=device,  # type: ignore[arg-type]
+            overwrite=overwrite,
+        )
+        service = default_autocut_service(lambda m: console.print(f"  {m}", markup=False, highlight=False))
+        result = service.cut(request, lambda label, fraction: console.print(f"  {label}...", markup=False))
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    _print_cut_report(result.report)
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+    console.print(f"Projeto: {result.spec_path}", markup=False, highlight=False)
+    console.print(
+        f"Confira com [bold]dmaker cuts {project_name}[/bold]; devolva um corte com "
+        f"[bold]dmaker uncut {project_name} <número>[/bold]; depois renderize com "
+        f"[bold]dmaker render {project_name} --preview[/bold]."
+    )
+
+
+@app.command()
+def cuts(name: Annotated[str, typer.Argument(help="Projeto criado por `dmaker autocut`.")]) -> None:
+    """Lista o que o autocut removeu do projeto (tempo na gravação original e motivo)."""
+    from .pipeline.autocut import load_cut_report
+    from .pipeline.projects import project_path
+
+    report = load_cut_report(project_path(name).parent)
+    if report is None:
+        _fail(f"{name} não tem lista de cortes (só projetos criados por `dmaker autocut` têm).")
+    _print_cut_report(report)
+
+
+@app.command()
+def uncut(
+    name: Annotated[str, typer.Argument(help="Projeto criado por `dmaker autocut`.")],
+    cut_ids: Annotated[list[int], typer.Argument(help="Número do corte na lista de `dmaker cuts`.")],
+) -> None:
+    """Desfaz cortes do autocut: o trecho volta ao projeto e as legendas acompanham."""
+    from .pipeline.autocut import undo_cut
+
+    report = None
+    try:
+        for cut_id in cut_ids:
+            report = undo_cut(name, cut_id)
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    assert report is not None
+    _print_cut_report(report)
 
 
 @app.command()
@@ -420,7 +601,7 @@ def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")])
     for seg in s.segments:
         console.print(f"  [{seg.index}] {seg.type:5s} {seg.duration:6.2f}s  {seg.label}")
     for w in s.warnings:
-        console.print(f"[yellow]aviso:[/yellow] {w}")
+        console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
 @app.command()
@@ -663,7 +844,7 @@ def qa(
         report = build_report(project, output=output)
     except (FFmpegError, *RENDER_ERRORS) as exc:
         _fail(str(exc))
-    console.print(report.to_text(), markup=False, highlight=False)
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
 
 
 @app.command()
@@ -702,6 +883,372 @@ def card(
     console.print(f"[green]Cartão salvo:[/green] {out}")
 
 
+transitions_app = typer.Typer(
+    help="Transições entre trechos: a lista e a folha de contato (prévia) de cada uma.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(transitions_app, name="transitions")
+
+
+@transitions_app.command("list")
+def transitions_list(
+    kind: Annotated[str | None, typer.Option(help="movimento | xfade")] = None,
+) -> None:
+    """Lista as transições aceitas em `transition.type` e o que cada uma faz."""
+    from .domain.transitions import catalog
+
+    wanted = {"movimento": "motion", "xfade": "xfade", None: None}.get(kind)
+    if kind is not None and wanted is None:
+        _fail("Tipo desconhecido: use movimento ou xfade.")
+    table = Table(Column("nome", no_wrap=True), Column("tipo", no_wrap=True), "o que faz", title="Transições")
+    for info in catalog():
+        if wanted in (None, info.kind):
+            table.add_row(info.name, "movimento" if info.kind == "motion" else "xfade", info.summary)
+    console.print(table)
+    console.print("Curva de tempo (`transition.curve`): linear (padrão), ease ou spring.")
+
+
+@transitions_app.command("sheet")
+def transitions_sheet(
+    name: Annotated[str, typer.Argument(help="Nome da transição, ou `all` para todas.")],
+    curve: Annotated[str, typer.Option(help="linear | ease | spring | all")] = "linear",
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/transitions).")] = None,
+) -> None:
+    """Folha de contato da transição: os quadros da troca entre dois clipes sintéticos (PNG)."""
+    import shutil
+
+    from .domain.curves import CURVES
+    from .domain.transitions import all_transition_names, catalog
+    from .media.ffmpeg import FFmpegError, SubprocessRunner
+    from .pipeline.transition_preview import TransitionPreview
+
+    names = [info.name for info in catalog()] if name == "all" else [name]
+    unknown = [n for n in names if n not in all_transition_names()]
+    if unknown:
+        _fail(f"Transição desconhecida: {unknown[0]}. Veja `dmaker transitions list`.")
+    chosen = list(CURVES) if curve == "all" else [curve]
+    if any(c not in CURVES for c in chosen):
+        _fail(f"Curva desconhecida: {curve}. Use {', '.join(CURVES)} ou all.")
+    folder = out_dir or config.OUTPUT_DIR / "transitions"
+    folder.mkdir(parents=True, exist_ok=True)
+    preview = TransitionPreview(SubprocessRunner(quiet=True))
+    try:
+        for transition in names:
+            for chosen_curve in chosen:
+                target = folder / f"{transition}-{chosen_curve}.png"
+                shutil.copyfile(preview.sheet(transition, chosen_curve), target)
+                console.print(f"[green]Folha salva:[/green] {target}")
+    except FFmpegError as exc:
+        _fail(str(exc))
+
+
+looks_app = typer.Typer(
+    help="Looks: acabamentos visuais prontos por nome (cinema, quente, frio...) e a folha de contato de cada um.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(looks_app, name="looks")
+
+EFFECT_LABELS = {
+    "vignette": "vinheta",
+    "glow": "brilho",
+    "aberration": "aberração",
+    "light_leak": "vazamento de luz",
+    "grain": "grão",
+}
+
+
+def _brand_looks(brand: str | None) -> dict:
+    """Looks da marca (brand.json); marca desconhecida ou look inválido param o comando com a mensagem."""
+    from .domain.brand import load_theme
+    from .domain.looks import available_looks
+
+    if not brand:
+        return {}
+    try:
+        theme = load_theme(brand)
+        available_looks(theme.looks)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+    return theme.looks
+
+
+@looks_app.command("list")
+def looks_list(
+    brand: Annotated[
+        str | None, typer.Option(help="Soma os looks desta marca (os dela valem no lugar).")
+    ] = None,
+) -> None:
+    """Lista os looks aceitos em `look` (no projeto e no trecho) e o que cada um faz."""
+    from .domain.looks import NO_LOOK, available_looks, look_effects
+
+    table = Table(
+        Column("nome", no_wrap=True),
+        Column("origem", no_wrap=True),
+        "efeitos",
+        "o que faz",
+        title="Looks",
+    )
+    for look in available_looks(_brand_looks(brand)).values():
+        effects = ", ".join(
+            f"{EFFECT_LABELS[name]} {amount:g}" for name, amount in look_effects(look).items()
+        )
+        table.add_row(look.name, look.source, effects or "só cor", look.summary)
+    console.print(table)
+    console.print(
+        f'No projeto: "look": "cinema". Num trecho, o dele vence; "{NO_LOOK}" desliga o do projeto. '
+        "Trecho com `color` próprio não recebe o look do projeto."
+    )
+
+
+@looks_app.command("sheet")
+def looks_sheet(
+    name: Annotated[str, typer.Argument(help="Nome do look, ou `all` para todos lado a lado.")],
+    brand: Annotated[str | None, typer.Option(help="Soma os looks desta marca.")] = None,
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/looks).")] = None,
+) -> None:
+    """Folha de contato: a mesma cena de teste sem acabamento e com o look (JPEG), da esquerda para a direita."""
+    import shutil
+
+    from .domain.looks import UnknownLookError, available_looks
+    from .media.ffmpeg import FFmpegError, SubprocessRunner
+    from .pipeline.look_preview import LookPreview
+
+    brand_looks = _brand_looks(brand)
+    folder = out_dir or config.OUTPUT_DIR / "looks"
+    folder.mkdir(parents=True, exist_ok=True)
+    preview = LookPreview(SubprocessRunner(quiet=True))
+    try:
+        names = list(available_looks(brand_looks)) if name == "all" else [name]
+        jobs = [("looks-todos", preview.overview(brand_looks))] if name == "all" else []
+        jobs += [(look, preview.sheet(look, brand_looks)) for look in names]
+    except UnknownLookError as exc:
+        _fail(f"{exc} Veja `dmaker looks list`.")
+    except FFmpegError as exc:
+        _fail(str(exc))
+    for stem, source in jobs:
+        target = folder / f"{stem}.jpg"
+        shutil.copyfile(source, target)
+        console.print(f"[green]Folha salva:[/green] {target}")
+    if name == "all":
+        console.print("Na folha dos todos, da esquerda para a direita: original, " + ", ".join(names) + ".")
+
+
+html_app = typer.Typer(
+    help="Composições em HTML: confere um quadro de uma composição antes de renderizar o vídeo.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(html_app, name="html")
+
+
+@html_app.command("frame")
+def html_frame(
+    src: Annotated[Path, typer.Argument(help="Arquivo .html ou pasta com index.html.")],
+    at: Annotated[float, typer.Option(help="Instante da composição, em segundos.")] = 0.0,
+    size: Annotated[
+        str,
+        typer.Option(help="Tamanho da página, LARGURAxALTURA em px na base 1080 (como a área da região)."),
+    ] = "1080x1920",
+    out: Annotated[
+        Path | None, typer.Option(help="PNG de saída (padrão: output/html/<nome>_<instante>s.png).")
+    ] = None,
+    duration: Annotated[
+        float, typer.Option(help="Duração da composição em segundos (a página lê dmaker.duration).")
+    ] = 5.0,
+    fps: Annotated[float, typer.Option(help="Quadros por segundo da composição.")] = 30.0,
+    scale: Annotated[float, typer.Option(help="Pixels de saída por px da página (0,5 gera a metade).")] = 1.0,
+    brand: Annotated[str | None, typer.Option(help="Marca cujas cores e fonte a página recebe.")] = None,
+    data: Annotated[str | None, typer.Option(help="Dados para a página (dmaker.data), em JSON.")] = None,
+    background: Annotated[
+        str | None, typer.Option(help="Cor lisa por baixo, para ver o transparente (ex.: #808080).")
+    ] = None,
+) -> None:
+    """Renderiza um quadro da composição, direto no instante pedido, em PNG com fundo transparente."""
+    from .pipeline.html_frame import default_frame_path, parse_size, render_html_frame
+
+    try:
+        page_size = parse_size(size)
+        page_data = json.loads(data) if data else {}
+        if not isinstance(page_data, dict):
+            raise ValueError('--data precisa ser um objeto JSON, como \'{"titulo": "Oi"}\'')
+        result = render_html_frame(
+            src,
+            out or default_frame_path(config.OUTPUT_DIR, src, at),
+            at=at,
+            size=page_size,
+            duration=duration,
+            fps=fps,
+            scale=scale,
+            data=page_data,
+            brand=brand,
+            background=background,
+        )
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except RENDER_ERRORS as exc:
+        _fail(escape(str(exc)))
+    console.print(
+        f"[green]Quadro salvo:[/green] {escape(str(result.path))}  ({result.size[0]}x{result.size[1]})"
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+infographics_app = typer.Typer(
+    help="Infográficos prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): lista, vê um quadro e põe no projeto.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(infographics_app, name="infographics")
+
+
+def _infographic_values(name: str, data: str | None, params: list[str] | None) -> dict:
+    """Os parâmetros do pedido: o JSON de `--data` e os `--param nome=valor` (estes, convertidos pelo tipo do esquema)."""
+    from .domain.infographics import find_infographic
+    from .pipeline.infographics import coerce_assignments
+
+    values = json.loads(data) if data else {}
+    if not isinstance(values, dict):
+        raise ValueError("--data precisa ser um objeto JSON, como '{\"ate\": 10000}'")
+    schema = find_infographic(name).schema
+    return {**values, **coerce_assignments(schema, params or [])}
+
+
+@infographics_app.command("list")
+def infographics_list(
+    name: Annotated[
+        str | None, typer.Argument(help="Mostra os parâmetros de um modelo (sem ele, a lista dos modelos).")
+    ] = None,
+) -> None:
+    """Lista os infográficos prontos e, dado um nome, os parâmetros que ele aceita."""
+    from .domain.infographics import InfographicError, find_infographic, load_infographics
+
+    try:
+        if name is None:
+            table = Table(Column("nome", no_wrap=True), "o que faz", "parâmetros", title="Infográficos")
+            for model in load_infographics().values():
+                table.add_row(model.name, model.schema.description, ", ".join(model.schema.params))
+            console.print(table)
+            console.print(
+                'No projeto: {"type": "html", "infographic": "contador", "data": {"ate": 10000}, "region": "topo"}. '
+                "Veja um modelo com `dmaker infographics list <nome>`."
+            )
+            return
+        schema = find_infographic(name).schema
+    except (InfographicError, ValueError) as exc:
+        _fail(escape(str(exc)))
+    table = Table(
+        Column("parâmetro", no_wrap=True),
+        Column("tipo", no_wrap=True),
+        "padrão ou limites",
+        "o que é",
+        title=f"{schema.title} ({schema.name})",
+    )
+    for param in schema.params.values():
+        limits = "obrigatório" if param.required else ""
+        if param.default is not None:
+            limits = f"padrão {param.default!r}"
+        if param.minimum is not None:
+            limits += f" ({param.minimum:.15g} a {param.maximum:.15g})"
+        if param.options:
+            limits += f" [{', '.join(param.options)}]"
+        table.add_row(param.name, param.type, limits.strip(), param.label)
+    console.print(table)
+    console.print(f"{escape(schema.description)}")
+
+
+@infographics_app.command("frame")
+def infographics_frame(
+    name: Annotated[str, typer.Argument(help="Nome do modelo (veja `dmaker infographics list`).")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Um parâmetro, como ate=10000 (repita para vários)."),
+    ] = None,
+    data: Annotated[
+        str | None, typer.Option(help="Os parâmetros em JSON (os --param valem por cima).")
+    ] = None,
+    at: Annotated[
+        float | None, typer.Option(help="Instante, em segundos (padrão: o modelo já desenhado).")
+    ] = None,
+    size: Annotated[
+        str | None, typer.Option(help="LARGURAxALTURA da página, em px na base 1080 (padrão: o do modelo).")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="PNG de saída (padrão: output/html/<nome>_<instante>s.png).")
+    ] = None,
+    brand: Annotated[
+        str | None, typer.Option(help="Marca cujas cores, fonte e cantos o modelo recebe.")
+    ] = None,
+    background: Annotated[
+        str | None, typer.Option(help="Cor lisa por baixo, para ver o transparente.")
+    ] = "#0F172A",
+) -> None:
+    """Renderiza um quadro do infográfico com os valores pedidos, em PNG, pelo mesmo renderizador do vídeo."""
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.infographics import infographic_frame
+
+    try:
+        values = _infographic_values(name, data, param)
+        at_value = at if at is not None else None
+        target = out or default_frame_path(config.OUTPUT_DIR, Path(name), at_value or 0.0)
+        result = infographic_frame(
+            name,
+            target,
+            params=values,
+            at=at_value,
+            size=parse_size(size) if size else None,
+            brand=brand,
+            background=background,
+        )
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except RENDER_ERRORS as exc:
+        _fail(escape(str(exc)))
+    console.print(
+        f"[green]Quadro salvo:[/green] {escape(str(result.path))}  ({result.size[0]}x{result.size[1]})"
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@infographics_app.command("add")
+def infographics_add(
+    project_name: Annotated[str, typer.Argument(help="Projeto (nome em projects/ ou caminho do spec.json).")],
+    name: Annotated[str, typer.Argument(help="Nome do modelo (veja `dmaker infographics list`).")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Um parâmetro, como ate=10000 (repita para vários)."),
+    ] = None,
+    data: Annotated[
+        str | None, typer.Option(help="Os parâmetros em JSON (os --param valem por cima).")
+    ] = None,
+    start: Annotated[float, typer.Option(help="Quando entra, em segundos.")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Quando sai (padrão: o fim do vídeo).")] = None,
+    region: Annotated[
+        str | None, typer.Option(help="Região do projeto onde o modelo entra (ex.: topo).")
+    ] = None,
+) -> None:
+    """Põe o infográfico nas sobreposições do projeto e salva. Sem região, ele entra na área própria do modelo."""
+    from .pipeline.infographics import add_infographic
+    from .pipeline.projects import load_project, save_project, summarize
+
+    try:
+        values = _infographic_values(name, data, param)
+        loaded = load_project(project_name)
+        project = add_infographic(loaded, name, values, start=start, end=end, region=region)
+        path = save_project(project, loaded.base_dir)
+        summary = summarize(project)
+    except json.JSONDecodeError as exc:
+        _fail(escape(f"--data não é um JSON válido: {exc}"))
+    except (ValidationError, *RENDER_ERRORS) as exc:
+        _fail(escape(str(exc)))
+    console.print(f"[green]Infográfico {escape(name)} no projeto:[/green] {escape(str(path))}")
+    for warning in summary.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
 @app.command()
 def quick(
     src: Annotated[Path, typer.Argument(help="Vídeo fonte.")],
@@ -738,12 +1285,19 @@ def clean(
         bool, typer.Option(help="Apaga também cache/jobs (grafos, ASS, áudio de transcrição).")
     ] = False,
 ) -> None:
-    """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy) e formas
-    de onda (cache/waveform)."""
+    """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
+    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor
+    pede ao pipeline (cache/frames)."""
     import shutil
 
     n = 0
-    for d in (config.MEZ_DIR, config.PROXY_DIR, config.WAVEFORM_DIR):
+    for d in (
+        config.MEZ_DIR,
+        config.PROXY_DIR,
+        config.WAVEFORM_DIR,
+        config.PREVIEW_AUDIO_DIR,
+        config.FRAMES_DIR,
+    ):
         if d.exists():
             n += sum(1 for _ in d.iterdir())
             shutil.rmtree(d)
@@ -814,50 +1368,125 @@ def _agent_tool_call_line(name: str, arguments: dict) -> str:
 
 
 def _agent_on_event(kind: str, data: dict) -> None:
-    if kind == "tool_call":
+    if kind == "triage":
+        from .agent.kits import kit_by_name
+
+        titles = ", ".join(kit_by_name(name).title for name in data["kits"])
+        console.print(f"  kit: {titles} ({data['method']})", style="dim", markup=False)
+    elif kind == "tool_call":
         console.print(_agent_tool_call_line(data["name"], data["arguments"]), style="dim", markup=False)
+    elif kind == "tool_blocked":
+        first_line = (data["reason"] or "").splitlines()[0] if data["reason"] else ""
+        console.print(f"  barrado: {first_line}", style="yellow", markup=False)
     elif kind == "tool_result":
         first_line = (data["result"] or "").splitlines()[0] if data["result"] else ""
         console.print(f"  <- {first_line}", style="dim", markup=False)
 
 
-@app.command()
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+class _TerminalConfirmation:
+    """Pergunta no terminal antes do que é longo ou difícil de desfazer; sem terminal interativo, recusa."""
+
+    def confirm(self, request) -> bool:
+        console.print()
+        console.print(request.question, markup=False, highlight=False)
+        if not _interactive():
+            console.print("Sem terminal interativo para perguntar: não vou fazer isso.", markup=False)
+            return False
+        if request.kind == "voice_consent":
+            return typer.confirm("O dono da voz autorizou o uso dela?", default=False)
+        return typer.confirm("Confirma?", default=False)
+
+
+def _agent_session(settings, on_event=None, policy=None):
+    """A sessão do agente com o motor configurado, o servidor MCP em processo e a confirmação no terminal."""
+    from .agent import AgentSession, build_chat
+    from .agent.session import default_host_factory, server_tool_names
+    from .pipeline.recipes import project_exists
+
+    return AgentSession(
+        chat=build_chat(settings),
+        host_factory=default_host_factory(),
+        available=server_tool_names(),
+        policy=policy or _TerminalConfirmation(),
+        on_event=on_event or _agent_on_event,
+        free_html=settings.free_html,
+        project_exists=project_exists,
+    )
+
+
+def _agent_settings(
+    engine: str | None, model: str | None, url: str | None, num_ctx: int | None, timeout: float | None
+):
+    from .agent.settings import SettingsError, load_settings
+
+    try:
+        return load_settings(engine=engine, model=model, url=url, num_ctx=num_ctx, timeout=timeout)
+    except SettingsError as exc:
+        _fail(str(exc))
+
+
+def _require_language_model(settings) -> None:
+    """Para o comando cedo, com o remédio, quando o servidor do modelo está fora do ar ou falta o modelo."""
+    from .agent import build_chat
+
+    chat = build_chat(settings)
+    if not chat.is_alive():
+        start = (
+            "abra o app do Ollama ou rode `ollama serve`"
+            if settings.engine == "ollama"
+            else "inicie o servidor"
+        )
+        _fail(f"{settings.engine_label} não está respondendo em {settings.url}; {start}.")
+    if settings.engine == "ollama" and not chat.has_model():
+        _fail(f"Modelo '{settings.model}' não encontrado no Ollama; rode `ollama pull {settings.model}`.")
+
+
+agent_app = typer.Typer(
+    help=(
+        "Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina, sem internet. "
+        "Sem subcomando, abre a conversa no terminal."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+app.add_typer(agent_app, name="agent")
+
+ENGINE_HELP = "Motor do modelo: ollama (padrão) ou openai (llama.cpp server, LM Studio)."
+
+
+@agent_app.callback()
 def agent(
-    model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
-    url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
-    num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    ctx: typer.Context,
+    model: Annotated[str | None, typer.Option(help="Modelo (padrão: DMAKER_AGENT_MODEL).")] = None,
+    engine: Annotated[str | None, typer.Option(help=ENGINE_HELP)] = None,
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor do modelo.")] = None,
+    num_ctx: Annotated[int | None, typer.Option(help="Tamanho do contexto (tokens), no Ollama.")] = None,
     timeout: Annotated[
-        float, typer.Option(help="Espera máxima por resposta do modelo (s); modelo em CPU demora.")
-    ] = 1800.0,
+        float | None, typer.Option(help="Espera máxima por resposta do modelo (s); modelo em CPU demora.")
+    ] = None,
     once: Annotated[str | None, typer.Option(help="Executa um único pedido e sai.")] = None,
 ) -> None:
-    """Opera o DMaker por um modelo local do Ollama: tarefas mecânicas (template, render, QA, legendas).
+    """Opera o DMaker por conversa: a triagem escolhe o kit de ferramentas e o modelo só vê o manual dele.
 
-    Cortes na mão, ritmo e textos da marca continuam sendo trabalho de uma IA maior ou de uma pessoa;
-    multicâmera entra só pelo caminho automático (template com bloco `multicam` + `plan_multicam`).
-    Veja a seção "Operador local com Ollama" do README.
+    Render final, apagar e sobrescrever pedem a sua confirmação no terminal; clonar voz só com a autorização
+    do dono da voz. Veja o capítulo "Usando com LLM local (Ollama)" do manual (docs/MANUAL.md).
     """
-    import os
-
-    from .agent import AgentLoop, McpToolHost, OllamaChat, system_prompt
-    from .agent.llm import OLLAMA_URL_ENV
-
-    base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
-    chat = OllamaChat(model=model, base_url=base_url, num_ctx=num_ctx, timeout=timeout)
-
-    if not chat.is_alive():
-        _fail(f"Ollama não está rodando em {base_url}; abra o app do Ollama ou rode `ollama serve`.")
-    if not chat.has_model():
-        _fail(f"Modelo '{model}' não encontrado no Ollama; rode `ollama pull {model}`.")
-
-    loop = AgentLoop(model=chat, tools=McpToolHost(), system=system_prompt(), on_event=_agent_on_event)
+    if ctx.invoked_subcommand is not None:
+        return
+    settings = _agent_settings(engine, model, url, num_ctx, timeout)
+    _require_language_model(settings)
+    session = _agent_session(settings)
 
     def _ask(message: str) -> str | None:
         try:
             with console.status("pensando...", spinner="dots"):
-                return loop.ask(message)
+                return session.ask(message)
         except (OSError, ValueError) as exc:
-            console.print(f"[red]Erro de comunicação com o Ollama: {exc}[/red]")
+            console.print(f"[red]Erro de comunicação com o modelo: {exc}[/red]")
             return None
 
     if once is not None:
@@ -867,8 +1496,8 @@ def agent(
         return
 
     console.print(
-        "[bold]Agente DMaker[/bold] (modelo local via Ollama). "
-        "/sair encerra, /limpar reinicia a conversa, /ferramentas lista o que ele pode usar."
+        f"[bold]Agente DMaker[/bold] ({settings.model}, {settings.engine_label}). "
+        "/sair encerra, /limpar reinicia a conversa, /ferramentas lista o que ele pode usar agora."
     )
     while True:
         try:
@@ -881,16 +1510,438 @@ def agent(
         if message == "/sair":
             break
         if message == "/limpar":
-            loop.reset()
+            session.reset()
             console.print("[dim]histórico limpo.[/dim]")
             continue
         if message == "/ferramentas":
-            for spec in McpToolHost().specs():
-                console.print(f"  {spec.name}: {spec.description}", markup=False, highlight=False)
+            from .agent.kits import kit_names
+
+            for name in session.tool_names(session.current_kits or kit_names()):
+                console.print(f"  {name}", markup=False, highlight=False)
             continue
         answer = _ask(message)
         if answer is not None:
             console.print(answer, markup=False)
+
+
+@agent_app.command("eval")
+def agent_eval(
+    model: Annotated[str | None, typer.Option(help="Modelo a medir (padrão: DMAKER_AGENT_MODEL).")] = None,
+    engine: Annotated[str | None, typer.Option(help=ENGINE_HELP)] = None,
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor do modelo.")] = None,
+    num_ctx: Annotated[int | None, typer.Option(help="Tamanho do contexto (tokens), no Ollama.")] = None,
+    timeout: Annotated[float | None, typer.Option(help="Espera máxima por resposta do modelo (s).")] = None,
+    cases: Annotated[
+        Path | None, typer.Option(help="Arquivo da bateria (padrão: tests/data/agent_eval.json).")
+    ] = None,
+    only: Annotated[
+        list[str] | None, typer.Option(help="Roda só estes pedidos (id); repita a opção.")
+    ] = None,
+    real_tools: Annotated[
+        bool,
+        typer.Option(
+            "--real-tools/--stub-heavy",
+            help="Executa de verdade as ferramentas pesadas (render, Whisper, dublagem) em vez de simulá-las.",
+        ),
+    ] = False,
+    fake: Annotated[
+        bool,
+        typer.Option(
+            "--fake", help="Usa o modelo falso que segue o roteiro de cada pedido (valida a bateria)."
+        ),
+    ] = False,
+    out: Annotated[
+        Path | None, typer.Option(help="Pasta do relatório (padrão: output/avaliacao-agente).")
+    ] = None,
+) -> None:
+    """Mede o agente com a bateria de pedidos reais: acerto, passos, tempo por pedido e memória do modelo.
+
+    Cada pedido roda numa pasta de dados temporária, com mídia sintética, e o relatório sai em Markdown e JSON.
+    """
+    from rich.markup import escape
+
+    from .agent import evaluation as ev
+    from .agent import evaluation_runner as runner
+
+    settings = _agent_settings(engine, model, url, num_ctx, timeout)
+    path = cases or config.ROOT / "tests" / "data" / "agent_eval.json"
+    try:
+        battery = ev.load_cases(path)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(escape(str(exc)))
+    if only:
+        battery = [case for case in battery if case.id in only]
+    if not fake:
+        _require_language_model(settings)
+    report = runner.run_battery(
+        battery,
+        settings=settings,
+        fake=fake,
+        real_tools=real_tools,
+        progress=lambda line: console.print(line, markup=False, highlight=False),
+    )
+    folder = out or config.OUTPUT_DIR / "avaliacao-agente"
+    markdown_path, json_path = ev.write_report(report, folder)
+    console.print("\n".join(ev.render_markdown(report)), markup=False, highlight=False, soft_wrap=True)
+    console.print(f"\nRelatório gravado em {markdown_path} e {json_path}", markup=False)
+    if not report.passed_threshold:
+        raise typer.Exit(code=1)
+
+
+# ---------- manual: partes geradas, exportação e ajuda ----------
+
+manual_app = typer.Typer(
+    help="Manual: regenera as partes automáticas (referência, docs/ia) e exporta em PDF e HTML.",
+    no_args_is_help=True,
+)
+app.add_typer(manual_app, name="manual")
+
+
+@manual_app.command("build")
+def manual_build(
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Só confere: sai com erro se `build` mudaria algum arquivo."),
+    ] = False,
+) -> None:
+    """Regenera o que o manual tira do código (comandos, ferramentas MCP, campos da spec, índice) e `docs/ia`."""
+    from rich.markup import escape
+
+    from .manual import service
+    from .manual.build import ManualBuildError
+
+    try:
+        names = service.check() if check else service.build()
+    except ManualBuildError as exc:
+        _fail(escape("O manual não fecha com o código:\n" + "\n".join(f"  - {p}" for p in exc.problems)))
+    except (FileNotFoundError, service.NotACheckout) as exc:
+        _fail(escape(str(exc)))
+    if check:
+        if names:
+            _fail(
+                "O manual está desatualizado; rode `dmaker manual build`:\n"
+                + "\n".join(f"  - {n}" for n in names)
+            )
+        console.print("[green]O manual está em dia com o código.[/green]")
+        return
+    if not names:
+        console.print("[green]Nada mudou:[/green] o manual já estava em dia.")
+        return
+    console.print(f"[green]{len(names)} arquivo(s) atualizado(s):[/green]")
+    for name in names:
+        console.print(f"  {name}", markup=False)
+
+
+@manual_app.command("export")
+def manual_export(
+    pdf: Annotated[bool, typer.Option("--pdf", help="Só o PDF (sem nenhuma opção, gera os dois).")] = False,
+    html: Annotated[bool, typer.Option("--html", help="Só o HTML de página única.")] = False,
+    out: Annotated[Path | None, typer.Option(help="Pasta de saída (padrão: output/manual).")] = None,
+) -> None:
+    """Exporta o manual em HTML de página única e PDF, com as imagens e o sumário navegável."""
+    from rich.markup import escape
+
+    from .manual import service
+    from .media.browser import BrowserUnavailable
+
+    both = not pdf and not html
+    try:
+        report = service.export_manual(out, html=html or both, pdf=pdf or both)
+    except (FileNotFoundError, BrowserUnavailable) as exc:
+        _fail(escape(str(exc)))  # a mensagem traz ".[docs]", que o Rich leria como marcação
+    for path in (report.html_path, report.pdf_path):
+        if path:
+            console.print(
+                f"[green]Pronto:[/green] {path}  ({path.stat().st_size / 1e6:.1f} MB)", highlight=False
+            )
+    if report.pages:
+        console.print(f"  PDF com {report.pages} páginas")
+    if report.missing_images:
+        console.print(f"[yellow]Imagens não encontradas:[/yellow] {', '.join(report.missing_images)}")
+
+
+@app.command()
+def ajuda(
+    pergunta: Annotated[str, typer.Argument(help="Sua dúvida, em português.")],
+    model: Annotated[str, typer.Option(help="Modelo do Ollama.")] = "gpt-oss:20b",
+    url: Annotated[str | None, typer.Option(help="Endereço do servidor Ollama.")] = None,
+    num_ctx: Annotated[int, typer.Option(help="Tamanho do contexto (tokens).")] = 16384,
+    timeout: Annotated[float, typer.Option(help="Espera máxima pela resposta do modelo (s).")] = 900.0,
+    no_model: Annotated[
+        bool,
+        typer.Option("--no-model", help="Só mostra os trechos do manual, sem pedir a resposta ao modelo."),
+    ] = False,
+    offer: Annotated[
+        bool,
+        typer.Option(
+            "--offer/--no-offer", help="Depois da resposta, oferece executar a tarefa pelo agente local."
+        ),
+    ] = True,
+) -> None:
+    """Responde uma dúvida sobre o DMaker em português, com o modelo local e a busca no manual (sem internet).
+
+    A resposta cita a seção do manual. Se a dúvida é uma tarefa que o agente local já sabe fazer, oferece executá-la.
+    """
+    import os
+
+    from .agent.llm import OLLAMA_URL_ENV, OllamaChat
+    from .manual import files, service
+    from .manual.ask import answer_question, search_only, thinking_level
+    from .manual.search import cached_index
+
+    try:
+        index = cached_index(files.read_manual())
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    base_url = url or os.environ.get(OLLAMA_URL_ENV, "http://127.0.0.1:11434")
+    chat = OllamaChat(
+        model=model, base_url=base_url, num_ctx=num_ctx, timeout=timeout, think=thinking_level(model)
+    )
+    usable = not no_model and chat.is_alive() and chat.has_model()
+    if not no_model and not usable:
+        console.print(
+            f"[yellow]O Ollama não está no ar em {base_url} ou falta o modelo '{model}' "
+            f"(`ollama pull {model}`); mostro só os trechos do manual.[/yellow]"
+        )
+    try:
+        if usable:
+            with console.status("lendo o manual...", spinner="dots"):
+                answer = answer_question(pergunta, index, chat, ia_doc=files.read_ia_doc)
+        else:
+            answer = search_only(pergunta, index, ia_doc=files.read_ia_doc)
+    except (OSError, ValueError) as exc:
+        _fail(f"Erro de comunicação com o Ollama: {exc}")
+    console.print(answer.text, markup=False, highlight=False)
+    invented = service.invented_commands(answer.text) if usable else []
+    if invented:
+        console.print(
+            "\n[yellow]Atenção: o modelo citou comando(s) que a CLI não tem. Confira com "
+            "`dmaker COMANDO --help` ou na seção do manual:[/yellow]"
+        )
+        for command in invented:
+            console.print(f"  {command}", markup=False, highlight=False)
+    if answer.sources:
+        console.print("\n[bold]Seções do manual:[/bold]")
+        for source in answer.sources:
+            console.print(f"  {source.section}", markup=False, highlight=False)
+    if offer and usable and answer.task_id and sys.stdin.isatty():
+        _offer_agent(answer.task_id, pergunta, chat)
+
+
+def _offer_agent(task_id: str, question: str, chat) -> None:
+    """Pergunta se o agente local deve executar a tarefa do manual e, se a pessoa aceitar, abre a conversa."""
+    from .agent import AgentLoop, McpToolHost, ToolGate
+    from .agent.kits import BASE_TOOLS
+    from .agent.prompt import task_prompt
+    from .manual import service
+    from .pipeline.recipes import project_exists
+
+    offer = service.agent_offer(task_id)
+    if offer is None:
+        return
+    if not offer.runnable:
+        missing = ", ".join(offer.missing_tools)
+        console.print(
+            f"\nO agente local ainda não enxerga estas ferramentas da tarefa '{offer.title}': {missing}. "
+            "Siga o passo a passo do manual ou peça ao Claude."
+        )
+        return
+    if not typer.confirm(f"\nQuer que o agente local execute '{offer.title}' agora?", default=False):
+        return
+    tools = McpToolHost(allowed=list(dict.fromkeys([*BASE_TOOLS, *offer.tools])))
+    gate = ToolGate(schemas={}, policy=_TerminalConfirmation(), project_exists=project_exists)
+    loop = AgentLoop(
+        model=chat, tools=tools, system=task_prompt(offer.manual), on_event=_agent_on_event, gate=gate
+    )
+    message = f"Pedido do usuário: {question}\nSiga o manual da tarefa e pergunte o que faltar."
+    while message:
+        try:
+            with console.status("pensando...", spinner="dots"):
+                console.print(loop.ask(message), markup=False)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Erro de comunicação com o Ollama: {exc}[/red]")
+            return
+        try:
+            message = console.input("[bold]você>[/bold] (vazio encerra) ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            return
+
+
+# ---------- lote: vários vídeos de uma planilha ----------
+
+batch_app = typer.Typer(
+    help="Lote: um vídeo por linha de uma planilha (CSV, XLSX ou JSON) sobre um modelo de projeto.",
+    no_args_is_help=True,
+)
+app.add_typer(batch_app, name="batch")
+
+
+def _batch_service():
+    from .pipeline.batch import BatchService
+
+    return BatchService()
+
+
+def _batch_fail(exc: Exception) -> None:
+    """Erro do lote com a frase pronta; a validação que o causou vem junto, linha por linha."""
+    from .pipeline.batch import BatchInvalidError
+
+    if isinstance(exc, BatchInvalidError):
+        console.print(exc.validation.to_text(), markup=False, highlight=False, soft_wrap=True)
+    _fail(str(exc.args[0]) if isinstance(exc, KeyError) else str(exc))
+
+
+def _batch_errors() -> tuple[type[Exception], ...]:
+    from .domain.batch_sheet import SheetError
+    from .domain.templates import TemplateError
+    from .pipeline.batch import BatchBusyError, BatchError
+    from .pipeline.batch_state import BatchFileError, BatchNotFoundError
+
+    return (
+        SheetError,
+        TemplateError,
+        BatchError,
+        BatchBusyError,
+        BatchNotFoundError,
+        BatchFileError,
+        FileNotFoundError,
+    )
+
+
+def _parse_rows(rows: str | None) -> set[int] | None:
+    """ "2,4" -> {2, 4}; sem valor, todas as linhas do lote."""
+    if not rows:
+        return None
+    try:
+        return {int(item) for item in rows.replace(";", ",").split(",") if item.strip()}
+    except ValueError:
+        _fail(f'--rows inválido: "{rows}" (use números de vídeo separados por vírgula, ex.: 2,4)')
+        return None
+
+
+def _run_batch(name: str, rows: set[int] | None, force: bool) -> None:
+    service = _batch_service()
+    try:
+        report = service.run(name, rows=rows, force=force, log=_console_log)
+    except KeyboardInterrupt:
+        _fail(f"Interrompido. O que já saiu fica; retome com: dmaker batch resume {name}")
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if report.failed:
+        raise typer.Exit(code=1)
+
+
+@batch_app.command("validate")
+def batch_validate(
+    template: Annotated[str, typer.Argument(help="Nome do modelo (dmaker templates).")],
+    sheet: Annotated[Path, typer.Argument(help="Planilha: .csv, .xlsx ou .json, uma linha por vídeo.")],
+    name_column: Annotated[
+        str | None, typer.Option("--name-column", help="Coluna cujo texto dá nome ao arquivo de cada vídeo.")
+    ] = None,
+) -> None:
+    """Confere a planilha contra o modelo sem renderizar nada: campo faltando, arquivo inexistente, texto que
+    não cabe e travessão. Sai com erro se alguma linha tem problema."""
+    try:
+        validation = _batch_service().validate(template, sheet, name_column)
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(validation.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if not validation.ok:
+        raise typer.Exit(code=1)
+    console.print("[green]Planilha válida:[/green] todas as linhas podem ser renderizadas.")
+
+
+@batch_app.command("run")
+def batch_run(
+    template: Annotated[str, typer.Argument(help="Nome do modelo (dmaker templates).")],
+    sheet: Annotated[Path, typer.Argument(help="Planilha: .csv, .xlsx ou .json, uma linha por vídeo.")],
+    lote: Annotated[
+        str | None, typer.Option("--lote", help="Nome do lote (pasta em output/). Padrão: o da planilha.")
+    ] = None,
+    name_column: Annotated[
+        str | None, typer.Option("--name-column", help="Coluna cujo texto dá nome ao arquivo de cada vídeo.")
+    ] = None,
+    skip_invalid: Annotated[
+        bool, typer.Option("--skip-invalid", help="Segue sem as linhas com problema, em vez de parar.")
+    ] = False,
+    preview: Annotated[bool, typer.Option(help="Prévias rápidas em baixa resolução.")] = False,
+    preset: Annotated[str | None, typer.Option(help="Sobrescreve o formato de saída do modelo.")] = None,
+    replace: Annotated[
+        bool,
+        typer.Option(
+            help="Refaz um lote de mesmo nome a partir da planilha atual (o que não mudou não é refeito)."
+        ),
+    ] = False,
+) -> None:
+    """Valida, cria um projeto por linha e renderiza tudo em output/<lote>/. Ctrl+C interrompe; retome com
+    `dmaker batch resume`."""
+    service = _batch_service()
+    try:
+        batch = service.create(
+            template,
+            sheet,
+            name=lote,
+            name_column=name_column,
+            preview=preview,
+            preset=preset,
+            skip_invalid=skip_invalid,
+            replace=replace,
+        )
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    skipped = sum(1 for row in batch.rows if row.project is None)
+    console.print(
+        f"[green]Lote criado:[/green] {batch.name}, {len(batch.rows) - skipped} projeto(s) em projects/"
+        + (f", {skipped} linha(s) pulada(s)" if skipped else "")
+    )
+    _run_batch(batch.name, None, False)
+
+
+@batch_app.command("resume")
+def batch_resume(
+    lote: Annotated[str, typer.Argument(help="Nome do lote (dmaker batch status).")],
+    rows: Annotated[
+        str | None, typer.Option("--rows", help="Só estes vídeos (números da tabela), ex.: 2,4.")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Refaz também os vídeos que já estão prontos.")] = False,
+) -> None:
+    """Continua o lote: renderiza o que falta, o que falhou e o que mudou no projeto. O que já saiu e continua
+    igual não é refeito."""
+    _run_batch(lote, _parse_rows(rows), force)
+
+
+@batch_app.command("pause")
+def batch_pause(lote: Annotated[str, typer.Argument(help="Nome do lote.")]) -> None:
+    """Pede a um lote em andamento (em outra janela) que pare depois do vídeo que está renderizando."""
+    try:
+        _batch_service().pause(lote)
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    console.print(f"[green]Pausa pedida:[/green] {lote} para depois do vídeo em andamento.")
+
+
+@batch_app.command("status")
+def batch_status(
+    lote: Annotated[str | None, typer.Argument(help="Nome do lote. Sem ele, lista todos.")] = None,
+) -> None:
+    """Mostra o relatório de um lote (o que saiu, o que falhou e por quê) ou a lista de lotes."""
+    service = _batch_service()
+    try:
+        if lote:
+            console.print(service.report(lote).to_text(), markup=False, highlight=False, soft_wrap=True)
+            return
+        reports = service.reports()
+    except _batch_errors() as exc:
+        _batch_fail(exc)
+    if not reports:
+        console.print("Nenhum lote ainda. Use `dmaker batch run`.")
+        return
+    table = Table("lote", "modelo", "estado", "andamento")
+    for report in reports:
+        table.add_row(report.name, report.template, report.to_dict()["status_label"], report.summary())
+    console.print(table)
 
 
 # ---------- voz e narração ----------
@@ -954,9 +2005,10 @@ def voice_say(
         ),
     ] = True,
 ) -> None:
-    """Narra um texto. Sem --voice usa a voz padrão (Kokoro, rápida); clones e vozes projetadas usam o OmniVoice
-    (lento na CPU). O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo
-    com uma etiqueta de procedência (confira com `dmaker voice verify`)."""
+    """Narra um texto. Sem --voice usa a voz automática do OmniVoice (ou a de DMAKER_DEFAULT_VOICE); as vozes
+    prontas (dora, alex, santa) usam o Kokoro, rápido; clones e vozes projetadas usam o OmniVoice (lento na CPU).
+    O resultado de cada fala fica em cache. Toda fala sai com marca d'água inaudível e o arquivo com uma etiqueta
+    de procedência (confira com `dmaker voice verify`)."""
     import time
 
     from .pipeline.voices import build_synthesizer, speak
@@ -1532,6 +2584,43 @@ def audio_isolate(
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
 
 
+# ---------- efeitos sonoros ----------
+
+sfx_app = typer.Typer(
+    help="Efeitos sonoros curtos (whoosh, pop, clique...) para pôr num instante do vídeo: ver e gerar a biblioteca.",
+    no_args_is_help=True,
+)
+app.add_typer(sfx_app, name="sfx")
+
+
+@sfx_app.command("list")
+def sfx_list() -> None:
+    """Lista os sons da biblioteca (nomes que a spec aceita em `audio.sfx` e em `sound`)."""
+    from .sfx import library_names, library_path, sound_def
+
+    table = Table("Som", "Duração", "No disco", "Para quê")
+    for name in library_names():
+        definition = sound_def(name)
+        present = "sim" if library_path(name).exists() else "não (rode dmaker sfx build)"
+        table.add_row(name, f"{definition.duration:.2f} s", present, definition.description)
+    console.print(table)
+
+
+@sfx_app.command("build")
+def sfx_build(
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out", help="Pasta de saída (padrão: assets/sfx, a biblioteca do DMaker)."),
+    ] = None,
+) -> None:
+    """Sintetiza de novo os sons da biblioteca (determinístico: o mesmo código gera os mesmos arquivos) e o
+    LICENSES. Só é preciso ao mudar uma receita em `sfx/synth.py`."""
+    from .sfx import write_library
+
+    for path in write_library(out_dir):
+        console.print(f"[green]gravado[/green] {path}", highlight=False, soft_wrap=True)
+
+
 # ---------- modelos ----------
 
 models_app = typer.Typer(
@@ -1738,6 +2827,10 @@ FIT_HELP = (
     "Quando a fala traduzida não cabe no tempo: voz (acelera a voz, o padrão), video (estica o vídeo "
     "naquele trecho, até 1,3x) ou misto (acelera a voz até 1,15x e estica o vídeo no resto)."
 )
+OVERWRITE_HELP = (
+    "Prepara de novo mesmo que o projeto .dub.json já exista, apagando as traduções revisadas e as falas "
+    "travadas. Sem isto, o comando recusa."
+)
 
 
 def _check_fit(fit: str) -> None:
@@ -1828,26 +2921,32 @@ def _prepare_dub(
     project_path: Path | None,
     fit: str = "voz",
     num_speakers: int | None = None,
+    overwrite: bool = False,
 ) -> tuple:
+    from .domain.dub import DubProjectExists
     from .pipeline.dubbing import default_project_path
 
     if speaker is not None and speaker not in SPEAKER_MODES:
         _fail(f"Modo de falante {speaker!r} inválido; use {' ou '.join(SPEAKER_MODES)}.")
     _check_fit(fit)
     path = project_path or default_project_path(file, target)
-    project = service.prepare(
-        file,
-        target,
-        source,
-        speaker_mode=speaker,
-        voice=voice,
-        keep_original_db=keep_original,
-        glossary=glossary or [],
-        brand=brand,
-        project_path=path,
-        fit_mode=fit,
-        num_speakers=num_speakers,
-    )
+    try:
+        project = service.prepare(
+            file,
+            target,
+            source,
+            speaker_mode=speaker,
+            voice=voice,
+            keep_original_db=keep_original,
+            glossary=glossary or [],
+            brand=brand,
+            project_path=path,
+            fit_mode=fit,
+            num_speakers=num_speakers,
+            overwrite=overwrite,
+        )
+    except DubProjectExists as exc:
+        _fail(f"{exc} Use --overwrite para preparar de novo mesmo assim.")
     return project, path
 
 
@@ -1872,6 +2971,7 @@ def dub_prepare(
         typer.Option(help="Onde gravar o projeto (padrão: output/dublagem/<nome>.<idioma>.dub.json)."),
     ] = None,
     fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
+    overwrite: Annotated[bool, typer.Option("--overwrite", help=OVERWRITE_HELP)] = False,
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Separa a voz, transcreve, parte em frases e traduz; grava o projeto `.dub.json` para você revisar.
@@ -1899,6 +2999,7 @@ def dub_prepare(
             project,
             fit,
             speakers,
+            overwrite,
         )
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
@@ -2033,6 +3134,7 @@ def dub_run(
     steps: Annotated[int | None, typer.Option(help="Passos de síntese do OmniVoice (padrão 16).")] = None,
     draft: Annotated[bool, typer.Option(help="Rascunho: 8 passos no OmniVoice (metade do tempo).")] = False,
     fit: Annotated[str, typer.Option(help=FIT_HELP)] = "voz",
+    overwrite: Annotated[bool, typer.Option("--overwrite", help=OVERWRITE_HELP)] = False,
     device: Annotated[str, typer.Option(help="auto | cpu | cuda")] = "auto",
 ) -> None:
     """Prepara e gera a dublagem de uma vez (é o que `dmaker dub ARQUIVO --to en` faz).
@@ -2057,6 +3159,7 @@ def dub_run(
             project,
             fit,
             speakers,
+            overwrite,
         )
         _print_segments(dub)
         result = service.render(dub, out, steps=DRAFT_STEPS if draft and steps is None else steps)

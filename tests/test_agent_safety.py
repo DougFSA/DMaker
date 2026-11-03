@@ -1,0 +1,570 @@
+"""Proteções do agente local: esquema da ferramenta, caminho inventado e confirmação do usuário."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+
+import dmaker.mcp_server as mcp_server
+from dmaker.agent.llm import Reply, ToolCall
+from dmaker.agent.loop import AgentLoop
+from dmaker.agent.safety import (
+    CONFIRMATION_RULES,
+    DUB_OVERWRITE_FLAG,
+    REDOES_EXISTING_PROJECT,
+    REPLACES_EXISTING_DUB_PROJECT,
+    ApproveAll,
+    ConfirmationRequest,
+    DenyAll,
+    KnownPaths,
+    ToolGate,
+    ask_user_about_paths,
+    dub_project_target,
+    input_paths,
+    looks_like_file_path,
+    missing_paths,
+    validate_arguments,
+)
+from dmaker.agent.tools import ToolSpec
+from dmaker.pipeline.dubbing import default_project_path
+
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name_or_path": {"type": "string"},
+        "preview": {"type": "boolean", "default": False},
+        "intensity": {"enum": ["suave", "normal", "agressiva"]},
+        "cut_id": {"type": "integer"},
+        "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+    },
+    "required": ["name_or_path"],
+}
+
+
+# ---------- esquema ----------
+
+
+def test_valid_arguments_have_no_problems():
+    assert validate_arguments(SCHEMA, {"name_or_path": "meu-video", "preview": True, "limit": None}) == []
+
+
+def test_missing_required_argument_is_said_in_simple_portuguese():
+    problems = validate_arguments(SCHEMA, {})
+
+    assert problems == ["falta o argumento 'name_or_path'"]
+
+
+def test_wrong_type_says_what_was_expected_and_what_came():
+    problems = validate_arguments(SCHEMA, {"name_or_path": "x", "preview": "sim", "cut_id": 2.5})
+
+    assert "o argumento 'preview' deve ser sim ou não (true ou false), mas veio texto" in problems
+    assert any("'cut_id' deve ser número inteiro" in problem for problem in problems)
+
+
+def test_value_outside_the_allowed_list_names_the_options():
+    problems = validate_arguments(SCHEMA, {"name_or_path": "x", "intensity": "forte"})
+
+    assert problems == ["o argumento 'intensity' deve ser um destes valores: suave, normal, agressiva"]
+
+
+def test_unknown_argument_lists_the_accepted_ones():
+    problems = validate_arguments(SCHEMA, {"name_or_path": "x", "projeto": "y"})
+
+    assert problems and "'projeto' não existe nesta ferramenta" in problems[0] and "cut_id" in problems[0]
+
+
+def test_union_type_error_is_not_a_json_schema_dump():
+    problems = validate_arguments(SCHEMA, {"name_or_path": "x", "limit": "dez"})
+
+    assert problems == ["o argumento 'limit' tem um tipo que a ferramenta não aceita"]
+
+
+# ---------- caminhos ----------
+
+
+def test_looks_like_file_path_accepts_drives_absolute_paths_and_media_extensions_only():
+    assert looks_like_file_path("C:/videos/a.mp4") and looks_like_file_path("D:\\x\\y")
+    assert looks_like_file_path("/home/a") and looks_like_file_path("gravacao.mp4")
+    assert not looks_like_file_path("Bem-vindo ao DMaker.") and not looks_like_file_path("dora")
+
+
+def test_input_paths_reads_path_arguments_and_files_inside_params():
+    found = input_paths(
+        {
+            "src": "C:/a.mp4",
+            "paths": ["C:/b.mp4", "C:/c.png"],
+            "params": {"titulo": "Olá", "print": "prints/x.png", "nomes": ["Ana & Carlos"]},
+            "name": "projeto",
+        }
+    )
+
+    assert found == ["C:/a.mp4", "C:/b.mp4", "C:/c.png", "prints/x.png"]
+
+
+def test_structured_arguments_only_count_src_and_absolute_paths():
+    found = input_paths({"op": {"type": "insert", "segment": {"src": "foto.png", "text": "ver notas.txt"}}})
+
+    assert found == ["foto.png"]
+
+
+def test_missing_paths_ignores_what_exists_and_what_the_user_or_a_tool_already_wrote():
+    known = KnownPaths()
+    known.remember("o vídeo está em D:\\Videos\\Aula.mp4")
+    known.remember('{"files": ["C:\\\\saidas\\\\pronto.mp4"]}')
+    exists = {"C:/real.mp4"}.__contains__
+
+    absent = missing_paths(
+        {"paths": ["C:/real.mp4", "d:/videos/aula.mp4", "C:/saidas/pronto.mp4", "C:/inventado.mp4"]},
+        exists,
+        known,
+    )
+
+    assert absent == ["C:/inventado.mp4"]
+
+
+def test_the_message_for_an_invented_path_tells_the_model_to_ask_the_user():
+    text = ask_user_about_paths(["C:/inventado.mp4"])
+
+    assert text.startswith("erro:") and "pergunte ao usuário" in text and "C:/inventado.mp4" in text
+
+
+# ---------- confirmação ----------
+
+
+def gate(policy=None, existing=(), projects=(), schemas=None):
+    return ToolGate(
+        schemas=schemas or {},
+        policy=policy or DenyAll(),
+        exists=set(existing).__contains__,
+        project_exists=set(projects).__contains__,
+    )
+
+
+def test_preview_render_goes_through_but_the_final_render_asks_first():
+    asked = ApproveAll()
+    g = gate(asked)
+
+    assert g.check("render_project", {"name_or_path": "x", "preview": True}) is None
+    assert asked.asked == []
+    assert g.check("render_project", {"name_or_path": "x"}) is None
+    assert [r.tool for r in asked.asked] == ["render_project"]
+
+
+def test_a_refused_confirmation_blocks_the_call_and_tells_the_model_not_to_retry():
+    text = gate(DenyAll()).check("render_project", {"name_or_path": "x"})
+
+    assert text is not None and "não autorizou" in text and "Não execute esta ação" in text
+
+
+def test_every_confirmation_rule_has_a_reason_and_the_expected_tools_are_listed():
+    assert all(rule.reason for rule in CONFIRMATION_RULES)
+    listed = {rule.tool for rule in CONFIRMATION_RULES}
+    assert {
+        "render_project",
+        "export_project",
+        "quick_edit",
+        "dub_render",
+        "clone_voice",
+        "run_batch",
+    } <= listed
+
+
+def test_an_existing_project_name_asks_before_overwriting():
+    asked = ApproveAll()
+    g = gate(asked, projects={"meu-video"})
+
+    g.check("new_from_template", {"template": "t", "name": "meu-video", "params": {}})
+    g.check("new_from_template", {"template": "t", "name": "novo", "params": {}})
+
+    assert len(asked.asked) == 1 and "já existe" in asked.asked[0].question
+
+
+def test_an_existing_output_file_asks_before_overwriting():
+    asked = ApproveAll()
+    g = gate(asked, existing={"C:/saida.wav"})
+
+    g.check("synthesize_speech", {"text": "oi", "out": "C:/saida.wav"})
+    g.check("synthesize_speech", {"text": "oi", "out": "C:/nova.wav"})
+
+    assert len(asked.asked) == 1 and "C:/saida.wav" in asked.asked[0].question
+
+
+def test_removing_content_and_pronunciations_asks_but_editing_does_not():
+    asked = ApproveAll()
+    g = gate(asked)
+
+    g.check("edit_project", {"name": "x", "op": {"type": "set_field", "path": "a", "value": 1}})
+    g.check("edit_project", {"name": "x", "op": {"type": "remove", "index": 0}})
+    g.check("edit_project", {"name": "x", "op": {"type": "overlay_remove", "index": 0}})
+    g.check("pronunciation", {"action": "remove", "term": "x"})
+    g.check("pronunciation", {"action": "list"})
+
+    assert [r.tool for r in asked.asked] == ["edit_project", "edit_project", "pronunciation"]
+
+
+CUT_TOOLS = ("autocut", "cut_pauses_and_caption")
+REDO_QUESTION = 'Posso refazer o projeto "meu-corte", apagando o corte anterior?'
+
+
+def cut_call(**extra):
+    return {"source": "a.mp4", "name": "meu-corte", **extra}
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_redoing_a_cut_asks_when_the_flag_is_on_and_the_project_exists_and_names_it(tool):
+    asked = ApproveAll()
+    g = gate(asked, existing={"a.mp4"}, projects={"meu-corte"})
+
+    assert g.check(tool, cut_call(overwrite=True)) is None
+
+    (request,) = asked.asked
+    assert request.tool == tool and request.kind == "action"
+    assert request.question == REDO_QUESTION
+    assert "—" not in request.question  # regra da marca: sem travessão no texto que a pessoa lê
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_redoing_a_cut_asks_nothing_when_the_flag_is_on_but_the_project_does_not_exist(tool):
+    """Era o falso positivo: `overwrite=true` num nome livre perguntava se podia apagar um corte que não há."""
+    asked = ApproveAll()
+    g = gate(asked, existing={"a.mp4"}, projects={"outro-projeto"})
+
+    assert g.check(tool, cut_call(overwrite=True)) is None
+
+    assert asked.asked == []
+
+
+@pytest.mark.parametrize("tool", CUT_TOOLS)
+def test_a_cut_without_the_flag_never_asks_even_when_the_project_exists(tool):
+    """Sem a flag o servidor recusa sozinho o nome que já existe, então nada é apagado e não há o que perguntar."""
+    asked = ApproveAll()
+    g = gate(asked, existing={"a.mp4"}, projects={"meu-corte"})
+
+    assert g.check(tool, cut_call()) is None
+    assert g.check(tool, cut_call(overwrite=False)) is None
+
+    assert asked.asked == []
+
+
+def test_a_gate_that_cannot_tell_which_projects_exist_asks_on_the_safe_side():
+    asked = ApproveAll()
+    g = ToolGate(schemas={}, policy=asked, exists={"a.mp4"}.__contains__)  # nenhum `project_exists` injetado
+
+    g.check("autocut", cut_call(overwrite=True))
+    g.check("autocut", cut_call())
+
+    assert [r.question for r in asked.asked] == [REDO_QUESTION]
+
+
+def test_only_a_real_true_turns_the_flag_on_and_a_name_is_needed_to_ask_about_a_project():
+    g = gate(ApproveAll(), existing={"a.mp4"}, projects={"meu-corte", ""})
+
+    assert g.confirmations("autocut", cut_call(overwrite="true")) == []
+    assert g.confirmations("autocut", cut_call(overwrite=1)) == []
+    assert g.confirmations("autocut", {"source": "a.mp4", "overwrite": True}) == []
+    assert g.confirmations("autocut", {"source": "a.mp4", "name": "", "overwrite": True}) == []
+    assert len(g.confirmations("autocut", cut_call(overwrite=True))) == 1
+
+
+def test_replace_is_not_a_flag_of_the_cut_tools_anymore():
+    """Nenhuma das duas ferramentas tem esse parâmetro (só o `run_batch`, que pergunta sempre): era código morto."""
+    g = gate(ApproveAll(), existing={"a.mp4"}, projects={"meu-corte"})
+
+    assert g.confirmations("autocut", cut_call(replace=True)) == []
+    assert g.confirmations("cut_pauses_and_caption", cut_call(replace=True)) == []
+    assert len(g.confirmations("run_batch", {"template": "t", "sheet": "p.csv", "replace": True})) == 1
+
+
+def test_a_refused_redo_blocks_the_call_and_says_which_project_stays_untouched():
+    g = gate(DenyAll(), existing={"a.mp4"}, projects={"meu-corte"})
+
+    text = g.check("autocut", cut_call(overwrite=True))
+
+    assert text is not None and "não autorizou" in text and '"meu-corte"' in text
+    assert "Não execute esta ação" in text
+
+
+def test_the_redo_table_only_lists_tools_that_have_the_name_and_the_flag():
+    """Contrato com o servidor MCP: a tabela fala dos argumentos que as ferramentas têm de verdade."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+
+    for tool, (name_argument, flag) in REDOES_EXISTING_PROJECT.items():
+        properties = tools[tool].input_schema["properties"]
+        assert properties[name_argument]["type"] == "string"
+        assert properties[flag]["type"] == "boolean" and properties[flag]["default"] is False
+        assert "replace" not in properties
+
+
+VIDEO = "C:/v/aula.mp4"
+
+
+def default_dub_project(language: str = "en") -> str:
+    """Onde o servidor MCP grava a dublagem de `VIDEO` quando a chamada não diz (a pasta de saída é a do teste)."""
+    return str(default_project_path(Path(VIDEO), language))
+
+
+def test_preparing_the_dubbing_of_a_video_that_already_has_one_asks_before_replacing_it():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project()})
+
+    assert g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": True}) is None
+
+    (request,) = asked.asked
+    assert request.tool == "dub_prepare" and request.kind == "action"
+    assert default_dub_project() in request.question and "para en" in request.question
+    assert "apaga as traduções revisadas" in request.question and request.question.endswith("por cima?")
+    assert "—" not in request.question  # regra da marca: sem travessão no texto que a pessoa lê
+
+
+def test_an_explicit_dubbing_project_that_already_exists_asks_before_replacing_it():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, "C:/dub/minha.dub.json"})
+
+    g.check(
+        "dub_prepare",
+        {"path": VIDEO, "target_language": "en", "project": "C:/dub/minha.dub.json", "overwrite": True},
+    )
+
+    assert [r.question for r in asked.asked] == [
+        "Já existe uma dublagem deste vídeo para en (C:/dub/minha.dub.json), e refazê-la apaga as traduções "
+        "revisadas. Posso refazê-la por cima?"
+    ]
+
+
+def test_the_explicit_project_is_the_destination_even_when_the_default_one_exists():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project()})
+
+    g.check(
+        "dub_prepare",
+        {"path": VIDEO, "target_language": "en", "project": "C:/dub/outra.dub.json", "overwrite": True},
+    )
+
+    assert asked.asked == []  # o padrão não será tocado: o destino é o outro arquivo
+
+
+def test_preparing_a_dubbing_with_no_project_on_disk_asks_nothing():
+    asked = ApproveAll()
+    g = gate(asked, existing={VIDEO, default_dub_project("es")})  # há uma dublagem, mas para outro idioma
+
+    on = {
+        "path": VIDEO,
+        "target_language": "en",
+        "overwrite": True,
+    }  # a flag ligada num destino livre é inofensiva
+    assert g.check("dub_prepare", on) is None
+    assert g.check("dub_prepare", {**on, "project": "C:/dub/nova.json"}) is None
+
+    assert asked.asked == []
+
+
+@pytest.mark.parametrize(
+    "flag", [{}, {"overwrite": False}, {"overwrite": None}, {"overwrite": "true"}, {"overwrite": 1}]
+)
+def test_preparing_a_dubbing_without_a_real_true_flag_never_asks_even_when_it_exists(flag):
+    """Sem a flag a ferramenta recusa sozinha o projeto que já existe: nada é substituído, não há o que perguntar."""
+    g = gate(ApproveAll(), existing={VIDEO, default_dub_project()})
+
+    assert g.confirmations("dub_prepare", {"path": VIDEO, "target_language": "en", **flag}) == []
+
+
+def test_the_dub_prepare_flag_is_a_boolean_of_the_mcp_tool_that_defaults_to_false():
+    """Contrato com o servidor MCP: o gate pergunta pelo argumento que a ferramenta tem de verdade."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    properties = tools["dub_prepare"].input_schema["properties"]
+
+    assert (
+        properties[DUB_OVERWRITE_FLAG]["type"] == "boolean"
+        and properties[DUB_OVERWRITE_FLAG]["default"] is False
+    )
+    assert {"dub_prepare"} == set(REPLACES_EXISTING_DUB_PROJECT)
+
+
+def test_a_flag_written_as_text_is_stopped_by_the_schema_before_it_could_reach_the_server():
+    """O servidor aceitaria "true" como sim; o esquema da ferramenta barra antes, e o gate nem chega a decidir."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.server.list_tools())}
+    g = ToolGate(
+        schemas={"dub_prepare": tools["dub_prepare"].input_schema},
+        policy=ApproveAll(),
+        exists={VIDEO, default_dub_project()}.__contains__,
+    )
+
+    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": "true"})
+
+    assert text is not None and text.startswith("erro:") and "'overwrite' deve ser sim ou não" in text
+
+
+def test_the_dubbing_destination_comes_from_the_same_function_the_mcp_server_uses():
+    """O gate não repete a regra do caminho: se o servidor mudar a pasta ou o nome, a pergunta acompanha."""
+    arguments = {"path": VIDEO, "target_language": "en"}
+
+    assert dub_project_target(arguments) == str(default_project_path(Path(VIDEO), "en"))
+    assert dub_project_target({**arguments, "project": "x.dub.json"}) == "x.dub.json"
+    assert dub_project_target({**arguments, "project": ""}) == str(default_project_path(Path(VIDEO), "en"))
+    assert dub_project_target({"path": VIDEO}) is None  # sem idioma a chamada nem chega a gravar
+
+
+def test_a_refused_dubbing_replacement_blocks_the_call_and_tells_the_model_not_to_retry():
+    g = gate(DenyAll(), existing={VIDEO, default_dub_project()})
+
+    text = g.check("dub_prepare", {"path": VIDEO, "target_language": "en", "overwrite": True})
+
+    assert text is not None and "não autorizou" in text and "Já existe uma dublagem" in text
+    assert "Não execute esta ação" in text
+
+
+def test_other_dubbing_tools_keep_their_own_rules():
+    asked = ApproveAll()
+    g = gate(asked, existing={default_dub_project()})
+
+    g.check("dub_get", {"project": default_dub_project()})
+    g.check("dub_update_segment", {"project": default_dub_project(), "segment_id": "s1", "text": "Hi"})
+
+    assert asked.asked == []  # editar uma fala do projeto que existe não o refaz
+
+
+def test_cloning_a_voice_needs_the_explicit_authorization_of_the_owner():
+    class Spy:
+        def __init__(self):
+            self.requests: list[ConfirmationRequest] = []
+
+        def confirm(self, request):
+            self.requests.append(request)
+            return False
+
+    spy = Spy()
+    text = gate(spy, existing={"C:/v.wav"}).check(
+        "clone_voice", {"name": "joao", "reference_audio": "C:/v.wav"}
+    )
+
+    assert text is not None and "não autorizou" in text
+    assert spy.requests[0].kind == "voice_consent"
+    assert "autorizou o uso" in spy.requests[0].question and "joao" in spy.requests[0].question
+
+
+def test_the_gate_checks_schema_then_paths_then_confirmation_in_that_order():
+    asked = ApproveAll()
+    g = gate(
+        asked,
+        schemas={
+            "render_project": {
+                "type": "object",
+                "properties": {"name_or_path": {}},
+                "required": ["name_or_path"],
+            }
+        },
+    )
+
+    assert "falta o argumento 'name_or_path'" in g.check("render_project", {})
+    assert asked.asked == []
+    assert "pergunte ao usuário" in g.check("probe_media", {"paths": ["C:/inventado.mp4"]})
+
+
+# ---------- no loop ----------
+
+
+class Script:
+    def __init__(self, replies):
+        self.replies = list(replies)
+
+    def chat(self, messages, tools):
+        return self.replies.pop(0)
+
+
+class Host:
+    def __init__(self):
+        self.calls = []
+
+    def specs(self):
+        return [
+            ToolSpec(
+                "render_project",
+                "r",
+                {
+                    "type": "object",
+                    "properties": {"name_or_path": {"type": "string"}, "preview": {"type": "boolean"}},
+                    "required": ["name_or_path"],
+                },
+            )
+        ]
+
+    def call(self, name, arguments):
+        self.calls.append((name, arguments))
+        return "feito"
+
+
+def run(policy, arguments):
+    host = Host()
+    events = []
+    loop = AgentLoop(
+        model=Script([Reply("", [ToolCall("render_project", arguments)]), Reply("fim")]),
+        tools=host,
+        system="s",
+        on_event=lambda kind, data: events.append((kind, data)),
+        gate=ToolGate(schemas={}, policy=policy),
+    )
+    loop.ask("renderiza o x")
+    return host, events, loop
+
+
+def test_the_loop_never_runs_a_refused_tool_and_reports_it_as_an_event():
+    host, events, loop = run(DenyAll(), {"name_or_path": "x"})
+
+    assert host.calls == []
+    assert [kind for kind, _ in events if kind == "tool_blocked"] == ["tool_blocked"]
+    tool_message = next(m for m in loop._messages if m["role"] == "tool")
+    assert "não autorizou" in tool_message["content"]
+
+
+def test_the_loop_runs_the_tool_once_the_user_approves():
+    host, _, _ = run(ApproveAll(), {"name_or_path": "x"})
+
+    assert host.calls == [("render_project", {"name_or_path": "x"})]
+
+
+def test_the_loop_returns_schema_errors_to_the_model_instead_of_calling():
+    host, _, loop = run(ApproveAll(), {"preview": True})
+
+    assert host.calls == []
+    tool_message = next(m for m in loop._messages if m["role"] == "tool")
+    assert "falta o argumento 'name_or_path'" in tool_message["content"]
+
+
+class ListingHost:
+    """Devolve um texto com o caminho de um arquivo, como `list_projects` ou o fim de um render fariam."""
+
+    def __init__(self):
+        self.calls = []
+
+    def specs(self):
+        return [ToolSpec("probe_media", "p", {"type": "object", "properties": {"paths": {"type": "array"}}})]
+
+    def call(self, name, arguments):
+        self.calls.append((name, arguments))
+        return json.dumps({"output": "C:\\saidas\\pronto.mp4"})
+
+
+def test_a_path_that_a_previous_tool_listed_is_not_treated_as_invented():
+    host = ListingHost()
+    loop = AgentLoop(
+        model=Script(
+            [
+                Reply("", [ToolCall("probe_media", {"paths": []})]),
+                Reply("", [ToolCall("probe_media", {"paths": ["C:/saidas/pronto.mp4"]})]),
+                Reply("", [ToolCall("probe_media", {"paths": ["C:/outra/inventada.mp4"]})]),
+                Reply("fim"),
+            ]
+        ),
+        tools=host,
+        system="s",
+        gate=ToolGate(schemas={}, policy=ApproveAll()),
+    )
+
+    loop.ask("vê o que tem aí")
+
+    assert [arguments["paths"] for _, arguments in host.calls] == [[], ["C:/saidas/pronto.mp4"]]
+    last_tool_message = [m for m in loop._messages if m["role"] == "tool"][-1]
+    assert "pergunte ao usuário" in last_tool_message["content"]

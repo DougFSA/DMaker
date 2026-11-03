@@ -17,7 +17,7 @@
  *   init()      chamado por app.js ao terminar de carregar o estado
  *   onShow()    chamado por app.js quando a aba Voz aparece (atualiza arquivos do projeto, vozes e projetos salvos)
  *   pure        parseGlossary, parseKeepDb, parseSpeakerCount, segmentEdits, describeResult, describeStretch, describeStems,
- *               statusLabel, segmentRowsHtml
+ *               statusLabel, segmentRowsHtml, overwriteQuestion, startPrepare
  */
 (function () {
   const UPLOAD_VALUE = "upload";
@@ -279,6 +279,27 @@
     return saved;
   }
 
+  /** O texto do `confirm()` quando a dublagem já existe: o que o servidor disse (com o caminho) e a pergunta. */
+  function overwriteQuestion(error) {
+    const said = error && error.message ? error.message : "Já existe uma dublagem preparada para este arquivo e idioma.";
+    return `${said}\n\nPreparar de novo mesmo assim? Isso não tem como desfazer.`;
+  }
+
+  /**
+   * Pede o job de preparar; se a dublagem já existe o servidor recusa (409) e a pessoa decide ali, com o que se perde
+   * à vista. Só o sim repete o pedido com `overwrite`; `null` quer dizer que ela desistiu. O envio (`post`) e a pergunta
+   * (`ask`) entram por parâmetro: o teste não precisa de servidor nem de janela.
+   */
+  async function startPrepare(body, post, ask) {
+    try {
+      return await post(body);
+    } catch (err) {
+      if (!err || err.status !== 409) throw err;
+      if (!ask(overwriteQuestion(err))) return null;
+      return post({ ...body, overwrite: true });
+    }
+  }
+
   async function prepare() {
     const source = chosenSource();
     if (!source) return;
@@ -298,7 +319,14 @@
     el("dub-result").hidden = true;
     updateButtons();
     try {
-      const project = await runJob(() => api.post("/api/dub/prepare", body), "dub-prepare-progress", "dub-prepare-fill", "dub-prepare-label");
+      // a pergunta de sobrescrever vem antes do andamento: o job só existe depois do sim
+      const started = await startPrepare(
+        body,
+        (payload) => api.post("/api/dub/prepare", payload),
+        (text) => window.confirm(text),
+      );
+      if (!started) return;
+      const project = await runJob(() => Promise.resolve(started), "dub-prepare-progress", "dub-prepare-fill", "dub-prepare-label");
       dub.entry = source.entry;
       showProject(project);
       loadSavedProjects();
@@ -525,6 +553,8 @@
       describeStems,
       statusLabel,
       segmentRowsHtml,
+      overwriteQuestion,
+      startPrepare,
     },
   };
 })();

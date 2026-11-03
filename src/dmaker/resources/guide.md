@@ -32,6 +32,82 @@ normal com placeholders `{{nome}}`, listas via `$for` e trechos condicionais via
 Só escreva a spec na mão (`save_project`) quando nenhum template cobrir o pedido: aí ainda assim comece
 copiando o template mais próximo.
 
+### Vídeo explicativo: o rosto num quadro embaixo e a área de cima livre (template `explicativo`)
+
+Formato de reel (1080x1920) para quem explica um assunto: a gravação do apresentador num quadro de cantos
+arredondados embaixo, uma área livre em cima para a imagem ou o infográfico de cada assunto, legenda curta
+sobre a parte de baixo do quadro e o fundo da tela trocando a cada assunto. O quadro do rosto e a área de
+cima ficam dentro da zona segura do Reels (nada importante sob a interface do app).
+
+```
+new_from_template("explicativo", "meu-explicativo", {
+  "gravacao": "D:/videos/gravacao.mp4",
+  "assuntos": [
+    {"fim": 20, "fundo": "escuro", "imagem": "D:/imagens/assunto1.png"},
+    {"fim": 40, "fundo": "bege",   "imagem": "D:/imagens/assunto2.png"},
+    {"fim": 60, "fundo": "claro"}
+  ]
+})
+```
+
+Na CLI: `dmaker new-from-template explicativo meu-explicativo --param gravacao=D:/videos/gravacao.mp4
+--params-json '{"assuntos": [{"fim": 20, "fundo": "escuro", "imagem": "D:/imagens/assunto1.png"}, ...]}'`.
+
+- **Assuntos**: em ordem e emendados (o início de cada um é o fim do anterior; `inicio` é opcional e, se
+  dado, precisa bater com esse fim; o primeiro começa em 0). O fim do último é a duração do vídeo e
+  deve ser a duração da gravação: gravação mais curta gera aviso. `fundo`: `escuro`, `claro`, `bege`, uma
+  cor `#RRGGBB`, uma chave do tema ou o caminho de uma imagem (preenche a tela); sem ele os fundos se
+  alternam. `imagem` (opcional) entra na região `topo` durante o assunto, inteira e centrada, sem distorcer.
+- **Sons do assunto** (`sons`, opcional): lista de `{som, em, volume}` com efeitos da biblioteca (tabela em
+  "Efeitos sonoros"), por exemplo `"sons": [{"som": "whoosh"}, {"som": "ding", "em": 8, "volume": 0.8}]`. `em`
+  são os segundos desde o começo do assunto (0 se omitido; não passa do fim dele) e `volume` é o mesmo de
+  `audio.sfx` (0 a 1,5; 1 é o nível padrão). O modelo os põe em `audio.sfx` no tempo do vídeo (início do
+  assunto mais `em`), então cabem o som de entrada e um som no meio, como o "ding" do contador. Nome que não
+  é da biblioteca, ou `em` fora do assunto, falha dizendo o assunto e os nomes disponíveis; sem `sons` a spec
+  sai como sempre. A receita `build_explainer_video` aceita o mesmo campo em `subjects`.
+- **A gravação é uma sobreposição de vídeo só**, do começo ao fim, com o áudio dela: a troca de fundo
+  nunca corta a fala. Gravação horizontal ou vertical: o quadro preenche cortando o excesso, sem distorcer;
+  `foco` ([x, y], padrão [0.5, 0.3]) diz o ponto que a janela do corte mantém visível (o rosto de uma
+  gravação vertical fica no terço de cima; na horizontal só o x conta).
+- `legendas` (padrão true; `false` tira) e `legenda_modo` (`rounded` padrão, `karaoke`, `classic`, `boxed`);
+  `marca` (opcional) traz cores e estilo de uma marca.
+- Fundos sem texto são cartões `flat` (cor lisa, sem os brilhos do tema): `{"type": "card", "flat": true,
+  "background": "#F1E8D8"}` não pede `title`.
+
+#### Regiões nomeadas (`regions`)
+
+A spec pode declarar retângulos nomeados do quadro, em fração (0 a 1) da largura e da altura, com `x`/`y` no
+CENTRO (a mesma convenção de `x`/`y` das sobreposições). Sobreposições de texto, imagem e vídeo se encaixam
+numa região por nome, no lugar de `position`/`x`/`y`/`width`, e quem monta um infográfico ou uma composição
+aponta para a mesma região, sem conta de pixel. O modelo `explicativo` declara duas:
+
+```json
+"regions": {
+  "topo":  { "x": 0.5, "y": 0.2575, "width": 0.7222, "height": 0.265 },
+  "rosto": { "x": 0.5, "y": 0.6,    "width": 0.8889, "height": 0.36 }
+},
+"overlays": [
+  { "type": "image", "src": "grafico.png", "region": "topo", "start": 0, "end": 20 },
+  { "type": "text", "text": "Três passos", "region": "topo", "start": 20, "end": 40 },
+  { "type": "video", "src": "gravacao.mp4", "region": "rosto", "shape": "rounded", "radius": 0.05 }
+]
+```
+
+- **Imagem**: cabe inteira na região, centrada, sem distorcer (a largura vem da região; `position` e `width`
+  são ignorados). **Texto**: centrado na região e quebrado na largura dela (`style.align` left/right encosta
+  na borda; `style.max_width` só pode estreitar). **Vídeo**: sem `aspect`, o quadro é a região inteira e o
+  vídeo a preenche cortando o excesso (`focus` escolhe o ponto); com `aspect` (ou `shape: circle`), o maior
+  quadro dessa proporção que cabe nela.
+- `region` junto de `x`/`y` (e, no texto, de `position`) é erro: a região já define o lugar. Nome que o projeto
+  não declara em `regions` é erro na validação, e a mensagem lista as regiões que existem. Projeto sem
+  `regions` não muda em nada.
+- Quem desenha dentro de uma região pede os pixels dela a `dmaker.domain.regions.region_pixels(region, largura,
+  altura)`; a resolução de `region` em x/y/width está em `resolve_region`.
+- Medidas do `explicativo` no Reels (1080x1920, zona segura de 220 px em cima, 420 embaixo, 60 à esquerda e 150
+  à direita): `topo` fica dentro da zona segura (x 150 a 930, y 240 a 749); `rosto` é um quadro de 960x691 px
+  centrado, terminando em y 1497, acima da faixa da interface (ele vai até a lateral direita, sob a coluna de
+  botões, mas só o fundo da gravação cai ali). A legenda (`captions.style.y` 0.72) fica dentro do quadro.
+
 ## Spec JSON (referência completa)
 
 ```json
@@ -62,20 +138,285 @@ copiando o template mais próximo.
 
 Regras e valores:
 
-- **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior); tipos: `cut`, `fade`, `dissolve`, `wipeleft/right/up/down`, `slideleft/right/up/down`, `smoothleft`, `circleopen`, `zoomin`, `fadeblack`, `fadewhite`, `pixelize`... (nomes do xfade). Transição consome tempo: duração final = soma dos trechos menos as transições (`validate_project` mostra).
-- **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`).
+- **Tempos em segundos.** `transition` de um trecho é a entrada dele (vindo do anterior): `{"type": "whippan", "duration": 0.5, "curve": "spring"}`. Tipos: `cut`, as de movimento do DMaker (`crosszoom`, `whippan`, `blurslide`, `filmburn`, `lightleak`) e os 48 do xfade (`fade`, `fadeblack`, `wipeleft/right/up/down`, `slideleft/...`, `circleopen`, `zoomin`...); a lista completa, com o que cada uma faz, está na seção "Transições" abaixo. Transição consome tempo: duração final = soma dos trechos menos as transições (`validate_project` mostra).
+- **Trechos**: `clip` (vídeo; `src` + `start`/`end` no arquivo fonte, ou `source` + tempos da sessão, ver multicâmera; `speed` 0.25 a 8, `volume`, `mute`, `fade_in/out`), `image` (foto/print; `duration`, `motion`: none, zoom-in, zoom-out, pan-left, pan-right, `motion_amount` 0.04 a 0.15 fica elegante; movimento sub-pixel com easing, sem tremor), `card` (cartão gerado no visual do tema: `title`, `subtitle`, `variant` light/dark, `logo`; `flat: true` deixa só a cor de `background`, sem decoração e sem exigir título).
 - **reframe.mode**: `auto` (recomendado: corta se a proporção for parecida; senão usa `brand` quando há marca ou `blur`), `crop` (preenche e corta; `focus` [x, y] de 0 a 1 diz onde está o assunto), `pad` (barras, `pad_color`), `blur` (fundo desfocado), `brand` (fonte inteira sobre fundo gerado com o visual do tema, com sombra; imagens ganham cantos redondos), `stretch`. Vídeo horizontal de pessoa falando para reels: `crop` com `focus` no rosto. Print de tela/produto: `brand`.
 - **matte** (só em `clip`): troca o fundo atrás da pessoa por uma cor lisa, sem chroma key (rede neural de matting de vídeo, RVM). `{"matte": {"background": "#FFFFFF"}}`; `background` aceita hex ou chave do tema (`primary`, `accent`, `mint`, `white`). `model`: `resnet50` (padrão, separa melhor cadeira/objeto que encosta na pessoa, mais lento na CPU) ou `mobilenetv3` (mais leve e rápido, bom para rascunho). O recorte fica em cache: o preview já faz o trabalho pesado e o render final reaproveita. Funciona bem com pessoa falando de frente e fundo parado; movimentos rápidos podem falhar na borda.
 - **audio_mode** (só em `clip`): `original` (padrão), `voice` (só a voz, limpa de música e ruído) ou `background` (só o fundo, para dublar ou trocar a fala). Usa o isolamento vocal, lento na CPU; veja a seção "Isolamento vocal". Vale só para o áudio da própria câmera, não para `audio.tracks`.
-- **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette`, `lut` (.cube), `extra` (filtro ffmpeg cru).
-- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `uppercase`, `align`, `max_width`, `font`, `weight`. `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição.
-- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `opacity`, `start`/`end`, `fade`.
+- **audio_fade** (só em `clip`, segundos, padrão 0): fade de áudio nas duas pontas do clipe, sem escurecer a imagem (ao contrário de `fade_in`/`fade_out`). Tira o estalo de um corte seco no meio da fala; o `autocut` usa 0,01.
+- **color**: `brightness` (-1..1), `contrast`, `saturation`, `gamma`, `sharpen`, `denoise`, `vignette` (`true`, ou uma intensidade de 0 a 1), `lut` (.cube), `extra` (filtro ffmpeg cru) e os efeitos de acabamento `glow`, `aberration`, `light_leak` e `grain` (0 a 1 cada; ver "Looks e acabamento").
+- **look** (na raiz do projeto ou num trecho): nome de um acabamento pronto, como `"look": "cinema"`. Os nomes e a regra de qual vale em cada trecho estão em "Looks e acabamento" abaixo.
+- **Sobreposições de texto** (`role`): `hook` (gancho grande no topo, animação pop), `title`, `subtitle` (texto de apoio; `position` top/center/bottom), `cta` (pílula na cor da marca, slide-up), `lower-third` (nome + `secondary`, barra de destaque), `custom`. Sobre cartões e fundo `brand` o texto muda sozinho para a cor da marca (fundo claro) ou branco (fundo escuro). `style` sobrescreve tudo: `size` (px na base 1080), `color`, `outline`, `box`, `box_color`, `box_shape`, `uppercase`, `align`, `max_width`, `font`, `weight`. `box_shape`: `block` (padrão, um retângulo em volta do texto todo) ou `rounded` (estilo TikTok: uma caixa por linha, de cantos arredondados, emendadas com curvas; já liga a `box`; ex.: `"style": {"box_shape": "rounded"}` num `title` ou `cta`). `animation`: fade, pop, slide-up, typewriter, none. `x`/`y` (0..1) forçam posição; `region` centra o texto numa região nomeada. `layer`: `front` (padrão, na frente de tudo) ou `behind-person` (o texto fica entre o fundo e a pessoa; ver "Texto atrás da pessoa" abaixo).
+- **Sobreposição de imagem**: `src` = `logo` (lockup horizontal), `logo:symbol`, `logo:horizontal_dark`, `logo:symbol_dark` ou caminho de PNG. `position`, `width` (fração da largura), `margin` (px na base 1080), `safe_zone` (padrão true; false cola no canto, ignorando a zona coberta pela interface do app), `x`/`y` (centro da imagem, em fração; juntos), `region` (cabe numa região nomeada, ver "Regiões nomeadas"), `opacity`, `start`/`end`, `fade`, `shape` (`rect`, padrão, ou `circle`, que recorta o maior quadrado central da imagem num círculo, como a foto do audiograma).
 - **progress-bar**: barra de progresso fina na base (cor accent do tema).
-- **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y`; `width` (fração da largura, 0.18 a 0.3 para webcam); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
-- **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
-- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
+- **audiogram** (`type: "audiogram"`): a onda ou as barras do áudio, animadas no ritmo dele, para divulgar um corte de podcast, entrevista ou áudio de WhatsApp. `style` wave, bars ou circle; `follow` auto, voice ou mix; `color`, `position`/`x`/`y`/`region`, `width`/`height`, `inner_radius`, `start`/`end`. Ver a seção "Audiograma" abaixo.
+- **Composição em HTML** (`type: "html"`): uma animação escrita em HTML, CSS e JavaScript (three.js, Lottie), desenhada quadro a quadro com fundo transparente por cima do vídeo. `src` (arquivo `.html` ou pasta com `index.html`) ou `infographic` (um modelo pronto pelo nome, ver "Infográficos prontos"), `region` ou `x`/`y`/`width`/`height`, `start`/`end`, `data` (chega à página como `dmaker.data`), `files`, `anchor`, `motion_blur`, `layer` (`front` ou `behind-person`), `sound`, `size`. Contrato, dois exemplos e boas práticas na seção "Composição animada em HTML" abaixo; confira com `render_html_frame`.
+- **Picture-in-picture** (`type: "video"` numa sobreposição): um segundo vídeo sobre a linha do tempo, como no Shotcut (Size & Position + Crop Circle/Mask). `src` + `offset` (ponto de entrada no arquivo) ou `source` + `offset` (tempo da sessão mostrado em `start`); `start`/`end` na linha do tempo; `position` (cantos, top, bottom, center) ou `x`/`y` ou `region` (o quadro ocupa uma região nomeada); `width` (fração da largura, 0.18 a 0.3 para webcam); `focus` ([x, y], padrão o centro: onde cortar quando a proporção do quadro difere da fonte, como `reframe.focus`); `shape` rect/rounded/circle (`radius` para rounded, `aspect` como "16:9", círculo é 1:1); `border` + `border_color` (chave do tema ou hex), `shadow`, `softness`; `animation` fade/slide/none; `volume` mistura o áudio do picture-in-picture (0 = mudo). Caso típico: tela gravada + webcam, ambos em `sources` com `sync: "auto"`, círculo no canto inferior direito com borda `accent` (template `templates/tutorial-tela-webcam.json`).
+- **captions**: `source` = `auto` (transcreve com Whisper; `small` é o padrão, `medium` é mais preciso e mais lento) ou caminho `.srt`/`.json`. `style.mode`: `karaoke` (palavra a palavra, padrão reels), `classic`, `boxed` (caixa retangular do ASS) ou `rounded` (estilo TikTok: uma caixa de fundo arredondada por linha, emendadas, com o destaque da palavra ativa por cima; ex.: `"style": {"mode": "rounded", "max_words": 6, "max_chars": 30}`). Na caixa arredondada (`rounded` e `box_shape: rounded`) o raio e a margem vêm da marca (`style.rounded_box_radius` e `style.rounded_box_padding` no `brand.json`, 28 px na base 1080 por padrão), e a cor e a opacidade seguem `box_color` e `box_alpha`. `max_words`/`max_chars` por linha, `uppercase`, `size`, `y`, `pop` (aumenta a palavra ativa; desligado por padrão porque desloca a linha), `follow_background` (padrão true: a legenda acompanha o tom claro/escuro do cartão por baixo; false mantém o estilo de quem está sobre vídeo, como no quadro do rosto do `explicativo`). `vocabulary` e `replacements` corrigem nomes próprios (o tema MedlyCare já traz os seus); some com os da marca.
+- **audio**: `tracks` (faixas externas sincronizadas, ver multicâmera), `music` (`volume` 0.1 a 0.3 costuma bastar, `ducking` abaixa a música quando há voz, `loop`, `fade_in/out`, `start_at`; `spans` limita a música a janelas do vídeo final, cada uma com `start`, `end` (None = até o fim), `start_at`, `fade_in/out`, ex.: trilha só na abertura e no encerramento de um casamento; `from_end: true` conta `start`/`end` a partir do fim do vídeo em vez do começo, útil quando a duração final só se sabe depois de um `plan_multicam`; `tail: true` toca o FINAL da música, terminando junto com a janela, e `start_at` vira uma folga antes desse fim em vez de um ponto de entrada), `sfx` (efeitos sonoros num instante marcado, ver "Efeitos sonoros"), `voiceover` (arquivos de áudio gravados como voz do vídeo, ver "Audiograma"), `voice_gain`, `normalize` (`two-pass` = -14 LUFS, padrão para redes; `fast`; `off`), `mute_clips`.
 - **output**: `preset`, `quality` (`high` = x264 medium, padrão; `max` = x264 slow, mais lento e arquivo menor; `medium`; `draft`), `encoder` (`x264` padrão e melhor qualidade; `auto` usa encoder de hardware quando `dmaker doctor` detectar um, mais rápido e com qualidade um pouco menor), `fps`, `thumbnail_at`, `path`.
 - Caminhos relativos resolvem a partir da pasta da spec. Prefira caminhos absolutos com `/`.
+
+### Efeitos sonoros (whoosh, pop, clique)
+
+Sons curtos num instante do vídeo: a entrada de um infográfico, a troca de fundo, o fim de uma contagem. Os da
+biblioteca são sintetizados pelo próprio DMaker e ficam em `assets/sfx` (nada é baixado: o render funciona sem
+internet); `dmaker sfx list` mostra o que há e `dmaker sfx build` os gera de novo.
+
+| som | duração | para quê |
+|---|---|---|
+| `whoosh` | 0,75 s | passagem de ar que sobe e some: entrada de elemento, troca de cena |
+| `whip` | 0,3 s | chicote curto e agudo: entradas rápidas |
+| `pop` | 0,16 s | estalo de bolha: texto ou ícone que aparece |
+| `click` | 0,08 s | clique de mouse: toque, seleção |
+| `riser` | 1,6 s | subida de tensão que cresce até o fim: ponha `at` 1,6 s antes da revelação |
+| `impact` | 1,4 s | pancada grave com cauda: o momento de maior peso |
+| `ding` | 1,3 s | sino curto: um resultado, um número que terminou de contar |
+
+```json
+{
+  "timeline": [
+    { "type": "card", "flat": true, "duration": 6 },
+    { "type": "card", "flat": true, "duration": 6,
+      "transition": { "type": "slideleft", "duration": 0.5, "sound": "whip" } }
+  ],
+  "overlays": [
+    { "type": "text", "text": "78% menos faltas", "role": "hook", "start": 3, "end": 6, "sound": true },
+    { "type": "image", "src": "grafico.png", "start": 8, "sound": { "sound": "whoosh", "volume": 0.7, "offset": -0.1 } }
+  ],
+  "audio": {
+    "sfx": [ { "sound": "whoosh", "at": 12.4 }, { "sound": "impact", "at": 31.0, "volume": 1.2 } ]
+  }
+}
+```
+
+- **`audio.sfx`**: lista de `{sound, at, volume}`. `sound` é um nome da tabela ou o caminho de um arquivo de
+  áudio (relativo à pasta da spec); `at` é o instante no vídeo final, em segundos; `volume` vai de 0 a 1,5 e o
+  padrão 1 é o nível de referência (abaixo).
+- **Som na entrada** (`sound` em sobreposição de texto, imagem ou vídeo, e em `transition`): desligado por
+  padrão, o que evita repetir os tempos. `true` toca o som padrão do tipo (`pop` em texto e imagem, `whoosh` em
+  vídeo e transição), uma string escolhe o som, e `{sound, volume, offset}` ajusta o nível e desloca o instante
+  (`offset` negativo antecipa, como um whoosh que chega um instante antes do elemento). Na sobreposição o som
+  toca em `start`; na transição, no começo dela (o começo do trecho que entra); a de um corte seco toca no corte.
+- **Nível e mixagem**: o efeito entra com atraso exato em amostras, é somado depois do ducking e antes do
+  loudnorm (a música não abaixa por causa dele, e a loudness final continua no alvo) e fica abaixo da voz. O
+  render mede a voz sozinha (clipes, picture-in-picture e narração) e, com `volume` 1, põe o pico do efeito 6 dB
+  abaixo do pico que a voz terá na saída, já contando o limite de -1,5 dBTP do loudnorm; no máximo (1,5) ainda
+  sobram 2,5 dB. Vídeo sem fala usa um pico de voz típico (-6 dBFS) como régua.
+- Cada som da biblioteca tem pico de -3 dBFS, então o `volume` significa o mesmo em todos. Um arquivo seu
+  entra com o nível dele (o pico dele conta: um arquivo normalizado a 0 dBFS chega 3 dB acima de um da
+  biblioteca). Um nome que não é da biblioteca e não é um arquivo existente falha antes de gerar qualquer trecho.
+- `audio.sfx` marca tempos do vídeo final: o render parcial (`segments`) o ignora, e `validate_project` avisa de
+  efeito marcado depois do fim do vídeo.
+
+### Transições
+
+`transition.type` aceita `cut` (corte seco, padrão quando não há `transition`), as de movimento e os 48 tipos do xfade. A troca dura `duration` segundos (0,3 a 0,6 costuma bastar; nunca passa de metade de cada trecho) e o áudio faz um fundido de entrada e saída durante ela.
+
+**Curva de tempo** (`transition.curve`, em qualquer tipo): `linear` (padrão: velocidade constante, tudo sai como sempre saiu), `ease` (parte e chega devagar, corre no meio) e `spring` (mola: corre logo no começo, passa um pouco do ponto final e assenta). Num wipe ou slide a cortina não anda além da borda, então a mola só acelera e assenta; nas de movimento ela passa do ponto de verdade (a imagem que entra recua e para). Exemplo: `"transition": {"type": "wipeleft", "duration": 0.5, "curve": "ease"}`.
+
+Para ver o que cada uma faz sem montar um projeto: `dmaker transitions list` (tabela com todas) e `dmaker transitions sheet <nome|all> [--curve linear|ease|spring|all]`, que gera a folha de contato (os quadros da troca entre dois clipes de teste) em `output/transitions`. Na interface nova, a tela **Transições** mostra a folha de cada uma, com seletor de curva.
+
+De movimento (feitas pelo DMaker; a troca é montada só sobre os quadros da janela, o resto do vídeo passa intacto):
+
+- `crosszoom`: zoom de passagem. A imagem amplia (até 1,6x) e desfoca, e a próxima entra do mesmo zoom e assenta no enquadramento.
+- `whippan`: chicote. O quadro corre para a esquerda com borrão de movimento proporcional à velocidade; a próxima imagem para no lugar. Com `spring`, passa um pouco do ponto e volta.
+- `blurslide`: desfoque deslizando. A próxima imagem sobe empurrando a anterior, com as duas desfocadas no meio da troca.
+- `filmburn`: queima de filme. Um clarão laranja e branco, que nasce pela esquerda, queima a imagem anterior e a próxima emerge dele.
+- `lightleak`: vazamento de luz. Uma faixa de luz rosa, laranja e quente cruza o quadro na diagonal e a troca acontece embaixo dela. A luz é gerada pelo próprio DMaker (sem arquivo de terceiros).
+
+Giro 3D e folha virando não existem como transição de ffmpeg; ficam para a composição em HTML.
+
+**Som na troca** (`transition.sound`): `true` toca um whoosh no começo da transição, um nome escolhe outro som (`"sound": "whip"` no `whippan`). Veja "Efeitos sonoros".
+
+Do xfade (nome em `type`): `fade` (dissolve suave, o recomendado; `dissolve` troca por grãos e costuma parecer pixelado), `fadeblack`, `fadewhite`, `fadegrays`, `wipeleft/right/up/down`, `wipetl/tr/bl/br`, `slideleft/right/up/down`, `smoothleft/right/up/down`, `coverleft/right/up/down`, `revealleft/right/up/down`, `circleopen`, `circleclose`, `circlecrop`, `rectcrop`, `radial`, `pixelize`, `distance`, `zoomin`, `squeezev`, `squeezeh`, `hlslice`, `hrslice`, `vuslice`, `vdslice`, `diagtl/tr/bl/br`, `hblur`. `dmaker transitions list --kind xfade` diz o que cada uma faz.
+
+### Looks e acabamento
+
+Um **look** é um acabamento visual pronto, com nome: ajuste de cor mais os efeitos de câmera e de filme, tudo pelo ffmpeg, sem LUT nem arquivo de terceiros. Para o pedido em português virar um nome, use esta tabela:
+
+| Pedido | `look` | O que faz |
+| --- | --- | --- |
+| "cinematográfico", "cara de cinema", "de filme" | `cinema` | Sombras verde-azuladas, luzes alaranjadas, preto levantado, vinheta e grão fino. |
+| "quente", "dourado", "tom de fim de tarde" | `quente` | Âmbar, cores mais vivas, vinheta leve e brilho suave nas luzes. |
+| "frio", "azulado" | `frio` | Tom azul e calmo, cores um pouco contidas, vinheta leve. |
+| "preto e branco", "p&b", "preto e branco contrastado" | `pb-contraste` | Preto e branco de contraste alto, vinheta marcada e grão. |
+| "antigo", "retrô", "película velha" | `vintage` | Cores desbotadas e amareladas, grão, vinheta, vazamento de luz e aberração. |
+
+- **Todos os trechos de uma vez**: `"look": "cinema"` na raiz do projeto. Vale para vídeo, foto e cartão (um cartão que não deve receber o look leva `"look": "nenhum"`). As legendas e os textos ficam por cima e não mudam de cor.
+- **Sobrescrita por trecho**: o `look` do próprio trecho vence o do projeto, e `"look": "nenhum"` no trecho desliga o do projeto. Um trecho com `color` próprio (qualquer ajuste, inclusive os efeitos) **não** recebe o look do projeto: mantém a cor que o pedido deu a ele. Pedindo `look` no próprio trecho, o look vale mesmo com `color`, aplicado depois do ajuste de cor; um efeito pedido em `color` vale no lugar do mesmo efeito do look (não soma duas vezes).
+- **Looks da marca**: `looks` no `brand.json`, no formato `{"nome": {"summary": "o que faz", "color": {campos de color}}}`. Com o mesmo nome de um padrão, o da marca vale no lugar dele. Exemplo: `"looks": {"clinica": {"summary": "Cores limpas", "color": {"saturation": 1.05, "vignette": 0.2, "grain": 0.1, "extra": "curves=r='0/0 0.5/0.52 1/1'"}}}`. Nome desconhecido (nem padrão nem da marca) é erro antes de gastar o render.
+- **Efeitos avulsos** (em `color`, de 0 a 1; 0 desliga): `vignette` (`true` é a vinheta de sempre; um número ajusta a intensidade, e `0.4` equivale a `true`), `grain` (granulação de filme, animada e sempre igual a cada render), `glow` (brilho suave nas luzes), `aberration` (vermelho e azul separados, até 0,5% da largura do quadro) e `light_leak` (uma faixa de luz quente que cruza o quadro; uma passagem de uns 4 s, e num trecho comprido ela volta de tempos em tempos). O vazamento é gerado pelo próprio DMaker. Exemplo: `"color": {"grain": 0.3, "light_leak": 0.4}`.
+- **Custo**: o grão é o que pesa no arquivo, porque o x264 gasta bits nele, e gasta uns 3 a 4 MB a cada 10 s em 1080x1920 qualquer que seja a cena. Em porcentagem isso depende do vídeo: numa cena de muito detalhe (uns 9 Mbps, 11,8 MB por 10 s) o arquivo final cresceu 17% com `grain` 0.25 e 21% com 0.35 (o look `cinema` inteiro chega a 37%, perto do teto de 12 Mbps do Reels, que segura o resto); numa cena de pouco detalhe (4 MB por 10 s) cresceu 81% com 0.25; numa cena parada e limpa, de uns 0,3 MB, passa dos 4 MB. Para um vídeo curto que precisa ficar leve, `grain` baixo ou `"look": "frio"` ou `"quente"`, que não têm grão. Cada efeito soma também de 1 a 5 s de CPU por 10 s de vídeo (o vazamento de luz é o mais caro), e o trecho pronto fica em cache enquanto a spec não mudar.
+
+Para ver cada look sem montar um projeto: `dmaker looks list` (tabela com os looks e os efeitos de cada um; `--brand` soma os da marca) e `dmaker looks sheet <nome|all>`, que gera a folha de contato (a mesma cena de teste sem acabamento e com o look, lado a lado) em `output/looks`. Na interface nova, a tela **Looks** mostra a folha de cada um, com o trecho de spec pronto para copiar.
+
+### Texto atrás da pessoa (efeito de profundidade)
+
+Para o título grande que fica atrás de quem fala e na frente da parede, como se estivesse no cenário (muito usado em Reels), ponha `"layer": "behind-person"` no texto. O padrão é `"front"`, na frente de tudo. O DMaker recorta a pessoa com a mesma rede neural do `matte` (RVM, sem modelo novo nem chroma key) e a põe por cima do texto, só do `start` ao `end` dele.
+
+```json
+{
+  "timeline": [{"type": "clip", "src": "gravacao.mp4", "start": 0, "end": 12}],
+  "overlays": [
+    {"type": "text", "text": "CINCO CAMADAS", "role": "title", "layer": "behind-person",
+     "start": 0, "end": 3, "position": "center", "animation": "fade",
+     "style": {"size": 190, "color": "#FFFFFF", "outline": 0}}
+  ]
+}
+```
+
+- **Ordem das camadas**, de baixo para cima: o vídeo, os textos `behind-person`, a pessoa recortada e só então imagens, picture-in-picture, audiogramas, textos `front` e legendas. As legendas ficam sempre na frente.
+- **Onde o recorte vale**: sobre o que o vídeo final mostra (enquadramento, velocidade, look e transições já aplicados), só nos quadros do intervalo do texto. O resto do vídeo sai idêntico ao render sem o efeito. Textos `behind-person` que se sobrepõem no tempo dividem um recorte só.
+- **Custo**: roda na CPU, perto de 0,5 s por quadro em 1080x1920 com o `resnet50` (num teste, 3 s de efeito somaram uns 50 s ao render e 6 s uns 105 s, contando 12 quadros de aquecimento do modelo por intervalo). O recorte fica em cache por conteúdo: um segundo render sem mudança não recorta de novo (4 s contra os 3,8 s do render sem o efeito), e mudar só a frase, a cor ou a posição do texto também reaproveita o recorte. Mudar o intervalo, o trecho, o enquadramento, o look ou o modelo recorta de novo.
+- **Rascunho**: no `--preview` o recorte usa o modelo `mobilenetv3` (2,5x mais rápido; 15 MB que baixam na primeira vez); o render final usa o `resnet50`, com a borda melhor em cabelo e mãos. O modelo entra na chave do cache, então rascunho e render final não se misturam.
+- **Avisos**: `dmaker validate` e `dmaker qa` avisam, em `overlays[N].layer`, quando o intervalo só cobre cartão ou foto: não há pessoa a recortar e o render gastaria o recorte à toa.
+- **Composição em HTML**: uma composição com `"layer": "behind-person"` entra na mesma pilha, logo acima do vídeo e abaixo dos textos `behind-person` (ver "Composição animada em HTML").
+- **Limites**: funciona melhor com a pessoa de frente e a câmera parada, como o `matte`; movimento muito rápido pode errar a borda. A borda vem do primeiro plano que o modelo prevê (sem a cor da parede nos fios de cabelo) e o corpo usa o pixel do próprio vídeo.
+
+### Composição animada em HTML (`type: "html"`)
+
+Para um título grande que cresce, um número que conta, um objeto em 3D girando, um mapa com fotos entrando, um gráfico animado: escreva a animação como código (HTML, CSS e JavaScript, inclusive three.js e Lottie) e o DMaker a desenha quadro a quadro, com fundo transparente, por cima do vídeo, na região que você escolher. A mesma composição sai sempre igual. Por dentro é o Chromium do Playwright, e a página **não tem rede**.
+
+**Instalação, uma vez:** `pip install -e ".[html]"` e `dmaker setup --html` (o Chromium, uns 120 MB, fica em `bin/playwright`, dentro do DMaker). Sem isso `validate_project` avisa e o render falha dizendo como instalar.
+
+**Fluxo:** 1) escreva a pasta `projects/<nome>/composicoes/<ideia>/index.html`; 2) `render_html_frame` (ou `dmaker html frame <pasta> --at 2 --size 1080x960`) mostra o quadro de qualquer instante, inclusive o do meio, com os avisos da página; ajuste até ficar bom; 3) `add_html_overlay` põe a composição no projeto; 4) `validate_project`, prévia, `qa_report`.
+
+```json
+{"type": "html", "src": "composicoes/titulo", "region": "topo", "start": 1, "end": 6,
+ "data": {"titulo": "Cinco camadas", "valor": 87}, "motion_blur": false, "layer": "front"}
+```
+
+- **Onde e quando:** `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que ela usa, relativo à pasta da spec. `region` (uma região nomeada, ver "Regiões nomeadas") ou o centro `x`/`y` com `width`/`height` (frações do quadro; sem nada, o quadro todo). `start`/`end` em segundos. `sound` põe um som na entrada, como nas outras sobreposições.
+- **Tamanho:** a página é desenhada com o tamanho da área em px na base 1080, o mesmo no `--preview` e no render final (a prévia só usa menos pixels, e o desenho sai igual). `size` (`[largura, altura]`) desenha a página em outro tamanho e o DMaker a ajusta à área. `dmaker.width` e `dmaker.height` dizem o tamanho da página.
+- **`data`:** um dicionário livre, entregue à página como `dmaker.data` e parte da chave do cache (mudou, desenha de novo).
+- **`layer`:** `front` (padrão) ou `behind-person`: a composição fica entre o vídeo e a pessoa recortada, como o título de "Texto atrás da pessoa" (mesma pilha, mesmo custo de recorte; o `validate_project` avisa se o intervalo só cobre cartão ou foto).
+- **`motion_blur`:** `true`, ou `{"subframes": 8, "shutter": 0.5}`. O DMaker captura vários instantes dentro do tempo em que um obturador ficaria aberto e tira a média: o que se move rápido fica borrado na direção do movimento e o que está parado fica nítido. O tempo do render cresce na proporção dos subquadros; desligado por padrão.
+
+**O contrato com a página**
+
+- **Fundo transparente:** não pinte `html` nem `body`. O que a página não cobre deixa o vídeo aparecer.
+- **O tempo é do DMaker.** Animações CSS (`animation`, `transition`) e Web Animations (`element.animate`) já andam no instante certo sem você fazer nada, e o GSAP e o Lottie também, se a página os trouxer. Para o resto (three.js, canvas, SVG, DOM) defina `window.dmakerSeek = (segundos) => { ... }`: o DMaker a chama em cada quadro, em ordem, com o instante da composição, e espera o fim (pode ser `async`). Desenhe só o estado daquele instante, sem depender do quadro anterior: `render_html_frame` com `at: 2.5` vai direto a 2,5 s. Uma `Promise` em `window.dmakerReady` segura o primeiro quadro até a página terminar de carregar o que precisa.
+- **O relógio é virtual:** `performance.now`, `Date`, `setTimeout`, `setInterval` e `requestAnimationFrame` só andam quando o DMaker manda (o `requestAnimationFrame` roda uma vez por quadro, no instante dele), e `Math.random` tem semente fixa. Por isso a composição sai igual em toda renderização. Dentro de `dmakerSeek` não espere temporizadores.
+- **O objeto `dmaker`:** `time` (segundos), `frame`, `progress` (de 0 a 1), `duration`, `fps`, `width`, `height`, `data`, `brand` (as cores da marca), `fontFamily`, `noise2(x, y)` e `noise3(x, y, z)` (ruído simplex suave, de -1 a 1, para câmera na mão leve e partículas flutuando), `noiseSeed(n)` e `random(semente)`.
+- **A marca só por variáveis CSS:** `var(--dm-primary)`, `var(--dm-accent)`, `var(--dm-text)`, `var(--dm-bg)` e as demais cores do tema, `var(--dm-font)` (a família do `brand.json`, com os pesos de 300 a 800, já carregada: a Poppins na maioria das marcas, a Arial ou a Bahnschrift nas que a escolhem), `var(--dm-radius)` (o raio dos cantos da marca, em px na base 1080) e `var(--dm-font-<papel>)` para cada fonte de `fonts.files` da marca (por exemplo `--dm-font-script`). Não escreva cor de marca na mão: trocar de marca troca a composição.
+- **Arquivos:** tudo relativo à pasta da composição (imagens, JSON por `fetch`, módulos ES, animações Lottie `.json`). O DMaker serve bibliotecas em `/_dmaker/`: `three.module.min.js` (declare um mapa de importação, como no exemplo), `lottie.min.js` (define `lottie`) e `rough-notation.js` (define `RoughNotation`, o traço à mão do grifo), mais os emojis animados em `/_dmaker/emoji/<nome>.json`. Uma imagem do projeto fora da pasta da composição entra por `files` (`{"foto": "C:/fotos/a.png"}` fica em `/_dmaker/files/foto.png`). O GSAP não vem junto (licença própria): se quiser, ponha o arquivo na pasta.
+- **Sem rede:** um pedido a qualquer endereço de fora (CDN, imagem de um site) é bloqueado, vira um aviso no log e no resultado do render, e o render segue. Erro de JavaScript e `console.error` da página também viram aviso.
+
+**Exemplo 1: um número contando, só em CSS** (nenhum JavaScript; o DMaker posiciona a animação em cada quadro):
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+  /* o número é uma propriedade inteira animada pelo CSS */
+  @property --n { syntax: "<integer>"; initial-value: 0; inherits: false; }
+  html, body { margin: 0; }
+  .contador {
+    position: absolute; left: 0; right: 0; top: 120px;
+    text-align: center; color: var(--dm-text);
+    font: 800 260px/1 var(--dm-font);
+    counter-reset: n var(--n);
+    animation: conta 3s cubic-bezier(.2, .7, .2, 1) forwards;
+  }
+  .contador::after { content: counter(n) "%"; }
+  @keyframes conta { from { --n: 0; opacity: 0; transform: translateY(40px); } 15% { opacity: 1; transform: none; } to { --n: 87; opacity: 1; } }
+</style>
+</head>
+<body><div class="contador"></div></body>
+</html>
+```
+
+**Exemplo 2: um objeto three.js girando, com a busca de tempo** (a função `dmakerSeek` desenha o estado de cada instante):
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<script type="importmap">{ "imports": { "three": "/_dmaker/three.module.min.js" } }</script>
+<style>html, body { margin: 0; } canvas { display: block; }</style>
+</head>
+<body>
+<script type="module">
+  import * as THREE from "three";
+
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);          // 0,5 na prévia: o mesmo desenho, menos pixels
+  renderer.setSize(dmaker.width, dmaker.height);
+  renderer.setClearColor(0x000000, 0);               // fundo transparente
+  document.body.append(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, dmaker.width / dmaker.height, 0.1, 100);
+  camera.position.z = 6;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+  sun.position.set(3, 4, 5);
+  scene.add(sun);
+
+  const cor = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--dm-accent").trim());
+  const objeto = new THREE.Mesh(new THREE.IcosahedronGeometry(1.6, 1), new THREE.MeshStandardMaterial({ color: cor, flatShading: true }));
+  scene.add(objeto);
+
+  // o DMaker chama esta função em cada quadro, com o instante em segundos; desenhe só o estado desse instante
+  window.dmakerSeek = (t) => {
+    objeto.rotation.set(t * 0.6, t * 1.4, 0);
+    objeto.scale.setScalar(Math.min(t / 0.5, 1));    // entra em meio segundo
+    renderer.render(scene, camera);
+  };
+  window.dmakerSeek(0);
+</script>
+</body>
+</html>
+```
+
+**Lottie** (animações `.json`, como setas, ícones e confete): ponha o arquivo na pasta, carregue a biblioteca do DMaker e toque do jeito de sempre; o relógio é do DMaker, e pedir o quadro do meio mostra o quadro do meio. Confira a licença de cada animação que usar.
+
+```html
+<script src="/_dmaker/lottie.min.js"></script>
+<div id="seta" style="width: 400px; height: 400px"></div>
+<script>lottie.loadAnimation({ container: seta, renderer: "svg", loop: false, autoplay: true, path: "seta.json" });</script>
+```
+
+**Boas práticas ao escrever uma composição**
+
+- **Gráfico maior e mais simples que num site:** vídeo não é página, e quem vê está no celular. Texto grande (a partir de uns 80 px na base 1080), poucas peças, contraste forte; o que tem letra miúda ou muito detalhe some no feed.
+- **Toda sobreposição tem entrada e saída:** o DMaker corta no `end`, então a própria composição deve sumir um instante antes (um `fade` ou um deslize de meio segundo, lendo `dmaker.duration`), em vez de aparecer e desaparecer de repente.
+- **Anime as partes de dentro e deixe a posição para o DMaker:** o lugar na tela é da `region` (ou de `x`/`y`); dentro dela, anime as peças (entrar, crescer, girar), sem posicionar a composição inteira na página.
+- **Sem estilo global:** nada de `* { ... }` nem de `body { background }`; cor de texto sempre explícita (`color: var(--dm-text)`), porque o fundo é o vídeo e o texto herdado pode sair preto sobre preto.
+- **Marca só por variáveis CSS** (`--dm-*`), nunca cor de marca na mão.
+- **Tamanho de pixels honesto:** use `dmaker.width` e `dmaker.height` para o `canvas` e o WebGL, e `renderer.setPixelRatio(devicePixelRatio)` para a prévia sair com o mesmo desenho.
+- **Não dependa de rede:** imagens, JSON e módulos ficam na pasta da composição.
+- **Sem sorteio nem relógio solto:** use `dmaker.time` e `dmaker.noise3` em vez de `Date.now()` e de `Math.random()` sem controle.
+
+**Custo e cache:** o WebGL roda por software (CPU), perto de 70 ms por quadro em 1080x1920 (5 s de composição levaram uns 12 s, medido); a área menor custa menos. O vídeo com alfa de cada composição fica em `cache/mez` por conteúdo (o HTML, todos os arquivos da pasta, o tamanho, a duração, os dados, o borrão e a marca): um segundo render igual não abre a página de novo. O Chromium é aberto com WebGL por software e perfil de cor fixo, para a saída ser igual em qualquer máquina.
+
+### Infográficos prontos (`infographic`)
+
+Antes de escrever uma composição do zero, veja se um destes modelos já faz o que o pedido quer. Cada um é uma composição pronta em `templates/html/<nome>/` (um `index.html` e um `esquema.json`), usa só as variáveis da marca (cor, fonte e cantos) e **não traz fundo**: um modelo faz uma coisa só, e vários se combinam no mesmo assunto. A tabela de parâmetros de cada um está no manual (gerada dos esquemas) e em `list_infographics`.
+
+| Modelo | O que faz | Parâmetros principais |
+| --- | --- | --- |
+| `contador` | número que conta de `de` até `ate`, com `prefixo`, `sufixo` e formatação brasileira (10.000); termina exatamente no valor e fica parado | `ate`, `de`, `prefixo`, `sufixo`, `casas`, `duracao`, `easing` |
+| `barra` | barra que enche até `valor` numa escala de 0 a `maximo`, com divisões (`marcas`) e a marca de um `limite` | `valor`, `maximo`, `limite`, `rotulo_limite`, `sufixo` |
+| `linha` | linha que se desenha do ponto A ao B (frações da área), com rótulo na chegada | `de_x`, `de_y`, `ate_x`, `ate_y`, `rotulo`, `pontas` |
+| `imagem` | imagem do projeto (PNG com transparência) que entra com `slide`, `pop` ou `zoom` e ganha um leve movimento de câmera | `arquivo`, `entrada`, `direcao`, `ken_burns` |
+| `etiqueta` | rótulo pequeno de borda arredondada (o raio é o da marca) que surge num ponto | `texto`, `x`, `y`, `estilo`, `entrada` |
+| `grifo` | círculo, sublinhado, marca-texto ou risco com traço irregular, desenhado como traço (rough-notation, MIT); com `palavra`, circula essa palavra da legenda quando ela é dita | `tipo`, `palavra`, `ocorrencia`, `permanencia`, `recuo` |
+| `emoji` | emoji animado do Google (joinha, check, coração, fogo, festa, lâmpada, café, gráfico, surpresa, risada; CC BY 4.0) | `emoji`, `repetir`, `entrada` |
+
+- **O atalho:** `{"type": "html", "infographic": "contador", "region": "topo", "start": 1, "end": 6, "data": {"ate": 10000, "prefixo": "+ de R$"}}`. Use `infographic` **ou** `src`, nunca os dois; os parâmetros vão em `data`, com as chaves em português do esquema, e os que faltam usam o padrão dele. Sem `region` nem `x`/`y`/`width`/`height`, o modelo entra na área própria dele. "Use o contador para 95 mg" é `{"infographic": "contador", "data": {"ate": 95, "sufixo": "mg"}}`.
+- **O esquema:** cada parâmetro declara nome, tipo (`number`, `integer`, `text`, `choice`, `bool`, `color`, `path`), padrão, limites (`min`, `max`, `max_length`, `options`) e o rótulo em português. Valor fora do esquema (um texto no lugar do número do contador, uma opção que não existe, um parâmetro com o nome errado) é apontado no `validate_project` e no `qa_report` com o caminho do campo (`overlays[2].data.ate: precisa ser um número`), e o render para antes de gastar tempo. As cores aceitam um nome da marca (`accent`, `primary`, `white`...) ou `#RRGGBB`.
+- **Ferramentas:** `list_infographics` (nome, descrição e esquema), `render_infographic_frame` (um quadro com os valores pedidos, na marca escolhida) e `add_infographic` (põe no projeto: `project`, `name`, `params`, `start`, `end`, `region`). CLI: `dmaker infographics list [NOME]`, `frame NOME --param ate=10000` e `add PROJETO NOME --param ate=10000 --region topo`. Na interface nova, a tela **Infográficos** monta o formulário do esquema e mostra o quadro.
+- **No modelo `explicativo`:** cada assunto aceita `infografico` (`{"nome": "contador", "parametros": {"ate": 10000}}`), que vira a composição na região `topo` durante o assunto, além da `imagem` que já existia.
+- **O grifo preso a uma palavra (`anchor`):** `{"type": "html", "infographic": "grifo", "data": {"palavra": "frio", "tipo": "circulo"}}` (ou, em qualquer composição, `"anchor": {"word": "frio", "occurrence": 1, "hold": "line", "margin": 32}`). O DMaker acha a palavra nas linhas finais da legenda (acento, caixa e pontuação não contam), calcula onde ela cai na tela com a mesma fonte e o mesmo tamanho da legenda e põe a composição naquela caixa, a partir do instante em que a palavra é dita (`hold`: `line` até a linha sair, `word` só enquanto a palavra é dita). `start`/`end` limitam onde procurar. A legenda fica sempre na frente do traço; no modo `rounded` a caixa dela cobre parte do círculo. Palavra que não aparece vira aviso e a composição é ignorada.
+- **Imagem do projeto (`files`):** o parâmetro `path` de um modelo (`arquivo` na `imagem`) é servido à página por `/_dmaker/files/`; a página nunca recebe um caminho do disco.
+- **A marca:** trocar `brand` troca as cores, a fonte e os cantos de todos os modelos sem editar HTML. O `emoji` é uma figura do Google e não usa a marca.
+- **Escrever um modelo novo no mesmo padrão:** copie a pasta do `contador`, ajuste o `index.html` (leia `dmaker.data`, desenhe cada instante em `window.dmakerSeek(t)`, saia 0,3 s antes de `dmaker.duration`, use só `var(--dm-*)`) e o `esquema.json` (`title`, `description`, `size`, `area`, `duration`, `example`, `params`; todo `number` e `integer` precisa de `min` e `max`, todo `text` de `max_length`, todo `choice` de `options`). Um esquema mal escrito falha dizendo o quê.
+- **Licenças:** o rough-notation é MIT e os emojis são Animated Noto Emoji (Google, CC BY 4.0): ao publicar um vídeo com eles, dê o crédito "Animated Noto Emoji, Google, CC BY 4.0". Detalhes em `THIRD_PARTY.md`.
 
 ## Vídeos longos, multicâmera e áudio externo
 
@@ -214,6 +555,77 @@ cue longa/curta, substituição pendente); `mode=full` devolve tudo, com tempo p
 precisar inspecionar de verdade. `fix_captions(name, {"errado": "certo"})` corrige o texto de todas as
 cues (o próximo render usa o corrigido); o cache de transcrição é reaproveitado enquanto as fontes não
 mudarem, `force=true` refaz tudo.
+
+## Cortar pausas, vícios e repetições de uma gravação falada (`autocut`)
+
+Para quem grava falando, use `autocut` no lugar de transcrever e montar os clipes um a um. Ele transcreve com o
+Whisper, mede a energia do áudio, decide os cortes e cria um projeto com os clipes já cortados da mesma
+gravação, mais a lista do que saiu (tempo e motivo) para conferir ANTES de renderizar. A spec não ganha modo
+de corte nenhum: são clipes comuns (`src`, `start`, `end`), cada um com `audio_fade: 0.01` (fade de áudio de
+10 ms nas duas pontas, sem escurecer a imagem).
+
+- MCP: `autocut(source, name, intensity, min_pause, breath, preset, brand, captions, language, model,
+  overwrite)` roda em segundo plano (`job_status`; a transcrição leva cerca de 1 min por minuto de gravação na
+  CPU, e cortar de novo a mesma gravação com outra intensidade reaproveita a transcrição). `list_cuts(name)`
+  devolve a lista e `undo_cut(name, cut_id)` devolve um corte ao projeto.
+- CLI: `dmaker autocut GRAVACAO --name X --intensity normal`, `dmaker cuts X`, `dmaker uncut X NUMERO`.
+  Interface: em Projetos, o botão "Cortar gravação"; dentro do projeto, o cartão "Cortes automáticos" com o
+  botão "Desfazer" em cada linha.
+- `intensity`: `suave` (só pausas), `normal` (pausas e vícios) ou `agressiva` (também falsos começos e frases
+  repetidas, ficando com a última tomada). `min_pause` (0,5 s) é a pausa acima da qual há corte; `breath`
+  (0,15 s) é o silêncio que sobra de cada lado de cada fala.
+- Vícios: "hã", "hum", "ééé" sempre; "né" só quando fecha a frase antes de uma pausa (colado nas vizinhas, no
+  meio da frase, é o "não é" e fica); "é" e "tipo" só quando isolados por pausa ou arrastados (colados na
+  frase são palavras). Cada item da lista traz `reason` (`silence`, `filler`, `repetition`) e as palavras tiradas.
+- Como corta: o tempo de cada palavra é ajustado à energia do áudio (o Whisper erra por dezenas de
+  milissegundos) e cada borda cai no vale de energia mais próximo, sem passar por dentro de uma palavra. Uma
+  pausa com fala que o Whisper não escutou não é cortada. A duração de cada clipe é um múltiplo do quadro (1/30
+  s), para as legendas não saírem do compasso ao longo do vídeo.
+- Legendas: o projeto aponta `captions.source` para `captions.cut.json`, com as palavras já transcritas nos
+  tempos da fala cortada (sem os vícios e as repetições). `undo_cut` refaz esse arquivo. Se você mexer na linha do
+  tempo depois (mover, dividir, inserir trechos), volte `captions.source` para `"auto"` para transcrever de novo.
+- Fluxo: `autocut` -> `list_cuts` -> `undo_cut` nos cortes que não quiser -> `render_project(preview=true)` ->
+  `qa_report`. Gravação com ruído de fundo forte ou muito baixa pode não ter pausas detectáveis: a resposta
+  traz o aviso "Nada passou do limite"; tente `intensity=agressiva` ou um `min_pause` menor.
+
+## Lote: vários vídeos de uma planilha (`run_batch`)
+
+Para gerar uma série (10 Reels "procedimento da semana") ou o mesmo anúncio em versões por clínica ou cidade,
+use o lote: uma planilha com uma linha por vídeo, sobre um modelo (`list_templates`). Cada linha vira um projeto
+salvo (`projects/<lote>-<nome>`, para corrigir e renderizar de novo só aquele) e um vídeo em
+`output/<lote>/<nome>.mp4`.
+
+- Planilha: `.csv` (UTF-8 com ou sem BOM, ou o ANSI do Excel brasileiro; separador `,`, `;` ou tabulação),
+  `.xlsx` (primeira aba; precisa do extra `lote`: `pip install -e ".[lote]"`) ou `.json` (lista de objetos).
+  O nome de cada coluna casa com o parâmetro do modelo sem diferenciar maiúscula, acento, espaço, hífen ou
+  sublinhado ("Título" casa com `titulo`, "CTA final" com `cta_final`). Coluna que não casa é ignorada, com aviso.
+  Exemplo para `stories-medlycare`: colunas `titulo;texto;print`. Célula vazia usa o padrão do modelo.
+- Valores: texto como está; número aceita vírgula decimal ("3,5"); `bool` aceita sim, não, 1, 0; `path` relativo
+  parte da pasta da planilha; `paths` e `list` aceitam itens separados por `|`, quebra de linha ou vírgula, ou
+  um JSON (`[{"fim": 20, "imagem": "a.png"}]`, necessário para lista de objetos como os `assuntos` do
+  `explicativo`; caminho de mídia dentro dele também parte da pasta da planilha).
+- Validação ANTES de tudo, sem renderizar nada: `validate_batch(template, sheet, name_column)` (CLI
+  `dmaker batch validate`). Aponta, com linha, coluna e motivo: campo obrigatório vazio, número ou lista
+  ilegível, arquivo inexistente, travessão ou meia-risca (regra da marca) e texto que não cabe no espaço (palavra
+  mais larga que a área, texto fora da zona segura, cartão alto demais), as mesmas medidas do `qa_report`. Um
+  problema que o próprio modelo já tem com texto curto sobe uma vez só como aviso da planilha, não como erro de
+  linha. `name_column` é a coluna cujo texto dá nome ao arquivo (padrão: `nome`, `arquivo`, `titulo`...).
+- Rodar: `run_batch(template, sheet, name, name_column, skip_invalid, preview, preset, replace)` valida, cria os
+  projetos e renderiza num job (um lote por vez; acompanhe com `job_status` ou `batch_status`). Com linha
+  inválida NÃO começa e devolve a validação, a não ser com `skip_invalid=true`, que segue sem elas (ficam
+  "Pulada" no relatório, com o motivo). `replace=true` refaz um lote de mesmo nome a partir da planilha atual.
+- Pausar e retomar: `pause_batch(name)` para depois do vídeo em andamento; `resume_batch(name, rows, force)`
+  continua. O que já saiu com a mesma spec e o arquivo ainda lá não é refeito; o que falhou e o que você
+  corrigiu no projeto (spec diferente) é renderizado de novo. Se o processo cair no meio de um vídeo, a
+  retomada refaz só esse. `rows` (números da tabela do relatório) e `force=true` refazem vídeos escolhidos.
+- Relatório: `batch_status(name)` devolve, por vídeo, o estado (Pendente, Renderizando, Pronto, Falhou, Pulada),
+  o arquivo, o tempo e o motivo da falha; sem `name` lista os lotes. O mesmo relatório fica em
+  `output/<lote>/relatorio.txt`. O estado do lote fica em `projects/_lotes/<lote>.json`.
+- CLI: `dmaker batch validate|run|resume|pause|status`. Interface nova: tela "Lote" (modelo, planilha,
+  validação em tabela, confirmação para seguir sem as linhas inválidas, progresso por vídeo, pausa, retomada,
+  "Refazer" em cada linha e o relatório final).
+- Fluxo: `validate_batch` -> corrigir a planilha -> `run_batch` (com `preview=true` para conferir rápido) ->
+  `batch_status` -> corrigir o projeto de um vídeo se preciso -> `resume_batch`.
 
 ## Voz e narração
 
@@ -392,7 +804,10 @@ com a revisão no meio, e o roteiro vive num projeto editável `<nome>.<idioma>.
    `keep_original_db` (ex.: -18: voz original por baixo, estilo voice-over; sem ele só a dublada), `brand`
    (dicionário de pronúncia). A diarização roda na CPU, sem conta nem token (sherpa-onnx; os modelos baixam
    para `cache/models/diarization` na primeira vez), em cerca de 0,3x a duração do áudio; `DMAKER_DIARIZATION=off`
-   a desliga (o padrão volta a ser `per_segment`).
+   a desliga (o padrão volta a ser `per_segment`). Se o `.dub.json` de destino já existe, preparar de novo
+   apagaria as traduções revisadas e as falas travadas, então `dub_prepare` (e `dub prepare`/`dub run` na CLI)
+   recusa; `overwrite=true` (`--overwrite` na CLI) prepara por cima, e só depois de o usuário confirmar. A API
+   (`POST /api/dub/prepare`) responde 409 com o caminho antes de criar o job, e a interface pergunta.
 2. **Revisar**: `dub_get(project)` lista as falas (`id`, tempo, `speaker`, `original`, `text`) e os `speakers`;
    `dub_update_segment(project, segment_id, text, locked, speaker)` corrige a tradução (aceita
    `[[termo|pronúncia]]`) e/ou troca quem fala ("Falante 2"): só aquela fala é sintetizada de novo; `locked=true`
@@ -462,6 +877,79 @@ cartões e imagens, ela é a voz (com `mute_clips` a música também abaixa sob 
   narração estimada passa do fim do vídeo; `render_project` avisa se a real passou.
 - Com `dry_run` nada é sintetizado (usa a estimativa). Render parcial (`segments`) ignora a narração.
 
+### Audiograma (onda ou barras do áudio, para cortes de podcast e áudios)
+
+Formato para divulgar um trecho de podcast, entrevista ou áudio de WhatsApp quando não há vídeo: a capa ou a
+foto, a onda ou as barras animadas no ritmo da fala e a legenda com o texto falado. Duas peças novas da spec:
+`audio.voiceover` (o arquivo de áudio como voz do vídeo) e a sobreposição `audiogram` (o desenho).
+
+**Caminho curto: o template `audiograma`** (1080x1920, dentro da zona segura do Reels). Ele mede o arquivo de
+áudio e usa a duração dele como duração do vídeo, então só pede o áudio e a capa:
+
+```
+dmaker new-from-template audiograma episodio-12 --param audio=C:/audios/ep12.mp3 --param capa=C:/imagens/capa.jpg --param titulo="Episódio 12"
+dmaker render episodio-12
+```
+
+Parâmetros: `audio` e `capa` (obrigatórios), `titulo`, `estilo` (`circle`, o padrão: barras em volta da foto;
+`bars` ou `wave`: embaixo dela), `seguir` (`auto`, `voice` ou `mix`), `cor` (chave do tema ou `#RRGGBB`; sem ela,
+a cor de destaque da marca), `fundo` (`escuro`, `claro`, `bege`, uma cor `#RRGGBB`, uma imagem, ou `capa`: a
+própria capa, cortada e desfocada), `legendas`, `legenda_modo`, `idioma`, `marca` e `duracao` (omitida, é a do
+áudio). A legenda é a automática (Whisper), que transcreve o próprio `audio`, no tempo em que ele toca.
+
+**`audio.voiceover`**: lista de `{src, start, offset, end, volume}`. `src` é relativo à spec; `start` é o instante
+do vídeo final em que o áudio começa (padrão 0); `offset` e `end` aparam o arquivo (ponto de entrada e de saída,
+em segundos do próprio arquivo; `end` ausente = até o fim dele); `volume` de 0 a 4. Ele entra no mesmo barramento
+de voz da narração: a música abaixa sob ele (ducking), o nível dos efeitos sonoros e o loudness final o contam e
+a legenda `auto` o transcreve, mesmo num projeto só de fundo parado e voiceover (com `mute_clips` também).
+
+**A conta da duração.** Quem manda no tamanho do vídeo é a linha do tempo, não o áudio: o fundo (um `card` com
+`flat: true`, ou uma `image` com `motion: "none"`) precisa durar o que o áudio toca, senão o final dele é cortado.
+Meça o arquivo (`probe_media`, ou `dmaker probe ARQUIVO`) e use a `duration` dele; com `offset` e `end`, a
+duração é `end - offset` (ou a do arquivo menos o `offset`). O `validate_project` avisa em
+`audio.voiceover[0]` quando o áudio passa do fim do vídeo e em `audio.voiceover[0].src` quando o arquivo não existe.
+
+```json
+{
+  "name": "episodio-12",
+  "output": { "preset": "instagram/reels" },
+  "regions": { "anel": { "x": 0.5, "y": 0.42, "width": 0.7222, "height": 0.40625 } },
+  "timeline": [{ "type": "card", "flat": true, "background": "#0F172A", "duration": 58.4, "motion": "none" }],
+  "overlays": [
+    { "type": "image", "src": "capa.jpg", "x": 0.5, "y": 0.42, "width": 0.4, "shape": "circle" },
+    { "type": "audiogram", "style": "circle", "region": "anel", "inner_radius": 0.6 }
+  ],
+  "captions": { "source": "auto", "language": "pt", "style": { "mode": "rounded", "y": 0.73, "follow_background": false } },
+  "audio": { "voiceover": [{ "src": "ep12.mp3" }], "music": { "src": "trilha.mp3", "volume": 0.12 } }
+}
+```
+
+**Estilos de `audiogram`:**
+
+| `style` | desenho | onde cabe |
+|---|---|---|
+| `wave` | linha de onda (o grave da voz), lisa e reta no silêncio | faixa baixa: sem `height`, largura / 5 |
+| `bars` | 48 barras simétricas (em cima e embaixo, as graves no meio) que ficam num traço no silêncio | sem `height`, largura / 4 |
+| `circle` | 48 barras em volta de um círculo, que nascem em `inner_radius` (fração do raio externo, padrão 0.6): ali cabe a foto | quadrado do menor lado da caixa |
+
+Lugar e tamanho: `region` (o desenho ocupa a região nomeada; no círculo, o maior quadrado dela), ou `x`/`y` (o
+centro, em fração do quadro) com `width`/`height` (frações do quadro), ou `position` (os cantos, `top`, `bottom`,
+`center`) com `margin` e `safe_zone`. `start` e `end` limitam o desenho no tempo. O audiograma não leva `sound`.
+
+**O que a animação acompanha (`follow`).** `voice` é o barramento de voz (clipes, PiP, faixas, narração e
+`audio.voiceover`, depois do `voice_gain`, antes de música e efeitos); `mix` é o áudio final; `auto` (padrão) é
+`voice` quando o projeto tem alguma voz e `mix` quando não tem (um visualizador de música). Com trilha de fundo
+use `voice`: a onda que segue a mistura se mexe no silêncio da fala. O desenho nunca volta para a saída de
+áudio: o áudio do vídeo é o mesmo com ou sem audiograma. O `validate_project` avisa se `follow: "voice"` não
+tem voz para seguir.
+
+**Como ele se comporta** (para quem ajusta): a cópia do áudio recebe o mesmo ganho linear que a normalização
+dá à saída, então a altura não depende do nível da gravação, e não passa por compressão (o ruído das pausas não
+sobe: com ruído de sala de -50 dBFS o desenho continua parado). As barras são a média de 160 ms das alturas de
+24 faixas de 0 a 2 kHz, o que tira o tremor sem borrar a sílaba. O render é offline e o áudio inteiro é conhecido,
+então a cópia anda adiantada o atraso do desenho: o pico da fala e o pico do desenho caem no mesmo quadro
+(medido a 24, 30 e 60 fps).
+
 ## Cartões por layout (brand.json)
 
 Marcas com identidade visual própria (placa floral, fontes cursivas) podem definir cartões fixos no
@@ -528,6 +1016,8 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
 
 - Um vídeo só, corte e formato: `quick_edit(src, preset="reels", start=3, end=33, captions=true, hook="texto", cta="medlycare.com.br", brand="medlycare")`.
 - Só transcrever: `transcribe_media(path, language="pt", model="small")`.
+- Gravação falada com pausas e vícios: `autocut(source, name, intensity="normal")`, confira com `list_cuts`, devolva o que não quiser com `undo_cut` e renderize a prévia (nunca recorte clipe a clipe à mão).
+- Receitas (uma chamada no lugar de várias): `narrate_into_project(name_or_path, text, voice, start)` narra o roteiro e o põe no projeto com a legenda; `cut_pauses_and_caption(source, name)` corta pausas e vícios, deixa a legenda e espera o fim; `build_explainer_video(name, recording, subjects)` monta o vídeo explicativo (sem `fim` nos assuntos, divide a gravação em partes iguais).
 - Cartão avulso para ver o design: `render_card_preview(title, subtitle, brand="medlycare", preset="reels")`.
 - Limpar cache: `clean_cache()`.
 - Modelos de IA baixados (tamanho, licença, sobras): `models()` lista; `models("download", model_id)` baixa em
@@ -535,10 +1025,23 @@ YouTube longo: `youtube/video` com `quality: high`; `lower-third` para nomes e `
   apagam, e só com `confirm=true` (sem ele o erro traz quais funções deixam de funcionar). Confira o espaço
   livre do disco que a listagem devolve antes de baixar os modelos grandes (OmniVoice ~3 GB).
 
+## Usar sem internet: o agente local
+
+Um modelo que roda na máquina (Ollama ou um servidor compatível com a OpenAI) opera o DMaker pelas mesmas ferramentas deste servidor MCP, sem nenhum serviço na nuvem. Para uma IA que está orientando alguém a configurar isso:
+
+- **Preparar com internet, uma vez**: `dmaker doctor --offline` lista cada peça (modelo de linguagem, Whisper, OmniVoice, Demucs, recorte de pessoa, AudioSeal, Chromium do Playwright, sons, fontes), onde procurou, o que falha sem ela e o comando de download. Rode de novo até aparecer "Tudo pronto: o DMaker funciona sem internet".
+- **Usar**: `dmaker agent` (conversa no terminal; `--once "pedido"` faz um só) ou a tela **Agente** de `dmaker ui`. O progresso das ferramentas aparece ao vivo.
+- **Configurar o motor**: `DMAKER_AGENT_ENGINE` (`ollama` ou `openai`), `DMAKER_AGENT_MODEL`, `DMAKER_AGENT_URL`, `DMAKER_AGENT_NUM_CTX`, `DMAKER_AGENT_TIMEOUT` e `DMAKER_AGENT_THINK` (`low` encurta o raciocínio de modelos como o `gpt-oss`). Os mesmos valores existem como opções de `dmaker agent` (`--engine`, `--model`, `--url`, `--num-ctx`, `--timeout`).
+- **Kits de ferramentas**: a triagem escolhe um kit pelo pedido (edição e render, legendas, voz e narração, dublagem, correção de fala e isolamento, multicâmera, composições e infográficos, lote) e o modelo só vê as ferramentas e o manual curto do kit (`docs/ia/agente-<kit>.md`, gerado pelo `dmaker manual build`). Fora dos kits ficam `dmaker_guide`, `spec_schema`, `save_project`, `clean_cache`, as ferramentas que devolvem imagem e `models`.
+- **Proteções**: o agente confere os argumentos contra o esquema da ferramenta, não usa caminho de arquivo que não existe (pergunta), pede confirmação antes de render final, exportar, dublar, rodar lote, apagar e sobrescrever, e só clona uma voz com a autorização explícita do dono.
+- **Composições**: com modelo pequeno, só os infográficos prontos com parâmetros; o HTML livre só com `DMAKER_AGENT_FREE_HTML=1`, para um modelo que a avaliação aprovou.
+- **Medir**: `dmaker agent eval --model NOME` roda a bateria de pedidos e relata acerto, passos, tempo e memória. Em 16 GB de RAM cabe o `gpt-oss:20b` (cerca de 14 GB); modelos de 30 bilhões de parâmetros não cabem.
+
 ## Depuração
 
 - `dmaker render ... --dry-run` mostra os comandos ffmpeg. Grafos em `cache/jobs/<nome>/graph.pretty.txt`,
-  o ASS (textos/legendas) em `overlay.ass`, comandos em `cmd.txt`.
+  o ASS (textos/legendas) em `overlay.ass` (e o dos textos atrás da pessoa em `overlay_behind.ass`), comandos
+  em `cmd.txt`.
 - Erro do ffmpeg vem com as últimas linhas do stderr e o comando completo.
 - `job_status(job_id)`/`list_jobs()` acompanham um render em segundo plano, local ou na interface.
 - Testes: `.venv\Scripts\python -m pytest` (integração renderiza de verdade e leva uns 2 min).

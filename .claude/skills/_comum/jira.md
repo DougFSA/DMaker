@@ -202,6 +202,10 @@ O caminho na interface ou o comando da CLI, com o projeto ou o arquivo de exempl
 o caso "não mexeu no que já estava certo" quando o ajuste tocou código
 compartilhado. Se precisar de `pip install -e .` (dependência nova), diga.>
 
+_Manual:_ <a seção de `docs/MANUAL.md` que mudou (o título da tarefa) e se `dmaker manual build` mudou a
+referência ou o `docs/ia`; ou "nenhuma: o chamado não muda nada que o usuário vê". Chamado que muda o que o
+usuário vê sem tocar no manual está incompleto (`_comum/qualidade.md` → "Manual").>
+
 _Validação técnica_
 
 * <portões: ruff check · ruff format --check · pytest N passados, e em que árvore

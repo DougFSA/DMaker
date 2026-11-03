@@ -34,12 +34,12 @@ describe('hash de render remoto', () => {
 })
 
 describe('rotas', () => {
-  it('redireciona a raiz para Projetos e cria as telas das próximas fases', async () => {
+  it('redireciona a raiz para Projetos e manda o que não existe para a página de não encontrado', async () => {
     const router = createAppRouter(createMemoryHistory())
     await router.push('/')
     expect(router.currentRoute.value.name).toBe('projects')
     await router.push('/voz')
-    expect(router.currentRoute.value.name).toBe('soon-voice')
+    expect(router.currentRoute.value.name).toBe('voice')
     await router.push('/inexistente')
     expect(router.currentRoute.value.name).toBe('not-found')
   })

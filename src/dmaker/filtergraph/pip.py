@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain.presets import SafeZone
-from ..domain.spec import VideoOverlay
-from .common import AUDIO_FMT_MIX, Inputs
+from ..domain.spec import VideoOverlay, parse_aspect
+from .common import AUDIO_FMT_MIX, Inputs, even
 
 SLIDE_SECONDS = 0.45
+# `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
+FRAME_SLACK_PX = 1e-6
 
 
 @dataclass
@@ -33,21 +35,42 @@ class ResolvedVideoOverlay:
         return self.end - self.start
 
 
+def pip_size(ov: VideoOverlay, W: int, source_aspect: float | None) -> tuple[int, int]:
+    """Largura e altura (px, pares) do quadro do PiP. A proporção é a do círculo (1:1), a pedida em `aspect` ou a
+    da própria fonte (16:9 se ela não disser)."""
+    width = even(W * ov.width)
+    if ov.shape == "circle":
+        aspect = 1.0
+    elif ov.aspect:
+        aspect = parse_aspect(ov.aspect)
+    else:
+        aspect = source_aspect or 16 / 9
+    return width, even(width / aspect + FRAME_SLACK_PX)
+
+
 def pip_position(pip: ResolvedVideoOverlay, W: int, H: int, scale: float, safe: SafeZone) -> tuple[int, int]:
     """Canto superior esquerdo do PiP, respeitando a zona segura do preset."""
-    ov = pip.overlay
+    return pip_origin(pip.overlay, pip.width, pip.height, W, H, scale, safe)
+
+
+def pip_origin(
+    ov: VideoOverlay, width: int, height: int, W: int, H: int, scale: float, safe: SafeZone
+) -> tuple[int, int]:
+    """Canto superior esquerdo de um PiP de `width` x `height`: o centro em `x`/`y` quando a spec os dá, senão a
+    posição nomeada dentro da zona segura. Separada de `pip_position` para a caixa da interface e o QA calcularem
+    o lugar sem montar o PiP inteiro (arquivo, máscara, moldura)."""
     if ov.x is not None and ov.y is not None:
-        return int(round(ov.x * W - pip.width / 2)), int(round(ov.y * H - pip.height / 2))
+        return int(round(ov.x * W - width / 2)), int(round(ov.y * H - height / 2))
     m = ov.margin * scale
     xs = {
         "left": int(round(safe.left + m)),
-        "right": int(round(W - safe.right - m - pip.width)),
-        "center": (W - pip.width) // 2,
+        "right": int(round(W - safe.right - m - width)),
+        "center": (W - width) // 2,
     }
     ys = {
         "top": int(round(safe.top + m)),
-        "bottom": int(round(H - safe.bottom - m - pip.height)),
-        "center": (H - pip.height) // 2,
+        "bottom": int(round(H - safe.bottom - m - height)),
+        "center": (H - height) // 2,
     }
     vertical, _, horizontal = ov.position.partition("-")
     if ov.position == "center":
@@ -78,6 +101,15 @@ def _slide_expr(axis_value: int, size: int, edge_far: int, start: float, positio
     return f"{axis_value}{sign}{off}*(1-{ease})"
 
 
+def pip_crop(width: int, height: int, focus: tuple[float, float]) -> str:
+    """Filtro `crop` do quadro do PiP. No centro (o padrão) deixa o ffmpeg centrar; fora dele, a janela
+    desliza pelo excesso da fonte até o ponto de interesse, como em `reframe.focus`."""
+    fx, fy = focus
+    if (fx, fy) == (0.5, 0.5):
+        return f"crop={width}:{height}"
+    return f"crop={width}:{height}:(iw-ow)*{fx:.4f}:(ih-oh)*{fy:.4f}"
+
+
 def video_overlay_graph(
     lines: list[str],
     inputs: Inputs,
@@ -95,12 +127,12 @@ def video_overlay_graph(
     for k, pip in enumerate(pips):
         ov = pip.overlay
         dur = pip.duration
-        idx = inputs.add(pip.path, "-ss", f"{max(pip.in_point, 0):.3f}", "-t", f"{dur:.3f}")
+        idx = _add_pip_input(inputs, pip)
         mask_idx = inputs.add_looped_image(pip.mask, fps, dur)
         w, h = pip.width, pip.height
         lines.append(
             f"[{idx}:v]setpts=PTS-STARTPTS,fps={fps:g},scale={w}:{h}:force_original_aspect_ratio=increase"
-            f":flags=lanczos,crop={w}:{h},format=rgba[pipv{k}]"
+            f":flags=lanczos,{pip_crop(w, h, ov.focus)},format=rgba[pipv{k}]"
         )
         lines.append(f"[{mask_idx}:v]format=gray,scale={w}:{h}[pipm{k}]")
         post = [f"[pipv{k}][pipm{k}]alphamerge"]
@@ -145,12 +177,33 @@ def video_overlay_graph(
         cur_v = f"[pv{k}]"
 
         if pip.has_audio and ov.volume > 0:
-            chain = [
-                f"[{idx}:a:{pip.audio_stream}]asetpts=PTS-STARTPTS",
-                f"adelay={int(round(pip.start * 1000))}:all=1",
-                f"volume={ov.volume:.3f}",
-                AUDIO_FMT_MIX,
-            ]
-            lines.append(",".join(chain) + f"[pipaud{k}]")
+            lines.append(_pip_audio_chain(idx, pip, k))
             audio_labels.append(f"[pipaud{k}]")
     return cur_v, audio_labels
+
+
+def _add_pip_input(inputs: Inputs, pip: ResolvedVideoOverlay) -> int:
+    """Entrada do arquivo do PiP, já posicionada no ponto em que ele começa e limitada à sua duração."""
+    return inputs.add(pip.path, "-ss", f"{max(pip.in_point, 0):.3f}", "-t", f"{pip.duration:.3f}")
+
+
+def _pip_audio_chain(idx: int, pip: ResolvedVideoOverlay, k: int) -> str:
+    """Ramo de áudio do PiP: volume e atraso até o instante em que ele entra na linha do tempo."""
+    chain = [
+        f"[{idx}:a:{pip.audio_stream}]asetpts=PTS-STARTPTS",
+        f"adelay={int(round(pip.start * 1000))}:all=1",
+        f"volume={pip.overlay.volume:.3f}",
+        AUDIO_FMT_MIX,
+    ]
+    return ",".join(chain) + f"[pipaud{k}]"
+
+
+def pip_audio_graph(lines: list[str], inputs: Inputs, pips: list[ResolvedVideoOverlay]) -> list[str]:
+    """Só os ramos de áudio dos PiPs, para a medição de loudness (que não monta vídeo): sem eles, uma
+    gravação que vem inteira numa sobreposição, como no modelo "explicativo", seria medida como silêncio."""
+    labels: list[str] = []
+    for k, pip in enumerate(pips):
+        if pip.has_audio and pip.overlay.volume > 0:
+            lines.append(_pip_audio_chain(_add_pip_input(inputs, pip), pip, k))
+            labels.append(f"[pipaud{k}]")
+    return labels

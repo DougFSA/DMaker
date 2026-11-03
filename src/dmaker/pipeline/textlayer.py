@@ -5,28 +5,57 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..domain.audiogram import audiogram_size, bars_layout, resolve_follow
 from ..domain.brand import Theme
-from ..domain.spec import ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay, parse_aspect
-from ..domain.timeline import tone_for
+from ..domain.infographics import resolve_infographic
+from ..domain.regions import resolve_region
+from ..domain.spec import (
+    AudiogramOverlay,
+    HtmlOverlay,
+    ImageOverlay,
+    ProgressBar,
+    Project,
+    TextOverlay,
+    VideoOverlay,
+)
+from ..domain.timeline import behind_person_intervals, tone_for
+from ..filtergraph.audiogram import ResolvedAudiogram
 from ..filtergraph.common import even
 from ..filtergraph.overlays import ResolvedImageOverlay
-from ..filtergraph.pip import ResolvedVideoOverlay
+from ..filtergraph.pip import ResolvedVideoOverlay, pip_size
 from ..text.ass import AssDoc
 from ..text.captions import Cue
 from ..text.overlays import Canvas, add_captions, add_guides, add_progress_bar, add_text_overlay
-from ..visuals.pip import render_pip_assets
+from ..visuals.audiogram import style_assets
+from ..visuals.pip import pip_mask, render_pip_assets
 from .context import RenderContext
+from .html_layer import ResolvedHtmlOverlay, resolve_html_overlay, resolve_html_source
+from .infographic_anchor import anchor_html_overlay
+
+PIP_SHORT_TOLERANCE = 0.5  # s: o vídeo do PiP pode terminar um pouco antes do pedido sem merecer aviso
 
 
 @dataclass
 class TextLayer:
+    """`doc` é o ASS da frente (tudo que fica sobre a pessoa); `behind_doc` leva só os textos `behind-person`, que
+    a montagem desenha antes de pôr a pessoa recortada por cima. `behind_intervals` são os intervalos desses
+    textos já juntados: só neles o render paga o recorte."""
+
     doc: AssDoc
+    behind_doc: AssDoc
     image_overlays: list[ResolvedImageOverlay] = field(default_factory=list)
     video_overlays: list[ResolvedVideoOverlay] = field(default_factory=list)
+    audiograms: list[ResolvedAudiogram] = field(default_factory=list)
+    html_overlays: list[ResolvedHtmlOverlay] = field(default_factory=list)
+    behind_intervals: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def has_text(self) -> bool:
         return bool(self.doc.events)
+
+    @property
+    def has_behind_text(self) -> bool:
+        return bool(self.behind_doc.events)
 
 
 def resolve_overlay_image(project: Project, theme: Theme, src: str) -> Path:
@@ -67,15 +96,14 @@ def resolve_video_overlay(
     end = min(overlay.end if overlay.end is not None else total, total)
     if end <= overlay.start:
         return None
+    available = info.duration - in_point
+    if info.duration and available + PIP_SHORT_TOLERANCE < end - overlay.start:
+        ctx.warn(
+            f"o vídeo de sobreposição {overlay.src or overlay.source!r} tem {available:.1f}s a partir do ponto "
+            f"de entrada, menos que os {end - overlay.start:.1f}s pedidos: o quadro some antes do fim"
+        )
 
-    width = even(ctx.width * overlay.width)
-    if overlay.shape == "circle":
-        aspect = 1.0
-    elif overlay.aspect:
-        aspect = parse_aspect(overlay.aspect)
-    else:
-        aspect = info.aspect or 16 / 9
-    height = even(width / aspect)
+    width, height = pip_size(overlay, ctx.width, info.aspect)
     assets = render_pip_assets(
         width,
         height,
@@ -108,6 +136,48 @@ def resolve_video_overlay(
     )
 
 
+def resolve_image_overlay(
+    ctx: RenderContext, overlay: ImageOverlay, path: Path, total: float, index: int
+) -> ResolvedImageOverlay | None:
+    """A imagem no tempo certo e, no recorte circular, com a máscara (a mesma do PiP) no diretório do job."""
+    end = min(overlay.end if overlay.end is not None else total, total)
+    if end <= overlay.start:
+        return None
+    mask_path = None
+    if overlay.shape == "circle":
+        side = even(ctx.width * overlay.width)
+        mask_path = ctx.job_dir / f"image{index}_mask.png"
+        pip_mask(side, side, "circle", radius=0, softness=0).save(mask_path)
+    return ResolvedImageOverlay(overlay, path, overlay.start, end, mask_path)
+
+
+def resolve_audiogram(
+    ctx: RenderContext, overlay: AudiogramOverlay, total: float, index: int, has_voice: bool
+) -> ResolvedAudiogram | None:
+    """Tamanho em px, cor, áudio que segue e as imagens estáticas do estilo (salvas no diretório do job)."""
+    end = min(overlay.end if overlay.end is not None else total, total)
+    if end <= overlay.start:
+        return None
+    width, height = audiogram_size(overlay, ctx.width, ctx.height)
+    if overlay.style == "bars":
+        width = bars_layout(width, height).width  # um número inteiro de colunas por barra
+    assets: dict[str, Path] = {}
+    for name, image in style_assets(overlay.style, width, height, overlay.inner_radius).items():
+        assets[name] = ctx.job_dir / f"audiogram{index}_{name}.png"
+        image.save(assets[name])
+    accent = ctx.theme.color("accent", "#FFFFFF")  # sem `color`, a cor de destaque da marca
+    return ResolvedAudiogram(
+        overlay,
+        width,
+        height,
+        ctx.theme.color(overlay.color, accent),
+        overlay.start,
+        end,
+        resolve_follow(overlay.follow, has_voice),
+        assets,
+    )
+
+
 def build_text_layer(
     ctx: RenderContext,
     total: float,
@@ -115,32 +185,60 @@ def build_text_layer(
     tones: list[str | None],
     cues: list[Cue] | None,
     guides: bool,
+    has_voice: bool = False,
 ) -> TextLayer:
+    """`has_voice` diz se o projeto tem voz (decide o áudio que um audiograma `auto` segue)."""
     project = ctx.project
     canvas = Canvas(ctx.width, ctx.height, ctx.preset.safe, ctx.theme, total)
-    layer = TextLayer(AssDoc(ctx.width, ctx.height, project.name))
+    layer = TextLayer(
+        AssDoc(ctx.width, ctx.height, project.name),
+        behind_doc=AssDoc(ctx.width, ctx.height, project.name),
+        behind_intervals=behind_person_intervals(project.overlays, total),
+    )
     text_index = 0
-    for overlay in project.overlays:
+    for overlay_index, overlay in enumerate(project.overlays):
         if isinstance(overlay, TextOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             end = min(overlay.end if overlay.end is not None else total, total)
             tone = tone_for(overlay.start, end, spans, tones)
-            add_text_overlay(layer.doc, canvas, overlay, text_index, tone=tone)
+            # cada texto vai ao ASS da sua camada; o índice é um só, para os estilos não colidirem entre os dois
+            target = layer.behind_doc if overlay.layer == "behind-person" else layer.doc
+            add_text_overlay(target, canvas, overlay, text_index, tone=tone)
             text_index += 1
         elif isinstance(overlay, ProgressBar):
             add_progress_bar(layer.doc, canvas, overlay)
         elif isinstance(overlay, ImageOverlay):
             path = resolve_overlay_image(project, ctx.theme, overlay.src)
-            end = min(overlay.end if overlay.end is not None else total, total)
-            if end > overlay.start:
-                layer.image_overlays.append(ResolvedImageOverlay(overlay, path, overlay.start, end))
+            if overlay.region:  # a imagem cabe na região: precisa da proporção do arquivo (o círculo é 1:1)
+                aspect = 1.0 if overlay.shape == "circle" else ctx.prober(path).aspect
+                overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height, aspect)
+            image = resolve_image_overlay(ctx, overlay, path, total, len(layer.image_overlays))
+            if image is not None:
+                layer.image_overlays.append(image)
         elif isinstance(overlay, VideoOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
             pip = resolve_video_overlay(ctx, overlay, total, len(layer.video_overlays))
             if pip is not None:
                 layer.video_overlays.append(pip)
+        elif isinstance(overlay, AudiogramOverlay):
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
+            audiogram = resolve_audiogram(ctx, overlay, total, len(layer.audiograms), has_voice)
+            if audiogram is not None:
+                layer.audiograms.append(audiogram)
+        elif isinstance(overlay, HtmlOverlay):
+            overlay = resolve_infographic(overlay, project)  # o modelo pronto vira uma composição comum
+            overlay = anchor_html_overlay(ctx, overlay, cues, total, overlay_index)  # presa a uma palavra
+            if overlay is None:
+                continue
+            overlay = resolve_region(overlay, project.regions, ctx.width, ctx.height)
+            source = resolve_html_source(project, overlay.src)
+            composition = resolve_html_overlay(ctx, overlay, source, total, overlay_index)
+            if composition is not None:
+                layer.html_overlays.append(composition)
     if cues and project.captions:
-        add_captions(
-            layer.doc, canvas, cues, project.captions.style, tone_fn=lambda a, b: tone_for(a, b, spans, tones)
-        )
+        style = project.captions.style
+        tone_fn = (lambda a, b: tone_for(a, b, spans, tones)) if style.follow_background else None
+        add_captions(layer.doc, canvas, cues, style, tone_fn=tone_fn)
     if guides:
         add_guides(layer.doc, canvas)
     return layer

@@ -2,10 +2,10 @@
 Puro: só olha para o projeto e o layout, não toca disco nem executa nada.
 
 Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-picture) em V2, V3... (uma
-faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem + barra de
-progresso), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
-clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`), "NAR" (narrações por texto), "MUS" (música)
-e "CC" (legendas)."""
+faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem, barra de progresso
+e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
+clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
+(narrações por texto), "MUS" (música) e "CC" (legendas)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from typing import Literal
 
 from ..domain.spec import (
     ClipSegment,
+    HtmlOverlay,
     ImageOverlay,
     Overlay,
     ProgressBar,
@@ -26,6 +27,9 @@ from ..domain.spec import (
 from ..domain.timeline import stack_lanes as _lane_of
 from ..filtergraph.audio import resolve_span
 from .layout import ProjectLayout, to_presentation
+from .missing import MissingMedia
+from .sources import physical_source_names
+from .track_slices import track_slice, track_window
 from .voiceover import estimate_narration_duration, narration_label
 
 
@@ -45,6 +49,7 @@ class TrackItem:
     muted: bool
     extra: dict = field(default_factory=dict)
     path: str | None = None  # caminho absoluto resolvido (project.resolve); None para cartão/texto
+    missing: bool = False  # o arquivo não está no disco: o item abre marcado "fonte não encontrada"
 
 
 @dataclass
@@ -243,13 +248,62 @@ def _graphics_overlay_items(project: Project, overlays: list[Overlay], total: fl
                     extra={"position": ov.position},
                 )
             )
+        elif isinstance(ov, HtmlOverlay):
+            items.append(
+                TrackItem(
+                    id=_item_id("GR", i),
+                    kind="html",
+                    index=i,
+                    label=ov.src or ov.infographic or "html",
+                    start=ov.start,
+                    end=_resolve_end(ov.end, total),
+                    in_point=0.0,
+                    out_point=None,
+                    src=ov.src,
+                    source=None,
+                    transition=None,
+                    muted=False,
+                    # presa a uma palavra, o tempo vem da legenda e o `start`/`end` da spec são só os limites da busca
+                    extra={"layer": ov.layer, "anchored": ov.anchor is not None},
+                )
+            )
     return items
 
 
-def _v1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
+def _clip_pieces(project: Project, physical: ProjectLayout, index: int) -> list[dict]:
+    """Pedaços físicos de um clipe cuja fonte tem `parts`, um por arquivo que ele atravessa: onde cada
+    um começa e termina na linha do tempo, que arquivo toca e em que ponto dele. O item da vista é um
+    só por clipe da spec (a edição aponta para ele), mas imagem e som vêm da parte que grava cada
+    instante, pela mesma partição do render (`expand_parts`). Vazio para clipe sem `parts`."""
+    segment = project.timeline[index]
+    if not isinstance(segment, ClipSegment) or not segment.source:
+        return []
+    ref = project.sources.get(segment.source)
+    if ref is None or not ref.parts:
+        return []
+    pieces = []
+    for j, origin in enumerate(physical.origin):
+        if origin != index:
+            continue
+        piece = physical.project.timeline[j]
+        source = physical.sources[j]
+        start, end = physical.spans[j]
+        pieces.append(
+            {
+                "start": start,
+                "end": end,
+                "in_point": source.in_point(piece.start),
+                "path": str(source.path),
+            }
+        )
+    return pieces
+
+
+def _v1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) -> list[TrackItem]:
     items = []
     for i, (segment, (start, end)) in enumerate(zip(project.timeline, layout.spans, strict=True)):
         is_clip = isinstance(segment, ClipSegment)
+        pieces = _clip_pieces(project, physical, i)
         items.append(
             TrackItem(
                 id=_item_id("V1", i),
@@ -264,8 +318,10 @@ def _v1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
                 source=segment.source if is_clip else None,
                 transition=segment.transition.model_dump() if segment.transition else None,
                 muted=is_clip and (segment.mute or segment.volume <= 0),
-                extra={},
-                path=_resolve_item_path(
+                extra={"pieces": pieces} if pieces else {},
+                path=pieces[0]["path"]
+                if pieces
+                else _resolve_item_path(
                     project, getattr(segment, "src", None), segment.source if is_clip else None
                 ),
             )
@@ -273,12 +329,13 @@ def _v1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
     return items
 
 
-def _a1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
+def _a1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) -> list[TrackItem]:
     items = []
     for i, (segment, (start, end)) in enumerate(zip(project.timeline, layout.spans, strict=True)):
         if not isinstance(segment, ClipSegment):
             continue
         muted = segment.mute or segment.volume <= 0 or project.audio.mute_clips
+        pieces = _clip_pieces(project, physical, i)
         items.append(
             TrackItem(
                 id=_item_id("A1", i),
@@ -293,40 +350,73 @@ def _a1_items(project: Project, layout: ProjectLayout) -> list[TrackItem]:
                 source=segment.source,
                 transition=None,
                 muted=muted,
-                extra={"speed": segment.speed},
-                path=_resolve_item_path(project, segment.src, segment.source),
+                extra={"speed": segment.speed, **({"pieces": pieces} if pieces else {})},
+                path=pieces[0]["path"]
+                if pieces
+                else _resolve_item_path(project, segment.src, segment.source),
             )
         )
     return items
 
 
-def _audio_track_tracks(project: Project, layout: ProjectLayout) -> list[Track]:
+def _track_items(
+    project: Project, physical: ProjectLayout, track_id: str, index: int, muted: bool
+) -> list[TrackItem]:
+    """Um item por trecho de clipe em que a faixa externa `audio.tracks[index]` soa, pela mesma conta
+    do render (`pipeline.track_slices`, sobre as partes que `expand_parts` gerou): o arquivo certo, o
+    ponto dele em `in_point` (tempo NO ARQUIVO, por isso `extra.offset` é zero) e o volume da faixa.
+    Trecho que a faixa não cobre fica sem item; a velocidade do clipe (`extra.speed`) vale para o som."""
+    audio_track = project.audio.tracks[index]
+    names = physical_source_names(project, audio_track.source)
+    found: list[TrackItem] = []
+    for j, segment in enumerate(physical.project.timeline):
+        if not isinstance(segment, ClipSegment) or not segment.source:
+            continue  # o render só mistura faixas externas em clipes de fonte sincronizada
+        for name in names:
+            source = physical.session.get(name)
+            if source is None or source.info is None:
+                continue
+            piece = track_slice(audio_track, source, segment)
+            if piece is None:
+                continue
+            window = track_window(piece, source.info.duration, segment.speed, physical.spans[j])
+            if window is None:
+                continue
+            found.append(
+                TrackItem(
+                    id="",  # a posição na trilha só é conhecida depois de ordenar
+                    kind="track",
+                    index=index,
+                    label=audio_track.source,
+                    start=window.start,
+                    end=window.end,
+                    in_point=window.file_in,
+                    out_point=window.file_in + (window.end - window.start) * segment.speed,
+                    src=None,
+                    source=audio_track.source,
+                    transition=None,
+                    muted=audio_track.volume <= 0 or muted,
+                    extra={"offset": 0.0, "speed": segment.speed, "volume": audio_track.volume},
+                    path=str(piece.path),
+                )
+            )
+    found.sort(key=lambda item: item.start)
+    for position, item in enumerate(found):
+        item.id = f"{_item_id(track_id, index)}-{position}"
+    return found
+
+
+def _audio_track_tracks(project: Project, physical: ProjectLayout) -> list[Track]:
     tracks = []
-    for i, audio_track in enumerate(project.audio.tracks):
+    for i in range(len(project.audio.tracks)):
         track_id = f"A{2 + i}"
         muted, hidden, locked = _track_state(project, track_id)
-        item = TrackItem(
-            id=_item_id(track_id, i),
-            kind="track",
-            index=i,
-            label=audio_track.source,
-            start=0.0,
-            end=layout.total,
-            in_point=0.0,
-            out_point=None,
-            src=None,
-            source=audio_track.source,
-            transition=None,
-            muted=audio_track.volume <= 0 or muted,
-            extra={"offset": layout.offsets.get(audio_track.source, 0.0)},
-            path=_resolve_item_path(project, None, audio_track.source),
-        )
         tracks.append(
             Track(
                 id=track_id,
                 kind="audio",
                 label=track_id,
-                items=[item],
+                items=_track_items(project, physical, track_id, i, muted),
                 muted=muted,
                 hidden=hidden,
                 locked=locked,
@@ -393,7 +483,7 @@ def _music_track(
             source=None,
             transition=None,
             muted=music.volume <= 0 or muted,
-            extra={"loop": music.loop},
+            extra={"loop": music.loop, "volume": music.volume},
             path=path,
         )
         for i, (start, end, start_at) in enumerate(windows)
@@ -424,11 +514,20 @@ def _captions_track(project: Project, layout: ProjectLayout) -> Track | None:
     return Track(id="CC", kind="captions", label="CC", items=[item], hidden=hidden, locked=locked)
 
 
+def _flag_missing(tracks: list[Track], missing: MissingMedia) -> None:
+    """Marca os itens cujo arquivo (ou algum dos arquivos das partes) está ausente do disco."""
+    for track in tracks:
+        for item in track.items:
+            pieces = [piece["path"] for piece in item.extra.get("pieces", [])]
+            item.missing = missing.covers(item.path, *pieces)
+
+
 def build_timeline_view(
     project: Project,
     layout: ProjectLayout,
     music_duration: float | None = None,
     narration_durations: Sequence[float | None] = (),
+    missing: MissingMedia | None = None,
 ) -> TimelineView:
     """Monta a vista multitrilha: uma faixa por PiP que se sobrepõe, texto, gráficos, a linha do
     tempo principal, o áudio de cada clipe, cada faixa de áudio externa, a música e as legendas.
@@ -438,7 +537,9 @@ def build_timeline_view(
     estimativa pela duração real das narrações já sintetizadas. Cada item
     ganha `path` (caminho absoluto já resolvido pela spec) e cada trilha carrega o mudo/oculto/
     bloqueio salvo em `project.tracks` (`domain.tracks.apply_track_state` aplica o mesmo estado no
-    render, para a prévia e o vídeo final nunca discordarem)."""
+    render, para a prévia e o vídeo final nunca discordarem). `missing` (ver `pipeline/missing.py`) marca
+    os itens de arquivos que sumiram do disco e traz um aviso por arquivo."""
+    physical = layout  # com as `parts` já partidas: de onde vêm o arquivo e o ponto de cada som
     layout = to_presentation(project, layout)
     total = layout.total
     tracks: list[Track] = []
@@ -491,14 +592,14 @@ def build_timeline_view(
             id="V1",
             kind="video",
             label="V1",
-            items=_v1_items(project, layout),
+            items=_v1_items(project, layout, physical),
             muted=v1_muted,
             hidden=v1_hidden,
             locked=v1_locked,
         )
     )
     a1_muted, a1_hidden, a1_locked = _track_state(project, "A1")
-    a1_items = _a1_items(project, layout)
+    a1_items = _a1_items(project, layout, physical)
     if a1_muted:
         for item in a1_items:
             item.muted = True
@@ -513,7 +614,7 @@ def build_timeline_view(
             locked=a1_locked,
         )
     )
-    tracks.extend(_audio_track_tracks(project, layout))
+    tracks.extend(_audio_track_tracks(project, physical))
 
     narration_track = _narration_track(project, layout, narration_durations)
     if narration_track is not None:
@@ -527,6 +628,8 @@ def build_timeline_view(
     if captions_track is not None:
         tracks.append(captions_track)
 
+    missing = missing or MissingMedia()
+    _flag_missing(tracks, missing)
     sources = {
         name: {
             "src": ref.src or ref.parts[0],
@@ -534,6 +637,7 @@ def build_timeline_view(
             "offset": layout.offsets.get(name, 0.0),
             "in_point": 0.0,
             "path": str(project.resolve(ref.src or ref.parts[0])),
+            "missing": missing.covers(*(project.resolve(raw) for raw in ref.files)),
         }
         for name, ref in project.sources.items()
     }
@@ -545,5 +649,5 @@ def build_timeline_view(
         height=layout.preset.height,
         tracks=tracks,
         sources=sources,
-        warnings=[],
+        warnings=[f"Fonte não encontrada: {path}" for path in sorted(missing.paths, key=str)],
     )

@@ -26,14 +26,23 @@ ROOT = _detect_root()
 DATA_DIR = Path(os.environ.get("DMAKER_DATA_DIR") or ROOT).expanduser().resolve()
 BIN_DIR = ROOT / "bin"
 FFMPEG_DIR = BIN_DIR / "ffmpeg"
+# Chromium do Playwright (composição em HTML, PDF do manual): mora dentro do clone, como o ffmpeg, para o DMaker
+# não guardar nada na pasta compartilhada `%LOCALAPPDATA%/ms-playwright` e não depender dela.
+PLAYWRIGHT_DIR = BIN_DIR / "playwright"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
+HTML_ASSETS_DIR = ASSETS_DIR / "html"  # three.js e lottie-web (MIT), servidos às composições em HTML
 BRANDS_DIR = ASSETS_DIR / "brands"
+SFX_DIR = ASSETS_DIR / "sfx"  # biblioteca de efeitos sonoros (WAV sintetizados pelo DMaker, versionados)
 VOICES_DIR = DATA_DIR / "assets" / "voices"
 LEXICON_DIR = DATA_DIR / "assets"  # pronunciation.json global e brands/<marca>/pronunciation.json
 CACHE_DIR = DATA_DIR / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
 PROXY_DIR = CACHE_DIR / "proxy"
+PREVIEW_AUDIO_DIR = (
+    CACHE_DIR / "preview-audio"
+)  # som da prévia da linha do tempo: pedaços por trecho e a mixagem
+FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
 STEMS_DIR = CACHE_DIR / "stems"  # voz e fundo separados (isolamento vocal), por trecho de arquivo
@@ -47,7 +56,13 @@ JOBS_DIR = CACHE_DIR / "jobs"
 MODELS_DIR = CACHE_DIR / "models"
 OUTPUT_DIR = DATA_DIR / "output"
 PROJECTS_DIR = DATA_DIR / "projects"
+# Conversas do agente local (um JSON por conversa e, ao lado, a pasta dos anexos dela): dado de quem usa o editor, por
+# isso mora fora de `cache/`, que se pode apagar a qualquer hora.
+CONVERSATIONS_DIR = DATA_DIR / "conversations"
 TEMPLATES_DIR = ROOT / "templates"
+# Infográficos prontos (contador, barra, linha...): cada um é uma pasta de composição em HTML com o seu esquema de
+# parâmetros; moram ao lado dos modelos de projeto, como os outros recursos versionados do clone.
+INFOGRAPHICS_DIR = TEMPLATES_DIR / "html"
 LAYOUTS_FILE = DATA_DIR / "layouts.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
@@ -60,6 +75,8 @@ def ensure_dirs() -> None:
         BRANDS_DIR,
         MEZ_DIR,
         PROXY_DIR,
+        PREVIEW_AUDIO_DIR,
+        FRAMES_DIR,
         WAVEFORM_DIR,
         JOBS_DIR,
         MODELS_DIR,

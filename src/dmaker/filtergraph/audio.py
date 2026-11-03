@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
-from .common import Inputs
+from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
+from .sfx import SfxInput, sfx_streams
 
 
 class NarrationInput(Protocol):
@@ -17,6 +19,29 @@ class NarrationInput(Protocol):
     path: Path
     start: float
     volume: float
+
+
+class VoiceFileInput(Protocol):
+    """O que a mixagem precisa saber de um arquivo de áudio posto como voz (satisfeito por `PreparedVoiceFile`):
+    onde o trecho do arquivo começa (`offset`), quanto dele toca (`duration`) e em que instante do vídeo entra."""
+
+    path: Path
+    start: float
+    offset: float
+    duration: float
+    volume: float
+
+
+@dataclass
+class AudioTaps:
+    """Cópias do áudio que o audiograma lê, tiradas de pontos do barramento sem mexer na saída.
+
+    `wanted` diz de que ponto (`voice`: a voz, depois do ganho e das narrações e antes da música; `mix`: a
+    mistura inteira, antes da normalização) e `labels` volta preenchido com o rótulo de cada cópia. A cópia
+    nunca volta para a mixagem: o ramo que a recebe só alimenta o desenho."""
+
+    wanted: frozenset[str]
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 def resolve_span(
@@ -53,11 +78,18 @@ def audio_graph(
     extra_voices: list[str] | None = None,
     music_duration: float | None = None,
     narrations: Sequence[NarrationInput] = (),
+    sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[VoiceFileInput] = (),
+    taps: AudioTaps | None = None,
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
-    `narrations` entram no barramento de voz depois do ganho e do mudo dos clipes (narrar sobre clipes
-    mudos é o caso comum) e antes do ducking: a música abaixa sob elas e o loudnorm as conta.
+    `narrations` e `voice_files` (arquivos de áudio gravados) entram no barramento de voz depois do ganho e
+    do mudo dos clipes (narrar sobre clipes mudos é o caso comum) e antes do ducking: a música abaixa sob
+    eles e o loudnorm os conta.
+    `sfx` (efeitos sonoros) somam-se por último, depois do ducking e antes do loudnorm: a música não abaixa
+    por causa deles (o sidechain só enxerga a voz) e o loudnorm os conta. Sem `sfx` o grafo é o de sempre.
+    `taps` pede cópias do barramento para o audiograma (ver `AudioTaps`); sem ele o grafo é o de sempre.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -73,30 +105,39 @@ def audio_graph(
         lines.append(f"{a}volume={audio.voice_gain:.3f}[a_gain]")
         a = "[a_gain]"
 
-    spoken = narration_streams(lines, inputs, narrations)
+    spoken = narration_streams(lines, inputs, narrations) + voice_file_streams(lines, inputs, voice_files)
     if spoken:
         lines.append(
             f"{a}{''.join(spoken)}amix=inputs={1 + len(spoken)}:duration=first"
             ":dropout_transition=0:normalize=0[a_narrated]"
         )
         a = "[a_narrated]"
+    a = _tap(lines, taps, "voice", a)
 
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
         mus = music_stream(lines, inputs, music, music_path, total, music_duration)
         if music.ducking and (spoken or not audio.mute_clips):
             lines.append(f"{a}asplit=2[voice][sc]")
-            lines.append(
-                f"{mus}[sc]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
-                f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
-            )
+            sidechain_compress(lines, mus, "[sc]", music)
             lines.append("[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         else:
             lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         a = "[amix]"
 
+    effects = sfx_streams(lines, inputs, sfx)
+    if effects:
+        # sem normalizar (`normalize=0`): o nível de cada efeito já foi acertado contra a voz, e dividir por
+        # N entradas o rebaixaria; `duration=first` corta o que passa do fim do vídeo
+        lines.append(
+            f"{a}{''.join(effects)}amix=inputs={1 + len(effects)}:duration=first"
+            ":dropout_transition=0:normalize=0[a_fx]"
+        )
+        a = "[a_fx]"
+    a = _tap(lines, taps, "mix", a)
+
     if audio.normalize != "off" and include_norm:
-        ln = f"loudnorm=I={audio.target_lufs:g}:TP=-1.5:LRA=11"
+        ln = f"loudnorm=I={audio.target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11"
         if measured:
             ln += (
                 f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
@@ -110,8 +151,36 @@ def audio_graph(
     return "[aout]"
 
 
+def sidechain_compress(lines: list[str], music_bus: str, sidechain: str, music: Music) -> None:
+    """Abaixa `music_bus` sob `sidechain` (a voz) e deixa a música abaixada em `[musd]`.
+
+    O `sidechaincompress` do ffmpeg guarda cada entrada numa fila própria e, quando uma delas acaba, encerra
+    a saída na hora e descarta o que ainda esperava na outra fila. Quanto sobra lá depende de qual das duas
+    entradas entregou o último quadro primeiro (uma corrida entre as threads), então o fim da mistura saía
+    diferente a cada render do mesmo projeto: medido, o PCM variava em até 7 quadros de 1024 amostras (0,15 s)
+    e 52 níveis de 16 bits nos últimos 0,15 s, em 8 s de teste. Igualar as durações não resolve (o fim das
+    duas continua simultâneo). O que resolve é o compressor nunca ver o fim: o `apad` sem argumento enche
+    as duas entradas com silêncio sem fim, e quem encerra a mistura é a voz, no `amix` (`duration=first`),
+    como sempre foi. O silêncio vem depois do programa, então o que se ouve não muda."""
+    lines.append(f"{sidechain}apad[scp]")
+    lines.append(f"{music_bus}apad[musp]")
+    lines.append(
+        f"[musp][scp]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
+        f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
+    )
+
+
+def _tap(lines: list[str], taps: AudioTaps | None, name: str, a: str) -> str:
+    """Se o audiograma pediu `name`, divide `a` em duas: a cópia fica em `taps.labels[name]` e o resto segue."""
+    if taps is None or name not in taps.wanted:
+        return a
+    lines.append(f"{a}asplit=2[a_{name}_main][a_{name}_tap]")
+    taps.labels[name] = f"[a_{name}_tap]"
+    return f"[a_{name}_main]"
+
+
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
-    return f"{cur_a}loudnorm=I={target_lufs:g}:TP=-1.5:LRA=11:print_format=json{out}"
+    return f"{cur_a}loudnorm=I={target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11:print_format=json{out}"
 
 
 def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[NarrationInput]) -> list[str]:
@@ -130,6 +199,29 @@ def narration_streams(lines: list[str], inputs: Inputs, narrations: Sequence[Nar
             # na grade de 20 ms do detector da marca d'água da voz (ver `voice/watermark.py`)
             chain.append(f"adelay={delay_on_detector_grid(narration.start)}:all=1")
         label = f"[nar{index}]"
+        lines.append(",".join(chain) + label)
+        labels.append(label)
+    return labels
+
+
+def voice_file_streams(lines: list[str], inputs: Inputs, files: Sequence[VoiceFileInput]) -> list[str]:
+    """Uma entrada por arquivo de áudio de voz: só o trecho `offset` + `duration` do arquivo, em 48 kHz estéreo
+    (como o resto da mixagem), com ganho e atrasado até o instante em que entra. O `asetpts` zera o tempo
+    do trecho aparado antes do atraso, senão o `adelay` somaria o `offset` ao instante de entrada."""
+    labels = []
+    for index, voice in enumerate(files):
+        if voice.volume <= 0 or voice.duration <= 0:
+            continue
+        chain = [
+            f"[{inputs.add(voice.path)}:a]atrim=start={voice.offset:.3f}:duration={voice.duration:.3f}",
+            "asetpts=PTS-STARTPTS",
+            "aresample=48000",
+            "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            f"volume={voice.volume:.3f}",
+        ]
+        if voice.start > 0:
+            chain.append(f"adelay={int(round(voice.start * 1000))}:all=1")
+        label = f"[vf{index}]"
         lines.append(",".join(chain) + label)
         labels.append(label)
     return labels

@@ -12,6 +12,9 @@ from .ffmpeg import probe_json
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+# Tudo que o editor aceita como fonte: o navegador de arquivos, o `/api/file` e os anexos do agente usam esta lista.
+MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
 
 @dataclass(frozen=True)

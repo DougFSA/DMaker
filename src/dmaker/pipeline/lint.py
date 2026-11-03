@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 
+from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
+from ..domain.infographics import infographic_warnings
+from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
-from ..domain.spec import ClipSegment, Project
+from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, TextOverlay
+from ..domain.timeline import TIME_EPSILON, timeline_spans, transitions_of
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
+from .voicefiles import voice_file_warnings
 from .voiceover import estimate_narration_duration
 
 DASHES = ("—", "–")
@@ -23,12 +28,17 @@ def lint(
     infos: list[MediaInfo | None],
     offsets: list[float] | None = None,
     known_voices: Collection[str] | None = None,
+    voiceover_playtimes: Sequence[float | None] = (),
 ) -> list[str]:
     """Devolve avisos; levanta ValueError só para o que não tem como renderizar. `offsets` é onde cada
     fonte começa no relógio da sessão (0 para arquivos avulsos). `known_voices` são os ids da biblioteca
-    de vozes; sem ele, a existência da voz de cada narração não é conferida."""
+    de vozes; sem ele, a existência da voz de cada narração não é conferida. `voiceover_playtimes` é quanto
+    toca de cada arquivo de `audio.voiceover` (ver `voice_file_playtimes`); sem ele só a existência dos
+    arquivos é conferida, porque medir a duração exige o ffprobe."""
     warnings: list[str] = []
     segments = project.timeline
+    _check_look_names(project, theme)
+    warnings += infographic_warnings(project, theme)
     if preset.max_duration and total > preset.max_duration + 0.01:
         warnings.append(
             f"Duração final {total:.1f}s passa do limite de {preset.platform} {preset.name} ({preset.max_duration:.0f}s)."
@@ -78,9 +88,19 @@ def lint(
         if start is not None and start >= total:
             warnings.append(f"overlays[{i}]: começa em {start:g}s, depois do fim do vídeo ({total:.1f}s).")
     captions = project.captions
-    if captions and captions.enabled and captions.source == "auto" and project.audio.mute_clips:
+    if (
+        captions
+        and captions.enabled
+        and captions.source == "auto"
+        and project.audio.mute_clips
+        and not project.audio.voiceover
+    ):
         warnings.append("Legendas automáticas com audio.mute_clips: não há voz para transcrever.")
     warnings += _narration_warnings(project, total, known_voices)
+    warnings += voice_file_warnings(project, total, voiceover_playtimes)
+    warnings += _audiogram_warnings(project, infos)
+    warnings += _behind_person_warnings(project, total, durations)
+    warnings += _sfx_warnings(project, total)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:
@@ -92,11 +112,78 @@ def lint(
     return warnings
 
 
+def _check_look_names(project: Project, theme: Theme) -> None:
+    """Look desconhecido (no projeto ou num trecho) não tem como renderizar: erro antes de gastar o render."""
+    asked = [("look", project.look)] + [
+        (f"timeline[{i}].look", seg.look) for i, seg in enumerate(project.timeline)
+    ]
+    for where, name in asked:
+        if name is not None and not is_no_look(name):
+            try:
+                resolve_look(name, theme.looks)
+            except UnknownLookError as exc:
+                raise ValueError(f"{where}: {exc}") from exc
+
+
 def _silent_clip_reason(seg: ClipSegment, info: MediaInfo) -> str | None:
     """Por que o trecho não tem áudio da câmera (mudo ou fonte sem áudio); None se tem."""
     if seg.mute or seg.volume <= 0:
         return "está mudo"
     return None if info.has_audio else "não tem áudio"
+
+
+def _audiogram_warnings(project: Project, infos: list[MediaInfo | None]) -> list[str]:
+    """Audiograma que segue a voz num projeto sem voz: a animação ficaria parada o vídeo inteiro."""
+    audiograms = [(i, ov) for i, ov in enumerate(project.overlays) if isinstance(ov, AudiogramOverlay)]
+    if not audiograms or project_has_voice(project, [bool(info and info.has_audio) for info in infos]):
+        return []
+    return [
+        f'overlays[{i}]: o audiograma segue a voz (follow "voice"), mas o projeto não tem voz (clipes mudos '
+        'ou sem áudio, nem narração nem audio.voiceover): ele ficaria parado. Use follow "mix" ou "auto".'
+        for i, ov in audiograms
+        if ov.follow == "voice"
+    ]
+
+
+def _behind_person_warnings(project: Project, total: float, durations: list[float]) -> list[str]:
+    """Texto ou composição em HTML atrás da pessoa num intervalo que só cobre cartão ou foto: não há pessoa a
+    recortar e o render pagaria o recorte (minutos de CPU) para não mudar nada na imagem."""
+    behind = [
+        (i, ov)
+        for i, ov in enumerate(project.overlays)
+        if isinstance(ov, TextOverlay | HtmlOverlay) and ov.layer == "behind-person"
+    ]
+    if not behind:
+        return []
+    spans = timeline_spans(durations, transitions_of(project.timeline))
+    warnings = []
+    for i, ov in behind:
+        start, end = ov.start, min(ov.end if ov.end is not None else total, total)
+        if end <= start:  # fora do vídeo: o aviso de início depois do fim já cobre
+            continue
+        showing = [
+            seg
+            for seg, (a, b) in zip(project.timeline, spans, strict=True)
+            if b > start + TIME_EPSILON and a < end - TIME_EPSILON
+        ]
+        if not any(isinstance(seg, ClipSegment) for seg in showing):
+            warnings.append(
+                f'overlays[{i}].layer: "behind-person" entre {start:.1f}s e {end:.1f}s só cobre cartão ou foto, '
+                'onde não há pessoa a recortar; o render gastaria o recorte à toa. Use "front" ou ponha o '
+                f"{'texto' if isinstance(ov, TextOverlay) else 'a composição'} sobre um trecho de vídeo."
+            )
+    return warnings
+
+
+def _sfx_warnings(project: Project, total: float) -> list[str]:
+    """Efeito sonoro marcado depois do fim do vídeo (a mixagem o corta) ou que nunca soaria (sem volume)."""
+    warnings = []
+    for i, cue in enumerate(project.audio.sfx):
+        if cue.at >= total:
+            warnings.append(f"audio.sfx[{i}]: toca em {cue.at:g}s, depois do fim do vídeo ({total:.1f}s).")
+        elif cue.volume <= 0:
+            warnings.append(f"audio.sfx[{i}]: volume 0, o efeito não toca.")
+    return warnings
 
 
 def _narration_warnings(project: Project, total: float, known_voices: Collection[str] | None) -> list[str]:

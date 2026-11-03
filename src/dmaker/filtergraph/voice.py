@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..media.ffmpeg import FFmpegCommand
+from .blocks import (
+    INTERMEDIATE_CODEC_ARGS,
+    MAX_INPUTS,
+    BlockSlot,
+    GraphStep,
+    graph_file_args,
+    reduce_in_blocks,
+)
 from .provenance import provenance_args
 
 OUTPUT_SAMPLE_RATE = 48000  # mesma taxa do resto do pipeline (ver filtergraph/audio.py)
@@ -157,6 +166,45 @@ def narration_concat_command(
         str(out),
     ]
     return FFmpegCommand(args, label="narração", total=total)
+
+
+def narration_block_step(
+    parts: Sequence[tuple[Path, float]], slot: BlockSlot, sample_rate: int = OUTPUT_SAMPLE_RATE
+) -> tuple[GraphStep, tuple[Path, float]]:
+    """Monta um bloco de falas num WAV float com o mesmo grafo da narração (grafo em arquivo).
+
+    A pausa depois de cada fala, a da última inclusive, já entra no bloco: no nível seguinte o bloco é
+    uma parte sem pausa, e o resultado é o mesmo da montagem de uma vez só.
+    """
+    args: list[str] = []
+    for path, _ in parts:
+        args += ["-i", str(path)]
+    graph = narration_concat_graph([pause for _, pause in parts], sample_rate)
+    args += [*graph_file_args(slot.graph_file), "-map", "[out]", *INTERMEDIATE_CODEC_ARGS, str(slot.out)]
+    step = GraphStep(FFmpegCommand(args, label=f"narração, {slot.label}"), graph, slot.graph_file)
+    return step, (slot.out, 0.0)
+
+
+def narration_concat_plan(
+    parts: Sequence[tuple[Path, float]],
+    out: Path,
+    work_dir: Path,
+    sample_rate: int = OUTPUT_SAMPLE_RATE,
+    total: float | None = None,
+    provenance: str = "",
+    limit: int = MAX_INPUTS,
+) -> list[GraphStep]:
+    """Os comandos que montam a narração, em ordem: blocos de até `limit` falas e o comando final.
+
+    Narração que cabe num comando só (até `limit` falas) tem um passo, e é `narration_concat_command` sem
+    tirar nem pôr. As maiores passam pelos blocos em `work_dir`, para a linha de comando não estourar o
+    limite do Windows com um caminho por fala.
+    """
+    reduction = reduce_in_blocks(
+        parts, work_dir, lambda block, slot: narration_block_step(block, slot, sample_rate), limit
+    )
+    final = narration_concat_command(reduction.items, out, sample_rate, total, provenance)
+    return [*reduction.steps, GraphStep(final)]
 
 
 def detection_audio_command(source: Path, out: Path, sample_rate: int) -> FFmpegCommand:

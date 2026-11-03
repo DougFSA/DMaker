@@ -123,6 +123,18 @@ def test_project_video_sources_dedupes_resolves_and_ignores_non_video(tmp_path):
     assert all(p.parent == tmp_path.resolve() for p in result)  # resolvidos pelo base_dir
 
 
+def test_project_video_sources_includes_every_part_of_a_source_with_parts(tmp_path):
+    """O trecho pode cair em qualquer parte e a prévia toca a que grava o instante: todas ganham proxy."""
+    project = _project(
+        tmp_path,
+        timeline=[{"type": "clip", "source": "cam1"}],
+        overlays=[{"type": "video", "source": "cam1"}],  # a mesma fonte no PiP: sem repetir as partes
+        sources={"cam1": {"parts": ["cam1_a.mp4", "cam1_b.mp4", "cam1_c.mp4"]}},
+    )
+    result = project_video_sources(project)
+    assert [p.name for p in result] == ["cam1_a.mp4", "cam1_b.mp4", "cam1_c.mp4"]
+
+
 # ---------- pipeline/proxies.py: ProxyBuilder ----------
 
 
@@ -338,7 +350,13 @@ def test_get_proxies_returns_status(client, monkeypatch):
     monkeypatch.setattr(proxies_module, "ProxyBuilder", _MissingProxyBuilder)
     body = client.get(f"/api/projects/{PROXY_PROJECT}/proxies").json()
     assert body == [
-        {"src": "clip.mp4", "proxy": str(config.PROXY_DIR / "fake.mp4"), "ready": False, "url": None}
+        {
+            "src": "clip.mp4",
+            "proxy": str(config.PROXY_DIR / "fake.mp4"),
+            "ready": False,
+            "missing": False,
+            "url": None,
+        }
     ]
     assert client.get("/api/projects/nao-existe/proxies").status_code == 404
 
@@ -365,6 +383,7 @@ def test_post_proxies_skips_job_when_everything_is_ready(client, monkeypatch):
             "src": "clip.mp4",
             "proxy": str(config.PROXY_DIR / "fake.mp4"),
             "ready": True,
+            "missing": False,
             "url": server._file_url(config.PROXY_DIR / "fake.mp4"),
         }
     ]

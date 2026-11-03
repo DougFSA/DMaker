@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dmaker.domain.dub import DubProject, load_dub_project, save_dub_project
+from dmaker.domain.dub import DubProject, DubProjectExists, load_dub_project, save_dub_project
 from dmaker.media.ffmpeg import FFmpegCommand
 from dmaker.pipeline.dub_stems import StemsOptions
 from dmaker.pipeline.dubbing import (
@@ -22,6 +22,7 @@ from dmaker.text.captions import Word
 from dmaker.text.translate import Line
 from dmaker.voice.pronunciation import Lexicon
 from dmaker.voice.watermark import delay_on_detector_grid
+from tests.conftest import WINDOWS_LINE_LIMIT, command_line_length
 from tests.test_speech_fix import Harness
 
 
@@ -70,8 +71,8 @@ class FakeTranslator:
 class DubHarness:
     """A mesma bancada da correção de fala (fakes de Whisper, Demucs e OmniVoice) com um tradutor falso."""
 
-    def __init__(self, tmp_path: Path, words: list[Word] = WORDS):
-        self.base = Harness(tmp_path, words=words)
+    def __init__(self, tmp_path: Path, words: list[Word] = WORDS, duration: float = 40.0):
+        self.base = Harness(tmp_path, duration=duration, words=words)
         self.translator = FakeTranslator()
         self.service = DubbingService(
             self.translator,
@@ -126,6 +127,28 @@ class DubHarness:
 @pytest.fixture
 def dub(tmp_path: Path) -> DubHarness:
     return DubHarness(tmp_path)
+
+
+LONG_SENTENCES = 150  # passa das 64 falas por comando: a mixagem e as trilhas montam em blocos
+
+
+@pytest.fixture
+def long_dub(tmp_path: Path) -> DubHarness:
+    """Uma dublagem de 150 frases, uma a cada 6 s, num arquivo de 15 minutos."""
+    words = [
+        word
+        for index in range(LONG_SENTENCES)
+        for word in sentence(f"Frase {index} da dublagem longa de teste.", 2.0 + index * 6.0)
+    ]
+    return DubHarness(tmp_path, words=words, duration=LONG_SENTENCES * 6.0 + 40.0)
+
+
+def block_commands(dub: DubHarness) -> list[FFmpegCommand]:
+    return [c for c in dub.commands if c.label.startswith("dublagem, bloco")]
+
+
+def leftover_workspaces(tmp_path: Path) -> list[Path]:
+    return list((tmp_path / "speech" / "dub").glob("montagem-*"))
 
 
 # ---------- preparar ----------
@@ -185,6 +208,69 @@ def test_prepare_refuses_bad_requests_before_working(dub: DubHarness, tmp_path: 
     assert dub.base.isolation.calls == []
 
 
+def revised_project(dub: DubHarness) -> bytes:
+    """Prepara, revisa a primeira fala e a trava: o arquivo que preparar de novo não pode perder."""
+    revised = dub.prepare().edited("s1", text="Minha tradução revisada.", locked=True)
+    save_dub_project(revised, dub.project_path)
+    return dub.project_path.read_bytes()
+
+
+def test_prepare_refuses_a_project_that_already_exists_and_keeps_the_file_byte_for_byte(dub: DubHarness):
+    before = revised_project(dub)
+    dub.base.isolation.calls.clear()
+    dub.translator.calls.clear()
+
+    with pytest.raises(DubProjectExists) as refused:
+        dub.prepare()
+
+    assert refused.value.path == dub.project_path
+    assert str(dub.project_path) in str(refused.value)
+    assert "traduções que você revisou" in str(refused.value) and "falas que você travou" in str(
+        refused.value
+    )
+    assert dub.project_path.read_bytes() == before
+    # recusou antes dos minutos de trabalho: nem separou a voz nem chamou o tradutor
+    assert dub.base.isolation.calls == [] and dub.translator.calls == []
+
+
+def test_prepare_refuses_the_default_project_too_when_no_path_is_given(
+    dub: DubHarness, monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr("dmaker.config.OUTPUT_DIR", tmp_path / "output")
+    existing = default_project_path(dub.src, "en")
+    save_dub_project(dub.prepare(), existing)
+
+    with pytest.raises(DubProjectExists) as refused:
+        dub.service.prepare(dub.src, "en")
+
+    assert refused.value.path == existing
+
+
+def test_prepare_with_overwrite_replaces_the_project(dub: DubHarness):
+    revised_project(dub)
+
+    project = dub.prepare(overwrite=True)
+
+    assert [s.text for s in project.segments][0] == f"EN {S1}" and not project.segments[0].locked
+    assert load_dub_project(dub.project_path) == project
+
+
+def test_prepare_does_not_step_on_a_project_that_appeared_while_it_worked(dub: DubHarness):
+    """A preparação leva minutos: o `.dub.json` que outro pedido gravou nesse tempo não é pisado."""
+    other = DubProject(source="x.mp4", target_language="en", segments=[])
+
+    def translate_while_another_request_saves(*args, **kwargs):
+        save_dub_project(other, dub.project_path)
+        return [f"EN {S1}", f"EN {S2}", f"EN {S3}"]
+
+    dub.translator.translate = translate_while_another_request_saves
+
+    with pytest.raises(DubProjectExists):
+        dub.prepare()
+
+    assert load_dub_project(dub.project_path) == other
+
+
 def test_prepare_with_no_words_reports_no_speech(dub: DubHarness, monkeypatch):
     monkeypatch.setattr(dub.service.speech, "transcribe_words", lambda *args, **kwargs: [])
     with pytest.raises(ValueError, match="Não encontrei fala"):
@@ -226,6 +312,20 @@ def test_render_mixes_background_and_each_clip_at_its_position_and_copies_the_vi
     assert "adelay=delays=14000:all=1" in graph
     assert "amix=inputs=4" in graph  # fundo + 3 falas
     assert "[original]" not in graph
+
+
+def test_a_long_dubbing_premixes_the_clips_in_blocks_and_every_command_fits_the_windows_line(
+    long_dub: DubHarness, tmp_path: Path
+):
+    project = long_dub.prepare()
+    assert len(project.segments) == LONG_SENTENCES
+    long_dub.service.render(load_dub_project(long_dub.project_path), long_dub.out)
+    assert len(block_commands(long_dub)) == 3  # 150 falas em blocos de 50
+    assert max(command_line_length(c.args) for c in long_dub.commands) < WINDOWS_LINE_LIMIT
+    (mix,) = long_dub.mix_commands()
+    assert mix.args.count("-i") == 5  # o vídeo, o fundo e os 3 blocos no lugar das 150 falas
+    assert "amix=inputs=4:duration=first:normalize=0" in long_dub.graph()  # o fundo e os 3 blocos
+    assert leftover_workspaces(tmp_path) == []
 
 
 def test_each_segment_clones_the_voice_around_itself(dub: DubHarness):
@@ -378,6 +478,16 @@ def test_export_stems_runs_one_command_with_the_clips_of_the_render(dub: DubHarn
     assert "adelay=delays=2000:all=1" in graph and "adelay=delays=14000:all=1" in graph
     assert "amix=inputs=3:duration=longest" in graph  # só as 3 falas dubladas
     assert command.total == 40.0
+
+
+def test_the_stems_of_a_long_dubbing_premix_the_clips_in_blocks_too(long_dub: DubHarness, tmp_path: Path):
+    long_dub.service.export_stems(long_dub.prepare(), StemsOptions(out_dir=tmp_path / "trilhas"))
+    assert len(block_commands(long_dub)) == 3
+    (command,) = long_dub.labeled("trilhas")
+    assert max(command_line_length(c.args) for c in long_dub.commands) < WINDOWS_LINE_LIMIT
+    graph = next(Path(a) for a in command.args if a.endswith(".graph.txt")).read_text(encoding="utf-8")
+    assert "amix=inputs=3:duration=longest:normalize=0" in graph  # os 3 blocos, não as 150 falas
+    assert leftover_workspaces(tmp_path) == []
 
 
 def test_export_stems_reuses_the_speech_already_synthesized_by_the_render(dub: DubHarness):
@@ -611,7 +721,7 @@ def stretched_project(dub: DubHarness, mode: str, seconds: float = 5.5) -> DubPr
 
 def test_the_default_fit_mode_is_the_voice_and_a_new_project_keeps_the_choice(dub: DubHarness):
     assert dub.prepare().fit_mode == "voz"
-    chosen = dub.prepare(fit_mode="video")
+    chosen = dub.prepare(fit_mode="video", overwrite=True)  # preparar de novo por cima pede o sim explícito
     assert chosen.fit_mode == "video"
     assert load_dub_project(dub.project_path).fit_mode == "video"
     assert project_summary(chosen, dub.project_path)["fit_mode"] == "video"

@@ -1,0 +1,66 @@
+{
+  "versao": 1,
+  "descricao": "Bateria fixa de perguntas ao manual. Cada pergunta diz em que seção a resposta certa se apoia (basta um dos trechos de título) e quais termos ela precisa conter (um termo com | aceita qualquer das grafias). A resposta que o modelo local dá é conferida contra isto; DMAKER_MANUAL_EVAL=1 liga o teste lento. Outros chamados acrescentam perguntas (campo opcional 'agente').",
+  "perguntas": [
+    {
+      "id": "dublar-ingles",
+      "pergunta": "como dublo um vídeo para inglês?",
+      "secoes": ["Dublar um vídeo para outro idioma"],
+      "termos": ["dub", "en"]
+    },
+    {
+      "id": "legenda-caixa",
+      "pergunta": "como faço a legenda ficar em caixa?",
+      "secoes": ["Deixar a legenda em caixa arredondada"],
+      "termos": ["rounded|arredondada"]
+    },
+    {
+      "id": "audio-gerado",
+      "pergunta": "como sei se um áudio foi gerado pelo DMaker?",
+      "secoes": ["Verificar se um áudio foi gerado pelo DMaker"],
+      "termos": ["voice verify|verify_watermark"]
+    },
+    {
+      "id": "cortar-pausas",
+      "pergunta": "como corto as pausas de uma gravação?",
+      "secoes": ["Cortar as pausas de uma gravação falada"],
+      "termos": ["autocut"]
+    },
+    {
+      "id": "corrigir-fala",
+      "pergunta": "como corrijo uma palavra que eu falei errado sem gravar de novo?",
+      "secoes": ["Corrigir uma palavra errada sem regravar"],
+      "termos": ["voice fix|fix_speech"]
+    },
+    {
+      "id": "narrar-voz",
+      "pergunta": "como narro um roteiro com a minha voz?",
+      "secoes": ["Narrar um roteiro com a minha voz", "Clonar uma voz"],
+      "termos": ["voice say|synthesize_speech|voice clone|clone_voice"]
+    },
+    {
+      "id": "casamento",
+      "pergunta": "como faço o vídeo do casamento com duas câmeras?",
+      "secoes": ["Fazer o vídeo do casamento com duas câmeras"],
+      "termos": ["casamento-pascom", "plan"]
+    },
+    {
+      "id": "separar-voz",
+      "pergunta": "como separo a voz da música de fundo?",
+      "secoes": ["Separar a voz da música e do ruído"],
+      "termos": ["audio isolate|isolate_vocals"]
+    },
+    {
+      "id": "planilha",
+      "pergunta": "como faço vários vídeos de uma vez a partir de uma planilha?",
+      "secoes": ["Fazer vários vídeos de uma planilha"],
+      "termos": ["batch|run_batch"]
+    },
+    {
+      "id": "modelos",
+      "pergunta": "como baixo os modelos de IA antes de ficar sem internet?",
+      "secoes": ["Ver, baixar e apagar os modelos de IA"],
+      "termos": ["models download|models"]
+    }
+  ]
+}

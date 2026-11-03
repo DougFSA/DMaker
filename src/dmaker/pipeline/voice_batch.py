@@ -13,7 +13,6 @@ from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..filtergraph.voice import narration_concat_command
 from ..media.ffmpeg import FFmpegRunner
 from ..text.captions import Cue, to_srt
 from ..voice.audiobook import (
@@ -26,7 +25,7 @@ from ..voice.estimate import Sample, speed_key
 from ..voice.library import VoiceLibrary
 from ..voice.manuscript import Chapter
 from ..voice.synth import DRAFT_STEPS
-from .narration import NarrationResult, NarrationService, PlannedUtterance
+from .narration import NarrationResult, NarrationService, PlannedUtterance, concat_narration
 from .voice_queue import ItemInterrupted, QueueItem, VoiceQueue
 
 # Segura a trava de síntese (a mesma das rotas de voz); recebe um callback para avisar que está esperando.
@@ -211,8 +210,8 @@ class BatchNarrator:
         complete = output_dir / complete_filename(item.title, suffix)
         # a montagem é seca: cada capítulo já saiu com o acabamento broadcast e a marca d'água, e mexer na
         # dinâmica deles agora apagaria a marca (e achataria a voz)
-        self.runner.run(
-            narration_concat_command(parts, complete, total=total, provenance=self.service.provenance())
+        concat_narration(
+            self.runner, self.service.cache_dir, parts, complete, total, self.service.provenance()
         )
         srt = complete.with_suffix(".srt")
         srt.write_text(to_srt([Cue(start, end, text) for start, end, text in merged]), encoding="utf-8")

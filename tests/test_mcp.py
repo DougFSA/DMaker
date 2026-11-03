@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 
 from mcp import ClientSession
@@ -20,7 +21,12 @@ async def _session(fn):
         command=sys.executable,
         args=["-m", "dmaker.mcp_server"],
         cwd=str(config.ROOT),
-        env={**get_default_environment(), "DMAKER_DATA_DIR": str(config.DATA_DIR)},
+        env={
+            **get_default_environment(),
+            "DMAKER_DATA_DIR": str(config.DATA_DIR),
+            # num worktree o pacote instalado é o da pasta principal: sem o PYTHONPATH o servidor testaria o código errado
+            **({"PYTHONPATH": os.environ["PYTHONPATH"]} if "PYTHONPATH" in os.environ else {}),
+        },
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -70,6 +76,15 @@ def test_lists_tools_and_prompt():
         "voice_queue_list",
         "pronunciation",
         "models",
+        "autocut",
+        "list_cuts",
+        "undo_cut",
+        "validate_batch",
+        "run_batch",
+        "resume_batch",
+        "pause_batch",
+        "batch_status",
+        "search_manual",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -86,6 +101,34 @@ def test_presets_and_schema_tools():
     assert "youtube/shorts" in presets and "instagram" not in presets
     assert "timeline" in json.loads(schema)["properties"]
     assert "spec" in guide.lower()
+
+
+def test_search_manual_answers_over_stdio_with_the_section_and_the_task_file():
+    """A busca no manual, pelo servidor de verdade (stdio): sem internet, sem modelo, com a tarefa sugerida."""
+
+    async def go(session):
+        found = await session.call_tool(
+            "search_manual", {"question": "como dublo um vídeo para inglês?", "limit": 3}
+        )
+        nothing = await session.call_tool("search_manual", {"question": "xyzzy qwerty plugh"})
+        return json.loads(_text(found)), json.loads(_text(nothing))
+
+    found, nothing = asyncio.run(_session(go))
+    assert found["question"] == "como dublo um vídeo para inglês?"
+    assert 1 <= len(found["results"]) <= 3
+    first = found["results"][0]
+    assert (
+        "Dublar um vídeo para outro idioma" in first["section"]
+        and first["task"] == "dublar"
+        and first["score"] > 0
+    )
+    assert len(first["text"]) <= 1203  # cada trecho é cortado para caber num modelo pequeno
+    assert found["suggested_task"] == {
+        "id": "dublar",
+        "title": "Dublar um vídeo para outro idioma",
+        "file": "docs/ia/dublar.md",
+    }
+    assert nothing["results"] == [] and nothing["suggested_task"] is None
 
 
 def test_save_and_validate_project_via_mcp(tmp_path):
@@ -143,6 +186,46 @@ def test_new_from_template_via_mcp(synthetic_media):
     saved = json.loads(spec_path.read_text(encoding="utf-8"))
     assert saved["name"] == "mcp-template-teste"
     assert len(saved["timeline"]) == 4  # cartão + 2 prints + cartão de CTA
+    spec_path.unlink()
+    spec_path.parent.rmdir()
+
+
+@requires_ffmpeg
+def test_explanatory_template_via_mcp_shows_the_topic_format_and_checks_the_topics(synthetic_media):
+    """O formato da lista de assuntos (objetos) chega à IA pelo `list_templates`, e um vão entre assuntos
+    volta como erro claro em vez de um projeto com fundo faltando."""
+    recording = str(synthetic_media["clip_a"])
+
+    async def go(session):
+        listed = (await session.call_tool("list_templates", {})).structured_content["result"]
+        created = await session.call_tool(
+            "new_from_template",
+            {
+                "template": "explicativo",
+                "name": "mcp-explicativo-teste",
+                "params": {"gravacao": recording, "assuntos": [{"fim": 1}, {"fim": 3, "fundo": "bege"}]},
+            },
+        )
+        gap = await session.call_tool(
+            "new_from_template",
+            {
+                "template": "explicativo",
+                "name": "mcp-explicativo-erro",
+                "params": {"gravacao": recording, "assuntos": [{"fim": 1}, {"inicio": 2, "fim": 3}]},
+            },
+        )
+        return listed, _text(created), gap
+
+    listed, created, gap = asyncio.run(_session(go))
+    explicativo = next(t for t in listed if t["name"] == "explicativo")
+    assert explicativo["params"]["assuntos"]["example"][0]["fim"] == 20
+    assert "exemplo:" in explicativo["summary"]
+    assert json.loads(created)["total_s"] == 3.0
+    assert gap.is_error and "assunto 2" in _text(gap) and "emendar" in _text(gap)
+
+    spec_path = config.PROJECTS_DIR / "mcp-explicativo-teste" / "spec.json"
+    saved = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert set(saved["regions"]) == {"topo", "rosto"} and len(saved["timeline"]) == 2
     spec_path.unlink()
     spec_path.parent.rmdir()
 

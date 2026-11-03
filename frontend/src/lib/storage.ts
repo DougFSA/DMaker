@@ -15,3 +15,11 @@ export function writeStored(key: string, value: string): void {
     // sem persistência: a preferência vale só até recarregar a página
   }
 }
+
+export function removeStored(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // sem acesso ao armazenamento, a preferência volta ao padrão só ao recarregar a página
+  }
+}

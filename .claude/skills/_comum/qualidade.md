@@ -153,11 +153,38 @@ O `ruff` não sabe de arquitetura. Antes de abrir o PR, confira à mão:
   justificativa no comentário ou na docstring.
 - **Sem travessão (—)** em texto que vai para a tela: exemplos, templates,
   mensagens e cartões. É regra da marca.
+- **Manual em dia** (`dmaker manual build --check`; seção acima) quando o chamado muda algo que o usuário vê;
 - **Português do Brasil** em mensagens, docs e comentários; identificadores em
   inglês; docstring de uma frase dizendo o porquê.
 
 Escrever arquivo com barras invertidas pelo Bash (heredoc) colapsa `\\` em `\`:
 use Write/Edit para código com escapes.
+
+## Manual: o que o usuário vê tem que estar no `docs/MANUAL.md`
+
+O manual (`docs/MANUAL.md`, organizado por tarefa) e a versão para IA local (`docs/ia`) fazem parte da entrega:
+um chamado que **muda algo que o usuário vê ou usa** (uma tela, um comando ou opção da CLI, uma ferramenta MCP, um
+campo da spec, o jeito de fazer uma tarefa) atualiza o manual **no mesmo PR**, nesta ordem:
+
+1. Escreva ou ajuste a **tarefa** do manual que ensina aquilo, no molde fixo: o título, uma frase do que ela
+   entrega, e os subtítulos `Quando usar` (com os pedidos que levam a ela), `Antes de começar`, `Pela IA`,
+   `Chamadas das ferramentas` (um bloco `json` com as chamadas MCP em ordem e argumentos válidos), `Pela interface`,
+   `Pela CLI`, `Como conferir` e `Se der errado`. Cada tarefa mostra os três caminhos ou diz que um não existe
+   (começa por "Não existe"). Sem travessão, em linguagem de quem usa. Chamado novo ganha também uma linha na tabela
+   "O que entrou nesta versão".
+2. Rode `.venv\Scripts\dmaker.exe manual build`: ele regenera a referência (comandos da CLI, ferramentas MCP, campos
+   da spec), o índice "Quero fazer X, onde está?" e a pasta `docs/ia`. Uma segunda execução não muda nada.
+3. Os testes `tests/test_manual_*.py` (dentro do `pytest`) reprovam se o manual está desatualizado, se um comando,
+   ferramenta ou campo novo não aparece nele, se um exemplo cita uma ferramenta, argumento ou opção que não existe, ou
+   se um arquivo de `docs/ia` passa de 1.500 tokens. `dmaker manual build --check` faz só essa conferência.
+4. Mudou o visual de uma tela que o manual mostra? Refaça a captura com `scripts/capturar_manual.py` (projetos
+   sintéticos, numa pasta de dados temporária; nunca os projetos reais). Total de `docs/img` abaixo de 5 MB.
+5. O **comentário de entrega** diz qual seção do manual mudou (`_comum/jira.md`).
+
+Mudança que o usuário não enxerga (refator, teste) não pede texto novo no manual, mas se ela altera o texto de ajuda
+de um comando, o nome de uma ferramenta ou um campo da spec, a referência gerada muda: rode o `build` mesmo assim.
+Se outro card entrou na `develop` e mexeu no manual, resolva o conflito mantendo os dois lados dentro do molde e rode
+o `build` de novo antes dos portões.
 
 ## CHANGELOG
 

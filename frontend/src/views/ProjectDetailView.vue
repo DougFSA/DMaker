@@ -12,6 +12,7 @@ import {
 import PageHeader from '@/components/layout/PageHeader.vue'
 import OutputCard from '@/components/outputs/OutputCard.vue'
 import VideoPlayerDialog, { type PlayableVideo } from '@/components/outputs/VideoPlayerDialog.vue'
+import CutsCard from '@/components/projects/CutsCard.vue'
 import JobProgressCard from '@/components/projects/JobProgressCard.vue'
 import QaReportCard from '@/components/projects/QaReportCard.vue'
 import RenderDialog, { type RenderChoice } from '@/components/projects/RenderDialog.vue'
@@ -21,7 +22,6 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { CLASSIC_UI_PATH } from '@/navigation'
 import { playableFromOutput, playableFromRender } from '@/lib/outputs'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
@@ -36,10 +36,13 @@ const workspace = useWorkspaceStore()
 const detail = ref<ProjectDetail | null>(null)
 const loading = ref(true)
 const loadError = ref<{ title: string; message: string } | null>(null)
+// a spec do disco não passa na validação: o editor abre esse projeto direto na aba JSON para consertar
+const invalidSpec = ref(false)
 
 const summary = ref<ValidationSummary | null>(null)
 const report = ref<QaReport | null>(null)
 const busy = ref<'validate' | 'qa' | null>(null)
+const undoingCut = ref<number | null>(null)
 
 const renderOpen = ref(false)
 const starting = ref(false)
@@ -53,6 +56,7 @@ const segmentsInSpec = computed(() => detail.value?.spec.timeline?.length ?? 0)
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
+  invalidSpec.value = false
   detail.value = null
   summary.value = null
   report.value = null
@@ -63,9 +67,11 @@ async function load(): Promise<void> {
     if (error instanceof ApiError && error.status === 404) {
       loadError.value = { title: 'Projeto não encontrado', message: `Não existe um projeto chamado “${props.name}”.` }
     } else if (error instanceof ApiError && error.status === 422) {
+      invalidSpec.value = true
+      const reason = error.message.replace(/[.\s]+$/, '')
       loadError.value = {
         title: 'A spec deste projeto não passa na validação',
-        message: `${error.message}\n\nCorrija na interface clássica ou direto no arquivo spec.json.`,
+        message: `${reason}. Abra o projeto no editor e corrija o texto na aba JSON, ou edite direto o arquivo spec.json.`,
       }
     } else {
       loadError.value = { title: 'Não foi possível abrir o projeto', message: errorMessage(error) }
@@ -80,6 +86,22 @@ async function reloadOutputs(): Promise<void> {
     detail.value = await api.projects.get(props.name)
   } catch {
     // a lista de saídas fica como estava; o próximo render tenta de novo
+  }
+}
+
+/** Devolve o trecho de um corte automático ao projeto; a linha do tempo mudou, então o que foi conferido vale de novo. */
+async function undoCut(cutId: number): Promise<void> {
+  undoingCut.value = cutId
+  try {
+    await api.projects.undoCut(props.name, cutId)
+    summary.value = null
+    report.value = null
+    await reloadOutputs()
+    toasts.push({ tone: 'success', title: 'Corte desfeito', description: 'O trecho voltou para o projeto.' })
+  } catch (error) {
+    toasts.push({ tone: 'error', title: 'Não foi possível desfazer o corte', description: errorMessage(error) })
+  } finally {
+    undoingCut.value = null
   }
 }
 
@@ -155,8 +177,10 @@ watch(() => props.name, load, { immediate: true })
 
     <AppCard v-else-if="loadError">
       <EmptyState icon="alert" :title="loadError.title" :description="loadError.message">
-        <AppButton to="/projetos" variant="primary">Voltar para Projetos</AppButton>
-        <AppButton :href="CLASSIC_UI_PATH">Abrir a interface clássica</AppButton>
+        <AppButton v-if="invalidSpec" :to="{ name: 'editor', params: { name } }" variant="primary">
+          Abrir no editor para corrigir
+        </AppButton>
+        <AppButton to="/projetos" :variant="invalidSpec ? 'secondary' : 'primary'">Voltar para Projetos</AppButton>
       </EmptyState>
     </AppCard>
 
@@ -174,9 +198,9 @@ watch(() => props.name, load, { immediate: true })
           <AppIcon name="sparkles" :size="18" />
           Conferir qualidade
         </AppButton>
-        <AppButton :href="`${CLASSIC_UI_PATH}#project=${encodeURIComponent(detail.name)}`">
-          <AppIcon name="external" :size="18" />
-          Editar na clássica
+        <AppButton :to="{ name: 'editor', params: { name: detail.name } }">
+          <AppIcon name="film" :size="18" />
+          Abrir no editor
         </AppButton>
         <AppButton variant="primary" @click="renderOpen = true">
           <AppIcon name="play" :size="18" />
@@ -186,6 +210,8 @@ watch(() => props.name, load, { immediate: true })
 
       <div class="stack">
         <JobProgressCard v-for="job in projectJobs" :key="job.id" :job="job" @play="playResult" />
+
+        <CutsCard v-if="detail.cuts" :report="detail.cuts" :busy-id="undoingCut" @undo="undoCut" />
 
         <ValidationCard v-if="summary" :summary="summary" />
         <QaReportCard v-if="report" :report="report" />

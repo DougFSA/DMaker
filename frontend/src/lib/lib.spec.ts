@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import type { OutputFile, ProjectListItem, QaReport, TemplateInfo } from '@/api'
+import type {
+  CutReport,
+  OutputFile,
+  LookInfo,
+  ProjectListItem,
+  QaReport,
+  TemplateInfo,
+  TransitionInfo,
+} from '@/api'
+import { effectChips, filterLooks, specSnippet as lookSnippet } from './looks'
+import { cutsSummary, defaultCutName, formatCutTime, reasonCounts, reasonTone } from './cuts'
 import { baseName, formatClock, formatDuration, formatRelative, formatSizeMb } from './format'
 import { filterOutputs, renderResultsFromJob } from './outputs'
 import { buildTemplateParams, defaultParamValues, filterProjects, missingRequiredParams, parseList } from './projects'
 import { findingTime, groupFindings, qaCounts, qaVerdict } from './qa'
 import { segmentRange } from './render'
+import { filterTransitions, specSnippet } from './transitions'
 
 describe('format', () => {
   it('formata relógio e duração', () => {
@@ -132,6 +143,40 @@ describe('render parcial', () => {
   })
 })
 
+describe('cortes automáticos', () => {
+  const report = {
+    removed_percent: 27.4,
+    duration_before_s: 120,
+    duration_after_s: 87.1,
+    counts: { silence: 14, filler: 1, repetition: 0 },
+  } as unknown as CutReport
+
+  it('conta os cortes aplicados por motivo, no singular e no plural', () => {
+    expect(reasonCounts(report.counts)).toBe('14 pausas, 1 vício')
+    expect(reasonCounts({ repetition: 2 })).toBe('2 repetições')
+    expect(reasonCounts({})).toBe('')
+  })
+
+  it('resume o antes e o depois com a porcentagem', () => {
+    expect(cutsSummary(report)).toBe('2:00 para 1:27 (27% a menos)')
+  })
+
+  it('mostra o instante com décimos', () => {
+    expect(formatCutTime(83.44)).toBe('01:23.4')
+    expect(formatCutTime(5.04)).toBe('00:05.0')
+  })
+
+  it('sugere o nome do projeto pelo arquivo', () => {
+    expect(defaultCutName('D:/Vídeos/entrevista final.mp4')).toBe('entrevista final-corte')
+    expect(defaultCutName('C:\\gravacao.mov')).toBe('gravacao-corte')
+  })
+
+  it('dá um tom por motivo', () => {
+    expect(reasonTone('filler')).toBe('warning')
+    expect(reasonTone('silence')).toBe('neutral')
+  })
+})
+
 describe('saídas', () => {
   const outputs = [
     { name: 'demo__instagram-reels.mp4', project: 'demo', preset: 'instagram/reels', kind: 'final' },
@@ -149,5 +194,60 @@ describe('saídas', () => {
     expect(renderResultsFromJob(result)).toHaveLength(1)
     expect(renderResultsFromJob([result, result])).toHaveLength(2)
     expect(renderResultsFromJob(null)).toEqual([])
+  })
+})
+
+
+describe('transições', () => {
+  const list: TransitionInfo[] = [
+    { name: 'whippan', kind: 'motion', summary: 'Chicote com borrão de movimento.' },
+    { name: 'wipeleft', kind: 'xfade', summary: 'Uma cortina corre para a esquerda.' },
+  ]
+
+  it('filtra por tipo e busca em nome e descrição sem diferenciar maiúsculas', () => {
+    expect(filterTransitions(list, '', 'all')).toHaveLength(2)
+    expect(filterTransitions(list, '', 'motion').map((t) => t.name)).toEqual(['whippan'])
+    expect(filterTransitions(list, 'CORTINA', 'all').map((t) => t.name)).toEqual(['wipeleft'])
+    expect(filterTransitions(list, 'whip', 'xfade')).toEqual([])
+    expect(filterTransitions(list, '  ', 'all')).toHaveLength(2)
+  })
+
+  it('monta o trecho de spec sem curva quando é a linear', () => {
+    expect(specSnippet('fade', 'linear')).toBe('"transition": { "type": "fade", "duration": 0.5 }')
+    expect(specSnippet('whippan', 'spring')).toBe(
+      '"transition": { "type": "whippan", "duration": 0.5, "curve": "spring" }',
+    )
+  })
+})
+
+describe('looks', () => {
+  const list: LookInfo[] = [
+    {
+      name: 'cinema',
+      summary: 'Verde-azulado nas sombras e grão fino.',
+      source: 'padrão',
+      effects: { vignette: 0.35, grain: 0.2 },
+    },
+    { name: 'clinica', summary: 'Cores limpas da marca.', source: 'marca', effects: {} },
+  ]
+
+  it('filtra pela origem e busca em nome e descrição sem diferenciar maiúsculas', () => {
+    expect(filterLooks(list, '', 'all')).toHaveLength(2)
+    expect(filterLooks(list, '', 'marca').map((l) => l.name)).toEqual(['clinica'])
+    expect(filterLooks(list, 'GRÃO', 'all').map((l) => l.name)).toEqual(['cinema'])
+    expect(filterLooks(list, 'cinema', 'marca')).toEqual([])
+    expect(filterLooks(list, '  ', 'all')).toHaveLength(2)
+  })
+
+  it('lista só os efeitos ligados, na ordem da galeria, com a quantidade de cada um', () => {
+    expect(effectChips(list[0]!)).toEqual([
+      { name: 'vignette', label: 'vinheta', amount: 0.35 },
+      { name: 'grain', label: 'grão', amount: 0.2 },
+    ])
+    expect(effectChips(list[1]!)).toEqual([])
+  })
+
+  it('monta o trecho de spec do projeto inteiro', () => {
+    expect(lookSnippet('pb-contraste')).toBe('"look": "pb-contraste"')
   })
 })

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from dmaker import config
-from dmaker.domain.dub import load_dub_project
+from dmaker.domain.dub import load_dub_project, save_dub_project
 from dmaker.ui import server
 from dmaker.ui.voice_routes import VoiceServices, get_voice_services
 from dmaker.voice.lexicon_store import LexiconStore
@@ -92,6 +93,53 @@ def test_prepare_reports_stage_progress_by_sse(client, dub: DubHarness):
     assert labels[0].startswith("Separando") and any(
         label.startswith("Traduzindo a fala") for label in labels
     )
+
+
+def revise(path: Path) -> bytes:
+    """Corrige e trava a primeira fala da dublagem preparada: o que preparar de novo não pode apagar."""
+    save_dub_project(load_dub_project(path).edited("s1", text="Minha tradução.", locked=True), path)
+    return path.read_bytes()
+
+
+def test_prepare_an_existing_dubbing_answers_409_before_any_job_and_keeps_the_file(client, dub: DubHarness):
+    path = Path(prepared(client, dub)["project"])
+    before = revise(path)
+    jobs_before = len(server.jobs.list())
+    body = {"path": str(dub.src), "target_language": "en", "source_language": "pt"}
+
+    refused = client.post("/api/dub/prepare", json=body)
+
+    assert refused.status_code == 409
+    answer = refused.json()
+    assert answer["path"] == str(path)
+    assert str(path) in answer["detail"] and "apaga as traduções que você revisou" in answer["detail"]
+    assert "\u2014" not in answer["detail"]  # regra da marca: sem travessão no texto que a pessoa lê
+    assert len(server.jobs.list()) == jobs_before  # a recusa vem antes do job: ele só gravaria minutos depois
+    assert path.read_bytes() == before
+
+    explicit_no = client.post("/api/dub/prepare", json={**body, "overwrite": False})
+    assert explicit_no.status_code == 409 and path.read_bytes() == before
+
+
+def test_prepare_an_existing_dubbing_with_overwrite_runs_the_job_and_replaces_the_file(
+    client, dub: DubHarness
+):
+    path = Path(prepared(client, dub)["project"])
+    before = revise(path)
+
+    result = prepared(client, dub, overwrite=True)
+
+    assert Path(result["project"]) == path and path.read_bytes() != before
+    assert load_dub_project(path).segments[0].text == f"EN {S1}"
+    assert not load_dub_project(path).segments[0].locked
+
+
+def test_prepare_a_dubbing_that_does_not_exist_yet_needs_no_flag(client, dub: DubHarness):
+    result = prepared(
+        client, dub
+    )  # o `prepared` exige 200: nenhuma pergunta para quem prepara pela primeira vez
+
+    assert Path(result["project"]).exists()
 
 
 def test_prepare_validates_before_starting_a_job(client, dub: DubHarness, tmp_path: Path):
@@ -346,7 +394,8 @@ def test_prepare_keeps_the_fit_mode_and_the_summary_shows_it(client, dub: DubHar
     assert result["fit_mode"] == "video"
     assert load_dub_project(Path(result["project"])).fit_mode == "video"
     assert client.get("/api/dub/project", params={"path": result["project"]}).json()["fit_mode"] == "video"
-    assert prepared(client, dub)["fit_mode"] == "voz"  # sem escolher, o comportamento de sempre
+    # sem escolher, o comportamento de sempre (e preparar de novo por cima pede o `overwrite`)
+    assert prepared(client, dub, overwrite=True)["fit_mode"] == "voz"
     bad = client.post(
         "/api/dub/prepare",
         json={"path": str(dub.src), "target_language": "en", "fit_mode": "esticar"},
@@ -461,3 +510,56 @@ def test_render_job_returns_the_speaker_and_voice_of_each_line(client, dub: DubH
     report = job.result["report"]
     assert [r["speaker"] for r in report] == ["Falante 1", "Falante 2", "Falante 1"]
     assert report[0]["voice"] == report[2]["voice"] != report[1]["voice"]
+
+
+# ---------- parar a pedido ----------
+
+
+def held_until_cancelled(client, target, method_name: str, start) -> object:
+    """Segura `target.method_name` até o teste pedir para parar o job que `start` disparou; devolve o job terminado."""
+    entered, release = threading.Event(), threading.Event()
+    original = getattr(target, method_name)
+
+    def hold(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), "o teste não liberou o trabalho a tempo"
+        return original(*args, **kwargs)
+
+    setattr(target, method_name, hold)
+    job_id = start()
+    assert entered.wait(10), "o trabalho não chegou ao ponto segurado"
+    snapshot = client.get(f"/api/jobs/{job_id}").json()
+    assert snapshot["cancellable"] is True
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+    release.set()
+    return finished(job_id)
+
+
+def test_prepare_can_be_cancelled_and_saves_no_project(client, dub: DubHarness):
+    def start() -> str:
+        body = {"path": str(dub.src), "target_language": "en", "source_language": "pt"}
+        return client.post("/api/dub/prepare", json=body).json()["job_id"]
+
+    job = held_until_cancelled(client, dub.translator, "translate", start)
+    assert job.status == "cancelled"
+    assert not (dub_folder() / "entrevista.en.dub.json").exists()
+
+
+def test_render_can_be_cancelled_before_synthesizing_any_speech(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    dub.synthesizer.requests.clear()
+
+    def start() -> str:
+        return client.post("/api/dub/render", json={"project": project}).json()["job_id"]
+
+    job = held_until_cancelled(client, dub.base.isolation, "isolate", start)
+    assert job.status == "cancelled"
+    assert dub.synthesizer.requests == []
+
+
+def test_cancelling_a_finished_dubbing_job_is_ignored(client, dub: DubHarness):
+    project = prepared(client, dub)["project"]
+    job_id = client.post("/api/dub/render", json={"project": project}).json()["job_id"]
+    assert finished(job_id).status == "done"
+    client.post(f"/api/jobs/{job_id}/cancel")
+    assert server.jobs.get(job_id).status == "done"

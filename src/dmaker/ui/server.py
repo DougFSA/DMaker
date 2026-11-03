@@ -8,13 +8,14 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import string
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,23 +26,30 @@ from .. import __version__, config
 from ..domain.brand import available_brands, load_theme
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
-from ..media.probe import AUDIO_EXTS, IMAGE_EXTS
+from ..media.probe import MEDIA_EXTS
+from ..pipeline.batch_files import SHEET_SUFFIXES
 from ..pipeline.build import build_id
+from ..pipeline.instant_frame_tasks import InstantFrameStatus, InstantFrameTasks
 from ..pipeline.jobs import Job, JobManager
+from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
+from .agent_routes import build_agent_router
+from .autocut_routes import build_autocut_router
+from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
+from .infographic_routes import build_infographics_router
+from .look_routes import build_looks_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
 from .speech_routes import build_speech_router
+from .transition_routes import build_transitions_router
 from .voice_routes import Services, VoiceServices, build_voice_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 CLASSIC_INDEX = STATIC_DIR / "index.html"
 # saída do `npm run build` em frontend/ (artefato de build: fora do git, dentro do pacote no release)
 DIST_DIR = Path(__file__).parent / "dist"
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
-MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
 
 # painéis conhecidos pelo seletor de layouts da interface (espelha KNOWN_PANELS em layout.js).
 LAYOUT_PANELS = {"player", "filters", "media", "timeline", "progress", "properties", "sidebar", "voice"}
@@ -58,11 +66,19 @@ SHUTDOWN_DELAY_S = 0.3
 app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
+preview_audio_tasks = PreviewAudioTasks()
+instant_frame_tasks = InstantFrameTasks()
 app.include_router(build_voice_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
 app.include_router(build_models_router(jobs))
+app.include_router(build_autocut_router(jobs))
+app.include_router(build_batch_router(jobs))
+app.include_router(build_transitions_router())
+app.include_router(build_looks_router())
+app.include_router(build_infographics_router())
+app.include_router(build_agent_router(jobs))
 
 
 # ---------- modelos de entrada ----------
@@ -117,6 +133,12 @@ class FrameRequest(BaseModel):
     width: int = 540
 
 
+class QaRequest(BaseModel):
+    # arquivo renderizado a conferir (a prévia ou a final que a pessoa escolheu); sem ele vale a última
+    # saída final do formato da spec, como sempre foi
+    output: str | None = None
+
+
 class CaptionsUpdate(BaseModel):
     cues: list[dict]
 
@@ -125,9 +147,22 @@ class TimelineRequest(BaseModel):
     spec: dict | None = None
 
 
+class BoxesRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
+
+
+class InstantFrameRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
+    t: float = Field(ge=0, allow_inf_nan=False)  # o instante, em segundos do vídeo final
+
+
 class EditRequest(BaseModel):
     spec: dict
     op: dict
+
+
+class PreviewAudioRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
 
 
 class LayoutModel(BaseModel):
@@ -199,8 +234,9 @@ def _summary_dict(summary: Any) -> dict:
 def _proxy_entry(status: Any) -> dict:
     return {
         "src": str(status.src),
-        "proxy": str(status.proxy),
+        "proxy": str(status.proxy) if status.proxy else None,
         "ready": status.ready,
+        "missing": status.missing,
         "url": _file_url(status.proxy) if status.ready else None,
     }
 
@@ -331,12 +367,23 @@ def create_project(req: NewProject) -> dict:
     }
 
 
-@app.get("/api/projects/{name}", response_model=None)
-def get_project(name: str) -> dict | JSONResponse:
-    from ..pipeline.projects import load_project, project_path
+def _cut_report(folder: Path) -> dict | None:
+    """A lista de cortes do autocut, quando o projeto nasceu dele; uma lista ilegível não derruba a tela."""
+    from ..pipeline.autocut import load_cut_report
 
     try:
-        project = load_project(name)
+        report = load_cut_report(folder)
+    except ValueError:
+        return None
+    return report.to_dict() if report else None
+
+
+@app.get("/api/projects/{name}", response_model=None)
+def get_project(name: str) -> dict | JSONResponse:
+    from ..pipeline.projects import load_project_with_revision, project_path, spec_revision
+
+    try:
+        project, revision = load_project_with_revision(name)
     except FileNotFoundError as exc:
         raise _error(404, str(exc)) from exc
     except ValidationError as exc:
@@ -349,21 +396,55 @@ def get_project(name: str) -> dict | JSONResponse:
         except (OSError, json.JSONDecodeError):
             raw_spec = None
         return JSONResponse(
-            status_code=422, content={"detail": _validation_detail(exc), "raw_spec": raw_spec}
+            status_code=422,
+            content={
+                "detail": _validation_detail(exc),
+                "raw_spec": raw_spec,
+                "revision": spec_revision(name),
+            },
         )
     folder = project_path(name).parent
     return {
         "name": project.name,
         "spec_path": str(project_path(name)),
         "spec": json.loads(project.model_dump_json(exclude_none=True)),
+        "revision": revision,
         "captions_exists": (folder / "captions.auto.json").exists(),
         "outputs": _project_outputs(name),
+        "cuts": _cut_report(folder),
     }
 
 
-@app.put("/api/projects/{name}")
-def save_spec(name: str, spec: dict) -> dict:
-    from ..pipeline.projects import save_project
+@app.get("/api/projects/{name}/revision")
+def project_spec_revision(name: str) -> dict:
+    """A revisão do `spec.json` no disco, barata o bastante para o editor consultar a cada poucos segundos e
+    perceber que o Claude, o agente ou a CLI mudaram o projeto por fora."""
+    from ..pipeline.projects import project_path, spec_revision
+
+    revision = spec_revision(name)
+    if revision is None:
+        raise _error(404, f"Spec não encontrada: {project_path(name)}")
+    return {"revision": revision}
+
+
+def _clean_etag(value: str) -> str:
+    """O valor de um `If-Match` sem aspas nem o prefixo de validador fraco (`W/`), como clientes HTTP o mandam."""
+    value = value.strip()
+    if value.startswith("W/"):
+        value = value[2:]
+    return value.strip('"')
+
+
+# Uma gravação de spec por vez neste processo: a conferência da revisão e a troca do arquivo não podem se
+# intercalar com outra gravação da interface (o MCP e a CLI escrevem por fora, e isso a revisão pega).
+_spec_write_lock = threading.Lock()
+
+
+@app.put("/api/projects/{name}", response_model=None)
+def save_spec(name: str, spec: dict, if_match: Annotated[str | None, Header()] = None) -> dict | JSONResponse:
+    """Grava a spec. Com `If-Match: <revisão>`, só grava se o disco ainda está nessa revisão; senão devolve 409 com
+    a revisão atual, sem escrever nada. Sem o cabeçalho grava como sempre (a interface clássica não o manda)."""
+    from ..pipeline.projects import project_revision, save_project, spec_revision
 
     spec = dict(spec)
     spec["name"] = name
@@ -371,8 +452,114 @@ def save_spec(name: str, spec: dict) -> dict:
         project = Project.model_validate(spec)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
-    path = save_project(project)
-    return {"ok": True, "spec_path": str(path)}
+    with _spec_write_lock:
+        if if_match is not None:
+            current = spec_revision(name)
+            expected = _clean_etag(if_match)
+            if current is None or (expected != "*" and expected != current):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "O projeto mudou no disco desde a última leitura.",
+                        "revision": current,
+                    },
+                )
+        path = save_project(project)
+    return {"ok": True, "spec_path": str(path), "revision": project_revision(project)}
+
+
+@app.post("/api/projects/{name}/boxes")
+def project_boxes(name: str, services: Services, req: BoxesRequest | None = None) -> dict:
+    """A caixa de cada sobreposição no quadro nativo do preset, em fração, pela mesma conta do render e do QA da
+    zona segura. Com `spec` vale a que o editor tem na tela (ainda não salva); sem ela, a do disco."""
+    from ..media.probe import probe
+    from ..pipeline.overlay_boxes import overlay_boxes
+    from ..pipeline.projects import load_project
+
+    if req is not None and req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    try:
+        preset = get_preset(project.output.preset)
+        theme = load_theme(project.brand, project.theme)
+    except (KeyError, FileNotFoundError, ValueError) as exc:
+        raise _error(422, str(exc)) from exc
+    return overlay_boxes(project, preset, theme, services.prober or probe).to_dict()
+
+
+def _instant_frame_renderer(services: VoiceServices):
+    """Fábrica do renderizador do quadro de um instante, com os serviços da requisição (ffmpeg, probe e isolamento)
+    que os testes trocam por dublês; a legenda automática só é lida do cache, nunca transcrita."""
+    from ..media.probe import probe
+    from ..pipeline.instant_frame import InstantFrameRenderer
+
+    def make(runner, log):
+        return InstantFrameRenderer(
+            runner=services.runner or runner,
+            prober=services.prober or probe,
+            isolator=services.isolation,
+            log=log,
+        )
+
+    return make
+
+
+def _instant_frame_dict(status: InstantFrameStatus) -> dict:
+    """O estado de um quadro de instante como o editor o lê: `ready` traz `url` (para um `<img>`), `error` traz a
+    mensagem, `pending` traz a etapa e o andamento, e `superseded` diz que um pedido mais novo tomou o lugar."""
+    body: dict = {"key": status.key, "status": status.state, "t": status.at, "notes": status.notes}
+    if status.state == "ready" and status.frame is not None:
+        body["url"] = _file_url(status.frame.path)
+    elif status.state == "error":
+        body["error"] = status.error
+    elif status.state == "pending":
+        body.update(label=status.label, percent=status.percent)
+    return body
+
+
+@app.post("/api/projects/{name}/frame")
+def request_instant_frame(name: str, req: InstantFrameRequest, services: Services) -> dict:
+    """Pede o quadro do projeto no instante `t`, renderizado pelo pipeline de verdade (resolução da prévia, sem
+    áudio). Já no cache responde `ready` com a `url`; senão começa em segundo plano e responde `pending` com a
+    chave, que `GET .../frame/{key}` acompanha. Um pedido novo do mesmo projeto supera o anterior (`superseded`)."""
+    from ..pipeline.projects import load_project
+
+    if req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    try:
+        status = instant_frame_tasks.request(project, req.t, _instant_frame_renderer(services))
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise _error(422, str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)) from exc
+    return _instant_frame_dict(status)
+
+
+@app.get("/api/projects/{name}/frame/{key}")
+def get_instant_frame(name: str, key: str, services: Services) -> dict:
+    """Estado do quadro de uma chave pedida antes (o editor consulta isto enquanto ele é feito)."""
+    from ..media.ffmpeg import SubprocessRunner
+
+    status = None
+    if re.fullmatch(
+        r"[0-9a-f]{16}", key
+    ):  # a chave que o servidor deu; barra qualquer outra coisa no nome do arquivo
+        renderer = _instant_frame_renderer(services)(SubprocessRunner(quiet=True), lambda message: None)
+        status = instant_frame_tasks.status(name, key, renderer)
+    if status is None:
+        raise _error(404, "quadro desconhecido: peça de novo com POST")
+    return _instant_frame_dict(status)
 
 
 @app.post("/api/projects/{name}/validate")
@@ -388,10 +575,10 @@ def validate_project(name: str) -> dict:
 
 
 @app.post("/api/projects/{name}/qa")
-def qa_project(name: str) -> dict:
+def qa_project(name: str, req: QaRequest | None = None) -> dict:
     """Relatório de QA em texto: checagens estáticas da spec e, se já houver uma saída final renderizada
-    para o preset da spec, também as checagens sobre o arquivo (duração, resolução, quadros pretos, silêncio,
-    loudness)."""
+    para o preset da spec (ou o arquivo pedido em `output`), também as checagens sobre o arquivo (duração,
+    resolução, quadros pretos, silêncio, loudness)."""
     from ..pipeline.projects import load_project
     from ..pipeline.report import build_report
 
@@ -401,11 +588,18 @@ def qa_project(name: str) -> dict:
         raise _error(404, str(exc)) from exc
     output = None
     try:
-        preset_id = get_preset(project.output.preset).id.replace("/", "-")
-        files = sorted(
-            config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
-        output = files[0] if files else None
+        if req is not None and req.output:
+            output = Path(req.output)
+            if not _allowed_file(output):
+                raise _error(404, "arquivo não encontrado ou não permitido")
+        else:
+            preset_id = get_preset(project.output.preset).id.replace("/", "-")
+            files = sorted(
+                config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            output = files[0] if files else None
         report = build_report(project, output=output)
     except (ValueError, KeyError) as exc:
         raise _error(400, str(exc)) from exc
@@ -490,11 +684,22 @@ def _narration_durations(project: Project, services: VoiceServices) -> list[floa
     return view_narration_durations(project, services.library, services.synthesizer, services.lexicons)
 
 
+def _timeline_view_dict(project: Project, services: VoiceServices) -> dict:
+    """Vista multitrilha do projeto. Arquivo ausente não derruba: o item abre marcado; o que a spec não
+    deixa calcular de jeito nenhum (ex.: um clipe fora da cobertura da fonte) vira 422 com o motivo."""
+    from ..media.ffmpeg import FFmpegError
+    from ..pipeline.timeline_service import project_timeline_view
+
+    durations = _narration_durations(project, services)
+    try:
+        return project_timeline_view(project, durations).to_dict()
+    except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+
+
 @app.post("/api/projects/{name}/timeline")
 def project_timeline(name: str, req: TimelineRequest, services: Services) -> dict:
-    from ..pipeline.layout import project_layout
     from ..pipeline.projects import load_project
-    from ..pipeline.timeline_view import build_timeline_view
 
     if req.spec is not None:
         project = _project_from_body(name, req.spec)
@@ -503,30 +708,101 @@ def project_timeline(name: str, req: TimelineRequest, services: Services) -> dic
             project = load_project(name)
         except FileNotFoundError as exc:
             raise _error(404, str(exc)) from exc
-    layout = project_layout(project)
-    durations = _narration_durations(project, services)
-    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
+    return _timeline_view_dict(project, services)
 
 
 @app.post("/api/projects/{name}/edit")
 def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
     from ..pipeline.edits import apply_edit
-    from ..pipeline.layout import project_layout
-    from ..pipeline.timeline_view import build_timeline_view
 
     project = _project_from_body(name, req.spec)
     try:
         new_project = apply_edit(project, req.op)
     except EditError as exc:
         raise _error(400, str(exc)) from exc
-    layout = project_layout(new_project)
-    durations = _narration_durations(new_project, services)
-    view = build_timeline_view(new_project, layout, narration_durations=durations)
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
-        "timeline": view.to_dict(),
+        "timeline": _timeline_view_dict(new_project, services),
     }
+
+
+def _preview_audio_builder(services: VoiceServices):
+    """Fábrica do construtor da mixagem da prévia, com os serviços da requisição (ffmpeg, probe, vozes e
+    isolamento) que os testes trocam por dublês; a síntese de voz só é lida do cache, nunca executada."""
+    from ..media.probe import probe
+    from ..pipeline.narration import NarrationService
+    from ..pipeline.preview_audio import PreviewAudioBuilder
+    from ..pipeline.voices import shared_synthesizer
+    from ..voice.lexicon_store import LexiconStore
+
+    def narrator(runner):
+        return NarrationService(
+            services.synthesizer or shared_synthesizer(),
+            runner,
+            lexicons=(services.lexicons or LexiconStore()).for_brand,
+        )
+
+    def make(runner, log):
+        return PreviewAudioBuilder(
+            runner=services.runner or runner,
+            prober=services.prober or probe,
+            library=services.library,
+            narrator=narrator,
+            isolator=services.isolation,
+            log=log,
+        )
+
+    return make
+
+
+def _preview_audio_dict(status: PreviewAudioStatus) -> dict:
+    audio = status.audio
+    return {
+        "state": status.state,
+        "key": status.key,
+        "url": _file_url(audio.path) if audio else None,
+        "duration_s": round(audio.duration, 3) if audio else None,
+        "warnings": status.warnings,
+        "error": status.error,
+        "label": status.label,
+        "percent": status.percent,
+    }
+
+
+@app.post("/api/projects/{name}/preview-audio")
+def request_preview_audio(name: str, req: PreviewAudioRequest, services: Services) -> dict:
+    """Pede o áudio da prévia da linha do tempo: a mixagem do projeto (a spec do corpo, ou a do disco) como o
+    render a faz, num AAC leve. Já pronta no cache, responde `ready` com a URL; senão começa em segundo plano
+    e responde `building` com a chave, que `GET .../preview-audio?key=` acompanha."""
+    from ..pipeline.projects import load_project
+
+    if req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+    from ..media.ffmpeg import FFmpegError
+
+    try:
+        status = preview_audio_tasks.request(project, _preview_audio_builder(services))
+    except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+    return _preview_audio_dict(status)
+
+
+@app.get("/api/projects/{name}/preview-audio")
+def get_preview_audio(name: str, key: str, services: Services) -> dict:
+    """Estado da mixagem de uma chave pedida antes (a página consulta isto enquanto ela é feita)."""
+    from ..media.ffmpeg import SubprocessRunner
+
+    builder = _preview_audio_builder(services)(SubprocessRunner(quiet=True), lambda message: None)
+    status = preview_audio_tasks.status(name, key, builder)
+    if status is None:
+        raise _error(404, "mixagem desconhecida: peça de novo com POST")
+    return _preview_audio_dict(status)
 
 
 @app.get("/api/projects/{name}/theme")
@@ -767,7 +1043,7 @@ def build_proxies(name: str) -> dict:
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
     status = ProxyBuilder(SubprocessRunner(quiet=True)).status(project)
-    if all(s.ready for s in status):
+    if all(s.ready or s.missing for s in status):
         return {"job": None, "proxies": [_proxy_entry(s) for s in status]}
 
     # a página pode chamar isto duas vezes para o mesmo projeto (hash da URL + clique ao mesmo tempo,
@@ -803,14 +1079,15 @@ def get_waveform(path: str, stream: int = 0) -> dict:
 
 
 @app.get("/api/browse")
-def browse(path: str | None = None) -> dict:
-    """Navegador de arquivos para escolher fontes (só pastas e mídia)."""
+def browse(path: str | None = None, kind: str = "media") -> dict:
+    """Navegador de arquivos para escolher fontes (só pastas e mídia; `kind=sheet` mostra as planilhas de lote)."""
     if not path:
         drives = [f"{d}:/" for d in string.ascii_uppercase if Path(f"{d}:/").exists()]
         return {"path": "", "parent": None, "dirs": drives, "files": []}
     p = Path(path)
     if not p.is_dir():
         raise _error(404, "pasta não encontrada")
+    listed = SHEET_SUFFIXES if kind == "sheet" else MEDIA_EXTS
     dirs, files = [], []
     try:
         for child in sorted(p.iterdir(), key=lambda c: c.name.lower()):
@@ -818,7 +1095,7 @@ def browse(path: str | None = None) -> dict:
                 continue
             if child.is_dir():
                 dirs.append(child.as_posix())
-            elif child.suffix.lower() in MEDIA_EXTS:
+            elif child.suffix.lower() in listed:
                 files.append(
                     {
                         "path": child.as_posix(),

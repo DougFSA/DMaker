@@ -108,7 +108,7 @@ def _plain_line(line: str) -> str:
     return line
 
 
-def _decode(data: bytes) -> str:
+def decode_text(data: bytes) -> str:
     """UTF-8 (com ou sem BOM); se não for, Windows-1252, que é o que o Bloco de Notas antigo grava."""
     try:
         return data.decode("utf-8-sig")
@@ -198,7 +198,21 @@ def _paragraph_text(paragraph: ElementTree.Element) -> str:
     return " ".join("".join(parts).split())
 
 
-def _docx_blocks(data: bytes) -> list[_Block]:
+@dataclass(frozen=True)
+class DocxParagraph:
+    """Um parágrafo do Word, sem formatação: o texto, se o estilo é de título e se é item de lista."""
+
+    text: str
+    is_heading: bool
+    is_list_item: bool
+
+
+def docx_paragraphs(data: bytes) -> list[DocxParagraph]:
+    """Os parágrafos não vazios de um .docx, na ordem do documento (tabelas inclusas, célula a célula).
+
+    É o leitor do roteiro e também dos anexos do agente: um só lugar sabe abrir o zip do Word, com a trava contra
+    arquivo que descompacta além do razoável.
+    """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
         names = set(archive.namelist())
@@ -209,21 +223,34 @@ def _docx_blocks(data: bytes) -> list[_Block]:
             raise ValueError("O arquivo .docx descompacta para um tamanho absurdo.")
         document = archive.read("word/document.xml")
         styles = archive.read("word/styles.xml") if "word/styles.xml" in names else None
-    except (zipfile.BadZipFile, KeyError) as exc:
+        chapter_styles = _heading_style_ids(styles)
+        root = ElementTree.fromstring(document)
+    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError) as exc:
         raise ValueError("Não consegui abrir o .docx: o arquivo está corrompido ou não é do Word.") from exc
-    chapter_styles = _heading_style_ids(styles)
-    blocks: list[_Block] = []
-    for paragraph in ElementTree.fromstring(document).iter(f"{_WORD_NS}p"):
+    paragraphs: list[DocxParagraph] = []
+    for paragraph in root.iter(f"{_WORD_NS}p"):
         text = _paragraph_text(paragraph)
         if not text:
             continue
         style = paragraph.find(f"{_WORD_NS}pPr/{_WORD_NS}pStyle")
         style_id = style.get(f"{_WORD_NS}val", "") if style is not None else ""
-        if chapter_styles.get(style_id, _is_chapter_style(style_id)):
-            blocks.append(_Block("chapter", _clean_title(text)))
+        paragraphs.append(
+            DocxParagraph(
+                text=text,
+                is_heading=chapter_styles.get(style_id, _is_chapter_style(style_id)),
+                is_list_item=paragraph.find(f"{_WORD_NS}pPr/{_WORD_NS}numPr") is not None,
+            )
+        )
+    return paragraphs
+
+
+def _docx_blocks(data: bytes) -> list[_Block]:
+    blocks: list[_Block] = []
+    for paragraph in docx_paragraphs(data):
+        if paragraph.is_heading:
+            blocks.append(_Block("chapter", _clean_title(paragraph.text)))
             continue
-        if paragraph.find(f"{_WORD_NS}pPr/{_WORD_NS}numPr") is not None:
-            text = _as_sentence(text)  # item de lista numerada ou com marcadores
+        text = _as_sentence(paragraph.text) if paragraph.is_list_item else paragraph.text
         blocks.append(_Block("paragraph", strip_formatting(text)))
     return [block for block in blocks if block.text.strip()]
 
@@ -269,9 +296,9 @@ def parse_manuscript(data: bytes, filename: str) -> list[Chapter]:
     if suffix == ".docx":
         chapters = chapters_from_docx(data, default_title)
     elif suffix in (".md", ".markdown"):
-        chapters = chapters_from_markdown(_decode(data), default_title)
+        chapters = chapters_from_markdown(decode_text(data), default_title)
     elif suffix == ".txt":
-        chapters = chapters_from_text(_decode(data), default_title)
+        chapters = chapters_from_text(decode_text(data), default_title)
     else:
         raise ValueError(
             f"Formato de roteiro não suportado ({suffix or 'sem extensão'}); use .txt, .md ou .docx."

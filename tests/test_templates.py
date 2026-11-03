@@ -12,6 +12,7 @@ from dmaker.domain.templates import (
     expand_dir,
     find_template,
     list_templates,
+    load_template,
     render_template,
     template_summary,
 )
@@ -22,6 +23,8 @@ TEMPLATES = list_templates()
 def _fake_value(param: TemplateParam, tmp_path: Path):
     """Um valor plausível do tipo certo, para preencher parâmetros obrigatórios em teste. `dir` cria
     uma pastinha de verdade em `tmp_path` com um arquivo de mídia vazio dentro."""
+    if param.example is not None:  # o exemplo do próprio template é o valor mais plausível
+        return param.example
     if param.type == "dir":
         folder = tmp_path / param.name
         folder.mkdir(parents=True, exist_ok=True)
@@ -232,3 +235,62 @@ def test_all_template_files_are_valid_json_with_params_and_description():
         data = json.loads(path.read_text(encoding="utf-8"))
         assert "params" in data, path
         assert "description" in data, path
+
+
+# ---------- campos de objeto, preparador de parâmetros e exemplo ----------
+
+
+def test_placeholder_reaches_a_field_of_an_object_param():
+    template = _template(
+        {"assuntos": {"type": "list", "required": True}},
+        {
+            "trechos": [
+                {"$for": "assuntos", "as": "a", "item": {"dur": "{{a.fim}}", "rotulo": "ate {{a.fim}} s"}}
+            ],
+            "primeiro": "{{assuntos}}",
+        },
+    )
+    out = render_template(template, {"assuntos": [{"fim": 4}, {"fim": 9}]})
+    assert out["trechos"] == [{"dur": 4, "rotulo": "ate 4 s"}, {"dur": 9, "rotulo": "ate 9 s"}]
+
+
+def test_nested_placeholder_with_a_missing_field_is_a_template_error():
+    template = _template(
+        {"a": {"type": "list", "required": True}}, {"x": [{"$for": "a", "as": "i", "item": "{{i.nome}}"}]}
+    )
+    with pytest.raises(TemplateError, match='i.nome.*sem o campo "nome"'):
+        render_template(template, {"a": [{"fim": 1}]})
+    with pytest.raises(TemplateError, match="desconhecido"):
+        render_template(_template({}, {"x": "{{sumiu.campo}}"}), {})
+
+
+def test_prepare_hook_runs_before_substitution_and_its_errors_become_template_errors(monkeypatch):
+    from dmaker.domain import templates
+
+    def preparer(params):
+        if params["n"] < 0:
+            raise ValueError("n negativo")
+        return {**params, "dobro": params["n"] * 2}
+
+    monkeypatch.setitem(templates.PARAM_PREPARERS, "dobrar", preparer)
+    template = _template({"n": {"type": "number", "required": True}}, {"x": "{{dobro}}"})
+    template.prepare = "dobrar"
+    assert render_template(template, {"n": 4}) == {"x": 8}
+    with pytest.raises(TemplateError, match="teste.*n negativo"):
+        render_template(template, {"n": -1})
+
+
+def test_unknown_prepare_hook_is_refused_when_the_template_is_loaded(tmp_path):
+    path = tmp_path / "ruim.json"
+    path.write_text(json.dumps({"description": "x", "prepare": "nao-existe", "params": {}}), encoding="utf-8")
+    with pytest.raises(TemplateError, match="preparador desconhecido.*nao-existe"):
+        load_template(path)
+
+
+def test_param_example_shows_up_in_the_summary_and_in_the_loaded_template():
+    explicativo = find_template("explicativo")
+    assert explicativo.prepare == "explicativo"
+    assert explicativo.params["assuntos"].example[0]["fim"] == 20
+    assert "exemplo:" in template_summary(explicativo) and '"fundo": "escuro"' in template_summary(
+        explicativo
+    )

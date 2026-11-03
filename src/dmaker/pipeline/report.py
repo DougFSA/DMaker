@@ -1,8 +1,9 @@
 """Relatório de QA automático, em texto: tudo que dá para conferir sem olhar imagem.
 
 Checagens estáticas (`STATIC_CHECKS`) olham só a spec, sem rodar nada: reaproveitam o `lint`, estimam
-onde o texto cai (zona segura, contraste) com as mesmas contas do ASS (`text/overlays.py`), e avisam
-sobre ritmo de leitura, sobreposições e legendas. `OutputInspector` faz as checagens que só dá para
+onde as sobreposições caem (zona segura) com a mesma conta das caixas que a interface mostra
+(`overlay_boxes.py`, que chama as funções do render), conferem o contraste do texto e avisam sobre ritmo
+de leitura, sobreposições e legendas. `OutputInspector` faz as checagens que só dá para
 saber olhando o arquivo pronto (duração, resolução, quadros pretos, silêncio, loudness), sempre por um
 `FFmpegRunner` injetado. `build_report` junta as duas pontas; a IA só chama `contact_sheet`/`frames`
 quando este relatório aponta algo.
@@ -18,17 +19,18 @@ from typing import Literal
 
 from ..domain.brand import Theme
 from ..domain.presets import Preset
-from ..domain.spec import CardSegment, ClipSegment, ImageSegment, Project, TextOverlay
+from ..domain.spec import CardSegment, ClipSegment, ImageOverlay, ImageSegment, Project, TextOverlay
 from ..domain.timeline import tone_for
 from ..filtergraph.reframe import resolve_reframe_mode
 from ..media import fonts
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..text.captions import from_json, suspicious_cues
-from ..text.overlays import ROLE_DEFAULTS, Canvas, effective_style, wrap_lines
+from ..text.overlays import ROLE_DEFAULTS, effective_style, wrap_lines
 from .context import Prober
 from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
+from .overlay_boxes import OverlayBox, overlay_boxes
 from .sync import OffsetFinder
 from .voiceover import known_voices
 
@@ -146,46 +148,6 @@ def _segment_tones(project: Project, layout: ProjectLayout) -> list[str | None]:
     ]
 
 
-def _text_geometry(ov: TextOverlay, theme: Theme, canvas: Canvas, tone: str | None):
-    """Reproduz a conta de posição/tamanho de `add_text_overlay`, sem desenhar nada."""
-    st = effective_style(ov, theme, tone)
-    s = canvas.scale
-    W, H, safe = canvas.width, canvas.height, canvas.safe
-    ref = fonts.resolve(st["font"] or theme.font_family, st["weight"])
-    size = st["size"] * s
-    spacing = st["spacing"] * s
-    text = ov.text.upper() if st["uppercase"] else ov.text
-    max_w = W * st["max_width"] - 2 * st["box_padding"] * s
-    lines = wrap_lines(text, ref, size, max_w, spacing)
-    line_widths = [fonts.measure(ln, ref, size, spacing)[0] for ln in lines]
-    block_w = max(line_widths) if line_widths else 0.0
-    block_h = size * len(lines) * 1.2
-    if st["box"]:
-        pad = st["box_padding"] * s
-        block_w += 2 * pad
-        block_h += 2 * pad
-    align = st["align"]
-    if ov.x is not None:
-        cx = ov.x * W
-    elif align == "left":
-        cx = safe.left + canvas.px(st["box_padding"]) + canvas.px(28)
-    elif align == "right":
-        cx = W - safe.right - canvas.px(st["box_padding"]) - canvas.px(28)
-    else:
-        cx = W / 2
-    if ov.y is not None:
-        cy = ov.y * H
-    else:
-        position = st["position"]
-        if position == "top":
-            cy = safe.top + H * 0.10 + block_h / 2
-        elif position == "bottom":
-            cy = H - safe.bottom - H * 0.045 - block_h / 2
-        else:
-            cy = H * 0.5 + H * st.get("offset_y", 0)
-    return cx, cy, block_w, block_h, line_widths, max_w, st
-
-
 # ---------- checagens estáticas ----------
 
 
@@ -209,36 +171,40 @@ def check_lint(project: Project, layout: ProjectLayout) -> list[Finding]:
     return [Finding("aviso", "lint", w) for w in warnings]
 
 
+def _boxes(project: Project, layout: ProjectLayout, kinds: set[str]) -> list[OverlayBox]:
+    """As caixas dos tipos pedidos, pela mesma conta que a interface usa para mostrar e arrastar a sobreposição."""
+    return overlay_boxes(project, layout.preset, layout.theme, layout.prober, kinds=kinds).boxes
+
+
+def _is_on_screen(overlay, layout: ProjectLayout) -> bool:
+    """A sobreposição tem tempo em tela (as que começam depois do fim do vídeo não desenham nada)."""
+    end = min(overlay.end if overlay.end is not None else layout.total, layout.total)
+    return end > overlay.start
+
+
 def check_text_safe_zone(project: Project, layout: ProjectLayout) -> list[Finding]:
     """texto fora da zona segura ou palavra larga demais para a área"""
     findings: list[Finding] = []
-    canvas = Canvas(layout.preset.width, layout.preset.height, layout.preset.safe, layout.theme, layout.total)
-    tones = _segment_tones(project, layout)
-    W, H, safe = layout.preset.width, layout.preset.height, layout.preset.safe
-    for i, ov in enumerate(project.overlays):
-        if not isinstance(ov, TextOverlay):
+    for box in _boxes(project, layout, {"text"}):
+        ov = project.overlays[box.index]
+        if not _is_on_screen(ov, layout):
             continue
-        end = min(ov.end if ov.end is not None else layout.total, layout.total)
-        if end <= ov.start:
-            continue
-        tone = tone_for(ov.start, end, layout.spans, tones)
-        cx, cy, bw, bh, widths, max_w, _st = _text_geometry(ov, layout.theme, canvas, tone)
-        left, right = cx - bw / 2, cx + bw / 2
-        top, bottom = cy - bh / 2, cy + bh / 2
-        if left < safe.left or right > W - safe.right or top < safe.top or bottom > H - safe.bottom:
+        if box.outside_safe_zone:
             findings.append(
                 Finding(
                     "aviso",
-                    f"overlays[{i}].text",
+                    f"overlays[{box.index}].text",
                     "texto pode invadir a área coberta pela interface do app",
                     ov.start,
                 )
             )
-        if any(w > max_w + 1 for w in widths):
+        text = box.text
+        # a segunda linha (`secondary`) não quebra, então só as linhas do texto principal entram nesta conta
+        if text and any(w > text.wrap_width + 1 for w in text.line_widths[: len(text.lines)]):
             findings.append(
                 Finding(
                     "aviso",
-                    f"overlays[{i}].text",
+                    f"overlays[{box.index}].text",
                     "uma palavra é mais larga que a área de texto e será cortada",
                     ov.start,
                 )
@@ -246,6 +212,43 @@ def check_text_safe_zone(project: Project, layout: ProjectLayout) -> list[Findin
     for i, seg in enumerate(project.timeline):
         if isinstance(seg, CardSegment):
             findings.extend(_check_card_text(i, seg, layout))
+    return findings
+
+
+def check_html_safe_zone(project: Project, layout: ProjectLayout) -> list[Finding]:
+    """composição em HTML cuja área invade a zona coberta pela interface do app"""
+    return [
+        Finding(
+            "aviso",
+            f"overlays[{box.index}]",
+            "a área da composição HTML pode invadir a região coberta pela interface do app",
+            box.start,
+        )
+        for box in _boxes(project, layout, {"html"})
+        if box.outside_safe_zone  # a presa a uma palavra e a página inteira vêm sem lado de fora
+    ]
+
+
+def check_media_safe_zone(project: Project, layout: ProjectLayout) -> list[Finding]:
+    """imagem ou vídeo sobreposto, posto por x/y, que invade a zona coberta pela interface do app"""
+    findings: list[Finding] = []
+    for box in _boxes(project, layout, {"image", "video"}):
+        ov = project.overlays[box.index]
+        # a posição nomeada já respeita a zona (a conta do grafo a soma), e a imagem com `safe_zone: false`
+        # pediu para ignorá-la: só o centro dado à mão (x/y) pode cair na área coberta sem querer
+        if box.placement != "xy" or not box.outside_safe_zone or not _is_on_screen(ov, layout):
+            continue
+        if isinstance(ov, ImageOverlay) and not ov.safe_zone:
+            continue
+        what = "a imagem" if box.kind == "image" else "o vídeo sobreposto"
+        findings.append(
+            Finding(
+                "aviso",
+                f"overlays[{box.index}]",
+                f"{what} pode invadir a região coberta pela interface do app",
+                ov.start,
+            )
+        )
     return findings
 
 
@@ -258,8 +261,11 @@ def _check_card_text(index: int, seg: CardSegment, layout: ProjectLayout) -> lis
     title_size = base * 0.085
     sub_size = base * 0.042
     max_w = W * 0.84 - (safe.left + safe.right)
-    title_lines = wrap_lines(seg.title, title_ref, title_size, max_w)
-    sub_lines = wrap_lines(seg.subtitle, body_ref, sub_size, max_w) if seg.subtitle else []
+    # o cartão é desenhado pelo Pillow (`visuals/cards.py`), então a conferência dele mede com a régua do Pillow
+    title_lines = wrap_lines(seg.title, title_ref, title_size, max_w, 0, fonts.measure_pillow)
+    sub_lines = (
+        wrap_lines(seg.subtitle, body_ref, sub_size, max_w, 0, fonts.measure_pillow) if seg.subtitle else []
+    )
     block_h = len(title_lines) * title_size * 1.18
     if sub_lines:
         block_h += sub_size * 0.6 + len(sub_lines) * sub_size * 1.35
@@ -272,7 +278,7 @@ def _check_card_text(index: int, seg: CardSegment, layout: ProjectLayout) -> lis
                 "título/subtítulo do cartão pode não caber na altura disponível",
             )
         )
-    widest = max((fonts.measure(ln, title_ref, title_size)[0] for ln in title_lines), default=0.0)
+    widest = max((fonts.measure_pillow(ln, title_ref, title_size)[0] for ln in title_lines), default=0.0)
     if widest > max_w + 1:
         findings.append(
             Finding(
@@ -317,6 +323,16 @@ def check_text_pacing(project: Project, layout: ProjectLayout) -> list[Finding]:
     return findings
 
 
+def _text_place(ov: TextOverlay) -> tuple:
+    """Onde o texto cai, o bastante para saber se dois se sobrepõem: a região, ou o `x`/`y` explícitos (a 1% do
+    quadro), ou a posição nomeada (a do papel quando o texto não diz nenhuma). Comparar só a `position` dava aviso
+    falso para dois textos que o editor pôs em lugares diferentes por `x`/`y`, caso em que a `position` nem existe."""
+    if ov.region:
+        return ("region", ov.region)
+    vertical = round(ov.y, 2) if ov.y is not None else (ov.position or ROLE_DEFAULTS[ov.role]["position"])
+    return (round(ov.x, 2) if ov.x is not None else None, vertical)
+
+
 def check_overlap(project: Project, layout: ProjectLayout) -> list[Finding]:
     """sobreposições fora da duração final ou textos no mesmo lugar e no mesmo instante"""
     findings: list[Finding] = []
@@ -346,13 +362,13 @@ def check_overlap(project: Project, layout: ProjectLayout) -> list[Finding]:
     for a in range(len(texts)):
         i, ov1 = texts[a]
         end1 = min(ov1.end if ov1.end is not None else total, total)
-        pos1 = ov1.position or ROLE_DEFAULTS[ov1.role]["position"]
+        place1 = _text_place(ov1)
         for b in range(a + 1, len(texts)):
             j, ov2 = texts[b]
             end2 = min(ov2.end if ov2.end is not None else total, total)
-            pos2 = ov2.position or ROLE_DEFAULTS[ov2.role]["position"]
+            place2 = _text_place(ov2)
             overlap = min(end1, end2) - max(ov1.start, ov2.start)
-            if overlap > 0.05 and ov1.role == ov2.role and pos1 == pos2:
+            if overlap > 0.05 and ov1.role == ov2.role and place1 == place2:
                 findings.append(
                     Finding(
                         "aviso",
@@ -396,6 +412,8 @@ def check_contrast(project: Project, layout: ProjectLayout) -> list[Finding]:
     for i, seg in enumerate(project.timeline):
         if not isinstance(seg, CardSegment):
             continue
+        if seg.flat and not seg.title.strip() and not seg.subtitle:
+            continue  # fundo de cor lisa sem texto: não há título para comparar com o fundo
         variant = seg.variant or theme.style.get("card_variant", "light")
         dark = variant == "dark"
         bg = (
@@ -502,6 +520,8 @@ def check_sources(project: Project, layout: ProjectLayout) -> list[Finding]:
 STATIC_CHECKS = [
     check_lint,
     check_text_safe_zone,
+    check_html_safe_zone,
+    check_media_safe_zone,
     check_text_pacing,
     check_overlap,
     check_contrast,

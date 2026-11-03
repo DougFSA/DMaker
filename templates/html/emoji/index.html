@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Emoji animado: um dos emojis animados do Google Noto (CC BY 4.0, em /_dmaker/emoji/), tocados pelo lottie-web.
+  Uma coisa só: o emoji, sem fundo. O relógio do DMaker posiciona a animação Lottie no instante de cada quadro; a
+  entrada (pop) e a saída são desta página, em `dmakerSeek(t)`.
+-->
+<script src="/_dmaker/lottie.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro { position: absolute; inset: 0; display: grid; place-items: center; }
+  #lottie { width: min(100vw, 100vh); height: min(100vw, 100vh); }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro"><div id="lottie"></div></div>
+<script>
+  const d = dmaker.data;
+  const quadro = document.getElementById("quadro"), lugar = document.getElementById("lottie");
+
+  lottie.loadAnimation({
+    container: lugar,
+    renderer: "svg",
+    loop: d.repetir,
+    autoplay: true,
+    path: `/_dmaker/emoji/${d.emoji}.json`,
+    rendererSettings: { preserveAspectRatio: "xMidYMid meet" },
+  });
+
+  window.dmakerSeek = (t) => {
+    const p = Math.min(Math.max(t / d.duracao, 0), 1);
+    const suave = 1 - Math.pow(1 - p, 3);
+    let escala = 1, opacidade = 1;
+    if (d.entrada === "pop") {
+      escala = p >= 1 ? 1 : 0.3 + 0.7 * suave + 0.16 * Math.sin(Math.PI * p) * (1 - p);
+      opacidade = Math.min(p * 3, 1);
+    } else if (d.entrada === "fade") {
+      opacidade = suave;
+    }
+    const sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    quadro.style.opacity = String(Math.min(opacidade, sai));
+    lugar.style.transform = `scale(${escala})`;
+  };
+</script>
+</body>
+</html>

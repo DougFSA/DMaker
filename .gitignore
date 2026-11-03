@@ -35,6 +35,9 @@ assets/voices/
 # projetos de vídeo (mídia pesada e dados de clientes ficam só na máquina)
 projects/
 
+# conversas do agente local e os anexos delas (dado da pessoa); ancorado na raiz para não pegar pasta de código
+/conversations/
+
 # interface Vue: dependências e artefato de build (npm run build gera src/dmaker/ui/dist)
 frontend/node_modules/
 src/dmaker/ui/dist/

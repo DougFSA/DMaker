@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Grifo à mão: círculo, sublinhado, marca-texto ou risco, desenhados com traço irregular (rough-notation, MIT, em
+  /_dmaker/rough-notation.js). Uma coisa só: o traço, sem fundo e sem texto; ele marca a área da página, e quem
+  decide qual palavra é o `anchor` da composição (o grifo preso a uma palavra da legenda recebe a caixa dela).
+  A animação da biblioteca é CSS (stroke-dashoffset), que o relógio do DMaker posiciona quadro a quadro: o traço se
+  desenha, e não aparece pronto. O sorteio do traço usa Math.random, que o DMaker semeia: sai igual em todo render.
+-->
+<script src="/_dmaker/rough-notation.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; }
+  .quadro { position: absolute; inset: 0; }
+  /* a área marcada: a página menos a folga em volta, onde o traço cabe sem ser cortado */
+  .alvo { position: absolute; }
+  .marca-texto svg { opacity: 0.4; }
+</style>
+</head>
+<body>
+<div class="quadro" id="quadro"><div class="alvo" id="alvo"></div></div>
+<script>
+  const d = dmaker.data;
+  const corDaMarca = (valor) => (String(valor).startsWith("#") ? valor : `var(--dm-${String(valor).replace(/_/g, "-")})`);
+  const quadro = document.getElementById("quadro"), alvo = document.getElementById("alvo");
+
+  // o círculo abraça a página inteira (menos o traço): quem prendeu a composição a uma palavra deu a folga em volta
+  // dela, e é nessa folga que o círculo passa. Os outros tipos marcam a própria palavra, no meio da folga (`recuo`).
+  const folga = d.tipo === "circulo" ? d.espessura / 2 + 3 : d.recuo;
+  const limite = Math.min(folga, dmaker.width / 2 - 1, dmaker.height / 2 - 1);
+  Object.assign(alvo.style, { left: limite + "px", top: limite + "px", right: limite + "px", bottom: limite + "px" });
+
+  const tipos = { circulo: "circle", sublinhado: "underline", "marca-texto": "highlight", risco: "strike-through" };
+  if (d.tipo === "marca-texto") quadro.classList.add("marca-texto");
+
+  // a cor chega como variável CSS da marca; a biblioteca precisa do valor, então ele é lido do estilo da página
+  const sonda = document.createElement("span");
+  sonda.style.color = corDaMarca(d.cor);
+  document.body.append(sonda);
+  const cor = getComputedStyle(sonda).color;
+  sonda.remove();
+
+  RoughNotation.annotate(alvo, {
+    type: tipos[d.tipo] || "circle",
+    color: cor,
+    strokeWidth: d.espessura,
+    animationDuration: d.duracao * 1000,
+    iterations: d.passadas,
+    padding: d.tipo === "circulo" ? 2 : 4,
+    multiline: false,
+    animate: true,
+  }).show();
+
+  window.dmakerSeek = (t) => {
+    const sai = Math.min(Math.max((dmaker.duration - t) / 0.3, 0), 1);
+    quadro.style.opacity = String(sai);
+  };
+</script>
+</body>
+</html>

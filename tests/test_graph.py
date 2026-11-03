@@ -103,6 +103,30 @@ def test_clip_mezzanine_command(tmp_path):
     assert "pcm_s16le" in cmd.args and cmd.args[-1] == str(tmp_path / "m.mov")
 
 
+def test_clip_mezzanine_audio_fade_fades_only_the_sound_on_both_edges(tmp_path):
+    seg = ClipSegment(src="x.mp4", start=0, end=2, audio_fade=0.01)
+    fc = _filter_complex(
+        clip_mezzanine(seg, _info(), Path("x.mp4"), 2.0, 1080, 1920, 30, tmp_path / "m.mov").args
+    )
+    assert "afade=t=in:st=0:d=0.010" in fc and "afade=t=out:st=1.990:d=0.010" in fc
+    assert "fade=t=" not in fc.replace("afade=t=", "")  # a imagem não escurece no corte
+
+
+def test_clip_mezzanine_without_audio_fade_has_no_audio_fade(tmp_path):
+    seg = ClipSegment(src="x.mp4", start=0, end=2)
+    fc = _filter_complex(
+        clip_mezzanine(seg, _info(), Path("x.mp4"), 2.0, 1080, 1920, 30, tmp_path / "m.mov").args
+    )
+    assert "afade" not in fc
+
+
+def test_audio_edge_fades_never_pass_half_of_the_clip():
+    from dmaker.filtergraph.common import audio_edge_fades
+
+    assert audio_edge_fades(0, 2.0) == []
+    assert audio_edge_fades(0.5, 0.4) == ["afade=t=in:st=0:d=0.200", "afade=t=out:st=0.200:d=0.200"]
+
+
 def test_clip_mezzanine_silent_and_brand(tmp_path):
     seg = ClipSegment(src="x.mp4", reframe=Reframe(mode="brand"))
     cmd = clip_mezzanine(
@@ -408,3 +432,29 @@ def test_audio_graph_without_narration_is_unchanged():
     lines: list[str] = []
     audio_graph(lines, Inputs(), "[ta0]", AudioSettings(normalize="off"), None, 5.0)
     assert "narrated" not in ";".join(lines) and "[nar" not in ";".join(lines)
+
+
+def test_image_overlay_by_center_ignores_position_and_the_safe_zone(tmp_path: Path):
+    """x/y (que o `region` resolve) põem o CENTRO da imagem, qualquer que seja o `position` guardado."""
+    from dmaker.domain.spec import ImageOverlay
+    from dmaker.filtergraph.overlays import ResolvedImageOverlay, image_overlay_graph, overlay_center_position
+
+    assert overlay_center_position(0.5, 0.25, 1080, 1920) == ("540.00-w/2", "480.00-h/2")
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"png")
+    lines: list[str] = []
+    ov = ImageOverlay(src=str(logo), position="top-right", x=0.5, y=0.25, width=0.5)
+    image_overlay_graph(
+        lines,
+        Inputs(),
+        "[v]",
+        [ResolvedImageOverlay(ov, logo, 0, 5)],
+        1080,
+        1920,
+        30,
+        5,
+        1.0,
+        SafeZone(220, 420, 60, 150),
+    )
+    text = ";".join(lines)
+    assert "overlay=x=540.00-w/2:y=480.00-h/2" in text and "scale=540:-2" in text

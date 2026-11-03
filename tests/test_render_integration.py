@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dmaker.domain.spec import Project
+from dmaker.media import ffmpeg
 from dmaker.media.probe import probe
 from dmaker.pipeline import RenderOptions, RenderPipeline, contact_sheet
 
@@ -809,3 +812,362 @@ def test_dub_stems_of_a_stretched_video_follow_the_new_timeline_with_the_pitch_i
     mix, _ = read_wav_channels(premix)
     summed = voice_dubbed + background_out
     assert float(np.abs(summed - mix[: len(summed)]).max()) < 2e-4
+
+
+def _face_recording(path: Path, size: tuple[int, int]) -> None:
+    """Gravação sintética (parede azul, cabeça redonda cor de pele, tom de 440 Hz) de 3 s, para medir
+    no quadro renderizado se o recorte distorce (a cabeça tem que continuar um círculo)."""
+    from PIL import Image, ImageDraw
+
+    width, height = size
+    image = Image.new("RGB", size, WALL)
+    # vertical: o rosto fica no terço de cima, onde o foco padrão do modelo mantém a janela do quadro
+    center_y, radius = (
+        (int(height * 0.28), int(height * 0.09)) if height > width else (height // 2, int(height * 0.22))
+    )
+    ImageDraw.Draw(image).ellipse(
+        [width // 2 - radius, center_y - radius, width // 2 + radius, center_y + radius], fill=SKIN
+    )
+    png = path.with_suffix(".png")
+    image.save(png)
+    ffmpeg.run(
+        ["-loop", "1", "-framerate", "30", "-t", "3", "-i", str(png)]
+        + ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3"]
+        + ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)],
+        quiet=True,
+    )
+
+
+WALL = (90, 120, 150)
+SKIN = (235, 190, 150)
+TOPIC_BACKGROUNDS = [(0x0F, 0x17, 0x2A), (0xF1, 0xE8, 0xD8), (0xF8, 0xFA, 0xFC)]  # escuro, bege, claro
+
+
+def _bounding_box(mask):
+    ys, xs = np.nonzero(mask)
+    return (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())) if len(xs) else None
+
+
+@pytest.mark.parametrize("size", [(720, 1280), (1280, 720)], ids=["vertical", "horizontal"])
+def test_explainer_template_renders_the_recording_in_its_frame_without_distortion(
+    synthetic_media, tmp_path, size
+):
+    """Modelo "explicativo" de ponta a ponta com ffmpeg: o rosto fica contínuo num quadro com os pixels da
+    região "rosto", o fundo troca nos limites dos assuntos, a imagem cabe em "topo" e a cabeça não distorce,
+    seja a gravação vertical ou horizontal."""
+    from PIL import Image
+
+    from dmaker.domain.regions import region_pixels
+    from dmaker.domain.templates import find_template, render_template
+
+    recording = tmp_path / "gravacao.mp4"
+    _face_recording(recording, size)
+    topics = [
+        {"fim": 1, "fundo": "escuro", "imagem": str(synthetic_media["photo"])},
+        {"fim": 2, "fundo": "bege", "imagem": str(synthetic_media["photo"])},
+        {"fim": 3, "fundo": "claro"},
+    ]
+    spec = render_template(
+        find_template("explicativo"), {"gravacao": str(recording), "assuntos": topics, "legendas": False}
+    )
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    out = tmp_path / "explicativo.mp4"
+    result = RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True, thumbnail=False)).run()
+
+    info = probe(out)
+    assert (info.width, info.height) == (540, 960) and abs(info.duration - 3.0) < 0.25 and info.has_audio
+    assert not any("some antes" in w or "silencioso" in w for w in result.warnings)
+    loudness = json.loads((result.job_dir / "loudnorm.json").read_text(encoding="utf-8"))
+    assert float(loudness["input_i"]) > -40  # a voz da gravação entrou na medição (era medida como silêncio)
+
+    left, top, width, height = region_pixels(project.regions["rosto"], 540, 960)
+    topo_left, topo_top, topo_width, topo_height = region_pixels(project.regions["topo"], 540, 960)
+    for index, instant in enumerate((0.5, 1.5, 2.5)):
+        frame_path = tmp_path / f"quadro{index}.png"
+        ffmpeg.run(["-ss", str(instant), "-i", str(out), "-frames:v", "1", str(frame_path)], quiet=True)
+        frame = np.asarray(Image.open(frame_path).convert("RGB")).astype(int)
+        # o fundo troca em cada assunto
+        assert np.abs(frame[5, 5] - np.array(TOPIC_BACKGROUNDS[index])).max() <= 6
+        # o quadro do rosto ocupa a região (a parede da gravação preenche, sem fresta)
+        wall = np.abs(frame - np.array(WALL)).max(axis=2) <= 14
+        x0, y0, x1, y1 = _bounding_box(wall)
+        assert abs(x0 - left) <= 3 and abs(y0 - top) <= 3
+        assert abs(x1 - (left + width - 1)) <= 3 and abs(y1 - (top + height - 1)) <= 3
+        # a cabeça continua um círculo: a gravação foi cortada para preencher, não esticada
+        skin = np.abs(frame - np.array(SKIN)).max(axis=2) <= 14
+        hx0, hy0, hx1, hy1 = _bounding_box(skin)
+        assert abs((hx1 - hx0 + 1) / (hy1 - hy0 + 1) - 1) < 0.05
+        # a imagem do assunto (só nos dois primeiros) fica dentro de "topo"; no terceiro, o fundo liso
+        above = np.abs(frame[: top - 15] - np.array(TOPIC_BACKGROUNDS[index])).max(axis=2) > 24
+        box = _bounding_box(above)
+        if index < 2:
+            assert box and box[0] >= topo_left - 3 and box[2] <= topo_left + topo_width + 3
+            assert box[1] >= topo_top - 3 and box[3] <= topo_top + topo_height + 3
+        else:
+            assert box is None
+
+    # a fala não é cortada na troca de fundo: o nível do áudio segue parelho de ponta a ponta
+    wav = tmp_path / "saida.wav"
+    ffmpeg.run(["-i", str(out), "-vn", "-ac", "1", "-ar", "16000", str(wav)], quiet=True)
+    with wave.open(str(wav)) as handle:
+        samples = np.frombuffer(handle.readframes(handle.getnframes()), dtype=np.int16).astype(float)
+    windows = [samples[i : i + 1600] for i in range(1600, len(samples) - 1600, 1600)]  # 100 ms, sem as pontas
+    levels = np.array([np.sqrt((w**2).mean()) for w in windows])
+    assert levels.min() > 0.7 * np.median(levels)
+
+
+# ---------- efeitos sonoros (DMK-25) ----------
+
+SFX_RATE = 48_000
+
+
+def _speechlike(seconds: float, seed: int = 5):
+    """Fala sintética: sílabas de timbre harmônico (110 a 210 Hz) com envelope e pausas, no pico de -6 dBFS.
+    Tem a crista e as pausas de uma fala, que é o que a conta de nível dos efeitos precisa enxergar."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    out = np.zeros(int(seconds * SFX_RATE))
+    cursor = 0.0
+    while cursor < seconds - 0.4:
+        length = rng.uniform(0.12, 0.28)
+        first, last = int(cursor * SFX_RATE), int((cursor + length) * SFX_RATE)
+        t = np.arange(last - first) / SFX_RATE
+        pitch = rng.uniform(110, 210)
+        voiced = sum(np.sin(2 * np.pi * pitch * k * t) / k for k in range(1, 12))
+        out[first:last] += voiced * np.sin(np.pi * t / length) ** 2 * rng.uniform(0.5, 1.0)
+        cursor += length + float(rng.choice([0.0, 0.0, 0.05, 0.4]))
+    return out / np.max(np.abs(out)) * 0.5
+
+
+@pytest.fixture(scope="module")
+def speech_clip(tmp_path_factory) -> Path:
+    """Vídeo de 16 s cujo áudio é a fala sintética (AAC, como uma gravação de verdade)."""
+    from dmaker.media import ffmpeg
+    from dmaker.media.wavio import write_wav
+
+    base = tmp_path_factory.mktemp("fala")
+    wav = write_wav(base / "fala.wav", _speechlike(16.0), SFX_RATE)
+    clip = base / "fala.mp4"
+    ffmpeg.run(
+        ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15", "-i", str(wav), "-t", "16"]
+        + ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(clip)],
+        quiet=True,
+    )
+    return clip
+
+
+def _decode_audio(path: Path, workdir: Path):
+    """Áudio do arquivo como amostras float (quadros, 2) a 48 kHz."""
+    from dmaker.media import ffmpeg
+    from dmaker.media.wavio import read_wav_channels
+
+    wav = workdir / f"{path.stem}.decoded.wav"
+    ffmpeg.run(
+        ["-i", str(path), "-vn", "-ar", str(SFX_RATE), "-ac", "2", "-c:a", "pcm_s16le", str(wav)], quiet=True
+    )
+    frames, rate = read_wav_channels(wav)
+    assert rate == SFX_RATE
+    return frames.astype(float)
+
+
+def _sfx_onset_seconds(signal, name: str, expected: float, search: float = 0.25) -> float:
+    """Instante em que o arquivo da biblioteca `name` toca em `signal`, por correlação cruzada normalizada
+    numa janela de ±`search` s em torno do esperado (resolução de uma amostra)."""
+    import numpy as np
+
+    from dmaker.media.wavio import read_wav_channels
+    from dmaker.sfx.library import library_path
+
+    template = read_wav_channels(library_path(name))[0][:, 0].astype(float)
+    first = max(int((expected - search) * SFX_RATE), 0)
+    segment = signal[first : int((expected + search) * SFX_RATE) + len(template)]
+    energy = np.sqrt(np.convolve(segment**2, np.ones(len(template)), mode="valid") * np.sum(template**2))
+    score = np.correlate(segment, template, mode="valid") / np.maximum(energy, 1e-12)
+    return (first + int(np.argmax(score))) / SFX_RATE
+
+
+def _integrated_loudness(path: Path) -> float:
+    import re
+
+    from dmaker.media.ffmpeg import SubprocessRunner
+
+    report = SubprocessRunner(quiet=True).capture(
+        ["-i", str(path), "-vn", "-af", "ebur128", "-f", "null", "-"]
+    )
+    return float(re.search(r"I:\s+(-?[\d.]+) LUFS", report.split("Summary:")[-1]).group(1))
+
+
+def _speech_project(clip: Path, tmp_path: Path, name: str, **audio) -> Project:
+    project = Project.model_validate(
+        {
+            "name": name,
+            "output": {"preset": "instagram/reels", "quality": "draft", "fps": 15},
+            "timeline": [{"type": "clip", "src": str(clip), "end": 16.0, "reframe": {"mode": "pad"}}],
+            "audio": {"normalize": "two-pass", **audio},
+        }
+    )
+    project.base_dir = tmp_path
+    return project
+
+
+def _render(project: Project, out: Path) -> Path:
+    RenderPipeline(project, RenderOptions(preview=True, out=out, quiet=True, thumbnail=False)).run()
+    return out
+
+
+def test_a_whoosh_marked_at_12_40_plays_at_12_40_in_the_final_audio(speech_clip, synthetic_media, tmp_path):
+    """Critério do chamado: o instante medido no áudio do render, com fala e música tocando, erra menos de 20 ms."""
+    sfx = [{"sound": "whoosh", "at": 12.4}, {"sound": "impact", "at": 5.1, "volume": 1.2}]
+    music = {"src": str(synthetic_media["music"]), "volume": 0.18, "ducking": True}
+    out = _render(
+        _speech_project(speech_clip, tmp_path, "sfx_tempo", music=music, sfx=sfx), tmp_path / "tempo.mp4"
+    )
+    mono = _decode_audio(out, tmp_path).mean(axis=1)
+    for name, at in (("whoosh", 12.4), ("impact", 5.1)):
+        assert abs(_sfx_onset_seconds(mono, name, at) - at) < 0.020, name
+
+
+def test_effects_stay_below_the_voice_and_the_loudness_stays_on_target(
+    speech_clip, synthetic_media, tmp_path
+):
+    """Com fala e música, o pico de cada efeito fica abaixo do pico da voz na saída e o loudness continua no
+    alvo. A voz de referência é o mesmo render sem efeitos; o ganho do loudnorm difere um pouco entre os dois,
+    então a escala entre eles se mede antes do primeiro efeito."""
+    import numpy as np
+
+    from dmaker.media.wavio import read_wav_channels
+    from dmaker.sfx.library import library_path
+
+    music = {"src": str(synthetic_media["music"]), "volume": 0.18, "ducking": True}
+    cues = [("whoosh", 4.0), ("pop", 7.0), ("impact", 10.0), ("click", 12.5)]
+    sfx = [{"sound": name, "at": at} for name, at in cues]
+    with_fx = _render(
+        _speech_project(speech_clip, tmp_path, "sfx_nivel", music=music, sfx=sfx), tmp_path / "com.mp4"
+    )
+    without = _render(
+        _speech_project(speech_clip, tmp_path, "sfx_nivel_base", music=music), tmp_path / "sem.mp4"
+    )
+    a = _decode_audio(with_fx, tmp_path).mean(axis=1)
+    b = _decode_audio(without, tmp_path).mean(axis=1)[: len(a)]
+    before = int(3.5 * SFX_RATE)
+    scale = float(np.dot(a[:before], b[:before]) / np.dot(b[:before], b[:before]))
+    effects = a - scale * b  # o que os efeitos acrescentaram
+    voice_peak = float(np.max(np.abs(scale * b)))
+    for name, at in cues:
+        length = len(read_wav_channels(library_path(name))[0])
+        peak = float(np.max(np.abs(effects[int(at * SFX_RATE) : int(at * SFX_RATE) + length])))
+        margin_db = 20 * np.log10(voice_peak / peak)
+        assert margin_db > 3.0, f"{name}: só {margin_db:.1f} dB abaixo da voz"
+    assert abs(_integrated_loudness(with_fx) - (-14.0)) < 0.5
+    assert abs(_integrated_loudness(without) - (-14.0)) < 0.5
+
+
+def test_entry_sounds_of_a_text_and_a_transition_play_in_the_render(tmp_path):
+    """Cartões sem voz e normalização desligada: o áudio da saída é só os efeitos, no nível que a biblioteca
+    tem sem voz medida (régua de -6 dBFS: o pico fica em -6 - 6 = -12 dBFS)."""
+    import numpy as np
+
+    project = Project.model_validate(
+        {
+            "name": "sfx_entrada",
+            "output": {"preset": "instagram/reels", "quality": "draft", "fps": 15},
+            "timeline": [
+                {"type": "card", "title": "Um", "duration": 4, "motion": "none"},
+                {
+                    "type": "card",
+                    "title": "Dois",
+                    "duration": 4,
+                    "motion": "none",
+                    "transition": {"type": "slideleft", "duration": 0.5, "sound": "whip"},
+                },
+            ],
+            "overlays": [{"type": "text", "text": "Gancho", "start": 1.5, "end": 3, "sound": True}],
+            "audio": {"normalize": "off"},
+        }
+    )
+    project.base_dir = tmp_path
+    out = _render(project, tmp_path / "entrada.mp4")
+    audio = _decode_audio(out, tmp_path)
+    mono = audio.mean(axis=1)
+    assert abs(_sfx_onset_seconds(mono, "pop", 1.5) - 1.5) < 0.020  # texto com `sound: true`: o pop padrão
+    assert abs(_sfx_onset_seconds(mono, "whip", 3.5) - 3.5) < 0.020  # a transição começa 0,5 s antes dos 4 s
+    assert 20 * np.log10(np.max(np.abs(audio))) == pytest.approx(
+        -12.0, abs=1.0
+    )  # +-1 dB: o AAC arredonda picos
+
+
+def test_a_project_without_sfx_keeps_its_audio_bit_for_bit(speech_clip, tmp_path):
+    """Sem `sfx` (nem ausente nem lista vazia) o grafo de áudio é o de antes e a saída é a mesma amostra a amostra.
+    Só voz (sem música): o caso com música e ducking tem o teste próprio logo abaixo (DMK-47)."""
+    import numpy as np
+
+    plain = _render(_speech_project(speech_clip, tmp_path, "sfx_igual"), tmp_path / "a.mp4")
+    empty = _render(_speech_project(speech_clip, tmp_path, "sfx_igual_vazio", sfx=[]), tmp_path / "b.mp4")
+    assert np.array_equal(_decode_audio(plain, tmp_path), _decode_audio(empty, tmp_path))
+
+
+# ---------- o mesmo projeto, o mesmo áudio (DMK-47) ----------
+
+
+@pytest.fixture(scope="module")
+def tone_clip_8s(tmp_path_factory) -> Path:
+    """Vídeo de 8 s com um tom de 440 Hz (AAC): longo o bastante para a corrida do fim do ducking aparecer."""
+    from dmaker.media import ffmpeg
+
+    clip = tmp_path_factory.mktemp("tom") / "tom.mp4"
+    ffmpeg.run(
+        ["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-f", "lavfi", "-i", "sine=frequency=440"]
+        + ["-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"]
+        + [str(clip)],
+        quiet=True,
+    )
+    return clip
+
+
+@pytest.mark.parametrize("ducking", [True, False])
+def test_rendering_the_same_project_again_gives_the_same_audio_from_start_to_end(
+    tone_clip_8s, synthetic_media, tmp_path, ducking
+):
+    """Antes, com ducking, os últimos 0,15 s variavam de um render para outro (até 52 níveis de 16 bits): o
+    `sidechaincompress` jogava fora, no fim, o que sobrava na fila de uma entrada, e quanto sobrava dependia de
+    uma corrida entre threads. O fade-out é zero para a música chegar inteira ao fim e qualquer pedaço perdido
+    aparecer; o loudness é medido em duas passadas, como no render de verdade. O áudio decodificado é comparado
+    inteiro, sem tolerância: são seis renders do mesmo projeto (no código antigo o teste reprovou em oito de
+    oito execuções; com um clipe de 3 s, só em cinco de oito, por isso os 8 s)."""
+    music = {"src": str(synthetic_media["music"]), "volume": 0.3, "ducking": ducking, "fade_out": 0.0}
+    project = Project.model_validate(
+        {
+            "name": f"mesmo_audio_{ducking}",
+            "output": {"preset": "instagram/reels", "quality": "draft"},
+            "timeline": [{"type": "clip", "src": str(tone_clip_8s), "reframe": {"mode": "pad"}}],
+            "audio": {"music": music, "normalize": "two-pass"},
+        }
+    )
+    project.base_dir = tmp_path
+    decoded = [_decode_audio(_render(project, tmp_path / f"r{k}.mp4"), tmp_path) for k in range(6)]
+    assert len({len(audio) for audio in decoded}) == 1
+    for other in decoded[1:]:
+        assert np.array_equal(decoded[0], other)
+
+
+def test_explainer_topic_sounds_play_at_the_start_of_the_topic_plus_em(speech_clip, tmp_path):
+    """DMK-46: os `sons` de cada assunto do modelo "explicativo" tocam no instante do vídeo (começo do assunto
+    mais `em`), com a gravação falada tocando junto; o erro medido por correlação fica abaixo de 20 ms."""
+    from dmaker.domain.templates import find_template, render_template
+
+    topics = [
+        {"fim": 4, "fundo": "escuro", "sons": [{"som": "whoosh"}, {"som": "ding", "em": 2.5}]},
+        {"fim": 8, "fundo": "bege", "sons": [{"som": "pop"}]},
+        {"fim": 12, "fundo": "claro", "sons": [{"som": "click"}]},
+        {"fim": 16, "fundo": "escuro", "sons": [{"som": "impact", "em": 1.25, "volume": 1.2}]},
+    ]
+    spec = render_template(
+        find_template("explicativo"), {"gravacao": str(speech_clip), "assuntos": topics, "legendas": False}
+    )
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    mono = _decode_audio(_render(project, tmp_path / "sons.mp4"), tmp_path).mean(axis=1)
+    for name, at in (("whoosh", 0.0), ("ding", 2.5), ("pop", 4.0), ("click", 8.0), ("impact", 13.25)):
+        assert abs(_sfx_onset_seconds(mono, name, at) - at) < 0.020, name

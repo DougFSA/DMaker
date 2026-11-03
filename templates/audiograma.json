@@ -1,0 +1,130 @@
+{
+  "description": "Audiograma para divulgar um corte de podcast, entrevista ou áudio de WhatsApp sem vídeo: a foto ou capa num círculo, a onda ou as barras animadas no ritmo da fala (em volta da foto ou embaixo dela), o título no alto e a legenda automática com o texto falado.",
+  "prepare": "audiograma",
+  "params": {
+    "audio": {
+      "description": "Arquivo de áudio (mp3, wav, m4a, ogg...) que vira a voz do vídeo e é legendado",
+      "type": "path",
+      "required": true
+    },
+    "capa": {
+      "description": "Foto ou capa do episódio (PNG ou JPG); aparece recortada em círculo no meio",
+      "type": "path",
+      "required": true
+    },
+    "duracao": {
+      "description": "Duração do vídeo em segundos; omitida, vale a duração do arquivo de áudio (o DMaker a mede sozinho)",
+      "type": "number",
+      "duration_of": "audio",
+      "required": true,
+      "example": 30
+    },
+    "titulo": {
+      "description": "Título no alto do vídeo (sem travessão, a regra da marca); vazio, sem título",
+      "default": "",
+      "type": "text"
+    },
+    "estilo": {
+      "description": "Desenho do áudio: circle (barras em volta da foto), bars (barras simétricas embaixo da foto) ou wave (linha de onda embaixo da foto)",
+      "default": "circle",
+      "type": "text"
+    },
+    "seguir": {
+      "description": "Áudio que o desenho acompanha: auto (a voz; sem voz, a mistura), voice ou mix. Seguir a voz mantém o desenho parado nas pausas mesmo com trilha de fundo",
+      "default": "auto",
+      "type": "text"
+    },
+    "cor": {
+      "description": "Cor do desenho: chave do tema (accent, primary...) ou #RRGGBB; sem ela, a cor de destaque da marca",
+      "default": null,
+      "type": "text"
+    },
+    "fundo": {
+      "description": "Fundo: escuro, claro, bege, uma cor #RRGGBB, o caminho de uma imagem, ou capa (a própria capa, cortada e desfocada)",
+      "default": "escuro",
+      "type": "text"
+    },
+    "legendas": {
+      "description": "Legendas automáticas com o texto falado, embaixo",
+      "default": true,
+      "type": "bool"
+    },
+    "legenda_modo": {
+      "description": "Estilo da legenda: rounded (caixa arredondada por linha), karaoke, classic ou boxed",
+      "default": "rounded",
+      "type": "text"
+    },
+    "idioma": {
+      "description": "Idioma falado no áudio, para a legenda automática (pt, en, es...)",
+      "default": "pt",
+      "type": "text"
+    },
+    "marca": {
+      "description": "Marca (assets/brands/<nome>) para cores e estilo da legenda; sem ela, o visual neutro",
+      "default": null,
+      "type": "text"
+    }
+  },
+  "name": "audiograma",
+  "output": { "preset": "instagram/reels", "quality": "high" },
+  "brand": "{{marca}}",
+  "regions": {
+    "titulo": { "x": 0.5, "y": 0.17, "width": 0.7222, "height": 0.1 },
+    "foto": { "x": 0.5, "y": 0.42, "width": 0.4, "height": 0.225 },
+    "anel": { "x": 0.5, "y": 0.42, "width": 0.7222, "height": 0.40625 },
+    "onda": { "x": 0.5, "y": 0.64, "width": 0.7222, "height": 0.1 }
+  },
+  "timeline": ["{{fundo_segmento}}"],
+  "overlays": [
+    {
+      "$if": "{{titulo}}",
+      "type": "text",
+      "text": "{{titulo}}",
+      "role": "title",
+      "region": "titulo",
+      "start": 0
+    },
+    {
+      "type": "image",
+      "src": "{{capa}}",
+      "region": "foto",
+      "shape": "circle"
+    },
+    {
+      "$if": "{{em_volta}}",
+      "type": "audiogram",
+      "style": "circle",
+      "follow": "{{seguir}}",
+      "color": "{{cor}}",
+      "region": "anel",
+      "inner_radius": 0.6
+    },
+    {
+      "$if": "{{embaixo}}",
+      "type": "audiogram",
+      "style": "{{estilo}}",
+      "follow": "{{seguir}}",
+      "color": "{{cor}}",
+      "region": "onda"
+    }
+  ],
+  "captions": {
+    "$if": "{{legendas}}",
+    "source": "auto",
+    "language": "{{idioma}}",
+    "model": "small",
+    "style": {
+      "mode": "{{legenda_modo}}",
+      "size": 56,
+      "uppercase": false,
+      "max_words": 4,
+      "max_chars": 22,
+      "y": 0.73,
+      "follow_background": false
+    }
+  },
+  "audio": {
+    "voiceover": [{ "src": "{{audio}}" }],
+    "normalize": "two-pass"
+  }
+}

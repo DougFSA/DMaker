@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..domain.brand import Theme
@@ -10,7 +10,8 @@ from ..domain.presets import SafeZone
 from ..domain.spec import CaptionStyle, ProgressBar, TextOverlay
 from ..media import fonts
 from .ass import AssDoc, Event, Style, ass_alpha, ass_color, escape_text, rect_path, rounded_rect_path
-from .captions import Cue
+from .captions import Cue, Word
+from .rounded_box import Align, RoundedBox, rounded_box
 
 
 @dataclass
@@ -136,6 +137,8 @@ ROLE_DEFAULTS: dict[str, dict] = {
 def effective_style(ov: TextOverlay, theme: Theme, tone: str | None = None) -> dict:
     """Estilo final: padrão do papel -> ajuste pelo tom do fundo (claro/escuro) -> estilo da spec."""
     st = dict(ROLE_DEFAULTS[ov.role])
+    if ov.style.box_shape == "rounded" and ov.style.box is None:
+        st["box"] = True  # pedir a caixa arredondada já liga a caixa; só `box: false` explícito a desliga
     if tone == "light" and not st.get("box"):
         # sobre fundo claro do tema (cartões, modo brand): texto na cor principal, sem contorno
         st.update(color="primary", outline=0, shadow=0)
@@ -151,6 +154,13 @@ def effective_style(ov: TextOverlay, theme: Theme, tone: str | None = None) -> d
         st["position"] = ov.position
     if ov.animation:
         st["animation"] = ov.animation
+    st.setdefault("box_shape", "block")
+    if st["box_shape"] == "rounded":
+        # raio e margem da caixa arredondada são da marca; só o que o texto pediu na spec ganha delas
+        if "box_radius" not in ov.style.model_fields_set:
+            st["box_radius"] = theme.rounded_box_radius
+        if "box_padding" not in ov.style.model_fields_set:
+            st["box_padding"] = theme.rounded_box_padding
     if st.get("box") and "outline" not in ov.style.model_fields_set:
         # a caixa já separa o texto do fundo; manter contorno aqui engrossa a letra e fecha os vãos
         st.update(outline=0, shadow=0)
@@ -172,23 +182,93 @@ def effective_style(ov: TextOverlay, theme: Theme, tone: str | None = None) -> d
     return st
 
 
-def wrap_lines(text: str, ref: fonts.FontRef, size: float, max_width: float, spacing: float = 0) -> list[str]:
+MeasureFn = Callable[[str, fonts.FontRef, float, float], tuple[float, float]]
+
+
+def wrap_tokens(
+    tokens: Sequence[str],
+    ref: fonts.FontRef,
+    size: float,
+    max_width: float,
+    spacing: float = 0,
+    measure: MeasureFn = fonts.measure_rendered,
+) -> list[list[str]]:
+    """Quebra gulosa: cada linha leva palavras enquanto couber em `max_width` (palavra maior fica sozinha).
+
+    A régua padrão é a do libass, que desenha o texto do ASS; quem quebra texto de outro desenhista (o cartão
+    do Pillow) passa a régua dele.
+    """
+    rows: list[list[str]] = []
+    current = [tokens[0]] if tokens else []
+    for token in tokens[1:]:
+        if measure(" ".join([*current, token]), ref, size, spacing)[0] <= max_width:
+            current.append(token)
+        else:
+            rows.append(current)
+            current = [token]
+    if current:
+        rows.append(current)
+    return rows
+
+
+def wrap_lines(
+    text: str,
+    ref: fonts.FontRef,
+    size: float,
+    max_width: float,
+    spacing: float = 0,
+    measure: MeasureFn = fonts.measure_rendered,
+) -> list[str]:
+    """`wrap_tokens` por parágrafo (`\\n` do texto vira linha nova); a régua padrão é a do libass."""
     lines: list[str] = []
     for paragraph in text.replace("\r", "").split("\n"):
         words = paragraph.split()
         if not words:
             lines.append("")
             continue
-        current = words[0]
-        for w in words[1:]:
-            candidate = f"{current} {w}"
-            if fonts.measure(candidate, ref, size, spacing)[0] <= max_width:
-                current = candidate
-            else:
-                lines.append(current)
-                current = w
-        lines.append(current)
+        lines.extend(" ".join(row) for row in wrap_tokens(words, ref, size, max_width, spacing, measure))
     return lines
+
+
+@dataclass(frozen=True)
+class TextBlock:
+    """Medidas do texto já quebrado, o que uma forma de caixa precisa para se desenhar em volta dele."""
+
+    line_widths: list[float]
+    line_heights: list[float]
+    width: float
+    height: float
+
+
+BoxDrawer = Callable[[TextBlock, Align, float, float], RoundedBox]
+
+
+@dataclass(frozen=True)
+class BoxShape:
+    """Um jeito de fazer a caixa de fundo de um texto: como medir as linhas e qual contorno traçar."""
+
+    measure: MeasureFn
+    draw: BoxDrawer
+
+
+def _draw_block_box(block: TextBlock, align: Align, radius: float, padding: float) -> RoundedBox:
+    """Um retângulo de cantos arredondados em volta do bloco inteiro (o `box` de sempre)."""
+    width, height = block.width + 2 * padding, block.height + 2 * padding
+    return RoundedBox(rounded_rect_path(width, height, radius), width, height)
+
+
+def _draw_rounded_box(block: TextBlock, align: Align, radius: float, padding: float) -> RoundedBox:
+    """Uma caixa por linha, emendadas com curvas (estilo TikTok): ver `rounded_box`."""
+    return rounded_box(block.line_widths, block.line_heights, align=align, radius=radius, padding=padding)
+
+
+# Formas de caixa por nome (`style.box_shape`). As duas medem com o libass, que é quem desenha o texto: só
+# assim a caixa abraça a linha com a margem configurada e a quebra respeita a largura permitida. (A de bloco
+# media com a célula do Pillow e sobrava uns 77 px de cada lado; ver DMK-45.)
+BOX_SHAPES: dict[str, BoxShape] = {
+    "block": BoxShape(fonts.measure_rendered, _draw_block_box),
+    "rounded": BoxShape(fonts.measure_rendered, _draw_rounded_box),
+}
 
 
 def _anchor(align: str) -> int:
@@ -225,10 +305,52 @@ def _typewriter(text: str, dur: float) -> str:
     return "".join(out)
 
 
-def add_text_overlay(
-    doc: AssDoc, canvas: Canvas, ov: TextOverlay, index: int, tone: str | None = None
-) -> None:
-    """`tone` = "light"/"dark" quando o texto fica sobre fundo gerado pelo tema; None sobre vídeo/foto."""
+@dataclass(frozen=True)
+class TextLayout:
+    """O que o desenho de um texto decide antes de emitir qualquer evento ASS: a quebra, as medidas, a âncora e a
+    caixa. É a conta única do render e da caixa que a interface mostra (`pipeline/overlay_boxes.py`)."""
+
+    style: dict
+    ref: fonts.FontRef
+    size: float
+    spacing: float
+    lines: list[str]
+    line_widths: list[float]  # uma por linha de `lines`, mais a da segunda linha quando existe
+    line_heights: list[float]
+    block_width: float
+    block_height: float
+    secondary: str | None
+    secondary_size: float
+    wrap_width: float  # px em que o texto quebra: a largura permitida menos o padding das duas pontas
+    padding: float  # px entre o texto e a borda da caixa
+    align: str
+    anchor_x: float  # a borda do texto se `align` é left/right; o centro se é center
+    anchor_y: float  # sempre o centro vertical do bloco
+    box: RoundedBox | None
+
+    def area(self) -> tuple[float, float, float, float]:
+        """(esquerda, topo, largura, altura) em px do que o texto desenha: a caixa de fundo quando há, senão o
+        bloco de texto. A caixa usa a mesma âncora do texto, deslocada pelo padding quando alinhada à borda."""
+        if self.box is not None:
+            width, height = self.box.width, self.box.height
+            reach = self.padding
+        else:
+            width, height = self.block_width, self.block_height
+            reach = 0.0
+        if self.align == "left":
+            left = self.anchor_x - reach
+        elif self.align == "right":
+            left = self.anchor_x + reach - width
+        else:
+            left = self.anchor_x - width / 2
+        return left, self.anchor_y - height / 2, width, height
+
+
+def layout_text_overlay(
+    canvas: Canvas, ov: TextOverlay, tone: str | None = None, measure: MeasureFn | None = None
+) -> TextLayout:
+    """Quebra e mede o texto, acha a âncora e desenha a caixa, sem emitir nada. `measure` troca a régua das
+    formas de caixa (os testes dão uma fixa); sem ela vale a do libass, que é quem desenha o texto."""
     theme = canvas.theme
     st = effective_style(ov, theme, tone)
     s = canvas.scale
@@ -237,26 +359,27 @@ def add_text_overlay(
     size = st["size"] * s
     spacing = st["spacing"] * s
     text = ov.text.upper() if st["uppercase"] else ov.text
-    max_w = W * st["max_width"] - 2 * st["box_padding"] * s
-    lines = wrap_lines(text, ref, size, max_w, spacing)
-    line_widths = [fonts.measure(ln, ref, size, spacing)[0] for ln in lines]
+    padding = st["box_padding"] * s
+    wrap_width = W * st["max_width"] - 2 * padding
+    shape = BOX_SHAPES[st["box_shape"] if st["box"] else "block"]
+    if measure is not None:
+        shape = BoxShape(measure, shape.draw)
+    lines = wrap_lines(text, ref, size, wrap_width, spacing, shape.measure)
+    line_widths = [shape.measure(ln, ref, size, spacing)[0] for ln in lines]
+    line_heights = [size] * len(lines)
     block_w = max(line_widths) if line_widths else 0
     block_h = size * len(lines)
 
     secondary_size = size * 0.7
+    secondary = None
     if ov.secondary:
-        sec_text = ov.secondary.upper() if st["uppercase"] else ov.secondary
+        secondary = ov.secondary.upper() if st["uppercase"] else ov.secondary
         sec_ref = fonts.resolve(st["font"] or theme.font_family, "regular")
-        sec_w = fonts.measure(sec_text, sec_ref, secondary_size)[0]
+        sec_w = shape.measure(secondary, sec_ref, secondary_size)[0]
+        line_widths.append(sec_w)
+        line_heights.append(secondary_size)
         block_w = max(block_w, sec_w)
         block_h += secondary_size
-
-    start = ov.start
-    end = ov.end if ov.end is not None else canvas.total
-    end = min(end, canvas.total)
-    if end <= start:
-        return
-    dur = end - start
 
     # posição da âncora
     align = st["align"]
@@ -280,6 +403,48 @@ def add_text_overlay(
             cy = H * 0.5 + H * st.get("offset_y", 0)
     if ov.role == "subtitle" and ov.y is None and st["position"] == "center":
         cy = H * 0.5 + H * 0.075
+
+    box = None
+    if st["box"]:
+        block = TextBlock(line_widths, line_heights, block_w, block_h)
+        box = shape.draw(block, align, st["box_radius"] * s, padding)
+    return TextLayout(
+        st,
+        ref,
+        size,
+        spacing,
+        lines,
+        line_widths,
+        line_heights,
+        block_w,
+        block_h,
+        secondary,
+        secondary_size,
+        wrap_width,
+        padding,
+        align,
+        cx,
+        cy,
+        box,
+    )
+
+
+def add_text_overlay(
+    doc: AssDoc, canvas: Canvas, ov: TextOverlay, index: int, tone: str | None = None
+) -> None:
+    """`tone` = "light"/"dark" quando o texto fica sobre fundo gerado pelo tema; None sobre vídeo/foto."""
+    start = ov.start
+    end = ov.end if ov.end is not None else canvas.total
+    end = min(end, canvas.total)
+    if end <= start:
+        return
+    dur = end - start
+
+    layout = layout_text_overlay(canvas, ov, tone)
+    theme = canvas.theme
+    st, s = layout.style, canvas.scale
+    ref, size, spacing, lines = layout.ref, layout.size, layout.spacing, layout.lines
+    cx, cy, align = layout.anchor_x, layout.anchor_y, layout.align
 
     animation = st["animation"]
     an = _anchor(align)
@@ -308,10 +473,9 @@ def add_text_overlay(
     )
 
     layer = 10 + index * 3
-    if st["box"]:
-        pad = st["box_padding"] * s
-        bw, bh = block_w + 2 * pad, block_h + 2 * pad
-        radius = st["box_radius"] * s
+    if layout.box is not None:
+        pad, box = layout.padding, layout.box
+        bh = box.height
         alpha = int(round(255 * (1 - st["box_alpha"])))
         # a caixa usa a mesma âncora do texto, deslocada pelo padding quando alinhada à esquerda
         if align == "left":
@@ -326,7 +490,7 @@ def add_text_overlay(
                 end,
                 style_name,
                 f"{{\\an{an}{box_pos}{anim_tags}\\1c{ass_color(st['box_color'])}\\1a{ass_alpha(alpha)}"
-                f"\\bord0\\shad0\\p1}}{rounded_rect_path(bw, bh, radius)}{{\\p0}}",
+                f"\\bord0\\shad0\\p1}}{box.path}{{\\p0}}",
                 layer=layer,
             )
         )
@@ -349,12 +513,13 @@ def add_text_overlay(
     body = escape_text("\n".join(lines))
     if animation == "typewriter":
         body = _typewriter(body, dur)
-    if ov.secondary:
-        sec_text = ov.secondary.upper() if st["uppercase"] else ov.secondary
+    if layout.secondary:
         muted = theme.colors.get("mint" if ov.role != "lower-third" else "muted", "#CBD5E1")
         if ov.role == "lower-third":
             muted = theme.colors.get("accent", muted)
-        body += f"\\N{{\\fs{secondary_size:.0f}\\b0\\1c{ass_color(muted)}}}{escape_text(sec_text)}"
+        body += (
+            f"\\N{{\\fs{layout.secondary_size:.0f}\\b0\\1c{ass_color(muted)}}}{escape_text(layout.secondary)}"
+        )
     doc.add(Event(start, end, style_name, f"{{\\an{an}{pos_tag}{anim_tags}}}{body}", layer=layer + 2))
 
 
@@ -376,6 +541,10 @@ def add_captions(
 ) -> None:
     """Legendas. Sobre fundo gerado pelo tema (`tone_fn` -> light/dark) o estilo muda: caixa na cor
     principal com texto branco sobre fundo claro; texto branco sem contorno sobre fundo escuro."""
+    renderer = CAPTION_RENDERERS.get(cs.mode)
+    if renderer is not None:
+        renderer(doc, canvas, cues, cs, tone_fn)
+        return
     theme = canvas.theme
     s = canvas.scale
     ref = fonts.resolve(cs.font or theme.font_family, cs.weight)
@@ -436,22 +605,153 @@ def add_captions(
         words = [w for w in cue.words if w.text.strip()]
         if cs.mode == "karaoke" and words:
             plain = " ".join(fmt(w.text) for w in words)
-            first_start = max(words[0].start, cue.start)
-            if first_start - cue.start > 0.05:
-                doc.add(Event(cue.start, first_start, style_name, pos + plain, layer=5))
-            for j, w in enumerate(words):
-                t0 = max(w.start, cue.start)
-                t1 = max(words[j + 1].start, t0) if j + 1 < len(words) else cue.end
-                t1 = min(t1, cue.end)
-                if t1 - t0 < 0.02:
+            for t0, t1, active in highlight_windows(cue, words):
+                if active is None:
+                    doc.add(Event(t0, t1, style_name, pos + plain, layer=5))
                     continue
                 parts = []
                 for k, other in enumerate(words):
                     txt = fmt(other.text)
-                    parts.append(f"{{{hl_on}}}{txt}{{{hl_off}}}" if k == j else txt)
+                    parts.append(f"{{{hl_on}}}{txt}{{{hl_off}}}" if k == active else txt)
                 doc.add(Event(t0, t1, style_name, pos + " ".join(parts), layer=5))
         else:
             doc.add(Event(cue.start, cue.end, style_name, pos + fmt(cue.text), layer=5))
+
+
+def highlight_windows(cue: Cue, words: list[Word]) -> list[tuple[float, float, int | None]]:
+    """Janelas do karaokê: (início, fim, índice da palavra ativa); None é o trecho antes da primeira palavra."""
+    windows: list[tuple[float, float, int | None]] = []
+    first_start = max(words[0].start, cue.start)
+    if first_start - cue.start > 0.05:
+        windows.append((cue.start, first_start, None))
+    for j, w in enumerate(words):
+        t0 = max(w.start, cue.start)
+        t1 = max(words[j + 1].start, t0) if j + 1 < len(words) else cue.end
+        t1 = min(t1, cue.end)
+        if t1 - t0 < 0.02:
+            continue
+        windows.append((t0, t1, j))
+    return windows
+
+
+def _add_rounded_captions(
+    doc: AssDoc,
+    canvas: Canvas,
+    cues: list[Cue],
+    cs: CaptionStyle,
+    tone_fn: Callable[[float, float], str | None] | None,
+) -> None:
+    """Legendas com uma caixa arredondada por linha (estilo TikTok) e o destaque da palavra ativa por cima.
+
+    As linhas são quebradas aqui, com a medida do libass, e não pelo libass: só assim a caixa sabe quantas
+    linhas há e a largura de cada uma (`\\q2` impede o libass de requebrar e desalinhar a caixa).
+    """
+    theme, s = canvas.theme, canvas.scale
+    ref = fonts.resolve(cs.font or theme.font_family, cs.weight)
+    size = cs.size * s
+    highlight = ass_color(theme.color(cs.highlight_color or theme.style.get("caption_highlight"), "#FACC15"))
+    # (estilo, cor do texto, cor da caixa, opacidade da caixa) por tom do fundo, como nos outros modos:
+    # sobre fundo claro do tema a caixa vira a cor principal; sobre fundo escuro o texto vai branco
+    base, white = theme.color(cs.color, "#FFFFFF"), theme.colors["white"]
+    box_color = theme.color(cs.box_color, "#000000")
+    palettes: dict[str | None, tuple[str, str, str, float]] = {
+        None: ("Cap", base, box_color, cs.box_alpha),
+        "light": ("CapLight", white, theme.colors["primary"], 1.0),
+        "dark": ("CapDark", white, box_color, cs.box_alpha),
+    }
+    margin_l, margin_r = int(canvas.safe.left + 40 * s), int(canvas.safe.right + 40 * s)
+    radius, padding = theme.rounded_box_radius * s, theme.rounded_box_padding * s
+    max_text_width = canvas.width - margin_l - margin_r - 2 * padding
+    center_x = canvas.width / 2
+    center_y = round(cs.y * canvas.height if cs.y is not None else default_caption_y(canvas, size))
+    pop_on = "\\fscx105\\fscy105" if cs.pop else ""
+    pop_off = "\\fscx100\\fscy100" if cs.pop else ""
+
+    def shown(word: str) -> str:
+        return word.upper() if cs.uppercase else word
+
+    for cue in cues:
+        if cue.end <= cue.start:
+            continue
+        tone = tone_fn(cue.start, cue.end) if tone_fn else None
+        style_name, color, fill, fill_alpha = palettes.get(tone) or palettes[None]
+        if style_name not in doc.styles:
+            doc.add_style(
+                Style(
+                    name=style_name,
+                    fontname=ref.ass_name,
+                    fontsize=size,
+                    primary=ass_color(color),
+                    secondary=highlight,
+                    outline=ass_color(fill),
+                    back=ass_color(fill, int(round(255 * (1 - fill_alpha)))),
+                    bold=ref.bold,
+                    border_style=1,
+                    outline_w=0,  # o texto fica sobre a caixa: contorno só engrossaria a letra
+                    shadow=0,
+                    alignment=5,
+                    margin_l=margin_l,
+                    margin_r=margin_r,
+                    margin_v=10,
+                )
+            )
+        words = [w for w in cue.words if w.text.strip()]
+        tokens = [shown(w.text.strip()) for w in words] if words else [shown(t) for t in cue.text.split()]
+        if not tokens:
+            continue
+        rows = wrap_tokens(tokens, ref, size, max_text_width, 0, fonts.measure_rendered)
+        widths = [fonts.measure_rendered(" ".join(row), ref, size)[0] for row in rows]
+        box = rounded_box(widths, size, align="center", radius=radius, padding=padding)
+        doc.add(
+            Event(
+                cue.start,
+                cue.end,
+                style_name,
+                f"{{\\an7\\pos({center_x - box.width / 2:.1f},{center_y - box.height / 2:.1f})"
+                f"\\1c{ass_color(fill)}\\1a{ass_alpha(int(round(255 * (1 - fill_alpha))))}"
+                f"\\bord0\\shad0\\p1}}{box.path}{{\\p0}}",
+                layer=4,
+            )
+        )
+        pos = f"{{\\an5\\q2\\pos({center_x:.0f},{center_y})}}"
+        hl_on = f"\\1c{highlight}{pop_on}"
+        hl_off = f"\\1c{ass_color(color)}{pop_off}"
+        escaped = [escape_text(token) for token in tokens]
+        sizes = [len(row) for row in rows]
+        if words:
+            for t0, t1, active in highlight_windows(cue, words):
+                text = _highlighted_rows(escaped, sizes, active, hl_on, hl_off)
+                doc.add(Event(t0, t1, style_name, pos + text, layer=5))
+        else:
+            doc.add(
+                Event(
+                    cue.start,
+                    cue.end,
+                    style_name,
+                    pos + _highlighted_rows(escaped, sizes, None, "", ""),
+                    layer=5,
+                )
+            )
+
+
+def _highlighted_rows(tokens: list[str], row_sizes: list[int], active: int | None, on: str, off: str) -> str:
+    """Texto ASS das linhas (separadas por quebra explícita), com a palavra `active` entre as tags de destaque."""
+    lines, first = [], 0
+    for size in row_sizes:
+        parts = [
+            f"{{{on}}}{tokens[k]}{{{off}}}" if k == active else tokens[k] for k in range(first, first + size)
+        ]
+        lines.append(" ".join(parts))
+        first += size
+    return "\\N".join(lines)
+
+
+# Como cada modo de legenda se desenha, por nome (`captions.style.mode`). Karaokê, clássico e caixa seguem
+# o corpo de `add_captions`; um modo novo que precise de mais eventos entra aqui, sem if/elif no corpo.
+CaptionRenderer = Callable[
+    [AssDoc, Canvas, list[Cue], CaptionStyle, Callable[[float, float], str | None] | None], None
+]
+CAPTION_RENDERERS: dict[str, CaptionRenderer] = {"rounded": _add_rounded_captions}
 
 
 def add_progress_bar(doc: AssDoc, canvas: Canvas, pb: ProgressBar) -> None:

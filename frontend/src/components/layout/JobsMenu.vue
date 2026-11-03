@@ -13,6 +13,9 @@ import { errorMessage } from '@/api'
 import { useJobsStore, type JobView } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
 
+/** Em tela estreita só cabe a bolinha (e o número, com job rodando): o resumo por extenso fica para o painel. */
+defineProps<{ compact?: boolean }>()
+
 const jobs = useJobsStore()
 const toasts = useToastsStore()
 const now = useNow()
@@ -43,11 +46,18 @@ async function clearFinished(): Promise<void> {
 <template>
   <PopoverRoot>
     <PopoverTrigger
-      :class="['jobs-pill', { 'is-live': jobs.runningCount > 0, 'is-offline': !jobs.reachable }]"
+      :class="[
+        'jobs-pill',
+        { 'is-live': jobs.runningCount > 0, 'is-offline': !jobs.reachable, 'jobs-pill--compact': compact },
+      ]"
       aria-label="Jobs em segundo plano"
+      :title="compact ? summary : undefined"
     >
       <span class="jobs-pill__dot" aria-hidden="true" />
-      <span class="jobs-pill__text">{{ summary }}</span>
+      <span :class="['jobs-pill__text', { 'visually-hidden': compact }]">{{ summary }}</span>
+      <span v-if="compact && jobs.runningCount > 0" class="jobs-pill__count" aria-hidden="true">
+        {{ jobs.runningCount }}
+      </span>
       <AppIcon name="chevron-down" :size="16" />
     </PopoverTrigger>
 
@@ -114,6 +124,16 @@ async function clearFinished(): Promise<void> {
 
 .jobs-pill:hover {
   border-color: var(--color-accent-soft);
+  color: var(--color-text);
+}
+
+.jobs-pill--compact {
+  gap: var(--space-1);
+  padding: 0.4rem 0.65rem;
+}
+
+.jobs-pill__count {
+  font-variant-numeric: tabular-nums;
   color: var(--color-text);
 }
 

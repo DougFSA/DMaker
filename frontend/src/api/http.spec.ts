@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, http, messageFromDetail } from './http'
+import { ApiError, http, messageFromDetail, withQuery } from './http'
 
 function stubFetch(status: number, body: unknown): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockResolvedValue(
@@ -29,6 +29,22 @@ describe('http', () => {
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
+  it('junta cabeçalhos extras (o If-Match) ao Content-Type nos PUT', async () => {
+    const fetchMock = stubFetch(200, { ok: true })
+    await http.put('/api/projects/a', { name: 'a' }, { headers: { 'If-Match': 'r1' } })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'If-Match': 'r1' })
+  })
+
+  it('manda o corpo como JSON nos PATCH', async () => {
+    const fetchMock = stubFetch(200, { id: 'c1' })
+    await http.patch('/api/agent/conversations/c1', { title: 'Novo nome' })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('PATCH')
+    expect(init.body).toBe('{"title":"Novo nome"}')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
   it('usa o detail em texto como mensagem do ApiError', async () => {
     stubFetch(404, { detail: 'Spec não encontrada' })
     const error = await http.get('/api/projects/x').catch((e: unknown) => e)
@@ -51,5 +67,36 @@ describe('http', () => {
 
   it('cai numa mensagem genérica quando não há detail', () => {
     expect(messageFromDetail(undefined, 'Erro 500')).toBe('Erro 500')
+  })
+
+  it('envia arquivo em multipart sem fixar o Content-Type', async () => {
+    const fetchMock = stubFetch(200, { path: 'x' })
+    const form = new FormData()
+    form.append('file', new Blob(['abc']), 'a.wav')
+    expect(await http.postForm('/api/speech/upload', form)).toEqual({ path: 'x' })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/speech/upload')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(form)
+    expect(init.headers).toBeUndefined()
+  })
+
+  it('o erro de um envio sai igual ao das outras chamadas', async () => {
+    stubFetch(413, { detail: 'Arquivo grande demais.' })
+    const error = await http.postForm('/api/speech/upload', new FormData()).catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 413, message: 'Arquivo grande demais.' })
+  })
+})
+
+describe('withQuery', () => {
+  it('codifica os valores e pula o que não tem valor', () => {
+    expect(withQuery('/api/x', { a: 'b c', n: 3, flag: true, vazio: '', nulo: null, falta: undefined })).toBe(
+      '/api/x?a=b%20c&n=3&flag=true',
+    )
+  })
+
+  it('devolve o caminho puro quando não sobra parâmetro', () => {
+    expect(withQuery('/api/x', {})).toBe('/api/x')
+    expect(withQuery('/api/x', { a: undefined })).toBe('/api/x')
   })
 })

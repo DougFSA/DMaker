@@ -15,8 +15,8 @@ MANUAL_SECTION_TITLES = (
     "Conceitos",
     "Usando com o Claude (Claude Code)",
     "Usando com LLM local (Ollama)",
-    "Usando manualmente pela interface gráfica",
-    "Usando manualmente pela linha de comando",
+    "Usando pela interface gráfica",
+    "Usando pela linha de comando",
     "Marca MedlyCare",
     "Solução de problemas",
     "Anexos",
@@ -52,9 +52,36 @@ def test_guide_is_package_data_for_wheel_installs():
     assert "resources/*.md" in pyproject
 
 
+def test_guide_and_skill_send_spoken_recordings_to_autocut_instead_of_manual_cutting():
+    guide = GUIDE_PATH.read_text(encoding="utf-8")
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    for tool in ("autocut", "list_cuts", "undo_cut", "audio_fade"):
+        assert tool in guide
+    assert "autocut" in skill and "undo_cut" in skill
+
+
 def test_manual_exists_is_dash_free_and_covers_all_sections():
     assert MANUAL_PATH.exists()
     text = MANUAL_PATH.read_text(encoding="utf-8")
     assert "—" not in text and "–" not in text
     for title in MANUAL_SECTION_TITLES:
         assert title in text
+
+
+def test_guide_documents_the_motion_transitions_the_curves_and_the_preview_commands():
+    from dmaker.domain.curves import CURVES
+    from dmaker.domain.transitions import MOTION_TRANSITIONS
+
+    text = GUIDE_PATH.read_text(encoding="utf-8")
+    for name in MOTION_TRANSITIONS:
+        assert f"`{name}`" in text, f"o guia não descreve a transição {name}"
+    for curve in CURVES:
+        assert f"`{curve}`" in text, f"o guia não descreve a curva {curve}"
+    assert "dmaker transitions sheet" in text and "dmaker transitions list" in text
+
+
+def test_manual_mentions_the_motion_transitions_and_the_curve():
+    from dmaker.domain.transitions import MOTION_TRANSITIONS
+
+    text = MANUAL_PATH.read_text(encoding="utf-8")
+    assert all(f"`{name}`" in text for name in MOTION_TRANSITIONS) and "`curve`" in text

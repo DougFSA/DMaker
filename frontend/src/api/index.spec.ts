@@ -19,7 +19,9 @@ describe('cliente da API', () => {
     await api.projects.validate('meu projeto')
     expect(lastCall()).toMatchObject({ url: '/api/projects/meu%20projeto/validate', method: 'POST' })
     await api.projects.qa('a')
-    expect(lastCall()).toMatchObject({ url: '/api/projects/a/qa', method: 'POST' })
+    expect(lastCall()).toMatchObject({ url: '/api/projects/a/qa', method: 'POST', body: {} })
+    await api.projects.qa('a', 'C:/out/a__preview.mp4')
+    expect(lastCall()).toMatchObject({ url: '/api/projects/a/qa', method: 'POST', body: { output: 'C:/out/a__preview.mp4' } })
     await api.projects.get('a')
     expect(lastCall()).toMatchObject({ url: '/api/projects/a', method: 'GET' })
   })
@@ -50,6 +52,17 @@ describe('cliente da API', () => {
     })
   })
 
+  it('inicia o corte automático e desfaz um corte da lista', async () => {
+    await api.autocut.start({ source: 'D:/g.mp4', name: 'g-corte', intensity: 'agressiva', min_pause: 0.8 })
+    expect(lastCall()).toMatchObject({
+      url: '/api/autocut',
+      method: 'POST',
+      body: { source: 'D:/g.mp4', name: 'g-corte', intensity: 'agressiva', min_pause: 0.8 },
+    })
+    await api.projects.undoCut('meu corte', 3)
+    expect(lastCall()).toMatchObject({ url: '/api/projects/meu%20corte/cuts/3/undo', method: 'POST' })
+  })
+
   it('lista templates, saídas e jobs', async () => {
     await api.templates.list()
     expect(lastCall().url).toBe('/api/templates')
@@ -59,6 +72,24 @@ describe('cliente da API', () => {
     expect(lastCall().url).toBe('/api/jobs')
     await api.jobs.clearFinished()
     expect(lastCall()).toMatchObject({ url: '/api/jobs/finished', method: 'DELETE' })
+  })
+
+  it('pede o catálogo de transições e monta a URL da folha de contato', async () => {
+    await api.transitions.catalog()
+    expect(lastCall()).toMatchObject({ url: '/api/transitions', method: 'GET' })
+    expect(api.transitions.sheetUrl('whippan', 'spring')).toBe('/api/transitions/whippan/sheet?curve=spring')
+  })
+
+  it('pede o catálogo de looks e monta as URLs das folhas, com a marca só quando ela existe', async () => {
+    await api.looks.catalog()
+    expect(lastCall()).toMatchObject({ url: '/api/looks', method: 'GET' })
+    await api.looks.catalog('minha marca')
+    expect(lastCall().url).toBe('/api/looks?brand=minha%20marca')
+    expect(api.looks.sheetUrl('pb-contraste')).toBe('/api/looks/pb-contraste/sheet')
+    expect(api.looks.sheetUrl('cinema', 'default')).toBe('/api/looks/cinema/sheet')
+    expect(api.looks.sheetUrl('cinema', 'medlycare')).toBe('/api/looks/cinema/sheet?brand=medlycare')
+    expect(api.looks.overviewUrl()).toBe('/api/looks/sheet')
+    expect(api.looks.overviewUrl('medlycare')).toBe('/api/looks/sheet?brand=medlycare')
   })
 
   it('navega pelo servidor com o caminho codificado', async () => {

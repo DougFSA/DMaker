@@ -4,7 +4,9 @@ Cada job guarda os eventos (mensagens de etapa, progresso de cada comando ffmpeg
 alimenta filas de quem estiver assistindo, o que permite streaming por SSE.
 
 O cancelamento é cooperativo: `Job.cancel()` só levanta uma bandeira, e quem executa o trabalho a consulta
-nos pontos seguros (entre falas, por exemplo) e encerra com `JobCancelled`. Nada é morto à força.
+nos pontos seguros (entre falas, por exemplo) e encerra com `JobCancelled`. Nada é morto à força. Quem espera
+numa chamada que bloqueia (a resposta de um modelo, uma confirmação) registra um gancho com `Job.on_cancel` para
+ser acordado na hora, em vez de esperar o próximo ponto seguro.
 """
 
 from __future__ import annotations
@@ -27,6 +29,13 @@ class JobCancelled(Exception):
         self.result = result
 
 
+def _run_hook(hook: Callable[[], None]) -> None:
+    try:
+        hook()
+    except Exception:  # noqa: BLE001 - um gancho que falha não pode impedir os outros nem derrubar quem cancelou
+        pass
+
+
 @dataclass
 class Job:
     id: str
@@ -42,6 +51,7 @@ class Job:
     _listeners: list[queue.Queue] = field(default_factory=list, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _cancel_requested: threading.Event = field(default_factory=threading.Event, repr=False)
+    _cancel_hooks: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
     @property
     def cancellable(self) -> bool:
@@ -53,8 +63,21 @@ class Job:
         return self._cancel_requested.is_set()
 
     def cancel(self) -> None:
+        # a bandeira sobe ANTES dos ganchos: quem é acordado por um deles já encontra `cancel_requested` verdadeiro
         self._cancel_requested.set()
         self.log("Cancelamento pedido")
+        with self._lock:
+            hooks = list(self._cancel_hooks)
+        for hook in hooks:
+            _run_hook(hook)
+
+    def on_cancel(self, hook: Callable[[], None]) -> None:
+        """Registra o que acordar quando pedirem o cancelamento; se o pedido já veio, roda agora (o gancho deve ser idempotente)."""
+        with self._lock:
+            self._cancel_hooks.append(hook)
+            already = self._cancel_requested.is_set()
+        if already:
+            _run_hook(hook)
 
     def snapshot(self) -> dict:
         return {
@@ -133,6 +156,17 @@ class JobSink:
         if self.total:
             self.job.progress = {"label": self.label, "done": self.total, "total": self.total, "percent": 100}
             self.job.emit("progress", **self.job.progress)
+
+
+def stage_progress(job: Job) -> Callable[[str, float], None]:
+    """Etapa e fração (0 a 1) de um serviço sem ffmpeg para acompanhar (ex.: transcrição) viram progresso do job."""
+
+    def report(label: str, fraction: float) -> None:
+        percent = round(fraction * 100)
+        job.progress = {"label": label, "done": percent, "total": 100, "percent": percent}
+        job.emit("progress", **job.progress)
+
+    return report
 
 
 class JobManager:

@@ -98,6 +98,25 @@ def test_project_roundtrip_and_validation(client):
     assert client.get("/api/projects/nao-existe").status_code == 404
 
 
+def test_a_text_behind_the_person_survives_save_and_load_through_the_api(client):
+    """DMK-28: o campo `layer` do texto não se perde no caminho da interface (salvar, carregar, salvar de novo)."""
+    spec = dict(SPEC, overlays=[{"type": "text", "text": "CINCO CAMADAS", "layer": "behind-person"}])
+    assert client.put(f"/api/projects/{PROJECT}", json=spec).json()["ok"]
+    loaded = client.get(f"/api/projects/{PROJECT}").json()["spec"]
+    assert loaded["overlays"][0]["layer"] == "behind-person"
+
+    loaded["overlays"][0]["text"] = "SEIS CAMADAS"  # a interface edita um campo e devolve o projeto inteiro
+    assert client.put(f"/api/projects/{PROJECT}", json=loaded).json()["ok"]
+    again = client.get(f"/api/projects/{PROJECT}").json()["spec"]
+    assert again["overlays"][0]["layer"] == "behind-person" and again["overlays"][0]["text"] == "SEIS CAMADAS"
+    assert "behind-person" in (config.PROJECTS_DIR / PROJECT / "spec.json").read_text(encoding="utf-8")
+
+    invalid = dict(spec, overlays=[{"type": "text", "text": "x", "layer": "no-meio"}])
+    assert client.put(f"/api/projects/{PROJECT}", json=invalid).status_code == 422
+    schema = client.get("/api/schema").json()
+    assert "behind-person" in json.dumps(schema)  # o esquema da spec (e o do MCP) já anuncia a camada
+
+
 def test_get_project_with_invalid_spec_returns_422_with_raw_spec(client):
     """Simula um servidor com código antigo lendo uma spec com um campo que ele não conhece: a
     interface precisa do JSON cru para mostrar na aba JSON em vez de travar ao abrir o projeto."""
@@ -334,6 +353,34 @@ def test_qa_endpoint(client):
     assert "Checagens feitas" in result["text"]
     assert result["project"] == PROJECT
     assert client.post("/api/projects/nao-existe/qa").status_code == 404
+
+
+def test_qa_endpoint_checks_the_chosen_output(client, monkeypatch, tmp_path):
+    """O editor deixa escolher a prévia ou a final: `output` aponta o arquivo que o QA vai inspecionar."""
+    from dmaker.pipeline import report as report_module
+
+    client.put(f"/api/projects/{PROJECT}", json=SPEC)
+    chosen = tmp_path / "escolhida.mp4"
+    chosen.write_bytes(b"x")
+    seen: dict[str, Path | None] = {}
+    real_build_report = report_module.build_report
+
+    def spy(project, **kwargs):
+        seen["output"] = kwargs.get("output")
+        return real_build_report(project)  # só as checagens da spec: o arquivo de teste não é vídeo
+
+    monkeypatch.setattr(report_module, "build_report", spy)
+    result = client.post(f"/api/projects/{PROJECT}/qa", json={"output": str(chosen)})
+    assert result.status_code == 200
+    assert seen["output"] == chosen
+
+    missing = client.post(f"/api/projects/{PROJECT}/qa", json={"output": str(tmp_path / "nao-existe.mp4")})
+    assert missing.status_code == 404
+
+    # sem `output` (e com corpo vazio) continua valendo a última saída final do formato da spec
+    seen.clear()
+    assert client.post(f"/api/projects/{PROJECT}/qa", json={}).status_code == 200
+    assert seen["output"] is None
 
 
 # ---------- estúdio de voz ----------

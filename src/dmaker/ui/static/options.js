@@ -135,6 +135,7 @@ const CAPTION_STYLE_MODE_OPTIONS = [
   { value: "karaoke", label: "Karaokê" },
   { value: "classic", label: "Clássico" },
   { value: "boxed", label: "Caixa" },
+  { value: "rounded", label: "Caixa arredondada" },
 ];
 
 const NORMALIZE_OPTIONS = [

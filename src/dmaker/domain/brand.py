@@ -43,7 +43,14 @@ DEFAULT_THEME = {
         "card_variant": "dark",
     },
     "card_layouts": {},
+    "looks": {},
 }
+
+
+# Caixa arredondada por linha (legendas `rounded` e textos com `box_shape: rounded`), px na base 1080. O raio
+# acompanha a altura de uma linha de legenda sem virar pílula; a margem dá folga lateral ao texto.
+DEFAULT_ROUNDED_BOX_RADIUS = 28.0
+DEFAULT_ROUNDED_BOX_PADDING = 28.0
 
 
 def normalize_hex(value: str) -> str:
@@ -64,6 +71,7 @@ class Theme:
     style: dict = field(default_factory=dict)
     captions: dict = field(default_factory=dict)
     card_layouts: dict[str, dict] = field(default_factory=dict)
+    looks: dict[str, dict] = field(default_factory=dict)  # acabamentos visuais da marca (ver domain/looks.py)
     base_dir: Path | None = None  # pasta da marca, para resolver fundos, imagens e fontes de layout
     key: str = "default"
 
@@ -95,6 +103,22 @@ class Theme:
     def no_dash(self) -> bool:
         return bool(self.rules.get("no_dash"))
 
+    def _rounded_box_metric(self, key: str, default: float) -> float:
+        value = self.style.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+            raise ValueError(f"{key} da marca precisa ser um número maior ou igual a zero, veio {value!r}")
+        return float(value)
+
+    @property
+    def rounded_box_radius(self) -> float:
+        """Raio dos cantos da caixa arredondada, em px na base 1080 (`style.rounded_box_radius` da marca)."""
+        return self._rounded_box_metric("rounded_box_radius", DEFAULT_ROUNDED_BOX_RADIUS)
+
+    @property
+    def rounded_box_padding(self) -> float:
+        """Margem lateral entre o texto e a borda da caixa arredondada (`style.rounded_box_padding`)."""
+        return self._rounded_box_metric("rounded_box_padding", DEFAULT_ROUNDED_BOX_PADDING)
+
     def resolve_asset(self, rel: str | Path) -> Path:
         """Caminho de um arquivo da marca (fundo ou imagem de um layout de cartão); absoluto passa direto."""
         p = Path(rel)
@@ -107,7 +131,7 @@ class Theme:
 
 def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
     merged = json.loads(json.dumps(DEFAULT_THEME))
-    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts"):
+    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts", "looks"):
         merged[section].update(data.get(section, {}))
     merged["name"] = data.get("name", merged["name"])
     logos = {}
@@ -135,6 +159,7 @@ def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
         style=merged["style"],
         captions=merged["captions"],
         card_layouts=merged["card_layouts"],
+        looks=merged["looks"],
         base_dir=base,
         key=key,
     )
@@ -164,7 +189,7 @@ def load_theme(name: str | None = None, overrides: dict | None = None) -> Theme:
                 )
             theme = _from_dict(json.loads(spec.read_text(encoding="utf-8")), folder, name)
     if overrides:
-        for section in ("colors", "fonts", "rules", "cta", "style", "captions"):
+        for section in ("colors", "fonts", "rules", "cta", "style", "captions", "looks"):
             if section in overrides:
                 getattr(theme, section).update(overrides[section])
         theme.colors = {k: normalize_hex(v) for k, v in theme.colors.items()}

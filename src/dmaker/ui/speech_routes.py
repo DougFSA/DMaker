@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlencode
@@ -28,12 +27,9 @@ from ..pipeline.speech_fix import FixRequest, default_speech_fix_service
 from ..pipeline.voice_conversion import ConversionRequest, default_voice_conversion_service
 from ..voice.speech_edit import MIN_PAUSE_SECONDS
 from ..voice.synth import DRAFT_STEPS
+from .uploads import media_upload_dir, save_upload
 from .voice_routes import Services, VoiceServices, audio_url, exclusive_synthesis, existing_voice
 
-MAX_UPLOAD_BYTES = (
-    4 * 1024**3
-)  # um vídeo de celular de alguns minutos; isto só barra o que claramente não é mídia
-UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 MAX_TEXT_CHARS = 2000  # uma correção troca uma palavra ou frase, não um roteiro (isso é a narração)
 ISOLATION_SUBDIR = "isolamento"
 CORRECTION_SUBDIR = "correcao"
@@ -81,37 +77,6 @@ def media_file(raw: str) -> Path:
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Arquivo não encontrado: {raw}")
     return path
-
-
-def _upload_name(upload: UploadFile) -> str:
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(upload.filename or "arquivo").stem).strip("-.")[:60]
-    suffix = re.sub(r"[^a-z0-9.]", "", Path(upload.filename or "").suffix.lower())[:6] or ".bin"
-    return f"{stem or 'arquivo'}{suffix}"
-
-
-def _save_media_upload(upload: UploadFile) -> Path:
-    """Grava o arquivo enviado em cache/uploads (o ffmpeg lê por caminho), recusando o que passa do limite."""
-    folder = config.CACHE_DIR / "uploads"
-    folder.mkdir(parents=True, exist_ok=True)
-    partial = folder / f".{hashlib.sha1(str(id(upload)).encode()).hexdigest()[:8]}.part"
-    digest = hashlib.sha256()
-    written = 0
-    with partial.open("wb") as handle:
-        while chunk := upload.file.read(UPLOAD_CHUNK_BYTES):
-            written += len(chunk)
-            if written > MAX_UPLOAD_BYTES:
-                handle.close()
-                partial.unlink(missing_ok=True)
-                raise HTTPException(status_code=413, detail="Arquivo grande demais.")
-            digest.update(chunk)
-            handle.write(chunk)
-    if not written:
-        partial.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="O arquivo enviado está vazio.")
-    # o conteúdo entra no nome: enviar o mesmo arquivo de novo reaproveita o caminho (e os caches por caminho)
-    destination = folder / f"{digest.hexdigest()[:10]}-{_upload_name(upload)}"
-    partial.replace(destination)
-    return destination
 
 
 def stage_reporter(job: Job):
@@ -248,7 +213,7 @@ def build_speech_router(jobs: JobManager) -> APIRouter:
 
     @router.post("/upload")
     def upload(file: Annotated[UploadFile, File()]) -> dict:
-        path = _save_media_upload(file)
+        path = save_upload(file, media_upload_dir()).path
         return {"path": path.as_posix(), "name": path.name}
 
     @router.post("/isolate")

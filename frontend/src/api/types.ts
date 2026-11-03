@@ -1,5 +1,7 @@
 /* Tipos das respostas da API (src/dmaker/ui/server.py), escritos à mão a partir das respostas reais.
-   Os nomes dos campos seguem o backend (snake_case) para não haver camada de tradução. */
+   Os nomes dos campos seguem o backend (snake_case) para não haver camada de tradução.
+   Os tipos de cada área grande (voz, fala, dublagem, fila, modelos, editor) ficam em types/<área>.ts. */
+import type { UtteranceEvent } from './types/voice'
 
 export interface PresetInfo {
   id: string
@@ -58,8 +60,55 @@ export interface ProjectDetail {
   name: string
   spec_path: string
   spec: ProjectSpec
+  /** A revisão do `spec.json` no disco; o editor a manda no `If-Match` ao salvar. Servidor antigo não manda. */
+  revision?: string | null
   captions_exists: boolean
   outputs: OutputFile[]
+  /** A lista do que o corte automático removeu; null em projeto que não nasceu dele. */
+  cuts: CutReport | null
+}
+
+export type CutIntensity = 'suave' | 'normal' | 'agressiva'
+
+/** Um trecho removido pelo corte automático (tempos na gravação original). */
+export interface CutItem {
+  id: number
+  start_s: number
+  end_s: number
+  duration_s: number
+  reason: 'silence' | 'filler' | 'repetition'
+  reason_label: string
+  /** As palavras tiradas; vazio numa pausa. */
+  text: string
+  undone: boolean
+}
+
+export interface CutReport {
+  source: string
+  intensity: CutIntensity
+  min_pause_s: number
+  breath_s: number
+  duration_before_s: number
+  duration_after_s: number
+  removed_s: number
+  removed_percent: number
+  /** Cortes ainda aplicados por motivo (silence, filler, repetition). */
+  counts: Record<string, number>
+  cuts: CutItem[]
+}
+
+export interface AutoCutRequest {
+  source: string
+  name: string
+  intensity?: CutIntensity
+  min_pause?: number
+  breath?: number
+  preset?: string
+  brand?: string | null
+  captions?: boolean
+  language?: string
+  model?: string
+  overwrite?: boolean
 }
 
 /** Só o que a tela lê da spec; a validação completa fica no backend. */
@@ -165,7 +214,7 @@ export interface JobStartResponse {
   job_id: string
 }
 
-export type JobStatus = 'running' | 'done' | 'error'
+export type JobStatus = 'running' | 'done' | 'error' | 'cancelled'
 
 export interface JobProgress {
   label?: string
@@ -182,16 +231,19 @@ export interface JobSnapshot {
   elapsed_s: number
   progress: JobProgress
   error: string | null
+  /** O trabalho aceita ser parado (POST /api/jobs/{id}/cancel): hoje só os de voz e áudio. */
+  cancellable: boolean
   focus: boolean
   project: string | null
 }
 
-/** Eventos do SSE em /api/jobs/{id}/events. */
+/** Eventos do SSE em /api/jobs/{id}/events. `utterance` só vem do job de narração (cada fala pronta). */
 export type JobEvent =
   | { kind: 'start'; t: number; description: string }
   | { kind: 'log'; t: number; message: string }
   | ({ kind: 'progress'; t: number } & JobProgress)
   | { kind: 'end'; t: number; status: JobStatus; error: string | null; result: unknown }
+  | UtteranceEvent
 
 export interface BrowseResponse {
   path: string
@@ -199,3 +251,178 @@ export interface BrowseResponse {
   dirs: string[]
   files: Array<{ path: string; name: string; size_mb: number }>
 }
+
+export type TransitionCurve = 'linear' | 'ease' | 'spring'
+
+/** Item de GET /api/transitions: `motion` são as de movimento do DMaker, `xfade` as do FFmpeg. */
+export interface TransitionInfo {
+  name: string
+  kind: 'motion' | 'xfade'
+  summary: string
+}
+
+export interface TransitionCatalog {
+  curves: TransitionCurve[]
+  transitions: TransitionInfo[]
+}
+
+/** Efeitos de acabamento que um look liga e a quantidade (0 a 1) de cada um. */
+export type LookEffectName = 'vignette' | 'glow' | 'aberration' | 'light_leak' | 'grain'
+
+/** Item de GET /api/looks: `source` diz se o look é um dos padrões ou veio do brand.json da marca. */
+export interface LookInfo {
+  name: string
+  summary: string
+  source: 'padrão' | 'marca'
+  effects: Partial<Record<LookEffectName, number>>
+}
+
+export interface LookCatalog {
+  /** Valor de `look` que desliga o acabamento (no trecho, desliga o do projeto). */
+  off: string
+  looks: LookInfo[]
+}
+
+/* ---------- infográficos prontos (src/dmaker/ui/infographic_routes.py) ---------- */
+
+export type InfographicParamType = 'number' | 'integer' | 'text' | 'choice' | 'bool' | 'color' | 'path'
+
+/** Um parâmetro de um infográfico, como o esquema do modelo o descreve (rótulo em português, limites, opções). */
+export interface InfographicParam {
+  name: string
+  type: InfographicParamType
+  label: string
+  description?: string
+  required: boolean
+  default?: string | number | boolean
+  min?: number
+  max?: number
+  max_length?: number
+  options?: string[]
+  example?: string | number | boolean
+}
+
+/** Item de GET /api/infographics: o modelo, o tamanho natural da página e o esquema dos parâmetros. */
+export interface InfographicInfo {
+  name: string
+  title: string
+  description: string
+  size: [number, number]
+  area: Record<string, number>
+  duration: number
+  example: Record<string, string | number | boolean>
+  anchors_to_caption: boolean
+  params: InfographicParam[]
+}
+
+/** Corpo de POST /api/infographics/{nome}/frame: os valores digitados e onde olhar. */
+export interface InfographicFrameRequest {
+  params: Record<string, string | number | boolean>
+  at?: number
+  size?: [number, number]
+  brand?: string
+  background?: string
+}
+
+/* ---------- lote: vários vídeos de uma planilha (src/dmaker/ui/batch_routes.py) ---------- */
+
+export type BatchIssueLevel = 'erro' | 'aviso'
+
+/** Um problema (ou aviso) da planilha: onde está, em que coluna e o que fazer. `line` nulo = planilha inteira. */
+export interface BatchIssue {
+  line: number | null
+  field: string | null
+  message: string
+  level: BatchIssueLevel
+}
+
+export interface BatchValidationRow {
+  index: number
+  line: number
+  title: string
+  valid: boolean
+  issues: BatchIssue[]
+}
+
+/** O que a validação achou antes de renderizar qualquer coisa. */
+export interface BatchValidation {
+  template: string
+  name_column: string | null
+  headers: string[]
+  columns: { matched: Record<string, string>; unused: string[]; missing: string[] }
+  issues: BatchIssue[]
+  rows: BatchValidationRow[]
+  total: number
+  valid: number
+  invalid: number
+  ok: boolean
+  text: string
+}
+
+export interface BatchValidateRequest {
+  template: string
+  sheet: string
+  name_column?: string | null
+}
+
+export interface BatchStartRequest extends BatchValidateRequest {
+  name?: string | null
+  skip_invalid?: boolean
+  preview?: boolean
+  preset?: string | null
+}
+
+export interface BatchResumeRequest {
+  /** Só estes vídeos (números da tabela); sem valor, todos os que faltam. */
+  rows?: number[]
+  /** Refaz também os que já estão prontos. */
+  force?: boolean
+}
+
+export type BatchRowState = 'pending' | 'running' | 'done' | 'failed' | 'invalid'
+export type BatchStatus = 'running' | 'paused' | 'finished'
+
+export interface BatchRow {
+  index: number
+  line: number
+  title: string
+  state: BatchRowState
+  state_label: string
+  project: string | null
+  output: string | null
+  duration_s: number | null
+  render_s: number | null
+  error: string | null
+  warnings: string[]
+  issues: BatchIssue[]
+}
+
+/** O relatório do lote: o que saiu, o que falhou e por quê. */
+export interface BatchReport {
+  name: string
+  template: string
+  status: BatchStatus
+  status_label: string
+  preview: boolean
+  output_dir: string
+  total: number
+  done: number
+  failed: number
+  skipped: number
+  waiting: number
+  summary: string
+  rows: BatchRow[]
+  /** Só na consulta de um lote: o relatório em texto e o job que o está rodando (se houver). */
+  text?: string
+  job_id?: string | null
+}
+
+export interface BatchListItem extends Omit<BatchReport, 'rows'> {
+  rows: number
+}
+
+export interface BatchStartResponse {
+  name: string
+  job_id: string
+}
+

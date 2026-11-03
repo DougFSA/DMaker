@@ -12,20 +12,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.spec import ClipSegment, Reframe
+from ..domain.spec import ClipSegment, ColorAdjust, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
-from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, color_chain, fade_chains
+from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, fade_chains
 from .encode import mezzanine_output_args
+from .finish import post_video_lines
 from .reframe import reframe_graph
 
 
-def _post_chain(
-    segment_color, fade_in: float, fade_out: float, duration: float
-) -> tuple[list[str], list[str]]:
-    vfades, afades = fade_chains(fade_in, fade_out, duration)
-    video = color_chain(segment_color) + vfades + ["format=yuv420p", "setsar=1"]
-    return video, afades
+def _audio_fades(fade_in: float, fade_out: float, duration: float) -> list[str]:
+    return fade_chains(fade_in, fade_out, duration)[1]
 
 
 def _finish(
@@ -65,51 +62,37 @@ def _audio_source_chain(in_point: float, volume: float, length: float) -> list[s
     return chain
 
 
-def clip_mezzanine(
+def uses_camera_audio(seg: ClipSegment, info: MediaInfo) -> bool:
+    """O som da própria câmera entra no trecho: o arquivo tem áudio e o trecho não está mudo nem a volume zero."""
+    return info.has_audio and not seg.mute and seg.volume > 0
+
+
+def clip_audio_lines(
+    inputs: Inputs,
+    lines: list[str],
     seg: ClipSegment,
     info: MediaInfo,
-    src: Path,
     duration: float,
-    W: int,
-    H: int,
-    fps: float,
-    out: Path,
+    length: float,
     *,
-    in_point: float | None = None,
+    source_index: int,
     tracks: tuple[TrackSlice, ...] = (),
     audio_stream: int = 0,
     camera_audio: Path | None = None,
-    backdrop: Path | None = None,
-    reframe: Reframe | None = None,
-    has_brand: bool = False,
-    label: str = "trecho",
-) -> FFmpegCommand:
-    """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
-    `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
-    já recortado no trecho (começa no `in_point`) que substitui o da câmera, como a voz isolada;
-    `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec."""
-    reframe = reframe or seg.reframe
-    post, afades = _post_chain(seg.color, seg.fade_in, seg.fade_out, duration)
-    inputs = Inputs()
-    start = seg.start if in_point is None else in_point
-    length = max(duration * seg.speed, 0.01)  # tempo de fonte que o trecho consome
-    inputs.add(src, "-ss", f"{max(start, 0):.3f}", "-t", f"{length:.3f}")
-    backdrop_label = f"[{inputs.add_looped_image(backdrop, fps, duration)}:v]" if backdrop else None
-
-    lines = [f"[0:v]setpts=(PTS-STARTPTS)/{seg.speed:.5g},fps={fps:g}[mz_v0]"]
-    lines.append(
-        reframe_graph("[mz_v0]", "[mz_v1]", info.width, info.height, W, H, reframe, has_brand, backdrop_label)
-    )
-    lines.append("[mz_v1]" + ",".join(post) + "[vout]")
-
-    # áudio: câmera (se houver e não estiver muda) + faixas externas, tudo já alinhado ao trecho
+) -> None:
+    """Acrescenta a `lines` o ramo de áudio do trecho, terminado em `[aout]`: câmera (se houver e não estiver
+    muda) + faixas externas, tudo alinhado ao início do trecho, com velocidade e fades. `source_index` é a
+    entrada do arquivo do clipe. É a mesma receita para o mezanino do render e para o áudio da prévia
+    (`filtergraph/preview_audio.py`), que por isso soam iguais."""
+    afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
+    afades += audio_edge_fades(seg.audio_fade, duration)
     voices: list[str] = []
-    if info.has_audio and not seg.mute and seg.volume > 0:
+    if uses_camera_audio(seg, info):
         if camera_audio is not None:
             index = inputs.add(camera_audio, "-t", f"{length:.3f}")
             camera = f"[{index}:a:0]"
         else:
-            camera = f"[0:a:{audio_stream}]"
+            camera = f"[{source_index}:a:{audio_stream}]"
         lines.append(camera + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]")
         voices.append("[mz_cam]")
     for k, track in enumerate(tracks):
@@ -130,6 +113,59 @@ def clip_mezzanine(
             + ",".join(tail)
             + "[aout]"
         )
+
+
+def clip_mezzanine(
+    seg: ClipSegment,
+    info: MediaInfo,
+    src: Path,
+    duration: float,
+    W: int,
+    H: int,
+    fps: float,
+    out: Path,
+    *,
+    in_point: float | None = None,
+    tracks: tuple[TrackSlice, ...] = (),
+    audio_stream: int = 0,
+    camera_audio: Path | None = None,
+    backdrop: Path | None = None,
+    reframe: Reframe | None = None,
+    has_brand: bool = False,
+    look: ColorAdjust | None = None,
+    label: str = "trecho",
+) -> FFmpegCommand:
+    """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
+    `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
+    já recortado no trecho (começa no `in_point`) que substitui o da câmera, como a voz isolada;
+    `backdrop` é o PNG de fundo do modo brand; `reframe` substitui o enquadramento da spec; `look` é o
+    acabamento (cor e efeitos) do look que vale no trecho, já resolvido."""
+    reframe = reframe or seg.reframe
+    inputs = Inputs()
+    start = seg.start if in_point is None else in_point
+    length = max(duration * seg.speed, 0.01)  # tempo de fonte que o trecho consome
+    inputs.add(src, "-ss", f"{max(start, 0):.3f}", "-t", f"{length:.3f}")
+    backdrop_label = f"[{inputs.add_looped_image(backdrop, fps, duration)}:v]" if backdrop else None
+
+    lines = [f"[0:v]setpts=(PTS-STARTPTS)/{seg.speed:.5g},fps={fps:g}[mz_v0]"]
+    lines.append(
+        reframe_graph("[mz_v0]", "[mz_v1]", info.width, info.height, W, H, reframe, has_brand, backdrop_label)
+    )
+    lines += post_video_lines(
+        "[mz_v1]", "[vout]", seg.color, look, seg.fade_in, seg.fade_out, duration, (W, H), fps
+    )
+    clip_audio_lines(
+        inputs,
+        lines,
+        seg,
+        info,
+        duration,
+        length,
+        source_index=0,
+        tracks=tracks,
+        audio_stream=audio_stream,
+        camera_audio=camera_audio,
+    )
     return _finish(inputs, lines, fps, duration, out, label)
 
 
@@ -142,13 +178,17 @@ def still_mezzanine(
     fps: float,
     out: Path,
     label: str = "trecho",
+    *,
+    look: ColorAdjust | None = None,
+    size: tuple[int, int] | None = None,
 ) -> FFmpegCommand:
-    """Imagem já no tamanho de saída, parada pela duração do trecho."""
-    post, _ = _post_chain(segment_color, fade_in, fade_out, duration)
+    """Imagem já no tamanho de saída, parada pela duração do trecho. `size` (largura, altura) é preciso quando há
+    efeito de acabamento no look ou na cor."""
     inputs = Inputs()
     inputs.add_looped_image(png, fps, duration)
     inputs.add_silence(duration)
-    lines = ["[0:v]" + ",".join(post) + "[vout]", f"[1:a]{AUDIO_FMT_MEZZ}[aout]"]
+    lines = post_video_lines("[0:v]", "[vout]", segment_color, look, fade_in, fade_out, duration, size, fps)
+    lines.append(f"[1:a]{AUDIO_FMT_MEZZ}[aout]")
     return _finish(inputs, lines, fps, duration, out, label)
 
 
@@ -191,11 +231,13 @@ def frames_mezzanine(
     fps: float,
     out: Path,
     label: str = "trecho",
+    *,
+    look: ColorAdjust | None = None,
 ) -> FFmpegCommand:
     """Quadros RGB24 de WxH vindos do stdin (movimento renderizado com precisão sub-pixel)."""
-    post, _ = _post_chain(segment_color, fade_in, fade_out, duration)
     inputs = Inputs()
     inputs.add("pipe:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", f"{fps:g}")
     inputs.add_silence(duration)
-    lines = ["[0:v]" + ",".join(post) + "[vout]", f"[1:a]{AUDIO_FMT_MEZZ}[aout]"]
+    lines = post_video_lines("[0:v]", "[vout]", segment_color, look, fade_in, fade_out, duration, (W, H), fps)
+    lines.append(f"[1:a]{AUDIO_FMT_MEZZ}[aout]")
     return _finish(inputs, lines, fps, duration, out, label, frames=frames)

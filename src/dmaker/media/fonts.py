@@ -6,6 +6,7 @@ libass identifica a fonte pelo nome de família gravado no TTF. Para pesos que n
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -88,28 +89,101 @@ def resolve(family: str, weight: str = "regular") -> FontRef:
     raise FileNotFoundError("Nenhuma fonte encontrada (nem Poppins em assets/fonts nem Arial do Windows).")
 
 
+# Corpo de referência para medir: em corpos pequenos o FreeType arredonda cada avanço para pixel inteiro
+# (hinting) e a soma sai até 4% maior do que o libass desenha; medir grande e escalar elimina isso.
+_REFERENCE_EM = 2000
+
+
+def _sfnt_table(file: Path, tag: bytes) -> bytes | None:
+    """Bytes de uma tabela do TrueType/OpenType (cabeçalho sfnt), ou None se não existir ou não for sfnt."""
+    with file.open("rb") as handle:
+        header = handle.read(12)
+        if len(header) < 12:
+            return None
+        (table_count,) = struct.unpack(">H", header[4:6])
+        directory = handle.read(16 * table_count)
+        for index in range(table_count):
+            entry_tag, _checksum, offset, length = struct.unpack(
+                ">4sIII", directory[16 * index : 16 * index + 16]
+            )
+            if entry_tag == tag:
+                handle.seek(offset)
+                return handle.read(length)
+    return None
+
+
 @lru_cache(maxsize=64)
-def _cell_ratio(file: str) -> float:
-    """(ascent+descent)/tamanho: o libass trata Fontsize como altura da célula, não como corpo (em)."""
-    f = ImageFont.truetype(file, 100)
-    asc, desc = f.getmetrics()
-    return (asc + desc) / 100.0
+def _libass_metrics(file: str) -> tuple[float, float]:
+    """(winAscent, winDescent) em frações do em, que o libass usa para dimensionar a célula da linha (como o
+    VSFilter); sem a tabela OS/2 ele cai na hhea, e nós também."""
+    try:
+        os2 = _sfnt_table(Path(file), b"OS/2")
+        head = _sfnt_table(Path(file), b"head")
+        if os2 is not None and head is not None and len(os2) >= 78 and len(head) >= 20:
+            (units_per_em,) = struct.unpack(">H", head[18:20])
+            win_ascent, win_descent = struct.unpack(">HH", os2[74:78])
+            if units_per_em and win_ascent + win_descent:
+                return win_ascent / units_per_em, win_descent / units_per_em
+    except (OSError, struct.error):
+        pass
+    ascent, descent = ImageFont.truetype(file, 1000).getmetrics()
+    return ascent / 1000.0, descent / 1000.0
 
 
-def em_px(ref: FontRef, ass_size: float) -> float:
-    """Corpo (em) em pixels equivalente a um Fontsize ASS, para medir texto com Pillow."""
-    return ass_size / _cell_ratio(str(ref.file))
+@lru_cache(maxsize=64)
+def _libass_cell_ratio(file: str) -> float:
+    """(winAscent+winDescent)/unitsPerEm: o libass dimensiona o Fontsize pela célula do OS/2, como o VSFilter.
+
+    Na Poppins isso dá 1,76 (a hhea que o Pillow expõe dá 1,40): o corpo (em) que o libass desenha é o
+    Fontsize dividido por esse número. Sem a tabela OS/2 o libass cai na hhea, e nós também.
+    """
+    ascent, descent = _libass_metrics(file)
+    return ascent + descent
 
 
-def pil_font(ref: FontRef, ass_size: float) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(ref.file), max(1, int(round(em_px(ref, ass_size)))))
+@lru_cache(maxsize=64)
+def _reference_font(file: str) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(file, _REFERENCE_EM)
 
 
-def measure(text: str, ref: FontRef, ass_size: float, spacing: float = 0) -> tuple[float, float]:
-    """Largura e altura (célula) do texto como o libass renderiza, em px."""
-    font = pil_font(ref, ass_size)
-    width = font.getlength(text) + spacing * max(len(text) - 1, 0)
+def measure_rendered(text: str, ref: FontRef, ass_size: float, spacing: float = 0) -> tuple[float, float]:
+    """Largura e altura (célula) do texto exatamente como o libass o desenha, em px.
+
+    É a régua de tudo o que o ASS desenha: a caixa que abraça o texto e a quebra de linha. `ass_size` é o
+    Fontsize do ASS, a altura da célula (não o corpo), e o espaçamento entra a cada caractere, como no libass.
+    """
+    em = ass_size / _libass_cell_ratio(str(ref.file))
+    width = _reference_font(str(ref.file)).getlength(text) * em / _REFERENCE_EM + spacing * len(text)
     return width, ass_size
+
+
+def measure_pillow(text: str, ref: FontRef, size: float, spacing: float = 0) -> tuple[float, float]:
+    """Largura e altura do texto como o Pillow o desenha com `size` de corpo (em), em px.
+
+    É a régua do que o Pillow desenha, como o cartão (`visuals/cards.py`): lá o tamanho passado a
+    `ImageFont.truetype` já é o corpo, sem a conversão da célula do libass que `measure_rendered` faz.
+    Para texto do ASS use `measure_rendered`: o Fontsize dele é a altura da célula, e o corpo que o libass
+    desenha é menor (na Poppins, 1,76 vezes).
+    """
+    width = _reference_font(str(ref.file)).getlength(text) * size / _REFERENCE_EM
+    return width + spacing * max(len(text) - 1, 0), size
+
+
+def ink_box(text: str, ref: FontRef, ass_size: float) -> tuple[float, float, float, float]:
+    """(esquerda, topo, direita, base) da tinta do texto como o libass o desenha, em px, com a origem no começo do
+    texto e na linha de base (o topo é negativo: fica acima dela). É o que um círculo ou um sublinhado precisa
+    para abraçar a palavra, e não a célula inteira da linha, que é bem mais alta que as letras."""
+    em = ass_size / _libass_cell_ratio(str(ref.file))
+    left, top, right, bottom = _reference_font(str(ref.file)).getbbox(text, anchor="ls")
+    scale = em / _REFERENCE_EM
+    return left * scale, top * scale, right * scale, bottom * scale
+
+
+def baseline_offset(ref: FontRef, ass_size: float) -> float:
+    """Distância, em px, do topo da célula da linha até a linha de base: a fração da célula que o libass reserva
+    acima da base (winAscent sobre winAscent+winDescent)."""
+    ascent, descent = _libass_metrics(str(ref.file))
+    return ass_size * ascent / (ascent + descent)
 
 
 def fontsdir() -> Path:

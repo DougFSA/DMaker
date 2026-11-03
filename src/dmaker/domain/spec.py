@@ -3,22 +3,68 @@
 Convenções:
 - tempos em segundos; cores em #RRGGBB ou chave do tema (primary, accent, text...);
 - tamanhos de texto em px na base 1080 (lado menor do vídeo): escalam com a resolução;
-- posições x/y em fração (0..1) do quadro.
+- posições x/y em fração (0..1) do quadro;
+- regiões nomeadas (`regions`): retângulos do quadro, em fração, que as sobreposições usam por nome
+  (`region`) em vez de x/y/width.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import config
+from .atomic_file import read_bytes_retrying, write_bytes_atomic
+from .curves import Curve
+from .transitions import all_transition_names
 
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# Camada de uma sobreposição na pilha de profundidade: "front" fica na frente de tudo; "behind-person" fica entre o
+# fundo e a pessoa recortada (título que parece estar no cenário). É um Literal, e não um booleano, porque outras
+# sobreposições (a composição em HTML) vão usar o mesmo campo e podem ganhar camadas novas.
+OverlayLayer = Literal["front", "behind-person"]
+
+
+# ---------- efeitos sonoros ----------
+
+# Teto do `volume` de um efeito (1 = o nível padrão, 6 dB abaixo da voz): num só lugar para a spec e o modelo
+# "explicativo" (`sons` de cada assunto) recusarem o mesmo valor.
+SFX_VOLUME_MAX = 1.5
+
+
+class SfxCue(Strict):
+    """Efeito sonoro solto num instante da linha do tempo (item de `audio.sfx`).
+
+    `sound` é um nome da biblioteca (whoosh, whip, pop, click, riser, impact, ding) ou o caminho de um
+    arquivo de áudio. `volume` 1 é o nível padrão: o pico do efeito fica 6 dB abaixo do pico da voz (ver
+    `filtergraph/sfx.py`); até 1,5 ele sobe, ainda sem passar da voz."""
+
+    sound: str = Field(min_length=1)
+    at: float = Field(ge=0)  # instante do vídeo final, em segundos
+    volume: float = Field(1.0, ge=0, le=SFX_VOLUME_MAX)
+
+
+class EntrySound(Strict):
+    """Som que toca na entrada de uma sobreposição (texto, imagem, vídeo) ou no começo de uma transição.
+
+    Sem `sound`, vale o som padrão do tipo (ver `domain/sfx.py`). `offset` desloca o instante em relação à
+    entrada: negativo antecipa o som, como num whoosh que chega um instante antes do elemento."""
+
+    sound: str | None = Field(None, min_length=1)
+    volume: float = Field(1.0, ge=0, le=SFX_VOLUME_MAX)
+    offset: float = Field(0.0, ge=-2, le=2)
+
+
+# `true` liga o som padrão do tipo, uma string escolhe o som, um objeto ajusta volume e deslocamento;
+# ausente ou `false` não toca nada (o som automático é opt-in)
+SoundSpec = bool | str | EntrySound
 
 
 # ---------- trechos da linha do tempo ----------
@@ -49,15 +95,30 @@ class Matte(Strict):
 
 
 class ColorAdjust(Strict):
+    """Cor e acabamento de um trecho (ou de um look). Os quatro últimos campos são efeitos de acabamento de
+    câmera e filme: 0 desliga e 1 é o máximo (ver `filtergraph/finish.py`, que justifica cada um)."""
+
     brightness: float = Field(0.0, ge=-1, le=1)
     contrast: float = Field(1.0, ge=0, le=3)
     saturation: float = Field(1.0, ge=0, le=3)
     gamma: float = Field(1.0, ge=0.1, le=10)
     sharpen: float = Field(0.0, ge=0, le=2)
     denoise: bool = False
-    vignette: bool = False
+    # true é a vinheta de sempre; um número de 0 a 1 ajusta a intensidade (0.4 equivale a true)
+    vignette: bool | float = False
     lut: str | None = None  # arquivo .cube
     extra: str | None = None  # cadeia de filtros ffmpeg de vídeo, para casos especiais
+    glow: float = Field(0.0, ge=0, le=1)  # brilho suave nas altas luzes
+    aberration: float = Field(0.0, ge=0, le=1)  # aberração cromática (separação de vermelho e azul)
+    light_leak: float = Field(0.0, ge=0, le=1)  # vazamento de luz quente que cruza o quadro
+    grain: float = Field(0.0, ge=0, le=1)  # granulação de filme (animada, sempre igual a cada render)
+
+    @field_validator("vignette")
+    @classmethod
+    def _vignette_range(cls, v: bool | float) -> bool | float:
+        if not isinstance(v, bool) and not 0 <= v <= 1:
+            raise ValueError("vignette: use true/false ou uma intensidade de 0 a 1")
+        return v
 
     def is_identity(self) -> bool:
         return (
@@ -70,64 +131,17 @@ class ColorAdjust(Strict):
             and not self.vignette
             and not self.lut
             and not self.extra
+            and not (self.glow or self.aberration or self.light_leak or self.grain)
         )
 
 
-XFADE_TYPES = {
-    "fade",
-    "fadeblack",
-    "fadewhite",
-    "dissolve",
-    "wipeleft",
-    "wiperight",
-    "wipeup",
-    "wipedown",
-    "slideleft",
-    "slideright",
-    "slideup",
-    "slidedown",
-    "smoothleft",
-    "smoothright",
-    "smoothup",
-    "smoothdown",
-    "circleopen",
-    "circleclose",
-    "circlecrop",
-    "rectcrop",
-    "radial",
-    "pixelize",
-    "distance",
-    "zoomin",
-    "fadegrays",
-    "squeezev",
-    "squeezeh",
-    "hlslice",
-    "hrslice",
-    "vuslice",
-    "vdslice",
-    "diagtl",
-    "diagtr",
-    "diagbl",
-    "diagbr",
-    "hblur",
-    "wipetl",
-    "wipetr",
-    "wipebl",
-    "wipebr",
-    "coverleft",
-    "coverright",
-    "coverup",
-    "coverdown",
-    "revealleft",
-    "revealright",
-    "revealup",
-    "revealdown",
-}
-
-
 class Transition(Strict):
+    """Como um trecho entra a partir do anterior: o tipo (xfade ou de movimento) e o ritmo (`curve`)."""
+
     type: str = "fade"
     duration: float = Field(0.5, gt=0, le=5)
+    curve: Curve = "linear"
+    sound: SoundSpec | None = None  # som no começo da transição (ver `EntrySound`)
 
     @field_validator("type")
     @classmethod
@@ -135,9 +149,10 @@ class Transition(Strict):
         v = v.lower()
         if v == "cut":
             return v
-        if v not in XFADE_TYPES:
+        if v not in all_transition_names():
             raise ValueError(
-                f"Transição desconhecida: {v!r}. Use cut ou um tipo xfade (fade, wipeleft, slideup...)"
+                f"Transição desconhecida: {v!r}. Use cut, um tipo xfade (fade, wipeleft, slideup...) "
+                "ou uma de movimento (crosszoom, whippan, blurslide, filmburn, lightleak)"
             )
         return v
 
@@ -149,6 +164,9 @@ class SegmentBase(Strict):
     fade_out: float = Field(0.0, ge=0)
     reframe: Reframe = Reframe()
     color: ColorAdjust = ColorAdjust()
+    # nome de um look (ver `domain/looks.py`) só deste trecho; "nenhum" desliga o do projeto. Sem ele, vale o
+    # `look` do projeto, a não ser que o trecho traga ajuste de cor próprio em `color`
+    look: str | None = None
 
 
 class ClipSegment(SegmentBase):
@@ -171,6 +189,9 @@ class ClipSegment(SegmentBase):
     mute: bool = False
     matte: Matte | None = None  # fundo substituído por cor lisa (pessoa recortada)
     audio_mode: Literal["original", "voice", "background"] = "original"
+    # fade de áudio curto nas duas pontas do clipe, sem escurecer a imagem (ao contrário de fade_in/fade_out):
+    # tira o estalo de um corte seco no meio da fala, como os de `autocut`. 0 = sem fade
+    audio_fade: float = Field(0.0, ge=0, le=0.5)
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
@@ -210,17 +231,47 @@ class CardSegment(SegmentBase):
     motion_amount: float = Field(0.04, ge=0, le=0.3)
     layout: str | None = None  # nome de um layout em `card_layouts` do brand.json da marca
     fields: dict[str, str | list[str]] = {}  # campos que preenchem o layout ({{campo}} e listas)
+    # cor lisa: sem as curvas e os brilhos do tema, e sem exigir título. É o fundo de apoio atrás de um
+    # quadro de vídeo ou de uma imagem (modelo "explicativo"), onde a decoração só atrapalharia
+    flat: bool = False
 
     @model_validator(mode="after")
     def _title_or_layout(self) -> CardSegment:
-        if not self.layout and not self.title.strip():
+        if not self.layout and not self.title.strip() and not self.flat:
             raise ValueError(
-                "cartão precisa de `title` (ou `layout` com `fields`, cartão por layout da marca)"
+                "cartão precisa de `title` (ou `layout` com `fields`, cartão por layout da marca, "
+                "ou `flat: true` para um fundo de cor lisa)"
             )
         return self
 
 
 Segment = Annotated[ClipSegment | ImageSegment | CardSegment, Field(discriminator="type")]
+
+
+# ---------- regiões nomeadas ----------
+
+_EDGE_TOLERANCE = 1e-6  # folga das contas de ponto flutuante ao conferir se a região cabe no quadro
+
+
+class Region(Strict):
+    """Retângulo nomeado do quadro, em fração (0..1) da largura e da altura. `x`/`y` são o CENTRO, a mesma
+    convenção de `x`/`y` nas sobreposições. Quem monta um layout (o modelo "explicativo") declara as
+    regiões uma vez e as sobreposições se encaixam nelas por nome (`region`), sem conta de pixel."""
+
+    x: float = Field(gt=0, lt=1)
+    y: float = Field(gt=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _inside_frame(self) -> Region:
+        for axis, center, size in (("horizontal", self.x, self.width), ("vertical", self.y, self.height)):
+            if center - size / 2 < -_EDGE_TOLERANCE or center + size / 2 > 1 + _EDGE_TOLERANCE:
+                raise ValueError(
+                    f"região fora do quadro no eixo {axis}: centro {center:g} e tamanho {size:g} "
+                    "passam da borda (x/y são o centro, em fração)"
+                )
+        return self
 
 
 # ---------- sobreposições ----------
@@ -239,6 +290,9 @@ class TextStyle(Strict):
     box_alpha: float | None = Field(None, ge=0, le=1)
     box_radius: float | None = Field(None, ge=0)
     box_padding: float | None = Field(None, ge=0)
+    # "block": um retângulo em volta do texto todo (padrão); "rounded": uma caixa por linha, emendadas
+    # com curvas (estilo TikTok), com raio e margem da marca; pedi-la já liga a `box`
+    box_shape: Literal["block", "rounded"] | None = None
     uppercase: bool | None = None
     align: Literal["left", "center", "right"] | None = None
     max_width: float | None = Field(None, gt=0, le=1)  # fração da largura
@@ -255,8 +309,20 @@ class TextOverlay(Strict):
     position: Literal["top", "center", "bottom"] | None = None
     x: float | None = Field(None, ge=0, le=1)
     y: float | None = Field(None, ge=0, le=1)
+    region: str | None = None  # nome em `regions`: o texto se centra na região (no lugar de position/x/y)
     animation: Literal["none", "fade", "pop", "slide-up", "typewriter"] | None = None
     style: TextStyle = TextStyle()
+    sound: SoundSpec | None = None  # som na entrada do texto (em `start`)
+    # "behind-person": o texto vai entre o fundo e a pessoa, que o recorte (RVM) põe por cima só no intervalo dele
+    layer: OverlayLayer = "front"
+
+    @model_validator(mode="after")
+    def _region_or_position(self) -> TextOverlay:
+        if self.region and (self.x is not None or self.y is not None or self.position is not None):
+            raise ValueError(
+                "texto com `region` não leva `position`, `x` nem `y`: a região já define o lugar"
+            )
+        return self
 
 
 class ImageOverlay(Strict):
@@ -265,6 +331,11 @@ class ImageOverlay(Strict):
     position: Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] = (
         "top-right"
     )
+    x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (x e y juntos; sobrescreve position)
+    y: float | None = Field(None, ge=0, le=1)
+    # nome em `regions`: a imagem inteira cabe na região, centrada e sem distorcer (no lugar de
+    # position/x/y; a largura vem da região)
+    region: str | None = None
     width: float = Field(0.22, gt=0, le=1)  # fração da largura do vídeo
     margin: float = Field(40, ge=0)  # px na base 1080
     safe_zone: bool = True  # False cola no canto do quadro, só com a margem (ignora a interface do app)
@@ -272,6 +343,17 @@ class ImageOverlay(Strict):
     start: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     fade: float = Field(0.3, ge=0)
+    sound: SoundSpec | None = None  # som na entrada da imagem (em `start`)
+    # "circle" recorta a imagem num círculo (o maior quadrado central dela), como a foto no meio do audiograma
+    shape: Literal["rect", "circle"] = "rect"
+
+    @model_validator(mode="after")
+    def _place(self) -> ImageOverlay:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("imagem: informe `x` e `y` juntos (o centro da imagem)")
+        if self.region and self.x is not None:
+            raise ValueError("imagem com `region` não leva `x` nem `y`: a região já define o lugar")
+        return self
 
 
 class ProgressBar(Strict):
@@ -297,8 +379,14 @@ class VideoOverlay(Strict):
     )
     x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (sobrescreve position)
     y: float | None = Field(None, ge=0, le=1)
+    # nome em `regions`: o quadro ocupa a região (no lugar de position/x/y/width). Sem `aspect`, o vídeo
+    # preenche a região inteira cortando o excesso; com `aspect`, o quadro dessa proporção cabe nela
+    region: str | None = None
     width: float = Field(0.28, gt=0, le=1)  # fração da largura do vídeo
     aspect: str | None = None  # "16:9", "1:1"...; None = proporção da fonte (círculo força 1:1)
+    # onde cortar quando a proporção do quadro difere da fonte, como em `reframe.focus`: (0.5, 0.5) mantém
+    # o centro; (0.5, 0.3) sobe a janela para um rosto de vídeo vertical, que fica no terço de cima
+    focus: tuple[float, float] = (0.5, 0.5)
     shape: Literal["rect", "rounded", "circle"] = "rounded"
     radius: float = Field(0.08, ge=0, le=0.5)  # cantos redondos, fração da largura do PiP
     softness: float = Field(0.0, ge=0)  # suavidade da borda da máscara, px na base 1080
@@ -310,6 +398,7 @@ class VideoOverlay(Strict):
     volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
     animation: Literal["none", "fade", "slide"] = "fade"
     fade: float = Field(0.3, ge=0)
+    sound: SoundSpec | None = None  # som na entrada do quadro (em `start`)
 
     @model_validator(mode="after")
     def _origin(self) -> VideoOverlay:
@@ -319,6 +408,10 @@ class VideoOverlay(Strict):
             raise ValueError("end precisa ser maior que start na sobreposição de vídeo")
         if self.aspect is not None:
             parse_aspect(self.aspect)
+        if self.region and (self.x is not None or self.y is not None):
+            raise ValueError("vídeo com `region` não leva `x` nem `y`: a região já define o lugar")
+        if not all(0 <= v <= 1 for v in self.focus):
+            raise ValueError("focus do vídeo precisa ter os dois valores entre 0 e 1")
         return self
 
 
@@ -334,14 +427,162 @@ def parse_aspect(value: str) -> float:
     return ratio
 
 
-Overlay = Annotated[TextOverlay | ImageOverlay | ProgressBar | VideoOverlay, Field(discriminator="type")]
+class AudiogramOverlay(Strict):
+    """Audiograma: a forma de onda ou as barras de frequência do áudio, animadas no ritmo dele. Serve para
+    divulgar um trecho de podcast, entrevista ou áudio de WhatsApp, quando não há vídeo.
+
+    `style`: `wave` (linha de onda), `bars` (barras simétricas, as graves no meio) ou `circle` (barras em
+    volta de um círculo; `inner_radius` é onde elas começam, e é ali que cabe a foto). `follow` escolhe o
+    áudio que a animação acompanha: `voice` (clipes, narração e `audio.voiceover`, sem a música), `mix` (o
+    áudio final) ou `auto` (a voz, quando o projeto tem alguma; senão a mistura, como num visualizador de
+    música). Seguir a voz mantém a onda parada nas pausas da fala mesmo com trilha de fundo.
+
+    `color` é uma chave do tema ou um hex (sem ele, a cor de destaque da marca). O lugar vem de `region`,
+    de `x`/`y` (o centro, em fração do quadro) ou de `position`; `width` e `height` são frações do quadro
+    (sem `height`, a proporção própria do estilo). No círculo, o desenho cabe no menor lado da caixa."""
+
+    type: Literal["audiogram"] = "audiogram"
+    style: Literal["wave", "bars", "circle"] = "bars"
+    follow: Literal["auto", "voice", "mix"] = "auto"
+    color: str | None = None
+    position: (
+        Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] | None
+    ) = None
+    x: float | None = Field(None, ge=0, le=1)
+    y: float | None = Field(None, ge=0, le=1)
+    region: str | None = (
+        None  # nome em `regions`: o desenho ocupa a região (no lugar de position/x/y/width/height)
+    )
+    width: float = Field(0.8, gt=0, le=1)  # fração da largura do quadro
+    height: float | None = Field(None, gt=0, le=1)  # fração da altura do quadro; None = proporção do estilo
+    inner_radius: float = Field(
+        0.6, ge=0.1, le=0.95
+    )  # só no círculo: fração do raio externo onde as barras começam
+    margin: float = Field(40, ge=0)  # px na base 1080, a partir de `position`
+    safe_zone: bool = True  # False ignora a área coberta pela interface do app
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _place(self) -> AudiogramOverlay:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("audiograma: informe `x` e `y` juntos (o centro do desenho)")
+        if self.region and (self.x is not None or self.position is not None):
+            raise ValueError(
+                "audiograma com `region` não leva `position`, `x` nem `y`: a região já define o lugar"
+            )
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start no audiograma")
+        return self
+
+
+class MotionBlur(Strict):
+    """Borrão de movimento da composição em HTML: o DMaker captura `subframes` instantes dentro do tempo em que o
+    "obturador" fica aberto e tira a média, como a câmera faz. `shutter` é a fração do intervalo entre dois
+    quadros em que ele fica aberto (0,5 é o obturador de 180 graus do cinema; 1 borra de um quadro ao seguinte).
+    O custo do render cresce na proporção de `subframes`."""
+
+    subframes: int = Field(5, ge=2, le=16)
+    shutter: float = Field(0.5, gt=0, le=1)
+
+
+PageSize = Annotated[int, Field(ge=16, le=8192)]
+
+
+class CaptionAnchor(Strict):
+    """Prende a composição a uma palavra da legenda: ela aparece quando a palavra é dita e ocupa o lugar dela na
+    tela (um círculo em volta, um sublinhado). `occurrence` escolhe qual vez que a palavra aparece, `hold`
+    diz até quando fica (`line`: enquanto a linha da legenda está na tela; `word`: só enquanto a palavra é dita)
+    e `margin` é a folga em volta da palavra, em px na base 1080, para o traço caber."""
+
+    word: str = Field(min_length=1)
+    occurrence: int = Field(1, ge=1, le=50)
+    hold: Literal["word", "line"] = "line"
+    margin: float = Field(24.0, ge=0, le=400)
+
+    @field_validator("hold", mode="before")
+    @classmethod
+    def _hold_in_portuguese(cls, value: object) -> object:
+        """`palavra` e `linha` (como o formulário do infográfico os mostra) valem como `word` e `line`."""
+        return {"palavra": "word", "linha": "line"}.get(value, value) if isinstance(value, str) else value
+
+
+class HtmlOverlay(Strict):
+    """Composição animada escrita em HTML, CSS e JavaScript (inclusive three.js e Lottie), renderizada quadro a
+    quadro com fundo transparente por cima do vídeo: títulos animados, gráficos, mapas, objetos em 3D.
+
+    `src` é um arquivo `.html` (a página inteira nele) ou uma pasta com `index.html` e os arquivos que a página usa;
+    no lugar dele, `infographic` usa um modelo pronto pelo nome (`contador`, `barra`...) e `data` leva os seus
+    parâmetros. O lugar vem de `region` (uma região nomeada) ou do centro `x`/`y` com `width`/`height` (frações do
+    quadro; sem nada, o quadro todo). A página é desenhada com o tamanho da área em px na base 1080 (`size` muda
+    isso: o resultado é então ajustado à área). `data` é entregue à página como `dmaker.data`. A página não
+    acessa a internet: só os arquivos locais dela e os de `files`. `layer: "behind-person"` põe a composição
+    atrás da pessoa. `anchor` prende a composição a uma palavra da legenda."""
+
+    type: Literal["html"] = "html"
+    src: str | None = Field(None, min_length=1)
+    # nome de um modelo pronto de `templates/html/` (ver `domain/infographics.py`); exatamente um entre src e infographic
+    infographic: str | None = Field(None, min_length=1)
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+    region: str | None = None  # nome em `regions`: a composição ocupa a região (no lugar de x/y/width/height)
+    x: float | None = Field(None, ge=0, le=1)  # centro da área, fração do quadro (x e y juntos)
+    y: float | None = Field(None, ge=0, le=1)
+    width: float = Field(1.0, gt=0, le=1)  # fração da largura do quadro
+    height: float = Field(1.0, gt=0, le=1)  # fração da altura do quadro
+    size: tuple[PageSize, PageSize] | None = None  # largura e altura da página, em px na base 1080
+    data: dict[str, Any] = {}  # entregue à página como `dmaker.data` (entra na chave do cache)
+    # arquivos de fora da pasta da composição que a página pode ler, por nome: `{"foto": "C:/fotos/a.png"}` fica
+    # em `/_dmaker/files/foto.png`. Entram na chave do cache pelo conteúdo.
+    files: dict[str, str] = {}
+    anchor: CaptionAnchor | None = None
+    motion_blur: MotionBlur | None = None
+    layer: OverlayLayer = "front"
+    sound: SoundSpec | None = None  # som na entrada da composição (em `start`)
+
+    @field_validator("motion_blur", mode="before")
+    @classmethod
+    def _blur_shorthand(cls, value: object) -> object:
+        """`true` liga o borrão com os valores padrão e `false` o desliga, para o pedido em uma palavra."""
+        if value is True:
+            return {}
+        if value is False:
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _place(self) -> HtmlOverlay:
+        if (self.src is None) == (self.infographic is None):
+            raise ValueError(
+                "composição html: informe `src` (a pasta ou o arquivo da composição) ou `infographic` "
+                "(o nome de um modelo pronto), um dos dois e não os dois"
+            )
+        if (self.x is None) != (self.y is None):
+            raise ValueError("composição html: informe `x` e `y` juntos (o centro da área)")
+        if self.region and self.x is not None:
+            raise ValueError("composição html com `region` não leva `x` nem `y`: a região já define o lugar")
+        if self.anchor and (self.region or self.x is not None):
+            raise ValueError(
+                "composição html presa a uma palavra da legenda (`anchor`) não leva `region` nem `x`/`y`: "
+                "o lugar vem da palavra"
+            )
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start na composição html")
+        return self
+
+
+Overlay = Annotated[
+    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay | HtmlOverlay,
+    Field(discriminator="type"),
+]
 
 
 # ---------- legendas ----------
 
 
 class CaptionStyle(Strict):
-    mode: Literal["karaoke", "classic", "boxed"] = "karaoke"
+    # "rounded": caixa arredondada por linha (estilo TikTok) com o destaque da palavra ativa por cima
+    mode: Literal["karaoke", "classic", "boxed", "rounded"] = "karaoke"
     font: str | None = None
     weight: Literal["light", "regular", "medium", "semibold", "bold", "extrabold"] = "bold"
     size: float = Field(72, gt=0)
@@ -357,6 +598,10 @@ class CaptionStyle(Strict):
     pop: bool = False  # aumentar a palavra ativa desloca a linha; fica desligado por padrão
     box_color: str = "#000000"  # hex ou chave do tema (primary, accent...)
     box_alpha: float = Field(0.6, ge=0, le=1)
+    # acompanha o tom (claro/escuro) do cartão ou fundo gerado que passa por baixo. False: a legenda mantém
+    # sempre o estilo de quem está sobre vídeo, como quando fica sobre o quadro do rosto e o fundo do tema
+    # só aparece ao redor dele
+    follow_background: bool = True
 
 
 class Captions(Strict):
@@ -456,10 +701,36 @@ class Narration(Strict):
         return self
 
 
+class VoiceoverClip(Strict):
+    """Arquivo de áudio gravado (corte de podcast, entrevista, áudio de WhatsApp) posto na linha do tempo como
+    voz do vídeo, sem precisar de um trecho de vídeo nem de uma fonte sincronizada. Entra no mesmo barramento
+    de voz da narração: a música abaixa sob ele, os efeitos sonoros se nivelam por ele e a legenda `auto` o
+    transcreve. `src` é relativo à spec; `start` é o instante do vídeo final em que o áudio começa;
+    `offset` e `end` aparam o arquivo (ponto de entrada e de saída, em segundos do próprio arquivo, `end`
+    None = até o fim dele)."""
+
+    src: str = Field(min_length=1)
+    start: float = Field(0.0, ge=0)
+    offset: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+    volume: float = Field(1.0, ge=0, le=4)
+
+    @model_validator(mode="after")
+    def _range(self) -> VoiceoverClip:
+        if self.end is not None and self.end <= self.offset:
+            raise ValueError(f"end ({self.end}) precisa ser maior que offset ({self.offset}) em {self.src}")
+        return self
+
+
 class AudioSettings(Strict):
     music: Music | None = None
     tracks: list[AudioTrack] = []
     narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
+    # arquivos de áudio gravados (podcast, WhatsApp) como voz do vídeo, no mesmo barramento da narração
+    voiceover: list[VoiceoverClip] = []
+    # efeitos sonoros soltos (whoosh, pop...): entram na mixagem antes da normalização, sem abaixar a música
+    # e abaixo da voz; os sons de entrada das sobreposições (`sound`) se juntam a estes
+    sfx: list[SfxCue] = []
     voice_gain: float = Field(1.0, ge=0, le=4)
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
@@ -555,13 +826,28 @@ class Project(Strict):
     sources: dict[str, SourceRef] = {}  # fontes sincronizadas (multicâmera, gravadores)
     master: str | None = None  # fonte principal = relógio da sessão; padrão: a primeira de `sources`
     timeline: list[Segment] = Field(min_length=1)
+    look: str | None = None  # acabamento visual de todos os trechos, por nome (ver `domain/looks.py`)
     overlays: list[Overlay] = []
     captions: Captions | None = None
     audio: AudioSettings = AudioSettings()
     multicam: MulticamBlock | None = None  # trecho ainda por planejar; `plan_multicam` o substitui
     tracks: dict[str, TrackState] = {}  # mudo/oculto/bloqueio por trilha (ids da vista: V1, A1, A2...,
     # MUS, CC, TX, GR, V2, V3...); ver `domain.tracks.apply_track_state`
+    # retângulos nomeados do quadro (ex.: "topo", "rosto" no modelo "explicativo"); as sobreposições se
+    # encaixam neles por `region`, e infográficos e composições usam o mesmo nome (ver `domain.regions`)
+    regions: dict[str, Region] = {}
     base_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def _region_refs(self) -> Project:
+        used = {ov.region for ov in self.overlays if getattr(ov, "region", None)}
+        unknown = sorted(used - set(self.regions))
+        if unknown:
+            known = ", ".join(sorted(self.regions)) or "nenhuma declarada"
+            raise ValueError(
+                f"região desconhecida: {', '.join(unknown)} (declare em `regions`; regiões do projeto: {known})"
+            )
+        return self
 
     @model_validator(mode="after")
     def _session_refs(self) -> Project:
@@ -622,15 +908,23 @@ class Project(Strict):
     @classmethod
     def load(cls, path: Path | str) -> Project:
         path = Path(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        project = cls.model_validate(data)
-        project.base_dir = path.parent.resolve()
+        return cls.from_bytes(read_bytes_retrying(path), path.parent.resolve())
+
+    @classmethod
+    def from_bytes(cls, data: bytes, base_dir: Path) -> Project:
+        """O projeto de um `spec.json` já lido: quem também precisa da revisão dos bytes lê uma vez só."""
+        project = cls.model_validate(json.loads(data.decode("utf-8")))
+        project.base_dir = base_dir
         return project
 
+    def to_bytes(self) -> bytes:
+        """Os bytes que `save` grava; a revisão do arquivo depois de salvo é a deste conteúdo."""
+        return self.model_dump_json(indent=2, exclude_none=True).encode("utf-8")
+
     def save(self, path: Path | str) -> Path:
+        """Grava por troca atômica: a interface, o MCP e a CLI escrevem a mesma spec e nenhum lê metade dela."""
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
+        write_bytes_atomic(path, self.to_bytes())
         return path
 
     # -- utilidades --

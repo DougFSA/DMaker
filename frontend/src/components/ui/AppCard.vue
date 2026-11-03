@@ -13,10 +13,10 @@ withDefaults(
 
 <template>
   <section :class="['card', { 'card--interactive': interactive, 'card--flush': flush }]">
-    <header v-if="title || $slots.actions || $slots.header" class="card__header">
+    <header v-if="title || subtitle || $slots.actions || $slots.header" class="card__header">
       <slot name="header">
-        <div class="card__heading">
-          <h3 class="card__title">{{ title }}</h3>
+        <div v-if="title || subtitle" class="card__heading">
+          <h3 v-if="title" class="card__title">{{ title }}</h3>
           <p v-if="subtitle" class="card__subtitle">{{ subtitle }}</p>
         </div>
       </slot>
@@ -49,13 +49,16 @@ withDefaults(
 
 .card__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-4);
   padding: var(--space-5) var(--space-5) 0;
 }
 
+/* o título pede pelo menos 11 rem; se as ações não deixam essa folga (tela estreita), elas descem para a linha de baixo */
 .card__heading {
+  flex: 1 1 11rem;
   min-width: 0;
 }
 
@@ -73,6 +76,7 @@ withDefaults(
   display: flex;
   flex-shrink: 0;
   gap: var(--space-2);
+  margin-left: auto;
 }
 
 .card__body {

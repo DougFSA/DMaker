@@ -1,9 +1,11 @@
 """Matting de pessoa para trocar o fundo sem chroma key (Robust Video Matting via ONNX Runtime).
 
 O modelo é recorrente: cada quadro recebe o estado do anterior, por isso a máscara não treme como
-nos segmentadores quadro a quadro. Este módulo só produz quadros RGB já compostos sobre a cor de
-fundo; quem codifica é o runner do ffmpeg (`filtergraph.mezzanine.matte_mezzanine`), como nas fotos
-com movimento. A entrada é decodificada pelo ffmpeg em rawvideo, o que evita depender do OpenCV.
+nos segmentadores quadro a quadro. Este módulo produz quadros RGB já compostos sobre a cor de fundo
+(`frames`, a troca de fundo) ou quadros RGBA só com a pessoa (`person_frames`, a camada que passa por cima
+de um texto); quem codifica é o runner do ffmpeg (`filtergraph.mezzanine.matte_mezzanine` e
+`filtergraph.person_layer`), como nas fotos com movimento. A entrada é decodificada pelo ffmpeg em rawvideo, o que
+evita depender do OpenCV.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ RELEASE_URL = "https://github.com/PeterL1n/RobustVideoMatting/releases/download/
 # resnet50 (100 MB) separa melhor objetos encostados na pessoa; mobilenetv3 (15 MB) é 2,5x mais rápido
 MODEL_FILES = {name: f"rvm_{name}_fp32.onnx" for name in ("resnet50", "mobilenetv3")}
 DEFAULT_MODEL = "resnet50"
+PREVIEW_MODEL = "mobilenetv3"  # no --preview o recorte da pessoa troca a borda fina por 2,5x de velocidade
 # O modelo foi treinado para ver a pessoa em ~512 px no lado maior: abaixo disso perde cabelo,
 # acima só fica mais lento sem ganhar borda.
 MODEL_WORKING_SIDE = 512
@@ -44,9 +47,28 @@ class MatteRequest:
     downsample: float | None = None
 
 
+@dataclass(frozen=True)
+class PersonRequest:
+    """Arquivo cuja pessoa vira camada: o vídeo todo, do início, com `warmup_frames` quadros de aquecimento no
+    começo, que o modelo vê (para a memória dele já conhecer a cena) e a saída não traz."""
+
+    src: Path
+    length: float
+    width: int
+    height: int
+    fps: float
+    model: str = DEFAULT_MODEL
+    downsample: float | None = None
+    warmup_frames: int = 0
+
+
 class Matter(Protocol):
     def frames(self, request: MatteRequest) -> Iterator[bytes]:
         """Quadros RGB24 (largura x altura do pedido), já compostos sobre a cor de fundo."""
+
+    def person_frames(self, request: PersonRequest) -> Iterator[bytes]:
+        """Quadros RGBA8 (largura x altura x 4) só com a pessoa, sem os quadros de aquecimento: a cor é a do
+        primeiro plano que o modelo prevê e o alfa é o recorte, ambos sem composição (alfa direto)."""
 
 
 def downsample_ratio_for(width: int, height: int) -> float:
@@ -71,6 +93,53 @@ def composite(foreground: np.ndarray, alpha: np.ndarray, background: tuple[int, 
     mixed = foreground * alpha + color * (1.0 - alpha)
     frame = np.clip(mixed * 255.0 + 0.5, 0, 255).astype(np.uint8)
     return frame.transpose(1, 2, 0).tobytes()
+
+
+# O RVM costuma deixar um pouco de alfa fora da pessoa (uma sombra fraca que apareceria como fantasma sobre as
+# letras) e raramente chega a 100 % dentro dela (o texto vazaria de leve pela camisa e pelo rosto). Esta curva de
+# níveis zera o ruído de baixo e fecha o de cima; a borda de verdade (cabelo, dedos), que fica no meio, só muda de
+# inclinação. Sem desfoque e sem erosão: os dois comem os fios de cabelo que o modelo acertou.
+ALPHA_FLOOR = 0.03
+ALPHA_CEILING = 0.97
+
+
+def refine_alpha(alpha: np.ndarray) -> np.ndarray:
+    """Níveis do alfa (`ALPHA_FLOOR` vira 0 e `ALPHA_CEILING` vira 1), para a camada da pessoa não deixar rastro."""
+    return np.clip((alpha - ALPHA_FLOOR) / (ALPHA_CEILING - ALPHA_FLOOR), 0.0, 1.0)
+
+
+# Do alfa de 85 % para cima a cor passa do primeiro plano previsto para o pixel do vídeo. Dentro do corpo o primeiro
+# plano do modelo difere do pixel por alguns níveis (medido num quadro, onde o alfa passa de 0,99: média de 0,4 e até
+# 12 de 255), e o pixel do vídeo é exato e ali não há parede para contaminar a cor, então a pessoa por cima não altera
+# o corpo; na borda, abaixo disso, só o primeiro plano vale, que é o que evita o halo.
+INTERIOR_FROM = 0.85
+
+
+def interior_weight(alpha: np.ndarray) -> np.ndarray:
+    """Quanto da cor vem do pixel do vídeo (0 na borda, 1 dentro do corpo), com uma curva suave entre os dois."""
+    t = np.clip((alpha - INTERIOR_FROM) / (1.0 - INTERIOR_FROM), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def person_rgba(foreground: np.ndarray, alpha: np.ndarray, source: np.ndarray) -> bytes:
+    """Quadro RGBA8 da pessoa: `foreground` e `source` (o pixel do vídeo) em (3, H, W) e `alpha` em (1, H, W),
+    tudo em 0..1, sem premultiplicar.
+
+    Na borda a cor vem do primeiro plano que o modelo prevê, não dos pixels do vídeo: o pixel da borda do cabelo
+    carrega a cor da parede, e é ela que apareceria como halo ao compor a pessoa sobre o texto. Dentro do corpo
+    (`interior_weight`) vale o pixel do vídeo. Onde o alfa é zero a cor não vale nada, então recebe uma cor única
+    (a média da pessoa no quadro): o arquivo comprime muito mais e a subamostragem de croma da junção com o fundo
+    não puxa a borda para o preto."""
+    alpha = refine_alpha(alpha)
+    inside = interior_weight(alpha)
+    person = foreground * (1.0 - inside) + source * inside
+    weight = float(alpha.sum())
+    fill = (person * alpha).sum(axis=(1, 2)) / weight if weight > 0 else np.zeros(3, np.float32)
+    color = np.where(alpha > 0, person, fill.reshape(3, 1, 1).astype(np.float32))
+    frame = np.empty((*alpha.shape[1:], 4), np.uint8)
+    frame[..., :3] = np.clip(color * 255.0 + 0.5, 0, 255).astype(np.uint8).transpose(1, 2, 0)
+    frame[..., 3] = np.clip(alpha[0] * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    return frame.tobytes()
 
 
 def model_path(model: str = DEFAULT_MODEL, models_dir: Path | None = None) -> Path:
@@ -102,7 +171,7 @@ class RvmMatter:
         options.log_severity_level = 3  # só erros: o runtime é falante em nível warning
         return ort.InferenceSession(str(ensure_model(model)), options, providers=["CPUExecutionProvider"])
 
-    def _decoder(self, request: MatteRequest) -> subprocess.Popen:
+    def _decoder(self, src: Path, start: float, length: float, fps: float) -> subprocess.Popen:
         # `-ss` antes da entrada busca pelo keyframe (rápido) e o decodificador refina até o instante
         # exato; `fps` fixa a cadência para o número de quadros bater com o codificador (CFR).
         cmd = [
@@ -112,13 +181,13 @@ class RvmMatter:
             "error",
             "-nostdin",
             "-ss",
-            f"{max(request.start, 0):.3f}",
+            f"{max(start, 0):.3f}",
             "-i",
-            str(request.src),
+            str(src),
             "-t",
-            f"{request.length:.3f}",
+            f"{length:.3f}",
             "-vf",
-            f"fps={request.fps:g}",
+            f"fps={fps:g}",
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -128,21 +197,31 @@ class RvmMatter:
         ]
         return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    def frames(self, request: MatteRequest) -> Iterator[bytes]:
-        session = self._session(request.model)
-        ratio = np.array(
-            [request.downsample or downsample_ratio_for(request.width, request.height)], np.float32
-        )
+    def _predictions(
+        self,
+        src: Path,
+        start: float,
+        length: float,
+        width: int,
+        height: int,
+        fps: float,
+        model: str,
+        downsample: float | None,
+    ) -> Iterator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """Primeiro plano (3, H, W), alfa (1, H, W) e o próprio quadro (3, H, W) de cada passo, em 0..1, com o
+        estado recorrente passando de um quadro ao seguinte."""
+        session = self._session(model)
+        ratio = np.array([downsample or downsample_ratio_for(width, height)], np.float32)
         recurrent = [np.zeros((1, 1, 1, 1), np.float32)] * 4  # estado inicial vazio, como no exemplo oficial
-        frame_bytes = request.width * request.height * 3
-        decoder = self._decoder(request)
+        frame_bytes = width * height * 3
+        decoder = self._decoder(src, start, length, fps)
         assert decoder.stdout is not None
         try:
             while True:
                 raw = decoder.stdout.read(frame_bytes)
                 if len(raw) < frame_bytes:
                     break
-                image = np.frombuffer(raw, np.uint8).reshape(request.height, request.width, 3)
+                image = np.frombuffer(raw, np.uint8).reshape(height, width, 3)
                 source = image.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
                 foreground, alpha, *recurrent = session.run(
                     None,
@@ -155,7 +234,36 @@ class RvmMatter:
                         "downsample_ratio": ratio,
                     },
                 )
-                yield composite(foreground[0], alpha[0], request.background)
+                yield foreground[0], alpha[0], source[0]
         finally:
             decoder.stdout.close()
             decoder.wait()
+
+    def frames(self, request: MatteRequest) -> Iterator[bytes]:
+        predictions = self._predictions(
+            request.src,
+            request.start,
+            request.length,
+            request.width,
+            request.height,
+            request.fps,
+            request.model,
+            request.downsample,
+        )
+        for foreground, alpha, _ in predictions:
+            yield composite(foreground, alpha, request.background)
+
+    def person_frames(self, request: PersonRequest) -> Iterator[bytes]:
+        predictions = self._predictions(
+            request.src,
+            0.0,
+            request.length,
+            request.width,
+            request.height,
+            request.fps,
+            request.model,
+            request.downsample,
+        )
+        for index, (foreground, alpha, source) in enumerate(predictions):
+            if index >= request.warmup_frames:  # o aquecimento só alimenta a memória do modelo
+                yield person_rgba(foreground, alpha, source)

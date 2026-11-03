@@ -161,3 +161,26 @@ def save_dub_project(project: DubProject, path: Path) -> Path:
     payload = json.dumps(project.model_dump(), ensure_ascii=False, indent=2)
     path.write_text(payload + "\n", encoding="utf-8")
     return path
+
+
+class DubProjectExists(FileExistsError):
+    """Já há uma dublagem preparada no destino: gravar por cima apagaria o que a pessoa revisou nela."""
+
+    def __init__(self, path: Path, hint: str = "") -> None:
+        self.path = path
+        message = (
+            f"Já existe uma dublagem preparada em {path}. Preparar de novo grava por cima dela e apaga as "
+            "traduções que você revisou e as falas que você travou."
+        )
+        super().__init__(f"{message} {hint}" if hint else message)
+
+
+def refuse_existing_project(path: Path, overwrite: bool, hint: str = "") -> None:
+    """Recusa preparar por cima de um `.dub.json` que já existe, a não ser que a pessoa tenha pedido (`overwrite`).
+
+    O arquivo guarda as traduções revisadas e as falas travadas, que são horas de trabalho e não voltam; cada
+    porta de entrada (CLI, API, MCP) chama isto antes de começar, e o serviço de novo antes de gravar.
+    `hint` diz, no vocabulário da porta, como pedir a substituição.
+    """
+    if not overwrite and path.exists():
+        raise DubProjectExists(path, hint)

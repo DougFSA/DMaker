@@ -1,0 +1,107 @@
+{
+  "description": "Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima (região \"topo\") livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro do rosto e o fundo trocando a cada assunto.",
+  "prepare": "explicativo",
+  "params": {
+    "gravacao": {
+      "description": "Gravação do apresentador, vertical ou horizontal; entra inteira e contínua no quadro de baixo, então a fala nunca é cortada na troca de fundo",
+      "type": "path",
+      "required": true
+    },
+    "assuntos": {
+      "description": "Os assuntos em ordem, emendados (o início de cada um é o fim do anterior): fim em segundos; fundo opcional (escuro, claro, bege, uma cor #RRGGBB ou o caminho de uma imagem; sem ele os fundos se alternam); imagem opcional, que entra na região topo durante o assunto; infografico opcional ({nome, parametros}: um modelo de list_infographics, como o contador ou a barra, que anima na região topo durante o assunto); sons opcionais (lista de {som, em, volume}: som é um nome da biblioteca de efeitos, como whoosh, pop, click, riser, whip, impact ou ding; em são os segundos desde o começo do assunto, 0 se omitido, e não passa do fim dele; volume vai de 0 a 1.5, sendo 1 o nível padrão). O fim do último assunto é a duração do vídeo.",
+      "type": "list",
+      "required": true,
+      "example": [
+        { "fim": 20, "fundo": "escuro", "infografico": { "nome": "contador", "parametros": { "ate": 10000, "prefixo": "+ de R$" } }, "sons": [{ "som": "whoosh" }, { "som": "ding", "em": 8 }] },
+        { "fim": 40, "fundo": "bege", "imagem": "C:/imagens/assunto2.png", "sons": [{ "som": "pop", "volume": 0.8 }] },
+        { "fim": 60, "fundo": "claro", "infografico": { "nome": "barra", "parametros": { "valor": 95, "maximo": 400, "sufixo": "mg", "limite": 400 } } }
+      ]
+    },
+    "legendas": {
+      "description": "Legendas automáticas sobre a parte de baixo do quadro do rosto",
+      "default": true,
+      "type": "bool"
+    },
+    "legenda_modo": {
+      "description": "Estilo da legenda: rounded (caixa arredondada por linha), karaoke, classic ou boxed",
+      "default": "rounded",
+      "type": "text"
+    },
+    "foco": {
+      "description": "Ponto da gravação que o quadro mantém visível, [x, y] de 0 a 1. O padrão sobe a janela para o rosto de uma gravação vertical, que fica no terço de cima; numa gravação horizontal só o x importa",
+      "default": [0.5, 0.3],
+      "type": "list"
+    },
+    "marca": {
+      "description": "Marca (assets/brands/<nome>) para cores e estilo da legenda; sem ela, o visual neutro",
+      "default": null,
+      "type": "text"
+    }
+  },
+  "name": "explicativo",
+  "output": { "preset": "instagram/reels", "quality": "high" },
+  "brand": "{{marca}}",
+  "regions": {
+    "topo": { "x": 0.5, "y": 0.2575, "width": 0.7222, "height": 0.265 },
+    "rosto": { "x": 0.5, "y": 0.6, "width": 0.8889, "height": 0.36 }
+  },
+  "timeline": [
+    { "$for": "assuntos", "as": "assunto", "item": "{{assunto.segmento}}" }
+  ],
+  "overlays": [
+    {
+      "type": "video",
+      "src": "{{gravacao}}",
+      "region": "rosto",
+      "start": 0,
+      "shape": "rounded",
+      "radius": 0.05,
+      "border": 0,
+      "shadow": false,
+      "animation": "none",
+      "focus": "{{foco}}",
+      "volume": 1
+    },
+    {
+      "$for": "assuntos",
+      "as": "assunto",
+      "item": {
+        "$if": "{{assunto.imagem}}",
+        "type": "image",
+        "src": "{{assunto.imagem}}",
+        "region": "topo",
+        "start": "{{assunto.inicio}}",
+        "end": "{{assunto.fim}}"
+      }
+    },
+    {
+      "$for": "assuntos",
+      "as": "assunto",
+      "item": {
+        "$if": "{{assunto.infografico}}",
+        "type": "html",
+        "infographic": "{{assunto.infografico.nome}}",
+        "data": "{{assunto.infografico.parametros}}",
+        "region": "topo",
+        "start": "{{assunto.inicio}}",
+        "end": "{{assunto.fim}}"
+      }
+    }
+  ],
+  "captions": {
+    "$if": "{{legendas}}",
+    "source": "auto",
+    "language": "pt",
+    "model": "small",
+    "style": {
+      "mode": "{{legenda_modo}}",
+      "size": 56,
+      "uppercase": false,
+      "max_words": 4,
+      "max_chars": 22,
+      "y": 0.72,
+      "follow_background": false
+    }
+  },
+  "audio": { "normalize": "two-pass", "sfx": "{{sfx}}" }
+}

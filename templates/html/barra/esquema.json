@@ -1,0 +1,93 @@
+{
+  "title": "Barra",
+  "description": "Uma barra que enche até um valor, com marcas de divisão e, se quiser, a marca de um limite com o seu rótulo (por exemplo 95 mg de cafeína numa barra até 400 mg).",
+  "size": [900, 300],
+  "area": { "x": 0.5, "y": 0.26, "width": 0.72, "height": 0.135 },
+  "duration": 4,
+  "example": { "valor": 95, "maximo": 400, "sufixo": "mg", "rotulo": "de cafeína", "limite": 400 },
+  "params": {
+    "valor": {
+      "type": "number",
+      "label": "Valor",
+      "description": "Até onde a barra enche. É o número que aparece contando junto.",
+      "required": true,
+      "min": 0,
+      "max": 1000000000,
+      "example": 95
+    },
+    "maximo": {
+      "type": "number",
+      "label": "Valor da barra cheia",
+      "description": "O valor que corresponde ao fim da barra (400 numa barra de 0 a 400).",
+      "default": 100,
+      "min": 1,
+      "max": 1000000000
+    },
+    "limite": {
+      "type": "number",
+      "label": "Limite",
+      "description": "Onde fica a marca do limite. Sem ele, não há marca.",
+      "min": 0,
+      "max": 1000000000,
+      "example": 400
+    },
+    "rotulo_limite": {
+      "type": "text",
+      "label": "Nome do limite",
+      "description": "O que está escrito junto da marca do limite, como \"limite\" ou \"máximo por dia\".",
+      "default": "limite",
+      "max_length": 30
+    },
+    "rotulo": {
+      "type": "text",
+      "label": "Descrição do valor",
+      "description": "Texto pequeno ao lado do número, como \"de cafeína\".",
+      "default": "",
+      "max_length": 40
+    },
+    "sufixo": {
+      "type": "text",
+      "label": "Unidade",
+      "description": "A unidade depois dos números, como \"mg\" ou \"%\".",
+      "default": "",
+      "max_length": 12
+    },
+    "marcas": {
+      "type": "integer",
+      "label": "Divisões da barra",
+      "description": "Em quantas partes iguais a barra é dividida (4 em 400 marca 100, 200 e 300). 0 não marca.",
+      "default": 4,
+      "min": 0,
+      "max": 10
+    },
+    "duracao": {
+      "type": "number",
+      "label": "Tempo enchendo (s)",
+      "description": "Quantos segundos a barra leva para encher; depois disso ela fica parada.",
+      "default": 1.4,
+      "min": 0.1,
+      "max": 30
+    },
+    "easing": {
+      "type": "choice",
+      "label": "Ritmo",
+      "default": "suave",
+      "options": ["suave", "entrada-saida", "linear"]
+    },
+    "cor": {
+      "type": "color",
+      "label": "Cor da barra",
+      "default": "accent"
+    },
+    "cor_texto": {
+      "type": "color",
+      "label": "Cor dos textos",
+      "default": "white"
+    },
+    "sombra": {
+      "type": "bool",
+      "label": "Sombra suave",
+      "default": true
+    }
+  }
+}

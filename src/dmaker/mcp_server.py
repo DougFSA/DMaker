@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,7 +20,9 @@ from .domain.brand import available_brands, load_theme
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
+from .pipeline.recipes import preview_notice
 from .pipeline.remote import RenderDispatcher, UIClient
+from .sfx.synth import library_names
 
 GUIDE_PATH = config.PACKAGE_DIR / "resources" / "guide.md"
 
@@ -82,6 +86,19 @@ def dmaker_guide() -> str:
 @server.tool(description="JSON Schema da spec de projeto (validação Pydantic).")
 def spec_schema() -> dict:
     return Project.model_json_schema()
+
+
+@server.tool(
+    description=(
+        "Busca no manual do DMaker, sem internet e por palavras: devolve os trechos que mais combinam com a "
+        "pergunta, cada um com a seção, a nota e o texto, e a tarefa do manual que mais combina (o arquivo "
+        "docs/ia dela traz o passo a passo). Use antes de adivinhar como se faz algo."
+    )
+)
+def search_manual(question: str, limit: int = 5) -> dict:
+    from .manual.service import search_manual as run_search
+
+    return run_search(question, limit)
 
 
 @server.tool(description="Formatos de saída por plataforma, com tamanho, limite de duração e zonas seguras.")
@@ -168,7 +185,7 @@ def save_project(name: str, spec: dict) -> dict:
 
 @server.tool(
     description=(
-        "Templates disponíveis (produto, depoimento, stories, vlog, tutorial, casamento...) com os "
+        "Templates disponíveis (produto, depoimento, stories, vlog, tutorial, explicativo, casamento...) com os "
         "parâmetros de cada um. Caminho preferido para criar projetos: em vez de escrever a spec "
         "inteira, veja aqui os parâmetros e chame `new_from_template`."
     )
@@ -194,8 +211,8 @@ def new_from_template(template: str, name: str, params: dict) -> dict:
 
     try:
         project = project_from_template(template, name, params)
-    except TemplateError as exc:
-        # anticipada: mensagem chega ao cliente (nome do template ou parâmetros faltando)
+    except (TemplateError, FileNotFoundError) as exc:
+        # anticipada: mensagem chega ao cliente (nome do template, parâmetros faltando ou arquivo de mídia ausente)
         raise ToolError(str(exc)) from exc
     return {"spec_path": str(project_path(name)), **_summary_dict(summarize(project))}
 
@@ -249,15 +266,13 @@ def edit_project(name: str, op: dict) -> dict:
     )
 )
 def timeline_view(name: str) -> dict:
-    from .pipeline.layout import project_layout
     from .pipeline.projects import load_project
-    from .pipeline.timeline_view import build_timeline_view
+    from .pipeline.timeline_service import project_timeline_view
     from .pipeline.voiceover import view_narration_durations
 
     project = load_project(name)
-    layout = project_layout(project)
     durations = view_narration_durations(project)
-    return build_timeline_view(project, layout, narration_durations=durations).to_dict()
+    return project_timeline_view(project, durations).to_dict()
 
 
 @server.tool(
@@ -283,6 +298,233 @@ def plan_multicam(name_or_path: str) -> dict:
         "start_s": round(result.start, 2),
         "end_s": round(result.end, 2),
     }
+
+
+# ---------- cortar pausas, vícios e repetições de uma gravação falada ----------
+
+
+def _autocut_service(job: Job | None = None) -> Any:
+    """O serviço de corte com as peças de verdade; com `job`, o ffmpeg e as etapas viram progresso dele."""
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.autocut import AutoCutService
+
+    if job is None:
+        return AutoCutService()
+    return AutoCutService(runner=SubprocessRunner(sink=job.sink()), log=job.log)
+
+
+def _autocut_work(job: Job, request: Any) -> dict:
+    """O corte ligado ao job: a transcrição é lenta na CPU, então cada etapa vira progresso."""
+    from .pipeline.jobs import stage_progress
+
+    result = _autocut_service(job).cut(request, stage_progress(job))
+    return {
+        "project": result.project.name,
+        "spec_path": str(result.spec_path),
+        "report": result.report.to_dict(),
+        "warnings": result.warnings,
+    }
+
+
+@server.tool(
+    description=(
+        "Corta as pausas, os vícios de fala e as frases repetidas de uma gravação falada (use no lugar de "
+        "transcrever e cortar clipe a clipe à mão). Cria o projeto `name` com os clipes já cortados, as "
+        "legendas seguindo a fala cortada, e devolve a lista do que saiu (cada corte com id, tempo na "
+        "gravação original, motivo e as palavras tiradas) para conferir ANTES de renderizar. "
+        "intensity: suave (só pausas), normal (pausas e vícios: hã, é isolado, tipo isolado, né no fim da "
+        "frase; o 'né' de 'não é' no meio da frase fica) ou agressiva (inclui falsos começos e frases "
+        "repetidas, ficando com a última tomada). min_pause: pausa em segundos acima da qual vira corte; "
+        "breath: silêncio mantido de cada lado. Cada borda cai no vale de energia, com fade de áudio de "
+        "10 ms. Roda em segundo plano (transcreve com o Whisper; ~1 min por minuto de gravação na CPU): "
+        "devolve job_id, consulte com job_status; a segunda chamada na mesma gravação reaproveita a "
+        "transcrição. Corrija o resultado com undo_cut (devolve um corte) e confira com list_cuts."
+    )
+)
+def autocut(
+    source: str,
+    name: str,
+    intensity: Literal["suave", "normal", "agressiva"] = "normal",
+    min_pause: float = 0.5,
+    breath: float = 0.15,
+    preset: str = "instagram/reels",
+    brand: str | None = None,
+    captions: bool = True,
+    language: str = "pt",
+    model: str = "small",
+    overwrite: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.autocut import AutoCutRequest
+    from .voice.cut_plan import CutOptions
+
+    request = AutoCutRequest(
+        source=Path(source),
+        name=name,
+        options=CutOptions(intensity=intensity, min_pause=min_pause, breath=breath),
+        preset=preset,
+        brand=brand,
+        captions=captions,
+        language=language,
+        model=model,
+        overwrite=overwrite,
+    )
+    _autocut_service().validate(request)  # o erro de nome, arquivo ou formato aparece já, não só no job
+    job = jobs.start(f"autocut {name}", lambda job: _autocut_work(job, request))
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Lista o que o `autocut` removeu de um projeto: para cada corte, id, início e fim na gravação original, "
+        "duração, motivo (silence, filler, repetition), as palavras tiradas e se já foi desfeito, mais a "
+        "duração antes e depois."
+    )
+)
+def list_cuts(name_or_path: str) -> dict:
+    from .pipeline.autocut import load_cut_report
+    from .pipeline.projects import project_path
+
+    report = load_cut_report(project_path(name_or_path).parent)
+    if report is None:
+        raise ValueError(f"{name_or_path} não tem lista de cortes (só projetos criados por autocut têm)")
+    return report.to_dict()
+
+
+@server.tool(
+    description=(
+        "Desfaz um corte do `autocut` (id de list_cuts): o trecho removido volta ao projeto, juntando os "
+        "clipes vizinhos, e as legendas voltam a incluir as palavras dele. Devolve a lista atualizada."
+    )
+)
+def undo_cut(name_or_path: str, cut_id: int) -> dict:
+    from .pipeline.autocut import undo_cut as _undo_cut
+
+    return _undo_cut(name_or_path, cut_id).to_dict()
+
+
+# ---------- lote: vários vídeos de uma planilha ----------
+
+
+def _batch_service() -> Any:
+    from .pipeline.batch import BatchService
+
+    return BatchService()
+
+
+def _batch_job(name: str, rows: list[int] | None, force: bool, wait_seconds: float) -> dict:
+    """Roda (ou retoma) o lote num job: o andamento sai por `job_status` e pausar para depois do vídeo atual."""
+    from .pipeline.batch import run_in_job
+
+    service = _batch_service()
+    if service.active(name):
+        raise ValueError(f"O lote {name} já está rodando; acompanhe com batch_status.")
+    job = jobs.start(
+        f"lote {name}",
+        lambda job: run_in_job(service, name, job, rows, force),
+        meta={"kind": "batch", "batch": name, "cancellable": True},
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "batch": name, "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Confere uma planilha de lote contra um modelo (template) SEM renderizar nada: campo obrigatório "
+        "vazio, arquivo inexistente, número ou lista ilegível, texto que não cabe no espaço, travessão (regra "
+        "da marca). Cada problema vem com linha, coluna e motivo. A planilha é .csv (UTF-8, separador , ou ;), "
+        ".xlsx (precisa do extra `lote`) ou .json (lista de objetos), uma linha por vídeo; o nome de cada "
+        "coluna casa com o parâmetro do modelo sem diferenciar maiúscula, acento ou espaço; caminhos relativos "
+        "partem da pasta da planilha. name_column é a coluna cujo texto dá nome ao arquivo de cada vídeo."
+    )
+)
+def validate_batch(template: str, sheet: str, name_column: str | None = None) -> dict:
+    validation = _batch_service().validate(template, sheet, name_column)
+    return {**validation.to_dict(), "text": validation.to_text()}
+
+
+@server.tool(
+    description=(
+        "Gera vários vídeos de uma vez: um por linha da planilha, sobre o modelo. Valida tudo antes (como "
+        "validate_batch); se alguma linha tem problema, NÃO começa e devolve a validação, a não ser com "
+        "skip_invalid=true, que segue sem as linhas inválidas. Cria um projeto por linha (projects/<lote>-<nome>) "
+        "e renderiza em output/<lote>/<nome>.mp4 (preview=true gera prévias rápidas). Roda em segundo plano: "
+        "devolve job_id; acompanhe com job_status ou batch_status. O que já saiu não é refeito na retomada "
+        "(resume_batch). name é o nome do lote (padrão: o da planilha); replace=true refaz um lote de mesmo nome."
+    )
+)
+def run_batch(
+    template: str,
+    sheet: str,
+    name: str | None = None,
+    name_column: str | None = None,
+    skip_invalid: bool = False,
+    preview: bool = False,
+    preset: str | None = None,
+    replace: bool = False,
+    wait_seconds: float = 0,
+) -> dict:
+    from .pipeline.batch import BatchInvalidError
+
+    try:
+        batch = _batch_service().create(
+            template,
+            sheet,
+            name=name,
+            name_column=name_column,
+            preview=preview,
+            preset=preset,
+            skip_invalid=skip_invalid,
+            replace=replace,
+        )
+    except BatchInvalidError as exc:
+        return {
+            "started": False,
+            "reason": str(exc),
+            "validation": exc.validation.to_dict(),
+            "text": exc.validation.to_text(),
+        }
+    return {"started": True, **_batch_job(batch.name, None, False, wait_seconds)}
+
+
+@server.tool(
+    description=(
+        "Retoma um lote pausado, interrompido ou com falhas: renderiza o que falta, o que falhou e o projeto "
+        "que você corrigiu depois; o que já saiu com a mesma spec não é refeito. rows (números da tabela de "
+        "batch_status) limita a certos vídeos e force=true refaz também os prontos. Roda em segundo plano."
+    )
+)
+def resume_batch(
+    name: str, rows: list[int] | None = None, force: bool = False, wait_seconds: float = 0
+) -> dict:
+    return _batch_job(name, rows, force, wait_seconds)
+
+
+@server.tool(
+    description=(
+        "Pede a um lote em andamento que pare depois do vídeo que está renderizando; nada é perdido e "
+        "resume_batch continua de onde parou."
+    )
+)
+def pause_batch(name: str) -> dict:
+    _batch_service().pause(name)
+    return {"batch": name, "pause_requested": True}
+
+
+@server.tool(
+    description=(
+        "Relatório de um lote: para cada vídeo o estado (Pendente, Renderizando, Pronto, Falhou, Pulada), o "
+        "arquivo de saída, o tempo e o motivo da falha; mais o resumo e a pasta de saída. Sem name, lista todos "
+        "os lotes."
+    )
+)
+def batch_status(name: str | None = None) -> dict:
+    service = _batch_service()
+    if name:
+        report = service.report(name)
+        return {**report.to_dict(), "text": report.to_text()}
+    return {"batches": [{**report.to_dict(), "rows": len(report.rows)} for report in service.reports()]}
 
 
 @server.tool(description="Projetos existentes em projects/.")
@@ -379,7 +621,7 @@ def _render(
     )
     pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     result = pipeline.run()
-    payload = _result_dict(result)
+    payload = preview_notice(_result_dict(result), preview and not segments)
     if not preview and not segments:
         payload["qa"] = _qa_text_for_output(project, preset, result.output)
     return payload
@@ -543,7 +785,7 @@ def quick_edit(
             runner=SubprocessRunner(sink=job.sink()),
             log=job.log,
         )
-        return {"spec_path": str(spec_path), **_result_dict(pipeline.run())}
+        return {"spec_path": str(spec_path), **preview_notice(_result_dict(pipeline.run()), preview)}
 
     job = jobs.start(f"quick {src}", work)
     jobs.wait(job, wait_seconds)
@@ -767,6 +1009,207 @@ def frames(video: str, times: list[float], width: int = 540) -> list:
         contents.append({"time_s": t, "image": str(path)})
         contents.append(Image(path=path))
     return contents
+
+
+@server.tool(
+    description=(
+        "Renderiza um quadro de uma composição HTML (a animação que você escreveu em HTML, CSS e JavaScript, "
+        "inclusive three.js e Lottie) no instante `at`, direto nele, e devolve a imagem. Use antes de pôr a "
+        "composição no projeto, para conferir o desenho, o tamanho e os avisos (rede bloqueada, erro de "
+        "JavaScript). `src` é o arquivo .html ou a pasta com index.html (relativo à pasta do projeto, se "
+        "`project` vier); `size` é LARGURAxALTURA em px na base 1080 (a área onde a composição entra); `data` "
+        "chega à página como dmaker.data; `background` é a cor por baixo, para ver o transparente. Custa tokens "
+        "de imagem."
+    ),
+    structured_output=False,
+)
+def render_html_frame(
+    src: str,
+    at: float = 0.0,
+    size: str = "1080x1920",
+    duration: float = 5.0,
+    data: dict | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    background: str = "#808080",
+) -> list:
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.html_frame import render_html_frame as _render_frame
+    from .pipeline.projects import load_project
+
+    source = load_project(project).resolve(src) if project else Path(src)
+    result = _render_frame(
+        source,
+        default_frame_path(config.OUTPUT_DIR, source, at),
+        at=at,
+        size=parse_size(size),
+        duration=duration,
+        data=data,
+        brand=brand,
+        background=background,
+    )
+    return [
+        {
+            "image": str(result.path),
+            "at_s": at,
+            "size": f"{result.size[0]}x{result.size[1]}",
+            "warnings": result.warnings,
+        },
+        Image(path=result.path),
+    ]
+
+
+@server.tool(
+    description=(
+        "Põe uma composição HTML (type html) nas sobreposições do projeto e salva. `src` é o arquivo .html ou a "
+        "pasta com index.html, relativo à pasta do projeto. O lugar é uma `region` do projeto ou o centro "
+        "`x`/`y` com `width`/`height` (frações do quadro; sem nada, o quadro todo). `layer` é `front` ou "
+        "`behind-person` (atrás da pessoa); `data` chega à página como dmaker.data; `motion_blur` liga o "
+        "borrão de movimento. Confira o desenho com render_html_frame antes e rode validate_project depois."
+    )
+)
+def add_html_overlay(
+    name: str,
+    src: str,
+    start: float = 0.0,
+    end: float | None = None,
+    region: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    layer: Literal["front", "behind-person"] = "front",
+    data: dict | None = None,
+    motion_blur: bool = False,
+) -> dict:
+    from .pipeline.html_frame import insert_html_overlay
+    from .pipeline.projects import load_project, summarize
+    from .pipeline.projects import save_project as _save
+
+    overlay: dict[str, Any] = {"src": src, "start": start, "layer": layer, "motion_blur": motion_blur}
+    for field_name, value in (
+        ("end", end),
+        ("region", region),
+        ("x", x),
+        ("y", y),
+        ("width", width),
+        ("height", height),
+        ("data", data),
+    ):
+        if value is not None:
+            overlay[field_name] = value
+    project = insert_html_overlay(load_project(name), overlay)
+    path = _save(project)
+    return {
+        "spec_path": str(path),
+        "overlay_index": len(project.overlays) - 1,
+        **_summary_dict(summarize(project)),
+    }
+
+
+@server.tool(
+    description=(
+        "Os infográficos animados prontos (contador, barra, linha, imagem, etiqueta, grifo, emoji): para cada "
+        "um, o nome, a descrição e o esquema dos parâmetros (nome, tipo, padrão, limites e rótulo em "
+        "português), para você usar sem ler o HTML. Ponha um no projeto com `add_infographic`; confira o "
+        "desenho com `render_infographic_frame`."
+    )
+)
+def list_infographics() -> list[dict]:
+    from .pipeline.infographics import describe_infographics
+
+    return describe_infographics()
+
+
+@server.tool(
+    description=(
+        "Põe um infográfico pronto (ver `list_infographics`) nas sobreposições do projeto e salva. `name` é o "
+        'nome do modelo, como `contador`; `params` são os parâmetros dele (ex.: {"ate": 10000, "prefixo": '
+        '"+ de R$"}); `start`/`end` em segundos (`end` vazio vai até o fim do vídeo); `region` é uma região '
+        "do projeto (ex.: `topo`), ou `x`/`y` com `width`/`height` em fração do quadro; sem lugar dito o modelo "
+        "entra na área própria dele. Valor fora do esquema falha dizendo qual. Rode validate_project depois."
+    )
+)
+def add_infographic(
+    project: str,
+    name: str,
+    params: dict | None = None,
+    start: float = 0.0,
+    end: float | None = None,
+    region: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    layer: Literal["front", "behind-person"] = "front",
+) -> dict:
+    from .pipeline.infographics import add_infographic as _add
+    from .pipeline.projects import load_project, summarize
+    from .pipeline.projects import save_project as _save
+
+    loaded = load_project(project)
+    updated = _add(
+        loaded,
+        name,
+        params,
+        start=start,
+        end=end,
+        region=region,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        layer=layer,
+    )
+    path = _save(updated)
+    return {
+        "spec_path": str(path),
+        "overlay_index": len(updated.overlays) - 1,
+        **_summary_dict(summarize(updated)),
+    }
+
+
+@server.tool(
+    description=(
+        "Renderiza um quadro de um infográfico pronto com os parâmetros pedidos e devolve a imagem, para "
+        "conferir antes de pôr no projeto. `at` é o instante (padrão: o modelo já desenhado), `size` é "
+        "LARGURAxALTURA em px na base 1080 (padrão: o tamanho do modelo), `brand` a marca (cores, fonte e "
+        "cantos), `background` a cor por baixo, para ver o transparente. Custa tokens de imagem."
+    ),
+    structured_output=False,
+)
+def render_infographic_frame(
+    name: str,
+    params: dict | None = None,
+    at: float | None = None,
+    size: str | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    background: str = "#0F172A",
+) -> list:
+    from .pipeline.html_frame import default_frame_path, parse_size
+    from .pipeline.infographics import infographic_frame
+    from .pipeline.projects import load_project
+
+    loaded = load_project(project) if project else None
+    result = infographic_frame(
+        name,
+        default_frame_path(config.OUTPUT_DIR, Path(name), at or 0.0),
+        params=params,
+        at=at,
+        size=parse_size(size) if size else None,
+        brand=brand or (loaded.brand if loaded else None),
+        background=background,
+        project=loaded,
+    )
+    return [
+        {
+            "image": str(result.path),
+            "size": f"{result.size[0]}x{result.size[1]}",
+            "warnings": result.warnings,
+        },
+        Image(path=result.path),
+    ]
 
 
 @server.tool(
@@ -1154,6 +1597,139 @@ def _voice_synthesizer():
     return shared_synthesizer()
 
 
+# ---------- receitas: várias ferramentas numa chamada só ----------
+
+
+@contextmanager
+def _recipe_errors() -> Iterator[None]:
+    """Erro de pedido que a receita antecipou (assunto sem fim, texto vazio) chega ao cliente com a mensagem."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.recipes import RecipeError
+
+    try:
+        yield
+    except RecipeError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Receita: narra um roteiro e já o põe no projeto, em uma chamada (no lugar de edit_project para "
+        "audio.narration, edit_project para as legendas e validate_project). Soma a fala às narrações que o "
+        "projeto já tinha, usa o texto falado como legenda (captions=true) e devolve o resumo com os avisos "
+        "(voz inexistente, narração que passa do fim do vídeo). Nada é sintetizado agora: a voz sai no render "
+        "e vai para o cache. voice = id de list_voices (dora, alex, santa ou uma sua); sem voice, a voz "
+        "automática. start = segundo do vídeo em que a fala começa."
+    )
+)
+def narrate_into_project(
+    name_or_path: str,
+    text: str,
+    voice: str | None = None,
+    start: float = 0.0,
+    language: str = "pt",
+    speed: float = 1.0,
+    seed: int | None = None,
+    captions: bool = True,
+) -> dict:
+    from .pipeline.projects import summarize
+    from .pipeline.recipes import NarrationRequest
+    from .pipeline.recipes import narrate_into_project as _narrate
+
+    request = NarrationRequest(
+        text=text, voice=voice, start=start, language=language, speed=speed, seed=seed, captions=captions
+    )
+    with _recipe_errors():
+        project, path = _narrate(name_or_path, request, check_voice=_voice_library().get)
+    return {
+        "spec_path": str(path),
+        "narrations": len(project.audio.narration),
+        **_summary_dict(summarize(project)),
+    }
+
+
+@server.tool(
+    description=(
+        "Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda "
+        "pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts). Cria o projeto "
+        "`name` com os clipes cortados e as legendas seguindo a fala cortada, e devolve o essencial: "
+        "duração antes e depois, quanto saiu e os cortes por motivo. intensity: suave (só pausas), normal "
+        "(pausas e vícios) ou agressiva (inclui falsos começos e frases repetidas). Transcreve com o "
+        "Whisper: cerca de 1 minuto por minuto de gravação na CPU. Confira os cortes com list_cuts e "
+        "desfaça um com undo_cut; gere a prévia com render_project."
+    )
+)
+def cut_pauses_and_caption(
+    source: str,
+    name: str,
+    intensity: Literal["suave", "normal", "agressiva"] = "normal",
+    preset: str = "instagram/reels",
+    brand: str | None = None,
+    language: str = "pt",
+    model: str = "small",
+    overwrite: bool = False,
+    wait_seconds: float = 1800,
+) -> dict:
+    from .pipeline.autocut import AutoCutRequest
+    from .pipeline.recipes import cut_summary
+    from .voice.cut_plan import CutOptions
+
+    request = AutoCutRequest(
+        source=Path(source),
+        name=name,
+        options=CutOptions(intensity=intensity),
+        preset=preset,
+        brand=brand,
+        captions=True,
+        language=language,
+        model=model,
+        overwrite=overwrite,
+    )
+    _autocut_service().validate(request)  # o erro de nome, arquivo ou formato aparece já, não só no job
+    job = jobs.start(f"cortar pausas e legendar {name}", lambda job: _autocut_work(job, request))
+    jobs.wait(job, wait_seconds)
+    if job.status == "done":
+        return cut_summary(job.result)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Receita: monta o vídeo explicativo (o rosto num quadro arredondado embaixo, a imagem de cada "
+        "assunto em cima e o fundo trocando a cada assunto) em uma chamada, no lugar de probe_media, "
+        "new_from_template e validate_project. subjects = lista de assuntos em ordem, cada um com 'fim' "
+        "(segundo em que termina), 'fundo' (escuro, claro, bege, #RRGGBB ou caminho de imagem), 'imagem' "
+        '(caminho), \'infografico\' ({"nome": "contador", "parametros": {...}}, ver list_infographics) e '
+        '\'sons\' (lista de {"som": "whoosh", "em": 0, "volume": 1}: som = um efeito da biblioteca, '
+        f"{', '.join(library_names())}; em = segundos desde o começo do assunto, 0 se omitido, nunca depois do "
+        "fim dele; volume de 0 a 1.5, 1 é o nível padrão, opcional; vira audio.sfx no tempo do vídeo): "
+        "'fim' vale para todos os assuntos ou para nenhum (sem ele, a gravação é dividida em partes iguais) e os "
+        "outros são opcionais. Devolve o resumo do projeto (duração e avisos). caption_mode: rounded, karaoke, "
+        "classic ou boxed."
+    )
+)
+def build_explainer_video(
+    name: str,
+    recording: str,
+    subjects: list[dict],
+    captions: bool = True,
+    caption_mode: str | None = None,
+    brand: str | None = None,
+) -> dict:
+    from .pipeline.projects import project_path, summarize
+    from .pipeline.recipes import build_explainer
+
+    options: dict[str, Any] = {"legendas": captions}
+    if caption_mode:
+        options["legenda_modo"] = caption_mode
+    if brand:
+        options["marca"] = brand
+    with _recipe_errors():
+        project = build_explainer(name, recording, subjects, options)
+    return {"spec_path": str(project_path(name)), **_summary_dict(summarize(project))}
+
+
 # ---------- isolamento vocal ----------
 
 
@@ -1162,7 +1738,7 @@ def _isolation_work(
 ) -> dict:
     """Isolamento ligado ao job: cada bloco do modelo vira progresso."""
     from .media.ffmpeg import SubprocessRunner
-    from .pipeline.isolation import default_isolation_service
+    from .pipeline.isolation import default_export_dir, default_isolation_service
 
     def on_progress(done: int, total: int) -> None:
         job.progress = {
@@ -1175,7 +1751,7 @@ def _isolation_work(
     service = default_isolation_service(SubprocessRunner(sink=job.sink()), job.log)
     stems = service.export(
         Path(path),
-        Path(out_dir) if out_dir else config.OUTPUT_DIR / "isolamento",
+        Path(out_dir) if out_dir else default_export_dir(),
         audio_format,  # type: ignore[arg-type]
         start,
         end,
@@ -1432,7 +2008,11 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
     project = _dubbing_service(job).prepare(
         Path(source_path), target, project_path=project_path, on_progress=_stage_progress(job), **options
     )
-    return project_summary(project, project_path)
+    return {
+        **project_summary(project, project_path),
+        # o pedido "dubla este vídeo" só termina com o vídeo dublado; a revisão das falas é opcional
+        "next": "Para entregar o vídeo dublado, chame dub_render com project igual ao campo project deste resultado.",
+    }
 
 
 @server.tool(
@@ -1448,7 +2028,9 @@ def _dub_prepare_work(job: Job, source_path: str, target: str, project_path: Pat
         "termos que não se traduzem (as marcas do dicionário de pronúncia já valem). fit_mode decide o que fazer "
         "quando a fala traduzida não cabe no tempo da original: voz (padrão: avança na pausa e acelera a voz até "
         "~1,44x), video (a voz fica natural e o vídeo estica até 1,3x naquele trecho) ou misto (a voz acelera "
-        "até 1,15x e o vídeo estica no resto). Lento na CPU (separação de "
+        "até 1,15x e o vídeo estica no resto). Se o projeto `.dub.json` de destino já existe, a ferramenta "
+        "recusa, porque preparar de novo apaga as traduções revisadas e as falas travadas; overwrite=true "
+        "prepara por cima (só depois de o usuário confirmar). Lento na CPU (separação de "
         "voz ~3x a 6x a duração, mais a tradução, minutos): devolve job_id, consulte com job_status."
     )
 )
@@ -1465,7 +2047,9 @@ def dub_prepare(
     fit_mode: Literal["voz", "video", "misto"] = "voz",
     wait_seconds: float = 0,
     num_speakers: int | None = None,
+    overwrite: bool = False,
 ) -> dict:
+    from .domain.dub import refuse_existing_project
     from .pipeline.dubbing import default_project_path
 
     if not Path(path).exists():
@@ -1475,7 +2059,12 @@ def dub_prepare(
     if voice:
         _voice_library().get(voice)  # falha já na chamada (e não só no job) se a voz não existe
     project_path = Path(project) if project else default_project_path(Path(path), target_language)
+    # a recusa sai já na chamada, e não como falha do job minutos depois
+    refuse_existing_project(
+        project_path, overwrite, "Para preparar de novo mesmo assim, chame dub_prepare com overwrite=true."
+    )
     options = {
+        "overwrite": overwrite,
         "source": source_language,
         "speaker_mode": speaker_mode,
         "num_speakers": num_speakers,

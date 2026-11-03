@@ -1,0 +1,417 @@
+{
+  "targets": {
+    "clip": { "def": "ClipSegment", "title": "Clipe" },
+    "image": { "def": "ImageSegment", "title": "Imagem" },
+    "card": { "def": "CardSegment", "title": "Cartão" },
+    "video": { "def": "VideoOverlay", "title": "Vídeo (PiP)" },
+    "text": { "def": "TextOverlay", "title": "Texto" },
+    "image-overlay": { "def": "ImageOverlay", "title": "Imagem (sobreposição)" },
+    "progress-bar": { "def": "ProgressBar", "title": "Barra de progresso" },
+    "track": { "def": "AudioTrack", "title": "Faixa de áudio" },
+    "music": { "def": "Music", "title": "Música" },
+    "captions": { "def": "Captions", "title": "Legendas" },
+    "project": { "def": null, "title": "Projeto (nada selecionado)" }
+  },
+  "groups": [
+    {
+      "id": "reframe",
+      "label": "Reenquadrar",
+      "applies": ["clip", "image"],
+      "def": "Reframe",
+      "fields": [
+        { "kind": "select", "key": "reframe.mode", "label": "Modo" },
+        { "kind": "number", "key": "reframe.focus.0", "prop": "focus", "label": "Foco X", "step": 0.05, "min": 0, "max": 1, "fallback": 0.5 },
+        { "kind": "number", "key": "reframe.focus.1", "prop": "focus", "label": "Foco Y", "step": 0.05, "min": 0, "max": 1, "fallback": 0.5 },
+        { "kind": "number", "key": "reframe.zoom", "label": "Zoom", "step": 0.05 },
+        { "kind": "number", "key": "reframe.margin", "label": "Margem", "step": 0.01 },
+        { "kind": "number", "key": "reframe.radius", "label": "Raio dos cantos", "step": 0.005 },
+        { "kind": "select", "key": "reframe.variant", "label": "Variante", "emptyLabel": "Padrão do tema" }
+      ]
+    },
+    {
+      "id": "color",
+      "label": "Cor",
+      "applies": ["clip", "image"],
+      "def": "ColorAdjust",
+      "fields": [
+        { "kind": "number", "key": "color.brightness", "label": "Brilho", "step": 0.05 },
+        { "kind": "number", "key": "color.contrast", "label": "Contraste", "step": 0.05 },
+        { "kind": "number", "key": "color.saturation", "label": "Saturação", "step": 0.05 },
+        { "kind": "number", "key": "color.gamma", "label": "Gama", "step": 0.1 },
+        { "kind": "number", "key": "color.sharpen", "label": "Nitidez", "step": 0.05 },
+        { "kind": "check", "key": "color.denoise", "label": "Reduzir ruído" },
+        { "kind": "check", "key": "color.vignette", "label": "Vinheta" },
+        { "kind": "text", "key": "color.lut", "label": "LUT (.cube)", "optional": true }
+      ]
+    },
+    {
+      "id": "speed",
+      "label": "Velocidade",
+      "applies": ["clip"],
+      "def": "ClipSegment",
+      "fields": [{ "kind": "number", "key": "speed", "label": "Velocidade", "step": 0.1 }]
+    },
+    {
+      "id": "clip-audio",
+      "label": "Áudio",
+      "applies": ["clip"],
+      "def": "ClipSegment",
+      "fields": [
+        { "kind": "number", "key": "volume", "label": "Volume", "step": 0.1 },
+        { "kind": "check", "key": "mute", "label": "Mudo" }
+      ]
+    },
+    {
+      "id": "fade",
+      "label": "Fade",
+      "applies": ["clip", "image", "card"],
+      "def": "ClipSegment",
+      "fields": [
+        { "kind": "number", "key": "fade_in", "label": "Fade in (s)", "step": 0.1 },
+        { "kind": "number", "key": "fade_out", "label": "Fade out (s)", "step": 0.1 }
+      ]
+    },
+    {
+      "id": "transition",
+      "label": "Transição de entrada",
+      "applies": ["clip", "image", "card"],
+      "def": "Transition",
+      "fields": [
+        { "kind": "select", "key": "transition.type", "label": "Tipo", "choicesFrom": "transitions" },
+        { "kind": "number", "key": "transition.duration", "label": "Duração (s)", "step": 0.1 }
+      ]
+    },
+    {
+      "id": "label",
+      "label": "Rótulo",
+      "applies": ["clip", "image", "card"],
+      "def": "ClipSegment",
+      "fields": [{ "kind": "text", "key": "label", "label": "Rótulo", "optional": true }]
+    },
+    {
+      "id": "motion-image",
+      "label": "Movimento",
+      "applies": ["image"],
+      "def": "ImageSegment",
+      "fields": [
+        { "kind": "select", "key": "motion", "label": "Movimento" },
+        { "kind": "number", "key": "motion_amount", "label": "Intensidade", "step": 0.01 }
+      ]
+    },
+    {
+      "id": "duration-image",
+      "label": "Duração",
+      "applies": ["image"],
+      "def": "ImageSegment",
+      "fields": [{ "kind": "number", "key": "duration", "label": "Duração (s)", "step": 0.1 }]
+    },
+    {
+      "id": "motion-card",
+      "label": "Movimento",
+      "applies": ["card"],
+      "def": "CardSegment",
+      "fields": [
+        { "kind": "select", "key": "motion", "label": "Movimento" },
+        { "kind": "number", "key": "motion_amount", "label": "Intensidade", "step": 0.01 }
+      ]
+    },
+    {
+      "id": "duration-card",
+      "label": "Duração",
+      "applies": ["card"],
+      "def": "CardSegment",
+      "fields": [{ "kind": "number", "key": "duration", "label": "Duração (s)", "step": 0.1 }]
+    },
+    {
+      "id": "card-text",
+      "label": "Texto",
+      "applies": ["card"],
+      "def": "CardSegment",
+      "fields": [
+        { "kind": "text", "key": "title", "label": "Título" },
+        { "kind": "text", "key": "subtitle", "label": "Subtítulo", "optional": true }
+      ]
+    },
+    {
+      "id": "card-style",
+      "label": "Estilo",
+      "applies": ["card"],
+      "def": "CardSegment",
+      "fields": [
+        { "kind": "select", "key": "variant", "label": "Variante", "emptyLabel": "Padrão do tema" },
+        { "kind": "check", "key": "logo", "label": "Mostrar logo" },
+        { "kind": "text", "key": "background", "label": "Fundo (cor ou imagem)", "optional": true }
+      ]
+    },
+    {
+      "id": "pip-time",
+      "label": "Tempo",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [
+        { "kind": "number", "key": "start", "label": "Início (s)", "step": 0.1 },
+        { "kind": "number", "key": "end", "label": "Fim (s)", "step": 0.1, "optional": true },
+        { "kind": "number", "key": "offset", "label": "Entrada na fonte (s)", "step": 0.1 }
+      ]
+    },
+    {
+      "id": "pip-position",
+      "label": "Posição",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [
+        { "kind": "select", "key": "position", "label": "Posição" },
+        { "kind": "number", "key": "x", "label": "X (0 a 1)", "step": 0.01, "optional": true },
+        { "kind": "number", "key": "y", "label": "Y (0 a 1)", "step": 0.01, "optional": true },
+        { "kind": "number", "key": "margin", "label": "Margem (px)", "step": 1 }
+      ]
+    },
+    {
+      "id": "pip-size",
+      "label": "Tamanho",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [
+        { "kind": "number", "key": "width", "label": "Largura (fração)", "step": 0.01 },
+        { "kind": "text", "key": "aspect", "label": "Proporção (ex.: 16:9)", "optional": true }
+      ]
+    },
+    {
+      "id": "pip-shape",
+      "label": "Forma",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [
+        { "kind": "select", "key": "shape", "label": "Formato" },
+        { "kind": "number", "key": "radius", "label": "Raio dos cantos", "step": 0.01 },
+        { "kind": "number", "key": "softness", "label": "Suavidade da borda (px)", "step": 1 },
+        { "kind": "number", "key": "border", "label": "Borda (px)", "step": 1 },
+        { "kind": "text", "key": "border_color", "label": "Cor da borda" },
+        { "kind": "check", "key": "shadow", "label": "Sombra" }
+      ]
+    },
+    {
+      "id": "pip-opacity",
+      "label": "Opacidade",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [{ "kind": "number", "key": "opacity", "label": "Opacidade", "step": 0.05 }]
+    },
+    {
+      "id": "pip-animation",
+      "label": "Animação",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [
+        { "kind": "select", "key": "animation", "label": "Animação" },
+        { "kind": "number", "key": "fade", "label": "Duração da animação (s)", "step": 0.05 }
+      ]
+    },
+    {
+      "id": "pip-audio",
+      "label": "Áudio",
+      "applies": ["video"],
+      "def": "VideoOverlay",
+      "fields": [{ "kind": "number", "key": "volume", "label": "Volume", "step": 0.1 }]
+    },
+    {
+      "id": "text-content",
+      "label": "Texto",
+      "applies": ["text"],
+      "def": "TextOverlay",
+      "fields": [
+        { "kind": "text", "key": "text", "label": "Texto" },
+        { "kind": "text", "key": "secondary", "label": "Segunda linha", "optional": true },
+        { "kind": "select", "key": "role", "label": "Papel" }
+      ]
+    },
+    {
+      "id": "text-time",
+      "label": "Tempo",
+      "applies": ["text"],
+      "def": "TextOverlay",
+      "fields": [
+        { "kind": "number", "key": "start", "label": "Início (s)", "step": 0.1 },
+        { "kind": "number", "key": "end", "label": "Fim (s)", "step": 0.1, "optional": true }
+      ]
+    },
+    {
+      "id": "text-position",
+      "label": "Posição",
+      "applies": ["text"],
+      "def": "TextOverlay",
+      "fields": [
+        { "kind": "select", "key": "position", "label": "Posição", "emptyLabel": "Automática" },
+        { "kind": "number", "key": "x", "label": "X (0 a 1)", "step": 0.01, "optional": true },
+        { "kind": "number", "key": "y", "label": "Y (0 a 1)", "step": 0.01, "optional": true }
+      ]
+    },
+    {
+      "id": "text-animation",
+      "label": "Animação",
+      "applies": ["text"],
+      "def": "TextOverlay",
+      "fields": [{ "kind": "select", "key": "animation", "label": "Animação", "emptyLabel": "Padrão" }]
+    },
+    {
+      "id": "text-style",
+      "label": "Estilo",
+      "applies": ["text"],
+      "def": "TextStyle",
+      "fields": [
+        { "kind": "number", "key": "style.size", "label": "Tamanho", "step": 1, "optional": true },
+        { "kind": "text", "key": "style.color", "label": "Cor", "optional": true },
+        { "kind": "check", "key": "style.uppercase", "label": "Maiúsculas" },
+        { "kind": "select", "key": "style.align", "label": "Alinhamento", "emptyLabel": "Padrão" },
+        { "kind": "check", "key": "style.box", "label": "Caixa de fundo" },
+        { "kind": "text", "key": "style.box_color", "label": "Cor da caixa", "optional": true },
+        { "kind": "number", "key": "style.box_alpha", "label": "Opacidade da caixa", "step": 0.05, "optional": true }
+      ]
+    },
+    {
+      "id": "imgov-src",
+      "label": "Origem",
+      "applies": ["image-overlay"],
+      "def": "ImageOverlay",
+      "fields": [{ "kind": "file", "key": "src", "label": "Arquivo", "media": "image" }]
+    },
+    {
+      "id": "imgov-time",
+      "label": "Tempo",
+      "applies": ["image-overlay"],
+      "def": "ImageOverlay",
+      "fields": [
+        { "kind": "number", "key": "start", "label": "Início (s)", "step": 0.1 },
+        { "kind": "number", "key": "end", "label": "Fim (s)", "step": 0.1, "optional": true }
+      ]
+    },
+    {
+      "id": "imgov-position",
+      "label": "Posição",
+      "applies": ["image-overlay"],
+      "def": "ImageOverlay",
+      "fields": [{ "kind": "select", "key": "position", "label": "Posição" }]
+    },
+    {
+      "id": "imgov-size",
+      "label": "Tamanho",
+      "applies": ["image-overlay"],
+      "def": "ImageOverlay",
+      "fields": [{ "kind": "number", "key": "width", "label": "Largura (fração)", "step": 0.01 }]
+    },
+    {
+      "id": "imgov-opacity-fade",
+      "label": "Opacidade/Fade",
+      "applies": ["image-overlay"],
+      "def": "ImageOverlay",
+      "fields": [
+        { "kind": "number", "key": "opacity", "label": "Opacidade", "step": 0.05 },
+        { "kind": "number", "key": "fade", "label": "Duração do fade (s)", "step": 0.05 }
+      ]
+    },
+    {
+      "id": "progress",
+      "label": "Barra de progresso",
+      "applies": ["progress-bar"],
+      "def": "ProgressBar",
+      "fields": [
+        { "kind": "text", "key": "color", "label": "Cor (vazio = tema)", "optional": true },
+        { "kind": "number", "key": "height", "label": "Altura (px)", "step": 1 },
+        { "kind": "select", "key": "position", "label": "Posição" },
+        { "kind": "number", "key": "track_alpha", "label": "Opacidade da trilha", "step": 0.05 }
+      ]
+    },
+    {
+      "id": "track-volume",
+      "label": "Faixa de áudio",
+      "applies": ["track"],
+      "def": "AudioTrack",
+      "fields": [{ "kind": "number", "key": "volume", "label": "Volume", "step": 0.1 }]
+    },
+    {
+      "id": "music-main",
+      "label": "Música",
+      "applies": ["music"],
+      "def": "Music",
+      "fields": [
+        { "kind": "file", "key": "src", "label": "Arquivo", "media": "audio" },
+        { "kind": "number", "key": "volume", "label": "Volume", "step": 0.01 },
+        { "kind": "number", "key": "start_at", "label": "Começar em (s)", "step": 0.1 },
+        { "kind": "check", "key": "loop", "label": "Repetir em loop" },
+        { "kind": "check", "key": "ducking", "label": "Abaixar sob a voz (ducking)" },
+        { "kind": "number", "key": "duck_threshold", "label": "Limiar do ducking", "step": 0.01 },
+        { "kind": "number", "key": "duck_ratio", "label": "Razão do ducking", "step": 0.5 },
+        { "kind": "number", "key": "duck_release", "label": "Release do ducking (ms)", "step": 10 }
+      ]
+    },
+    {
+      "id": "music-fade",
+      "label": "Fade",
+      "applies": ["music"],
+      "def": "Music",
+      "fields": [
+        { "kind": "number", "key": "fade_in", "label": "Fade in (s)", "step": 0.1 },
+        { "kind": "number", "key": "fade_out", "label": "Fade out (s)", "step": 0.1 }
+      ]
+    },
+    {
+      "id": "captions-main",
+      "label": "Legendas",
+      "applies": ["captions"],
+      "def": "Captions",
+      "fields": [
+        { "kind": "file", "key": "source", "label": "Origem (auto ou .srt)", "media": "video" },
+        { "kind": "text", "key": "language", "label": "Idioma" },
+        { "kind": "select", "key": "model", "label": "Modelo", "values": ["tiny", "base", "small", "medium", "large-v3"] },
+        { "kind": "select", "key": "device", "label": "Dispositivo" },
+        { "kind": "number", "key": "offset", "label": "Deslocamento (s)", "step": 0.05 }
+      ]
+    },
+    {
+      "id": "captions-style",
+      "label": "Estilo",
+      "applies": ["captions"],
+      "def": "CaptionStyle",
+      "fields": [
+        { "kind": "select", "key": "style.mode", "label": "Estilo" },
+        { "kind": "number", "key": "style.size", "label": "Tamanho", "step": 1 },
+        { "kind": "text", "key": "style.color", "label": "Cor" },
+        { "kind": "check", "key": "style.uppercase", "label": "Maiúsculas" },
+        { "kind": "number", "key": "style.max_words", "label": "Máx. palavras por linha", "step": 1 },
+        { "kind": "number", "key": "style.max_chars", "label": "Máx. caracteres por linha", "step": 1 },
+        { "kind": "text", "key": "style.box_color", "label": "Cor da caixa" },
+        { "kind": "number", "key": "style.box_alpha", "label": "Opacidade da caixa", "step": 0.05 },
+        { "kind": "number", "key": "style.y", "label": "Posição Y (0 a 1)", "step": 0.01, "optional": true }
+      ]
+    },
+    {
+      "id": "project-output",
+      "label": "Saída",
+      "applies": ["project"],
+      "base": "output",
+      "defaultsDef": "Output",
+      "def": "Output",
+      "fields": [
+        { "kind": "select", "key": "preset", "label": "Formato", "choicesFrom": "presets" },
+        { "kind": "select", "key": "quality", "label": "Qualidade" },
+        { "kind": "select", "key": "encoder", "label": "Encoder" },
+        { "kind": "number", "key": "fps", "label": "FPS (opcional)", "step": 1, "optional": true, "placeholder": "do formato" },
+        { "kind": "check", "key": "guides", "label": "Mostrar guias de zona segura" }
+      ]
+    },
+    {
+      "id": "project-audio",
+      "label": "Áudio geral",
+      "applies": ["project"],
+      "base": "audio",
+      "defaultsDef": "AudioSettings",
+      "def": "AudioSettings",
+      "fields": [
+        { "kind": "number", "key": "voice_gain", "label": "Ganho da voz", "step": 0.1 },
+        { "kind": "select", "key": "normalize", "label": "Normalização" },
+        { "kind": "number", "key": "target_lufs", "label": "LUFS alvo", "step": 0.5 },
+        { "kind": "check", "key": "mute_clips", "label": "Silenciar áudio original dos clipes" }
+      ]
+    }
+  ]
+}

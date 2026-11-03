@@ -19,6 +19,7 @@ from ..media.audiosync import SyncResult, sync_offset, sync_offset_near
 from ..media.ffmpeg import FFmpegRunner
 from ..media.probe import probe
 from .context import Prober
+from .missing import MissingMedia
 from .partsync import CLOCK_TOLERANCE_S, LinkFinder, PartInfo, PartOffsets, chain_parts
 
 OffsetFinder = Callable[[Path, Path, int, int], SyncResult]
@@ -60,6 +61,9 @@ class SyncResolver:
     finder: OffsetFinder
     log: Callable[[str], None] = lambda message: None  # noqa: E731
     prober: Prober = probe  # só usado para as fontes com `parts` (duração e relógio de cada arquivo)
+    # o editor abre o projeto mesmo com um arquivo ausente: sem o áudio dele não há o que correlacionar, e a
+    # fonte fica onde a spec ou o último cálculo guardado a pôs
+    missing: MissingMedia | None = None
 
     def resolve(self, project: Project, store: Path | None) -> SyncResolution:
         master_name = project.master_source
@@ -79,8 +83,12 @@ class SyncResolver:
                     offsets[name] = float(source.sync)
                     continue
                 path = project.resolve(source.src)
-                key = self._key(master_path, path)
                 entry = cache.get(name)
+                if self._unreadable(master_path, path):
+                    offsets[name] = float(entry["offset"]) if entry else 0.0
+                    self.log(f"{name}: arquivo ausente, sincronização não recalculada")
+                    continue
+                key = self._key(master_path, path)
                 if entry and entry.get("key") == key:
                     offsets[name] = float(entry["offset"])
                     continue
@@ -129,8 +137,14 @@ class SyncResolver:
         positions, warnings = chain_parts(infos, links, master_name, seed)
         return positions, warnings, changed[0]
 
+    def _unreadable(self, *paths: Path) -> bool:
+        """Algum destes arquivos falta e o editor aceita a falta (ver `missing`)."""
+        return self.missing is not None and self.missing.covers(*paths)
+
     def _part_info(self, path: Path) -> PartInfo:
         if not path.exists():
+            if self.missing is not None and self.missing.covers(path):
+                return PartInfo(path, self.missing.stand_in(path).duration, None)
             raise FileNotFoundError(f"parte não encontrada: {path}")
         info = self.prober(path)
         return PartInfo(path, info.duration, info.creation_time)
@@ -142,6 +156,8 @@ class SyncResolver:
         near = getattr(self.finder, "near", None)
 
         def call(a: Path, b: Path, expected: float | None) -> SyncResult:
+            if self._unreadable(a, b):
+                return SyncResult(expected or 0.0, 0.0)  # sem o arquivo, sem confiança no deslocamento
             key = self._key(a, b)
             bucket = "blind" if expected is None else round(expected, 1)
             cache_id = f"{a}|{b}|{bucket}"

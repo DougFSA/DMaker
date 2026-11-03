@@ -19,10 +19,12 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",  # upload de referência de voz na interface (FastAPI Form/UploadFile)
     "numpy>=1.26",
+    "jsonschema>=4.20",  # confere os argumentos do agente local e os exemplos do manual contra o esquema das ferramentas
 ]
 
 [project.optional-dependencies]
-captions = ["faster-whisper>=1.0"]
+# av: o faster-whisper abre o áudio com `metadata_errors`, parâmetro que o PyAV 16 removeu (TypeError ao transcrever)
+captions = ["faster-whisper>=1.0", "av>=11,<16"]
 # torch vem à parte, versão CPU: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 # kokoro-onnx: motor rápido (vozes prontas); omnivoice: clones e vozes projetadas (lento na CPU);
 # demucs: isolamento vocal (voz x música e ruído; usa só get_model e apply_model, sem o I/O do pacote)
@@ -30,6 +32,15 @@ captions = ["faster-whisper>=1.0"]
 # pacote original fixa numpy, librosa e gradio antigos; ele só precisa do torch e do torchaudio já instalados
 # sherpa-onnx: diarização (quem fala quando) na dublagem; audioseal: marca d'água inaudível (Meta, MIT) em toda fala sintetizada e a verificação (dmaker voice verify)
 voice = ["kokoro-onnx>=0.6.1", "omnivoice>=0.2.1", "soundfile>=0.12", "num2words>=0.5", "demucs>=4.1", "sherpa-onnx>=1.13.8", "audioseal>=0.2"]
+# lote: ler planilha .xlsx no `dmaker batch` (CSV e JSON não precisam de nada)
+lote = ["openpyxl>=3.1"]
+# agente: anexar arquivos PDF na conversa com o agente local (.txt, .md, .srt e .docx não precisam de nada)
+agente = ["pypdf==6.20.1"]
+# docs: exportar o manual em PDF (`dmaker manual export`) e tirar as capturas de tela, pelo Chromium do Playwright
+# html: composição animada em HTML sobreposta ao vídeo (type "html"), pelo mesmo Chromium
+# o Chromium baixa à parte, para dentro do clone (bin/playwright): dmaker setup --html
+docs = ["playwright>=1.45"]
+html = ["playwright>=1.45"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
@@ -40,7 +51,7 @@ dmaker-mcp = "dmaker.mcp_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dmaker = ["py.typed", "ui/static/*", "ui/dist/*", "ui/dist/assets/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md"]
+dmaker = ["py.typed", "media/*.js", "ui/static/*", "ui/dist/*", "ui/dist/assets/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

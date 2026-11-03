@@ -19,11 +19,10 @@ from .. import config
 from ..domain.spec import ClipSegment, Project, VideoOverlay
 from ..filtergraph.proxy import proxy_command
 from ..media.ffmpeg import FFmpegRunner, ProgressSink
-from ..media.probe import probe
+from ..media.probe import VIDEO_EXTS, probe
 from .context import Prober
 
 PROXY_VERSION = "p1"  # muda quando a receita do proxy muda (invalida o cache; ver filtergraph/proxy.py)
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
 # tentativas de troca do tmp pelo proxy final antes de desistir; no Windows o ffmpeg às vezes ainda
 # segura o handle do arquivo por um instante depois de o processo sair (PermissionError WinError 32)
@@ -41,18 +40,20 @@ def proxy_path(src: Path) -> Path:
     return config.PROXY_DIR / f"{digest}.mp4"
 
 
-def _origin_path(project: Project, src: str | None, source: str | None) -> str:
-    """Caminho (ainda relativo ao projeto) de um clipe ou PiP: `src` direto ou o de uma fonte nomeada.
-    Fonte com `parts` entra pelo primeiro arquivo (a prévia troca de parte não é feita aqui)."""
+def _origin_paths(project: Project, src: str | None, source: str | None) -> list[str]:
+    """Caminhos (ainda relativos ao projeto) de um clipe ou PiP: `src` direto ou todos os arquivos de
+    uma fonte nomeada. Fonte com `parts` entra por inteiro, porque o trecho pode cair em qualquer
+    parte e a prévia toca a que grava aquele instante."""
     if src:
-        return src
+        return [src]
     assert source is not None  # garantido pelo validador de ClipSegment/VideoOverlay (um dos dois)
-    return project.sources[source].files[0]
+    return project.sources[source].files
 
 
 def project_video_sources(project: Project) -> list[Path]:
     """Vídeos usados nos clipes e nas sobreposições de PiP da linha do tempo, resolvidos pelo
-    `base_dir` do projeto e sem repetir (cartões e imagens não entram)."""
+    `base_dir` do projeto e sem repetir (cartões e imagens não entram). Fonte com `parts` traz todas
+    as partes."""
     paths: list[Path] = []
     seen: set[Path] = set()
 
@@ -65,18 +66,21 @@ def project_video_sources(project: Project) -> list[Path]:
 
     for seg in project.timeline:
         if isinstance(seg, ClipSegment):
-            add(_origin_path(project, seg.src, seg.source))
+            for raw in _origin_paths(project, seg.src, seg.source):
+                add(raw)
     for overlay in project.overlays:
         if isinstance(overlay, VideoOverlay):
-            add(_origin_path(project, overlay.src, overlay.source))
+            for raw in _origin_paths(project, overlay.src, overlay.source):
+                add(raw)
     return paths
 
 
 @dataclass
 class ProxyStatus:
     src: Path
-    proxy: Path
+    proxy: Path | None  # None quando o original sumiu: o nome do proxy depende da data e do tamanho dele
     ready: bool
+    missing: bool = False  # o original não está no disco: não há o que gerar, e a prévia o marca
 
 
 class ProxyBuilder:
@@ -92,6 +96,9 @@ class ProxyBuilder:
     def status(self, project: Project) -> list[ProxyStatus]:
         out = []
         for src in project_video_sources(project):
+            if not src.exists():
+                out.append(ProxyStatus(src, None, False, missing=True))
+                continue
             proxy = proxy_path(src)
             out.append(ProxyStatus(src, proxy, proxy.exists()))
         return out
@@ -102,7 +109,7 @@ class ProxyBuilder:
         pela metade nem colidir com outro job de proxies gerando a mesma fonte ao mesmo tempo.
         Informa o progresso por fonte concluída em `sink`."""
         statuses = self.status(project)
-        todo = [item for item in statuses if not item.ready]
+        todo = [item for item in statuses if not item.ready and not item.missing]
         if sink:
             sink.start("proxies de prévia", len(todo))
         for done, item in enumerate(todo):
@@ -120,6 +127,7 @@ class ProxyBuilder:
         chamadas); se o proxy final já existir quando terminar (outro processo terminou antes), o
         nosso tmp é descartado em vez de sobrescrevê-lo. Nunca deixa um `.tmp` para trás, mesmo com
         erro no meio (finally)."""
+        assert item.proxy is not None  # só se gera o que existe (ver `build`)
         info = self.prober(item.src)
         item.proxy.parent.mkdir(parents=True, exist_ok=True)
         tmp = item.proxy.with_name(

@@ -21,6 +21,7 @@ from dmaker.pipeline.report import (
     check_captions,
     check_contrast,
     check_lint,
+    check_media_safe_zone,
     check_overlap,
     check_sources,
     check_text_pacing,
@@ -181,6 +182,28 @@ def test_check_text_safe_zone_default_position_is_clean(tmp_path):
     assert check_text_safe_zone(project, _layout(project, make_prober({}))) == []
 
 
+def test_check_text_safe_zone_measures_a_region_text_where_the_region_puts_it(tmp_path):
+    """Um texto com `region` é conferido no lugar da região: dentro da zona segura passa, encostado no topo avisa."""
+    _touch(tmp_path, "take.mp4")
+
+    def findings(region: dict) -> list[Finding]:
+        spec = {
+            "name": "p",
+            "output": {"preset": "instagram/reels"},
+            "regions": {"faixa": region},
+            "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+            "overlays": [{"type": "text", "text": "Assunto", "region": "faixa", "start": 0, "end": 3}],
+            "audio": {"normalize": "off"},
+        }
+        project = _project(tmp_path, spec)
+        return check_text_safe_zone(project, _layout(project, make_prober({})))
+
+    assert findings({"x": 0.46, "y": 0.26, "width": 0.7, "height": 0.2}) == []  # dentro da zona segura
+    assert any(
+        "área coberta" in f.message for f in findings({"x": 0.5, "y": 0.03, "width": 0.7, "height": 0.05})
+    )
+
+
 def test_check_text_safe_zone_flags_word_wider_than_area(tmp_path):
     _touch(tmp_path, "take.mp4")
     spec = {
@@ -214,6 +237,24 @@ def test_check_text_safe_zone_flags_tall_card_title(tmp_path):
     project = _project(tmp_path, spec)
     findings = check_text_safe_zone(project, _layout(project, make_prober({})))
     assert any("não caber na altura" in f.message for f in findings)
+
+
+def test_check_text_safe_zone_measures_a_card_with_the_width_the_card_draws(tmp_path):
+    """O cartão é desenhado pelo Pillow, que usa o tamanho como corpo da letra: "Desenvolvimento" ocupa 832 px
+    numa área de 697 e sai cortada. A conferência a media pela conta da célula do libass (594 px) e deixava passar."""
+
+    def findings(title: str) -> list[Finding]:
+        spec = {
+            "name": "p",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [{"type": "card", "title": title, "duration": 3}],
+            "audio": {"normalize": "off"},
+        }
+        project = _project(tmp_path, spec)
+        return check_text_safe_zone(project, _layout(project, make_prober({})))
+
+    assert any("mais larga que a área" in f.message for f in findings("Desenvolvimento"))
+    assert findings("Agenda inteligente") == []  # quebra em duas linhas que cabem
 
 
 # ---------- check_text_pacing ----------
@@ -304,6 +345,46 @@ def test_check_overlap_flags_same_role_and_position(tmp_path):
     project = _project(tmp_path, spec)
     findings = check_overlap(project, _layout(project, make_prober({})))
     assert any("mesmo lugar" in f.message for f in findings)
+
+
+def _two_titles(tmp_path, first: dict, second: dict):
+    _touch(tmp_path, "take.mp4")
+    spec = {
+        "name": "p",
+        "output": {"preset": "instagram/reels"},
+        "regions": {
+            "topo": {"x": 0.5, "y": 0.2, "width": 0.8, "height": 0.1},
+            "base": {"x": 0.5, "y": 0.8, "width": 0.8, "height": 0.1},
+        },
+        "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+        "overlays": [
+            {"type": "text", "text": "Primeiro", "role": "title", "start": 0, "end": 3, **first},
+            {"type": "text", "text": "Segundo", "role": "title", "start": 1, "end": 2, **second},
+        ],
+        "audio": {"normalize": "off"},
+    }
+    project = _project(tmp_path, spec)
+    return check_overlap(project, _layout(project, make_prober({})))
+
+
+def test_check_overlap_clean_for_texts_placed_apart_by_x_and_y(tmp_path):
+    # um gesto no palco troca a `position` por `x`/`y`: dois textos do mesmo papel em lugares diferentes não se sobrepõem
+    findings = _two_titles(tmp_path, {"x": 0.5, "y": 0.35}, {"x": 0.5, "y": 0.67})
+    assert not any("mesmo lugar" in f.message for f in findings)
+
+
+def test_check_overlap_flags_texts_at_the_same_x_and_y(tmp_path):
+    findings = _two_titles(tmp_path, {"x": 0.5, "y": 0.4}, {"x": 0.5, "y": 0.4})
+    assert any("mesmo lugar" in f.message for f in findings)
+
+
+def test_check_overlap_compares_regions_by_name(tmp_path):
+    assert not any(
+        "mesmo lugar" in f.message for f in _two_titles(tmp_path, {"region": "topo"}, {"region": "base"})
+    )
+    assert any(
+        "mesmo lugar" in f.message for f in _two_titles(tmp_path, {"region": "topo"}, {"region": "topo"})
+    )
 
 
 def test_check_overlap_clean_when_sequential(tmp_path):
@@ -612,3 +693,104 @@ def test_build_report_with_output_adds_output_checks(tmp_path):
     report = build_report(project, prober=prober, output=video, runner=runner)
     assert len(report.checks) == len(STATIC_CHECKS) + 1
     assert any("saída renderizada" in c for c in report.checks)
+
+
+# ---------- zona segura pela caixa das sobreposições (DMK-31) ----------
+
+
+def _overlay_project(tmp_path: Path, overlay: dict, **extra) -> tuple[Project, object]:
+    for name in ("take.mp4", "logo.png", "cam.mp4"):
+        _touch(tmp_path, name)
+    spec = {
+        "name": "p",
+        "output": {"preset": "instagram/reels"},
+        "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+        "overlays": [overlay],
+        "audio": {"normalize": "off"},
+        **extra,
+    }
+    project = _project(tmp_path, spec)
+    prober = make_prober({"logo.png": SMALL_IMAGE_INFO, "cam.mp4": VIDEO_INFO})
+    return project, _layout(project, prober)
+
+
+def _text_at(**fields) -> dict:
+    return {"type": "text", "text": "Dra. Maria Silva", "role": "lower-third", "start": 0, "end": 3, **fields}
+
+
+def test_the_default_lower_third_no_longer_draws_a_false_warning(tmp_path):
+    """O texto alinhado à esquerda era medido como se estivesse centrado: a caixa saía 400 px à esquerda do que o
+    render desenha, e o `lower-third` padrão acusava invadir a margem de 60 px à toa."""
+    project, layout = _overlay_project(tmp_path, _text_at())
+    assert check_text_safe_zone(project, layout) == []
+
+
+def test_a_left_aligned_text_pushed_over_the_left_margin_is_flagged(tmp_path):
+    project, layout = _overlay_project(tmp_path, _text_at(x=0.03, y=0.5))
+    assert any("área coberta" in f.message for f in check_text_safe_zone(project, layout))
+
+
+def test_a_right_aligned_text_pushed_over_the_right_margin_is_flagged(tmp_path):
+    inside, layout = _overlay_project(tmp_path, _text_at(x=0.83, y=0.5, style={"align": "right"}))
+    assert check_text_safe_zone(inside, layout) == []
+    over, layout = _overlay_project(tmp_path, _text_at(x=0.97, y=0.5, style={"align": "right"}))
+    assert any("área coberta" in f.message for f in check_text_safe_zone(over, layout))
+
+
+def test_a_text_with_a_background_box_counts_the_padding(tmp_path):
+    """O texto cabe, mas a caixa de fundo (com o padding) passa da margem: o aviso é da caixa que se vê."""
+    base = {"type": "text", "text": "Oi", "role": "title", "y": 0.5, "start": 0, "end": 3}
+    plain, layout = _overlay_project(tmp_path, {**base, "x": 0.1, "style": {"align": "left"}})
+    assert check_text_safe_zone(plain, layout) == []  # o texto começa em 108 px, dentro dos 60 px da margem
+    boxed, layout = _overlay_project(
+        tmp_path, {**base, "x": 0.06, "style": {"align": "left", "box": True, "box_padding": 30}}
+    )
+    assert any("área coberta" in f.message for f in check_text_safe_zone(boxed, layout))
+
+
+def test_an_image_placed_by_xy_over_the_right_margin_is_flagged(tmp_path):
+    fields = {"type": "image", "src": "logo.png", "y": 0.5, "width": 0.2, "start": 0, "end": 3}
+    over, layout = _overlay_project(tmp_path, {**fields, "x": 0.98})
+    [finding] = check_media_safe_zone(over, layout)
+    assert finding.level == "aviso" and finding.where == "overlays[0]"
+    assert "imagem" in finding.message and "interface do app" in finding.message
+    inside, layout = _overlay_project(tmp_path, {**fields, "x": 0.5})
+    assert check_media_safe_zone(inside, layout) == []
+
+
+def test_an_image_in_a_named_position_or_without_the_safe_zone_is_not_flagged(tmp_path):
+    named = {"type": "image", "src": "logo.png", "position": "top-right", "width": 0.2}
+    project, layout = _overlay_project(tmp_path, named)
+    assert check_media_safe_zone(project, layout) == []  # a posição nomeada já respeita a zona
+    glued = {**named, "safe_zone": False, "x": 0.98, "y": 0.02}
+    project, layout = _overlay_project(tmp_path, glued)
+    assert check_media_safe_zone(project, layout) == []  # `safe_zone: false` pede para ignorá-la
+
+
+def test_a_pip_placed_by_xy_over_the_zone_is_flagged(tmp_path):
+    fields = {"type": "video", "src": "cam.mp4", "width": 0.3, "start": 0, "end": 3}
+    over, layout = _overlay_project(tmp_path, {**fields, "x": 0.5, "y": 0.95})
+    [finding] = check_media_safe_zone(over, layout)
+    assert "vídeo sobreposto" in finding.message
+    inside, layout = _overlay_project(tmp_path, {**fields, "x": 0.5, "y": 0.5})
+    assert check_media_safe_zone(inside, layout) == []
+    named, layout = _overlay_project(tmp_path, {**fields, "position": "bottom-right"})
+    assert check_media_safe_zone(named, layout) == []
+
+
+def test_an_overlay_after_the_end_of_the_video_is_not_checked(tmp_path):
+    project, layout = _overlay_project(tmp_path, _text_at(x=0.03, y=0.5, start=9, end=10))
+    assert check_text_safe_zone(project, layout) == []
+
+
+def test_a_missing_overlay_file_does_not_break_the_qa(tmp_path):
+    project, layout = _overlay_project(tmp_path, {"type": "image", "src": "sumiu.png", "x": 0.98, "y": 0.5})
+    assert check_media_safe_zone(project, layout) == []  # o `lint` é quem diz que a imagem não existe
+
+
+def test_the_media_check_is_part_of_the_static_checks_and_of_the_report(tmp_path):
+    assert check_media_safe_zone in STATIC_CHECKS
+    project, _ = _overlay_project(tmp_path, {"type": "image", "src": "logo.png", "x": 0.98, "y": 0.5})
+    report = build_report(project, prober=make_prober({"logo.png": SMALL_IMAGE_INFO}))
+    assert any("imagem ou vídeo sobreposto" in check for check in report.checks)
+    assert any(f.where == "overlays[0]" and "imagem" in f.message for f in report.findings)
