@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /* O painel Filtros: os grupos de campos do item selecionado na linha do tempo (ou os do projeto, sem seleção).
    É dirigido pelo catálogo (`lib/filterCatalog.json`): mostra só os grupos "aplicados", ou seja, os que já saem do
-   padrão do schema; o "+" lista os outros e o "×" de um grupo o devolve ao padrão. A faixa A1 edita o clipe da V1. */
+   padrão do schema; o "+" lista os outros e o "×" de um grupo o devolve ao padrão. A faixa A1 edita o clipe da V1.
+   Abaixo dos grupos vem o bloco "Efeitos de áudio", a cadeia de efeitos do mesmo item (ou a do master, sem seleção). */
 import { computed, onMounted, ref, watch } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -23,6 +24,7 @@ import {
 import { displayLabel } from '@/lib/timeline'
 import { useCatalogStore } from '@/stores/catalog'
 import { useEditorStore } from '@/stores/editor'
+import AudioEffectsSection from './AudioEffectsSection.vue'
 import FilterGroupCard from './FilterGroupCard.vue'
 
 interface GroupEntry {
@@ -163,6 +165,7 @@ const ready = computed(() => !!editor.spec)
         @remove="remove(entry)"
       />
       <p v-if="shown.length === 0" class="filters__empty">Nenhum filtro aplicado. Use o botão Filtro para adicionar.</p>
+      <AudioEffectsSection />
     </div>
   </AppCard>
 </template>

@@ -243,28 +243,58 @@ def validate_project(name_or_path: str) -> dict:
     description=(
         "Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, "
         "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, "
-        'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed") e marker_add/marker_set/marker_remove '
-        '(marcadores). `op` é um dict com "type" e os parâmetros da operação, ex.: '
-        '{"type": "split", "index": 1, "at": 2.5}. Onde a operação pede um instante (`at` do split, '
-        '`start`/`end` do overlay_span) vale "marker:<texto>", o instante de um marcador (com grupo: '
-        '"marker:<grupo>/<texto>"); no split, sem `index`, corta o trecho que contém o marcador. Cortar, remover, '
-        "aparar ou mover trechos desloca os marcadores junto; um marcador que estava num trecho removido some, e o "
-        "aviso vem em `edit_warnings`."
+        'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove '
+        "(marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, "
+        'enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
+        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). `op` é um dict com "type" e os '
+        'parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a operação pede um instante '
+        '(`at` do split, `start`/`end` do overlay_span) vale "marker:<texto>", o instante de um marcador (com '
+        'grupo: "marker:<grupo>/<texto>"); no split, sem `index`, corta o trecho que contém o marcador. Cortar, '
+        "remover, aparar ou mover trechos desloca os marcadores junto; um marcador que estava num trecho removido "
+        "some, e o aviso vem em `edit_warnings`."
     )
 )
 def edit_project(name: str, op: dict) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
     from .pipeline.edits import apply_edit_report
     from .pipeline.projects import load_project, summarize
     from .pipeline.projects import save_project as _save
 
     project = load_project(name)
-    report = apply_edit_report(project, op)
+    try:
+        report = apply_edit_report(project, op)
+    except EditError as exc:
+        # o pedido recusado chega ao cliente com o motivo (um erro inesperado só diria "falhou")
+        raise ToolError(str(exc)) from exc
     path = _save(report.project)
     summary = summarize(report.project)
     result = {"spec_path": str(path), **_summary_dict(summary)}
     if report.warnings:
         result["edit_warnings"] = report.warnings
     return result
+
+
+@server.tool(
+    description=(
+        "O catálogo dos efeitos de áudio que qualquer item de áudio (clipe, voz gravada, narração, música, "
+        "faixa externa, PiP) ou o master recebe em uma cadeia ordenada (`effects` na spec): para cada efeito, "
+        "o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e "
+        "faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos. Ponha, "
+        "mova, ligue ou desligue um efeito com `edit_project` (operação audio_effect). `type` restringe "
+        "a um efeito."
+    )
+)
+def audio_effects(type: str | None = None) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import catalog_payload
+
+    try:
+        return catalog_payload(type)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 @server.tool(

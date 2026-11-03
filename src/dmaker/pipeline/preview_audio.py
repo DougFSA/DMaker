@@ -29,7 +29,23 @@ from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, VoiceLevelMeter, audio_only_graph, graph_args, plan_loudness
+from .assembly import (
+    LoudnessMeter,
+    MasterEffectMeter,
+    VoiceLevelMeter,
+    audio_only_graph,
+    graph_args,
+    plan_loudness,
+    plan_master_effects,
+)
+from .audio_effects import (
+    clip_camera_audio,
+    effect_processor,
+    processed_music,
+    processed_pips,
+    processed_voiceovers,
+    track_audio_overrides,
+)
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
@@ -78,6 +94,7 @@ def piece_recipe(segment: Segment) -> dict:
                 "fade_out",
                 "audio_fade",
                 "audio_mode",
+                "effects",
             },
         )
     return {"type": segment.type, "duration": getattr(segment, "duration", None)}
@@ -235,13 +252,26 @@ class PreviewAudioBuilder:
         prepared = self.pieces(ctx, layout, missing)
         transitions = transitions_of(layout.project.timeline)
         total = layout.total
-        voiceovers = self._voiceovers(ctx)
+        voiceovers = processed_voiceovers(ctx, self._voiceovers(ctx))
         voice_files = self._voice_files(ctx)
         pips = self.pip_audio(ctx, total, missing)
+        processed_pips(ctx, pips)
         music = ctx.project.audio.music
-        music_path = ctx.project.resolve(music.src) if music else None
+        music_path = processed_music(ctx, ctx.project.resolve(music.src) if music else None)
         sfx = self._effects(ctx, prepared, transitions, layout, total, voiceovers, pips, voice_files)
 
+        plan_master_effects(
+            ctx,
+            MasterEffectMeter(),
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            pips,
+            sfx,
+            voice_files,
+        )
         plan = plan_loudness(
             ctx, LoudnessMeter(), prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files
         )
@@ -338,7 +368,9 @@ class PreviewAudioBuilder:
         if segment.source:
             tracks = tuple(
                 piece
-                for piece in track_slices(ctx.project.audio.tracks, ctx.session, segment)
+                for piece in track_slices(
+                    ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx)
+                )
                 if not missing.covers(piece.path)
             )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
@@ -358,6 +390,9 @@ class PreviewAudioBuilder:
             return out, None
         if camera_audio is not None:
             camera_audio.isolate()  # separa a voz (ou o fundo) só se o pedaço precisa ser feito
+        camera_path = camera_audio.path if camera_audio else None
+        length = max(duration * segment.speed, 0.01)  # tempo de fonte que o trecho consome
+        camera_path = clip_camera_audio(ctx, segment, source, in_point, length, camera_path) or camera_path
         command = clip_audio_piece(
             segment,
             info,
@@ -367,7 +402,7 @@ class PreviewAudioBuilder:
             in_point=in_point,
             tracks=tracks,
             audio_stream=source.audio_stream,
-            camera_audio=camera_audio.path if camera_audio else None,
+            camera_audio=camera_path,
         )
         return out, command
 
@@ -401,13 +436,19 @@ class PreviewAudioBuilder:
                 ctx.warn(f"A narração {index} não entrou na prévia: {exc}")
                 continue
             prepared.append(
-                PreparedVoiceover(result.path, narration.start, narration.volume, result.duration)
+                PreparedVoiceover(
+                    result.path,
+                    narration.start,
+                    narration.volume,
+                    result.duration,
+                    effects=tuple(narration.effects),
+                )
             )
         return prepared
 
     def _voice_files(self, ctx: RenderContext) -> list[PreparedVoiceFile]:
         try:
-            return prepare_voice_files(ctx.project, self.prober)
+            return prepare_voice_files(ctx.project, self.prober, effect_processor(ctx))
         except (OSError, ValueError) as exc:
             ctx.warn(f"As locuções não entraram na prévia: {exc}")
             return []

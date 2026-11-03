@@ -41,6 +41,10 @@
 - [Importar áudio bruto](importar-bruto.md): Converte um arquivo de áudio sem cabeçalho (PCM bruto, de um gravador ou de um programa) num WAV na pasta do projeto e o põe como voz gravada, como o "Importar dados brutos" do Audacity.
 - [Fazer um episódio de podcast](podcast.md): Monta um episódio só de áudio com a gravação entre uma música de abertura e uma de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio.
 
+## Edição de áudio
+
+- [Aplicar efeitos de áudio em um item ou no master](efeitos-de-audio.md): Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original.
+
 ## Tarefas de dublagem e modelos
 
 - [Dublar um vídeo para outro idioma](dublar.md): Traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma escolhido, mantendo o fundo; você revisa a tradução antes de gerar.

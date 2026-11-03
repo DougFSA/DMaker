@@ -43,12 +43,15 @@ from ..voice.library import VoiceLibrary
 from .assembly import (
     LoudnessMeter,
     LoudnessPlan,
+    MasterEffectMeter,
     VoiceLevelMeter,
     audio_only_graph,
     graph_args,
     plan_loudness,
+    plan_master_effects,
 )
 from .audio_duration import NOTHING_TO_PLAY, audio_extent
+from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .audio_lint import audio_output_warnings
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .layout import ProjectLayout, project_layout
@@ -233,8 +236,10 @@ class AudioRenderPipeline:
         )
         ctx.warnings.extend(layout.warnings)
         ctx.log(f"render de áudio {project.name}: {self.preset.id}")
-        voiceovers = self.voiceover.prepare(ctx)
-        voice_files = prepare_voice_files(layout.project, self.prober)
+        # os efeitos de cada item (cadeia de efeitos) viram um arquivo processado em cache antes de tudo: a mixagem,
+        # a duração e a exportação por trilha partem dele, como no render de vídeo e na prévia
+        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
+        voice_files = prepare_voice_files(layout.project, self.prober, effect_processor(ctx))
         total = layout.total
         if not layout.project.timeline:
             total = audio_extent(layout.project, self.prober, [item.duration for item in voiceovers])
@@ -244,13 +249,28 @@ class AudioRenderPipeline:
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
         prepared = self.pieces.pieces(ctx, layout, MissingMedia())
         pips = self.pieces.pip_audio(ctx, total, MissingMedia())
+        processed_pips(ctx, pips)
         music = layout.project.audio.music
         music_path = layout.project.resolve(music.src) if music else None
         if music_path is not None and not music_path.exists():
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
+        music_path = processed_music(ctx, music_path)
         transitions = transitions_of(layout.project.timeline)
         sfx = leveled_effects(
             ctx, VoiceLevelMeter(), prepared, transitions, layout.spans, total, voiceovers, pips, voice_files
+        )
+        # a medida que cada efeito do master pede vem antes de qualquer grafo da mixagem, como no render de vídeo
+        plan_master_effects(
+            ctx,
+            MasterEffectMeter(),
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            pips,
+            sfx,
+            voice_files,
         )
         provenance = ""
         if ctx.narrator is not None and voiceovers:

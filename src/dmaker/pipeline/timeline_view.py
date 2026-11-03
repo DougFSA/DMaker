@@ -5,13 +5,15 @@ Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-pic
 faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem, barra de progresso
 e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
 clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
-(narrações por texto), "VO" (arquivos de voz gravada, `audio.voiceover`), "MUS" (música), "CC" (legendas) e, por último, uma trilha de marcadores por grupo
-("MK" para o grupo padrão, "MK:<grupo>" para os nomeados)."""
+(narrações por texto), "VO" (arquivos de voz gravada, com a duração depois dos efeitos), "MUS" (música),
+"CC" (legendas) e, por último, uma trilha de marcadores por grupo ("MK" para o grupo padrão, "MK:<grupo>" para
+os nomeados)."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from ..domain.markers import marker_groups, marker_track_id
@@ -32,7 +34,6 @@ from .layout import ProjectLayout, to_presentation
 from .missing import MissingMedia
 from .sources import physical_source_names
 from .track_slices import track_slice, track_window
-from .voicefiles import voice_file_playtimes
 from .voiceover import estimate_narration_duration, narration_label
 
 
@@ -461,31 +462,32 @@ def _narration_track(
     return Track(id="NAR", kind="audio", label="NAR", items=items, muted=muted, hidden=hidden, locked=locked)
 
 
-def _voiceover_track(project: Project, layout: ProjectLayout) -> Track | None:
-    """Um item por arquivo de voz gravada (`audio.voiceover`), do instante em que entra até onde o trecho dele termina.
-    Arquivo ausente ou ilegível aparece com um segundo de largura, marcado como ausente pelo `missing`."""
-    clips = project.audio.voiceover
-    if not clips:
+def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -> Track | None:
+    """Um item por arquivo de voz gravada (`audio.voiceover`). `durations` traz quanto cada um toca depois dos
+    efeitos dele (o Repetir a aumenta); sem o número (arquivo ausente), o item mostra o que a spec diz."""
+    if not project.audio.voiceover:
         return None
     muted, hidden, locked = _track_state(project, "VO")
-    playtimes = voice_file_playtimes(project, layout.prober)
     items = []
-    for i, (clip, playtime) in enumerate(zip(clips, playtimes, strict=True)):
+    for i, clip in enumerate(project.audio.voiceover):
+        known = durations[i] if i < len(durations) else None
+        if known is None:
+            known = max((clip.end - clip.offset) if clip.end is not None else 1.0, 0.1)
         items.append(
             TrackItem(
                 id=_item_id("VO", i),
                 kind="voiceover",
                 index=i,
-                label=clip.src,
+                label=Path(clip.src).name,
                 start=clip.start,
-                end=clip.start + (playtime if playtime else 1.0),
+                end=clip.start + known,
                 in_point=clip.offset,
                 out_point=clip.end,
                 src=clip.src,
                 source=None,
                 transition=None,
                 muted=clip.volume <= 0 or muted,
-                extra={"volume": clip.volume},
+                extra={"volume": clip.volume, "effects": len(clip.effects), "duration": known},
                 path=str(project.resolve(clip.src)),
             )
         )
@@ -602,13 +604,15 @@ def build_timeline_view(
     music_duration: float | None = None,
     narration_durations: Sequence[float | None] = (),
     missing: MissingMedia | None = None,
+    voiceover_durations: Sequence[float | None] = (),
 ) -> TimelineView:
     """Monta a vista multitrilha: uma faixa por PiP que se sobrepõe, texto, gráficos, a linha do
     tempo principal, o áudio de cada clipe, cada faixa de áudio externa, a música e as legendas.
     Trechos de uma fonte com `parts` aparecem como um item só (agregado pelo trecho original).
     `music_duration` refina spans de música com `tail`; sem ela, a folga bruta é mostrada.
     `narration_durations` (uma por narração, ver `VoiceoverPreparer.cached_durations`) troca a
-    estimativa pela duração real das narrações já sintetizadas. Cada item
+    estimativa pela duração real das narrações já sintetizadas, e `voiceover_durations` (uma por arquivo de
+    `audio.voiceover`, ver `voice_file_playtimes`) dá a duração de cada voz gravada depois dos efeitos. Cada item
     ganha `path` (caminho absoluto já resolvido pela spec) e cada trilha carrega o mudo/oculto/
     bloqueio salvo em `project.tracks` (`domain.tracks.apply_track_state` aplica o mesmo estado no
     render, para a prévia e o vídeo final nunca discordarem). `missing` (ver `pipeline/missing.py`) marca
@@ -694,7 +698,7 @@ def build_timeline_view(
     if narration_track is not None:
         tracks.append(narration_track)
 
-    voiceover_track = _voiceover_track(project, layout)
+    voiceover_track = _voiceover_track(project, voiceover_durations)
     if voiceover_track is not None:
         tracks.append(voiceover_track)
 

@@ -4,8 +4,6 @@ gerar o mezanino e calcula a chave de cache. Um tipo novo entra registrando outr
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,17 +32,14 @@ from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
+from .audio_effects import clip_camera_audio, track_audio_overrides
+from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
 from .sources import Source
 from .track_slices import track_slices
 
 MEZZ_VERSION = "m7"  # muda quando a receita do mezanino muda (invalida o cache)
-
-
-def cache_key(*parts: object) -> str:
-    raw = json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
@@ -98,8 +93,8 @@ def _default_variant(ctx: RenderContext) -> str:
 
 def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice, ...]:
     """Fatias das faixas externas que soam no trecho, pela mesma conta da vista de linha do tempo
-    (`pipeline.track_slices`)."""
-    return track_slices(ctx.project.audio.tracks, ctx.session, segment)
+    (`pipeline.track_slices`). A faixa que tem efeitos é fatiada do arquivo já processado, inteiro."""
+    return track_slices(ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx))
 
 
 @dataclass(frozen=True)
@@ -254,6 +249,13 @@ class ClipPreparer:
             if _needs_render(backdrop, ctx) and not ctx.options.dry_run:
                 rect = fit_rect(info.width, info.height, W, H, segment.reframe.margin)
                 save_card(render_backdrop(ctx.theme, W, H, segment.reframe.variant, index, rect), backdrop)
+        camera_path = camera_audio.path if camera_audio else None
+        if _needs_render(out, ctx):
+            # os efeitos do clipe: o som da câmera (ou a voz isolada) entra no mezanino já processado
+            length = max(duration * segment.speed, 0.01)
+            camera_path = (
+                clip_camera_audio(ctx, segment, source, in_point, length, camera_path) or camera_path
+            )
         command = clip_mezzanine(
             segment,
             info,
@@ -266,7 +268,7 @@ class ClipPreparer:
             in_point=in_point,
             tracks=tracks,
             audio_stream=source.audio_stream,
-            camera_audio=camera_audio.path if camera_audio else None,
+            camera_audio=camera_path,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
             look=look,

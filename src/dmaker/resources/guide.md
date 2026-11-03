@@ -212,6 +212,24 @@ internet); `dmaker sfx list` mostra o que há e `dmaker sfx build` os gera de no
 - `audio.sfx` marca tempos do vídeo final: o render parcial (`segments`) o ignora, e `validate_project` avisa de
   efeito marcado depois do fim do vídeo.
 
+### Efeitos de áudio (cadeia por item e no master)
+
+Qualquer item com som tem uma lista ordenada `effects`: o clipe (`timeline[i].effects`, o som da câmera), o PiP
+(`overlays[i].effects`), `audio.voiceover[i]`, `audio.narration[i]`, `audio.music` e `audio.tracks[i]`; a mistura
+inteira tem `audio.master_effects` (depois de música, voz e efeitos sonoros e antes da normalização final). O
+catálogo (tipos, parâmetros, unidades e faixas, nos nomes do Audacity) vem da ferramenta `audio_effects`; hoje:
+`amplify` (`gain_db`, `prevent_clipping`), `normalize` (`peak_db`, `remove_dc`, `stereo_independent`), `invert`,
+`reverse` e `repeat` (`times`, as passagens no total: 2 dobra). Todo efeito tem `enabled` (liga e desliga sem
+apagar) e `start`/`end` (intervalo em segundos do item; fora dele o som passa intacto, com emenda de 10 ms).
+O arquivo original nunca muda: o item tratado fica em cache e o render e a prévia usam o mesmo.
+
+- Mexa na cadeia com `edit_project` (`{"type": "audio_effect", "action": "add", "target": "audio.voiceover.0",
+  "effect": {"type": "amplify", "gain_db": 6}}`; `action` também é `remove`, `move`, `enable`, `disable` ou `set`;
+  `target` é `timeline.N`, `overlays.N`, `audio.voiceover.N`, `audio.narration.N`, `audio.tracks.N`,
+  `audio.music` ou `audio.master`). A ordem conta: normalizar depois de amplificar mede o som já amplificado.
+- `repeat` muda a duração e só vale em voz gravada e em música; nos outros a spec o recusa dizendo onde vale.
+  Com ele, a vista da linha do tempo (trilha `VO`) e o `validate_project` mostram a duração nova.
+
 ### Transições
 
 `transition.type` aceita `cut` (corte seco, padrão quando não há `transition`), as de movimento e os 48 tipos do xfade. A troca dura `duration` segundos (0,3 a 0,6 costuma bastar; nunca passa de metade de cada trecho) e o áudio faz um fundido de entrada e saída durante ela.

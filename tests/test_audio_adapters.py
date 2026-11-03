@@ -20,10 +20,9 @@ from dmaker.cli import app
 from dmaker.domain.spec import Project
 from dmaker.media.ffmpeg import RecordingRunner
 from dmaker.media.probe import MediaInfo
-from dmaker.pipeline.layout import project_layout
 from dmaker.pipeline.projects import save_project, summarize
 from dmaker.pipeline.report import build_report
-from dmaker.pipeline.timeline_view import build_timeline_view
+from dmaker.pipeline.timeline_service import project_timeline_view
 from dmaker.ui import server
 
 pytestmark = pytest.mark.skipif(config.find_tool("ffmpeg") is None, reason="precisa do ffmpeg")
@@ -401,7 +400,7 @@ def test_validate_warns_about_audio_options_on_a_video_output(tmp_path):
 
 def test_the_timeline_view_of_an_audio_project_shows_the_audio_tracks(tmp_path):
     project = audio_only(tmp_path, music={"src": "voz.wav", "spans": [{"start": 0, "end": 8}]})
-    view = build_timeline_view(project, project_layout(project, fake_prober))
+    view = project_timeline_view(project, prober=fake_prober)
     ids = [track.id for track in view.tracks]
     assert view.total == 604.0 and "VO" in ids and "MUS" in ids and "V1" in ids  # V1 existe, vazia
     voice = next(track for track in view.tracks if track.id == "VO")

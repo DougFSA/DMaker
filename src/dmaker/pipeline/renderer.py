@@ -20,7 +20,15 @@ from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, Subproc
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly, plan_loudness
+from .assembly import (
+    LoudnessMeter,
+    MasterEffectMeter,
+    VoiceLevelMeter,
+    build_assembly,
+    plan_loudness,
+    plan_master_effects,
+)
+from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
@@ -77,6 +85,7 @@ class RenderPipeline:
         self.voiceover = VoiceoverPreparer(voice_library)
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
+        self.master_meter = MasterEffectMeter()
         self.voice_level = VoiceLevelMeter()
         self.log = log or (lambda message: None)
         self.sync = SyncResolver(
@@ -176,9 +185,9 @@ class RenderPipeline:
         total = timeline_total(durations, transitions)
         spans = timeline_spans(durations, transitions)
         tones = [item.tone for item in prepared]
-        voiceovers = self.voiceover.prepare(ctx)
+        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
-        voice_files = prepare_voice_files(p, self.prober)
+        voice_files = prepare_voice_files(p, self.prober, effect_processor(ctx))
 
         if p.captions and p.captions.enabled and not o.no_captions:
             ctx.log(
@@ -194,8 +203,9 @@ class RenderPipeline:
         layer.doc.write(ctx.job_dir / "overlay.ass")
         if layer.has_behind_text:
             layer.behind_doc.write(ctx.job_dir / "overlay_behind.ass")
+        processed_pips(ctx, layer.video_overlays)
 
-        music_path = self._music_path()
+        music_path = processed_music(ctx, self._music_path())
         sfx = self._effects(
             ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays, voice_files
         )
@@ -362,7 +372,20 @@ class RenderPipeline:
         sfx=(),
         voice_files=(),
     ) -> tuple[dict | None, bool, float]:
-        """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`)."""
+        """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`). Antes dela, mede a
+        mistura que cada efeito do master pede, para a medição do loudness já enxergar o master pronto."""
+        plan_master_effects(
+            ctx,
+            self.master_meter,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            video_overlays,
+            sfx,
+            voice_files,
+        )
         plan = plan_loudness(
             ctx,
             self.loudness,

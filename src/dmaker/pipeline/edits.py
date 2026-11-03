@@ -24,6 +24,7 @@ from ..domain.edits import (
     split_segment,
     trim_segment,
 )
+from ..domain.effect_edits import apply_effect_op
 from ..domain.marker_edits import add_marker, marker_index, remove_marker, set_marker
 from ..domain.markers import MarkerError, is_marker_ref, resolve_instant
 from ..domain.spec import ClipSegment, Project
@@ -139,6 +140,10 @@ def _op_set_field(project: Project, op: dict, layout: OriginAggregate) -> Projec
     return set_field(project, op["path"], op.get("value"))
 
 
+def _op_audio_effect(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    return apply_effect_op(project, op)
+
+
 def _op_marker_add(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return add_marker(project, op)
 
@@ -162,6 +167,7 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     "overlay_remove": _op_overlay_remove,
     "overlay_duplicate": _op_overlay_duplicate,
     "set_field": _op_set_field,
+    "audio_effect": _op_audio_effect,
     "marker_add": _op_marker_add,
     "marker_set": _op_marker_set,
     "marker_remove": _op_marker_remove,
