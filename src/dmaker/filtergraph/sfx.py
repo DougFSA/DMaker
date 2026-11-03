@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
+from .mix import pan_filter
 
 MIX_RATE = 48_000  # a taxa da mixagem: o atraso em amostras só é exato nela
 # Pico de um som da biblioteca antes de qualquer ganho (ver `sfx.synth.PEAK_DBFS`); é daqui que sai a conta do nível.
@@ -67,6 +68,9 @@ def sfx_streams(lines: list[str], inputs: Inputs, sfx: Sequence[SfxInput]) -> li
             "aformat=sample_fmts=fltp:channel_layouts=stereo",
             f"volume={item.gain_db:.2f}dB",
         ]
+        balance = pan_filter(getattr(item, "pan", 0.0))
+        if balance:
+            chain.append(balance)
         delay = delay_samples(item.at)
         if delay > 0:
             chain.append(f"adelay={delay}S:all=1")

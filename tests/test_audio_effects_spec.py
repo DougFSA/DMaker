@@ -56,8 +56,18 @@ def project_with(**audio) -> Project:
 # ---------- registro e catálogo ----------
 
 
-def test_the_five_basic_effects_are_registered():
-    assert list(EFFECT_CLASSES) == ["amplify", "normalize", "invert", "reverse", "repeat"]
+def test_the_basic_and_the_wave_editing_effects_are_registered():
+    assert list(EFFECT_CLASSES) == [
+        "amplify",
+        "normalize",
+        "invert",
+        "reverse",
+        "repeat",
+        "silence",
+        "cut",
+        "envelope",
+        "channels",
+    ]
     assert [info.type for info in catalog()] == list(EFFECT_CLASSES)
 
 

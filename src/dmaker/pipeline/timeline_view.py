@@ -29,11 +29,12 @@ from ..domain.spec import (
     VideoOverlay,
 )
 from ..domain.timeline import stack_lanes as _lane_of
+from ..domain.tracks import silenced_audio_tracks
 from ..filtergraph.audio import resolve_span
 from .layout import ProjectLayout, to_presentation
 from .missing import MissingMedia
 from .sources import physical_source_names
-from .track_slices import track_slice, track_window
+from .track_slices import TrackWindow, track_slice, track_window
 from .voiceover import estimate_narration_duration, narration_label
 
 
@@ -65,6 +66,12 @@ class Track:
     muted: bool = False
     hidden: bool = False
     locked: bool = False
+    # controles de mixagem salvos em `project.tracks` (só as trilhas de áudio os usam) e se a trilha deixa de soar,
+    # por estar muda ou porque outra está em solo (`domain.tracks.silenced_audio_tracks`)
+    gain_db: float = 0.0
+    pan: float = 0.0
+    solo: bool = False
+    silenced: bool = False
 
 
 @dataclass
@@ -91,6 +98,10 @@ class TimelineView:
                     "muted": t.muted,
                     "hidden": t.hidden,
                     "locked": t.locked,
+                    "gain_db": t.gain_db,
+                    "pan": t.pan,
+                    "solo": t.solo,
+                    "silenced": t.silenced,
                     "items": [asdict(item) for item in t.items],
                 }
                 for t in self.tracks
@@ -149,6 +160,19 @@ def _resolve_end(end: float | None, total: float) -> float:
     return total if end is None else end
 
 
+def _mix_extra(audio_offset: float = 0.0, pan: float = 0.0, effects: Sequence = ()) -> dict:
+    """O que o item de áudio tem de mixagem fora do padrão, para a interface desenhar: o deslocamento do som em
+    relação à imagem, o equilíbrio esquerda/direita e quantos efeitos ele leva. Item sem nada disso fica sem as chaves."""
+    extra: dict = {}
+    if audio_offset:
+        extra["audio_offset"] = audio_offset
+    if pan:
+        extra["pan"] = pan
+    if effects:
+        extra["effects"] = len(effects)
+    return extra
+
+
 def _item_id(track_id: str, index: int) -> str:
     return f"{track_id}-{index}"
 
@@ -180,7 +204,11 @@ def _video_overlay_items(project: Project, overlays: list[Overlay], total: float
                 source=ov.source,
                 transition=None,
                 muted=ov.volume <= 0,
-                extra={"position": ov.position, "shape": ov.shape},
+                extra={
+                    "position": ov.position,
+                    "shape": ov.shape,
+                    **_mix_extra(ov.audio_offset, 0.0, ov.effects),
+                },
                 path=_resolve_item_path(project, ov.src, ov.source),
             )
         )
@@ -354,7 +382,11 @@ def _a1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) 
                 source=segment.source,
                 transition=None,
                 muted=muted,
-                extra={"speed": segment.speed, **({"pieces": pieces} if pieces else {})},
+                extra={
+                    "speed": segment.speed,
+                    **({"pieces": pieces} if pieces else {}),
+                    **_mix_extra(segment.audio_offset, segment.pan, segment.effects),
+                },
                 path=pieces[0]["path"]
                 if pieces
                 else _resolve_item_path(project, segment.src, segment.source),
@@ -363,16 +395,22 @@ def _a1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) 
     return items
 
 
-def _track_items(
-    project: Project, physical: ProjectLayout, track_id: str, index: int, muted: bool
-) -> list[TrackItem]:
-    """Um item por trecho de clipe em que a faixa externa `audio.tracks[index]` soa, pela mesma conta
-    do render (`pipeline.track_slices`, sobre as partes que `expand_parts` gerou): o arquivo certo, o
-    ponto dele em `in_point` (tempo NO ARQUIVO, por isso `extra.offset` é zero) e o volume da faixa.
-    Trecho que a faixa não cobre fica sem item; a velocidade do clipe (`extra.speed`) vale para o som."""
+@dataclass(frozen=True)
+class TrackSlicePlay:
+    """Onde uma fatia de faixa externa soa: a janela na linha do tempo, a velocidade do clipe e o arquivo."""
+
+    window: TrackWindow
+    speed: float
+    path: Path
+
+
+def track_slice_windows(project: Project, physical: ProjectLayout, index: int) -> list[TrackSlicePlay]:
+    """Um pedaço por trecho de clipe em que a faixa externa `audio.tracks[index]` soa, pela mesma conta do render
+    (`pipeline.track_slices`, sobre as partes que `expand_parts` gerou), na ordem da linha do tempo. A vista e as
+    edições de áudio leem daqui, para o que se vê e o que se edita ser o que se ouve."""
     audio_track = project.audio.tracks[index]
     names = physical_source_names(project, audio_track.source)
-    found: list[TrackItem] = []
+    found: list[TrackSlicePlay] = []
     for j, segment in enumerate(physical.project.timeline):
         if not isinstance(segment, ClipSegment) or not segment.source:
             continue  # o render só mistura faixas externas em clipes de fonte sincronizada
@@ -384,29 +422,45 @@ def _track_items(
             if piece is None:
                 continue
             window = track_window(piece, source.info.duration, segment.speed, physical.spans[j])
-            if window is None:
-                continue
-            found.append(
-                TrackItem(
-                    id="",  # a posição na trilha só é conhecida depois de ordenar
-                    kind="track",
-                    index=index,
-                    label=audio_track.source,
-                    start=window.start,
-                    end=window.end,
-                    in_point=window.file_in,
-                    out_point=window.file_in + (window.end - window.start) * segment.speed,
-                    src=None,
-                    source=audio_track.source,
-                    transition=None,
-                    muted=audio_track.volume <= 0 or muted,
-                    extra={"offset": 0.0, "speed": segment.speed, "volume": audio_track.volume},
-                    path=str(piece.path),
-                )
+            if window is not None:
+                found.append(TrackSlicePlay(window, segment.speed, piece.path))
+    found.sort(key=lambda play: play.window.start)
+    return found
+
+
+def _track_items(
+    project: Project, physical: ProjectLayout, track_id: str, index: int, muted: bool
+) -> list[TrackItem]:
+    """Um item por trecho de clipe em que a faixa externa `audio.tracks[index]` soa: o arquivo certo, o ponto dele
+    em `in_point` (tempo NO ARQUIVO, por isso `extra.offset` é zero) e o volume da faixa. Trecho que a faixa não
+    cobre fica sem item; a velocidade do clipe (`extra.speed`) vale para o som."""
+    audio_track = project.audio.tracks[index]
+    found: list[TrackItem] = []
+    for position, play in enumerate(track_slice_windows(project, physical, index)):
+        window = play.window
+        found.append(
+            TrackItem(
+                id=f"{_item_id(track_id, index)}-{position}",
+                kind="track",
+                index=index,
+                label=audio_track.source,
+                start=window.start,
+                end=window.end,
+                in_point=window.file_in,
+                out_point=window.file_in + (window.end - window.start) * play.speed,
+                src=None,
+                source=audio_track.source,
+                transition=None,
+                muted=audio_track.volume <= 0 or muted,
+                extra={
+                    "offset": 0.0,
+                    "speed": play.speed,
+                    "volume": audio_track.volume,
+                    **_mix_extra(audio_track.audio_offset, audio_track.pan, audio_track.effects),
+                },
+                path=str(play.path),
             )
-    found.sort(key=lambda item: item.start)
-    for position, item in enumerate(found):
-        item.id = f"{_item_id(track_id, index)}-{position}"
+        )
     return found
 
 
@@ -455,7 +509,11 @@ def _narration_track(
                 source=None,
                 transition=None,
                 muted=narration.volume <= 0 or muted,
-                extra={"voice": narration.voice, "estimated": known is None},
+                extra={
+                    "voice": narration.voice,
+                    "estimated": known is None,
+                    **_mix_extra(0.0, narration.pan, narration.effects),
+                },
                 path=str(project.resolve(narration.script)) if narration.script else None,
             )
         )
@@ -487,7 +545,12 @@ def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -
                 source=None,
                 transition=None,
                 muted=clip.volume <= 0 or muted,
-                extra={"volume": clip.volume, "effects": len(clip.effects), "duration": known},
+                extra={
+                    "volume": clip.volume,
+                    "effects": len(clip.effects),
+                    "duration": known,
+                    **({"pan": clip.pan} if clip.pan else {}),
+                },
                 path=str(project.resolve(clip.src)),
             )
         )
@@ -519,7 +582,7 @@ def _music_track(
             source=None,
             transition=None,
             muted=music.volume <= 0 or muted,
-            extra={"loop": music.loop, "volume": music.volume},
+            extra={"loop": music.loop, "volume": music.volume, **_mix_extra(0.0, music.pan, music.effects)},
             path=path,
         )
         for i, (start, end, start_at) in enumerate(windows)
@@ -588,6 +651,20 @@ def _marker_tracks(project: Project) -> list[Track]:
         label = f"MK {group}" if group else "MK"
         tracks.append(Track(id=track_id, kind="markers", label=label, items=items, locked=locked))
     return tracks
+
+
+def _apply_mix_state(project: Project, tracks: list[Track]) -> None:
+    """Põe em cada trilha o ganho, o pan e o solo salvos, e marca como mudos os itens das trilhas de áudio que não
+    soam (mudas, ou todas as outras quando alguma está em solo)."""
+    silenced = silenced_audio_tracks(project)
+    for track in tracks:
+        state = project.tracks.get(track.id)
+        if state is not None:
+            track.gain_db, track.pan, track.solo = state.gain_db, state.pan, state.solo
+        if track.id in silenced:
+            track.silenced = True
+            for item in track.items:
+                item.muted = True
 
 
 def _flag_missing(tracks: list[Track], missing: MissingMedia) -> None:
@@ -712,6 +789,7 @@ def build_timeline_view(
 
     tracks.extend(_marker_tracks(project))
 
+    _apply_mix_state(project, tracks)
     missing = missing or MissingMedia()
     _flag_missing(tracks, missing)
     sources = {

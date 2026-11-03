@@ -63,6 +63,26 @@ def chain_duration(effects: Sequence[EffectBase], duration: float) -> float:
     return duration
 
 
+def rebase_effects(effects: Sequence[EffectBase], origin: float, length: float) -> list[EffectBase]:
+    """A cadeia de um pedaço do item que começa em `origin` (segundos do item) e dura `length`: cada intervalo anda
+    junto com o som e o que cai fora do pedaço some. É o que leva a cadeia para a metade de uma divisão, para o
+    trecho que sobra de uma apara e para a cópia de um trecho."""
+    kept = []
+    for effect in effects:
+        moved = effect.rebased(origin, length)
+        if moved is not None:
+            kept.append(moved)
+    return kept
+
+
+def rebase_effect_dicts(chain: Sequence[dict], origin: float, length: float) -> list[dict]:
+    """Como `rebase_effects`, para a cadeia como dicionários (a forma que a edição da spec manipula)."""
+    return [
+        effect.model_dump()
+        for effect in rebase_effects([parse_effect(item) for item in chain], origin, length)
+    ]
+
+
 def chain_signature(effects: Sequence[EffectBase]) -> list[dict]:
     """Os efeitos ligados como dados puros: é o que muda o som, então é o que entra na chave de cache."""
     return [effect.model_dump(mode="json") for _, effect in active_effects(effects)]
@@ -85,5 +105,7 @@ __all__ = [
     "effect_type",
     "param",
     "parse_effect",
+    "rebase_effect_dicts",
+    "rebase_effects",
     "register_effect",
 ]

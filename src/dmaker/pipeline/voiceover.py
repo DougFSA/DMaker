@@ -41,6 +41,7 @@ class PreparedVoiceover:
     duration: float
     cues: list[tuple[float, float, str]] = field(default_factory=list)  # tempos relativos ao início da fala
     effects: tuple[EffectBase, ...] = ()  # cadeia de efeitos da narração (`Narration.effects`)
+    pan: float = 0.0  # equilíbrio esquerda/direita da narração (`Narration.pan`)
 
     @property
     def end(self) -> float:
@@ -161,7 +162,12 @@ class VoiceoverPreparer:
                 duration = estimate_speech_duration(text, narration.speed)
                 prepared.append(
                     PreparedVoiceover(
-                        out, narration.start, narration.volume, duration, effects=tuple(narration.effects)
+                        out,
+                        narration.start,
+                        narration.volume,
+                        duration,
+                        effects=tuple(narration.effects),
+                        pan=narration.pan,
                     )
                 )
                 continue
@@ -184,6 +190,7 @@ class VoiceoverPreparer:
                     result.duration,
                     result.cues,
                     tuple(narration.effects),
+                    narration.pan,
                 )
             )
         return prepared

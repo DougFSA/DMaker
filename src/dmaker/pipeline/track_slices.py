@@ -15,10 +15,11 @@ from .sources import Source
 MIN_AUDIBLE_S = 1e-3  # menos que isso é arredondamento, não um trecho em que a faixa soa
 
 
-def source_covers(source: Source, segment: ClipSegment) -> bool:
-    """Se o arquivo da fonte grava algum instante entre o início e o fim do trecho."""
+def source_covers(source: Source, segment: ClipSegment, shift: float = 0.0) -> bool:
+    """Se o arquivo da fonte grava algum instante entre o início e o fim do trecho. Com a faixa deslocada em `shift`
+    segundos (positivo atrasa o som), o trecho toca o que o arquivo gravou `shift` segundos antes."""
     end = segment.end if segment.end is not None else float("inf")
-    return source.offset < end and source.offset + source.info.duration > segment.start
+    return source.offset < end - shift and source.offset + source.info.duration > segment.start - shift
 
 
 def track_slice(
@@ -28,11 +29,13 @@ def track_slice(
     None quando o arquivo não grava nenhum instante do trecho: um gravador em vários arquivos (câmera
     que parte a gravação a cada 30 min) vira várias faixas, e só a que grava aquele momento entra.
     `processed` é o arquivo da faixa já com os efeitos dela (o mesmo tempo, na faixa 0): a fatia sai dele."""
-    if not source_covers(source, segment):
+    shift = track.audio_offset  # segundos da gravação: a faixa toda anda em relação à sessão
+    if not source_covers(source, segment, shift):
         return None
+    in_point = source.in_point(segment.start) - shift
     if processed is not None:
-        return TrackSlice(processed, source.in_point(segment.start), track.volume, 0)
-    return TrackSlice(source.path, source.in_point(segment.start), track.volume, source.audio_stream)
+        return TrackSlice(processed, in_point, track.volume, 0, track.pan)
+    return TrackSlice(source.path, in_point, track.volume, source.audio_stream, track.pan)
 
 
 def track_slices(
