@@ -259,6 +259,20 @@ function onMouseDown(event: MouseEvent): void {
   }
 }
 
+/** O duplo clique num marcador abre a caixa de texto dele; nos outros itens não faz nada. */
+function onDoubleClick(event: MouseEvent): void {
+  if (!(event.target instanceof HTMLElement)) return
+  const element = event.target.closest<HTMLElement>('[data-marker]')
+  const id = element?.dataset.itemId
+  const trackId = element?.dataset.trackId
+  if (!id || !trackId) return
+  if (tracks.value.find((track) => track.id === trackId)?.locked) {
+    lockedWarning(trackId)
+    return
+  }
+  timeline.editMarker(id)
+}
+
 function onMouseOver(event: MouseEvent): void {
   const id = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>('[data-track-id]')?.dataset.trackId ?? null) : null
   if (id !== timeline.hoverTrackId) timeline.hoverTrackId = id
@@ -356,6 +370,7 @@ onBeforeUnmount(() => {
           class="timeline__content"
           :style="{ width: contentWidth }"
           @mousedown="onMouseDown"
+          @dblclick="onDoubleClick"
           @mouseover="onMouseOver"
           @dragover="onDragOver"
           @drop="onDrop"
@@ -385,7 +400,8 @@ onBeforeUnmount(() => {
       </div>
 
       <p class="timeline__hint">
-        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. A tecla ? mostra os atalhos.
+        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. M cria um marcador no
+        cursor (duplo clique edita o texto; vírgula e ponto pulam entre eles). A tecla ? mostra os atalhos.
       </p>
     </template>
   </AppCard>
@@ -409,6 +425,7 @@ onBeforeUnmount(() => {
   --tl-captions: #555a5e;
   --tl-progress: #3a3f44;
   --tl-other: #1f5c63;
+  --tl-marker: #d9a21b;
 }
 
 .timeline__scroll {

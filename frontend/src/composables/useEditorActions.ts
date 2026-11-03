@@ -6,6 +6,7 @@ import { usePlayerStore } from '@/stores/player'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import {
+  planAddMarker,
   planDuplicate,
   planRemove,
   planSplit,
@@ -15,6 +16,7 @@ import {
   v1ItemIds,
   type Plan,
 } from '@/lib/editorActions'
+import { nextMarker } from '@/lib/markers'
 import { edgeTimes, nextEdge, type TrackToggle } from '@/lib/timeline'
 
 export function useEditorActions() {
@@ -95,6 +97,33 @@ export function useEditorActions() {
     if (target !== null) player.seek(target)
   }
 
+  /** Cria um marcador no cursor, escolhe-o e abre a caixa de texto dele, como o Audacity faz com um rótulo novo. */
+  async function addMarker(): Promise<boolean> {
+    const view = editor.view
+    if (!view) return false
+    const index = (editor.get('markers') as unknown[] | undefined)?.length ?? 0
+    const done = await run(planAddMarker(view, editor.selectedItems, editor.playhead))
+    if (done) {
+      const id = `MK-${index}`
+      editor.select([id])
+      timeline.editMarker(id)
+    }
+    return done
+  }
+
+  /** Pula para o marcador anterior ou seguinte ao cursor e o escolhe. */
+  function jumpMarker(direction: -1 | 1): void {
+    const view = editor.view
+    if (!view) return
+    const target = nextMarker(view, editor.playhead, direction)
+    if (!target) {
+      warn(direction > 0 ? 'Não há marcador depois do cursor.' : 'Não há marcador antes do cursor.')
+      return
+    }
+    player.seek(target.start)
+    editor.select([target.id])
+  }
+
   /** Anda `seconds` (negativo volta) sem parar nem começar a tocar. */
   function nudge(seconds: number): void {
     player.seek(editor.playhead + seconds)
@@ -109,6 +138,8 @@ export function useEditorActions() {
     toggleTrack,
     selectAllV1,
     jumpEdit,
+    addMarker,
+    jumpMarker,
     nudge,
   }
 }

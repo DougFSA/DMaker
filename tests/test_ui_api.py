@@ -222,6 +222,34 @@ def test_edit_split_card_endpoint(client):
     assert bad_op.status_code == 400  # não pode remover o único trecho
 
 
+def test_edit_moves_the_markers_and_reports_the_ones_it_dropped(client):
+    cards = [{"type": "card", "title": f"Trecho {n}", "duration": 2.0, "motion": "none"} for n in (1, 2, 3)]
+    markers = [
+        {"at": 1.0, "text": "no primeiro"},
+        {"at": 3.0, "text": "no segundo"},
+        {"at": 5.0, "text": "no terceiro"},
+    ]
+    spec = {**SPEC, "timeline": cards, "markers": markers}
+    body = client.post(
+        f"/api/projects/{PROJECT}/edit", json={"spec": spec, "op": {"type": "remove", "index": 1}}
+    ).json()
+    assert [(m["text"], m["at"]) for m in body["spec"]["markers"]] == [
+        ("no primeiro", 1.0),
+        ("no terceiro", 3.0),
+    ]
+    assert body["edit_warnings"] == [
+        'O marcador "no segundo" em 3 s estava dentro do trecho removido e foi apagado.'
+    ]
+    track = next(t for t in body["timeline"]["tracks"] if t["id"] == "MK")
+    assert [item["label"] for item in track["items"]] == ["no primeiro", "no terceiro"]
+
+    created = client.post(
+        f"/api/projects/{PROJECT}/edit",
+        json={"spec": spec, "op": {"type": "marker_add", "at": 0.5, "text": "novo"}},
+    ).json()
+    assert created["edit_warnings"] == [] and len(created["spec"]["markers"]) == 4
+
+
 def test_theme_endpoint(client):
     client.put(f"/api/projects/{PROJECT}", json=SPEC)
     theme = client.get(f"/api/projects/{PROJECT}/theme").json()

@@ -20,9 +20,9 @@ type KeyInit = Partial<Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altK
 const press = (init: KeyInit) => comboFromEvent({ ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init })
 
 describe('a tabela padrão', () => {
-  it('tem os 34 atalhos, cada um com id único e ao menos uma tecla', () => {
-    expect(SHORTCUT_DEFAULTS).toHaveLength(34)
-    expect(new Set(SHORTCUT_DEFAULTS.map((entry) => entry.id)).size).toBe(34)
+  it('tem os 37 atalhos, cada um com id único e ao menos uma tecla', () => {
+    expect(SHORTCUT_DEFAULTS).toHaveLength(37)
+    expect(new Set(SHORTCUT_DEFAULTS.map((entry) => entry.id)).size).toBe(37)
     for (const entry of SHORTCUT_DEFAULTS) expect(entry.keys.length, entry.id).toBeGreaterThan(0)
   })
 
@@ -95,7 +95,7 @@ describe('trocas da pessoa', () => {
     const merged = mergeKeymap({ split: ['b'] })
     expect(merged.find((entry) => entry.id === 'split')?.keys).toEqual(['b'])
     expect(merged.find((entry) => entry.id === 'pause')?.keys).toEqual(['k'])
-    expect(merged).toHaveLength(34)
+    expect(merged).toHaveLength(37)
   })
 
   it('uma troca vazia ou de outro tipo é ignorada', () => {

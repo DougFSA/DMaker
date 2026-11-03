@@ -1,4 +1,4 @@
-/* A tabela de atalhos do editor (o padrão é o de ilhas de edição como o Shotcut): os 34 atalhos, a combinação de
+/* A tabela de atalhos do editor (o padrão é o de ilhas de edição como o Shotcut): os 37 atalhos, a combinação de
    teclas que cada evento representa, as trocas que a pessoa salvou e quando o teclado deve ficar quieto. Tudo puro,
    sem tocar no navegador; quem escuta o teclado é `useEditorShortcuts`. */
 
@@ -39,6 +39,9 @@ export type ShortcutId =
   | 'track_mute'
   | 'track_hide'
   | 'track_lock'
+  | 'add_marker'
+  | 'prev_marker'
+  | 'next_marker'
 
 export interface ShortcutDef {
   id: ShortcutId
@@ -93,6 +96,9 @@ export const SHORTCUT_DEFAULTS: readonly ShortcutDef[] = [
   { id: 'track_mute', label: 'Mudo na trilha atual', keys: ['Ctrl+m'], category: 'edicao' },
   { id: 'track_hide', label: 'Ocultar a trilha atual', keys: ['Ctrl+h'], category: 'edicao' },
   { id: 'track_lock', label: 'Bloquear a trilha atual', keys: ['Ctrl+l'], category: 'edicao' },
+  { id: 'add_marker', label: 'Criar um marcador no cursor', keys: ['m'], category: 'edicao' },
+  { id: 'prev_marker', label: 'Marcador anterior', keys: [','], category: 'navegacao' },
+  { id: 'next_marker', label: 'Próximo marcador', keys: ['.'], category: 'navegacao' },
 ]
 
 /** A chave do navegador onde as trocas ficam: a mesma da interface clássica, no mesmo formato (id para combinações). */

@@ -11,6 +11,7 @@ Convenções:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -817,6 +818,68 @@ class TrackState(Strict):
     locked: bool = False
 
 
+MARKER_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class Marker(Strict):
+    """Marcador da trilha MK: um instante (`at`) ou uma região (`start` e `end`) da linha do tempo FINAL, com texto,
+    cor e grupo. Cada grupo é uma trilha de marcadores (a "label track" do Audacity); o grupo vazio é a trilha padrão.
+    `low_hz` e `high_hz` guardam a faixa de frequência de um marcador espectral do Audacity, para a ida e volta do
+    arquivo dele não perder nada. Os marcadores seguem as edições que mexem no tempo (cortes, aparas)."""
+
+    at: float | None = Field(None, ge=0)
+    start: float | None = Field(None, ge=0)
+    end: float | None = Field(None, ge=0)
+    text: str = ""
+    color: str | None = None  # #RRGGBB; sem cor, a interface usa a do tema
+    group: str = ""
+    low_hz: float | None = Field(None, ge=0)
+    high_hz: float | None = Field(None, ge=0)
+
+    @field_validator("color")
+    @classmethod
+    def _hex_color(cls, v: str | None) -> str | None:
+        if v is not None and not MARKER_COLOR.match(v):
+            raise ValueError("color do marcador precisa ser #RRGGBB (ex.: #e0a020)")
+        return v
+
+    @field_validator("group")
+    @classmethod
+    def _group_name(cls, v: str) -> str:
+        v = v.strip()
+        if "/" in v:
+            raise ValueError(
+                "o nome do grupo não pode ter `/` (a barra separa grupo e texto em marker:grupo/texto)"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _instant_or_region(self) -> Marker:
+        if self.at is not None:
+            if self.start is not None or self.end is not None:
+                raise ValueError("marcador com `at` (instante) não tem `start` nem `end` (região)")
+            return self
+        if self.start is None or self.end is None:
+            raise ValueError("marcador precisa de `at` (instante) ou de `start` e `end` (região)")
+        if self.end <= self.start:
+            raise ValueError("`end` do marcador precisa ser maior que `start` (para um instante, use `at`)")
+        return self
+
+    @property
+    def is_region(self) -> bool:
+        return self.at is None
+
+    @property
+    def begin(self) -> float:
+        """Onde o marcador começa: o instante, ou o início da região."""
+        return self.at if self.at is not None else self.start  # type: ignore[return-value]
+
+    @property
+    def finish(self) -> float:
+        """Onde o marcador termina: o próprio instante, ou o fim da região."""
+        return self.at if self.at is not None else self.end  # type: ignore[return-value]
+
+
 class Project(Strict):
     name: str
     version: int = 1
@@ -836,6 +899,9 @@ class Project(Strict):
     # retângulos nomeados do quadro (ex.: "topo", "rosto" no modelo "explicativo"); as sobreposições se
     # encaixam neles por `region`, e infográficos e composições usam o mesmo nome (ver `domain.regions`)
     regions: dict[str, Region] = {}
+    # trilha de marcadores no tempo FINAL: não entra em hash de mezanino nem na receita da prévia (não muda a imagem
+    # nem o som), e `to_bytes` a omite quando vazia para o `spec.json` de um projeto antigo seguir idêntico
+    markers: list[Marker] = []
     base_dir: Path | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
@@ -919,7 +985,9 @@ class Project(Strict):
 
     def to_bytes(self) -> bytes:
         """Os bytes que `save` grava; a revisão do arquivo depois de salvo é a deste conteúdo."""
-        return self.model_dump_json(indent=2, exclude_none=True).encode("utf-8")
+        # sem marcador o campo não vai para o arquivo: o `spec.json` de um projeto antigo não muda ao ser salvo de novo
+        exclude = None if self.markers else {"markers"}
+        return self.model_dump_json(indent=2, exclude_none=True, exclude=exclude).encode("utf-8")
 
     def save(self, path: Path | str) -> Path:
         """Grava por troca atômica: a interface, o MCP e a CLI escrevem a mesma spec e nenhum lê metade dela."""

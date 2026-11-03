@@ -132,13 +132,25 @@ export function isOverlayTrack(trackId: string, item: Pick<TimelineItem, 'kind'>
   return /^V\d+$/.test(trackId) && trackId !== 'V1'
 }
 
-/** O item se arrasta: trecho da V1, sobreposição, ou fala da narração (que só se desloca). */
-export function isDraggable(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
-  return trackId === 'V1' || trackId === 'NAR' || isOverlayTrack(trackId, item)
+/** Uma trilha de marcadores por grupo: `MK` para o grupo padrão e `MK:<grupo>` para os nomeados. */
+export function isMarkerTrack(trackId: string): boolean {
+  return trackId === 'MK' || trackId.startsWith('MK:')
 }
 
-/** As alças de aparar só existem onde aparar faz sentido: a fala da narração tem a duração que a voz levou. */
-export function hasTrimHandles(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
+/** O marcador é um instante (uma linha só), não uma região. */
+export function isInstantMarker(item: Partial<Pick<TimelineItem, 'extra'>>): boolean {
+  return item.extra?.instant === true
+}
+
+/** O item se arrasta: trecho da V1, sobreposição, marcador, ou fala da narração (que só se desloca). */
+export function isDraggable(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
+  return trackId === 'V1' || trackId === 'NAR' || isMarkerTrack(trackId) || isOverlayTrack(trackId, item)
+}
+
+/** As alças de aparar só existem onde aparar faz sentido: a fala da narração tem a duração que a voz levou, e um
+ * marcador pontual não tem bordas (só a região tem). */
+export function hasTrimHandles(trackId: string, item: Pick<TimelineItem, 'kind'> & Partial<Pick<TimelineItem, 'extra'>>): boolean {
+  if (isMarkerTrack(trackId)) return !isInstantMarker(item)
   return isDraggable(trackId, item) && trackId !== 'NAR'
 }
 
@@ -174,6 +186,8 @@ export function trackTitle(track: Pick<TimelineTrack, 'id' | 'label'>): string {
   if (known) return `${known} (${track.id})`
   if (/^V\d+$/.test(track.id)) return `Vídeo sobreposto (${track.id})`
   if (/^A\d+$/.test(track.id)) return `Faixa de áudio externa (${track.id})`
+  if (track.id === 'MK') return 'Marcadores (MK)'
+  if (isMarkerTrack(track.id)) return `Marcadores do grupo ${track.id.slice(3)} (${track.id})`
   return track.label
 }
 

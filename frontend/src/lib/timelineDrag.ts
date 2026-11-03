@@ -1,8 +1,9 @@
 /* O arrasto na linha do tempo, sem tocar no navegador: onde o fantasma fica a cada movimento do mouse e qual
    operação de edição sai quando o mouse é solto. Há três gestos: mover um trecho da V1 (muda a ordem), aparar uma
-   borda e deslocar um bloco (sobreposição ou fala da narração). */
+   borda e deslocar um bloco (sobreposição, fala da narração ou marcador). */
 import type { EditOperation, TimelineItem, TimelineTrack } from '@/api'
-import { MIN_ITEM_SECONDS, narrationMoveOp, roundSeconds, snapBlock, snapTime } from './timeline'
+import { markerMoveOperation } from './markers'
+import { isMarkerTrack, MIN_ITEM_SECONDS, narrationMoveOp, roundSeconds, snapBlock, snapTime } from './timeline'
 
 export type DragMode = 'move-v1' | 'trim' | 'shift'
 export type TrimSide = 'in' | 'out'
@@ -91,7 +92,7 @@ export function dragPreview(drag: DragStart, track: TimelineTrack, deltaSeconds:
 
 /**
  * A operação que o gesto solto vira, ou nulo se nada mudou. A V1 usa as operações de trecho (mover, aparar); as
- * sobreposições usam `overlay_span`; a fala da narração só desloca o início. Aparar uma sobreposição NÃO usa
+ * sobreposições usam `overlay_span`; a fala da narração só desloca o início; o marcador usa `marker_set`. Aparar uma sobreposição NÃO usa
  * `trim`: aquela operação mexe no trecho da V1 de mesmo índice.
  */
 export function dragOperation(drag: DragStart, track: TimelineTrack, preview: DragPreview): EditOperation | null {
@@ -104,6 +105,7 @@ export function dragOperation(drag: DragStart, track: TimelineTrack, preview: Dr
   }
   if (Math.abs(preview.start - original.start) < 0.001 && Math.abs(preview.end - original.end) < 0.001) return null
   if (drag.trackId === 'NAR') return narrationMoveOp(item, preview.start)
+  if (isMarkerTrack(drag.trackId)) return markerMoveOperation(item, preview)
   if (drag.mode === 'trim' && drag.side) {
     if (drag.trackId === 'V1') {
       const delta = drag.side === 'in' ? preview.start - original.start : preview.end - original.end

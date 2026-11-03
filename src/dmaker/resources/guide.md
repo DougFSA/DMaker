@@ -527,14 +527,16 @@ um bloco `multicam` pendente (chame `plan_multicam` antes).
 
 `edit_project(name, op)` carrega o projeto, aplica uma operação e salva, sem reescrever a spec inteira.
 `timeline_view(name)` devolve a vista multitrilha (V2/V3... picture-in-picture, TX texto, GR imagem/barra
-de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, MUS música, CC legendas), útil para
-descobrir índices e tempos antes de editar.
+de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, MUS música, CC legendas, MK marcadores:
+uma trilha por grupo, `MK` ou `MK:<grupo>`), útil para descobrir índices e tempos antes de editar.
 
 Operações (`op["type"]`): `split` (`index`, `at` em segundos desde o início do trecho), `remove`
 (`index`), `move` (`index`, `to`), `trim` (`index`, `side`: "in"/"out", `delta` em segundos), `duplicate`
 (`index`), `insert` (`index`, `segment`: dict do trecho novo), `overlay_span` (`index`, `start`, `end`),
 `overlay_remove` (`index`), `overlay_duplicate` (`index`), `set_field` (`path` com pontos e índices, ex.:
-`"timeline.2.speed"`, `"overlays.0.style.size"`, `"sources.cam1.sync"`; `value` = `None` volta ao padrão).
+`"timeline.2.speed"`, `"overlays.0.style.size"`, `"sources.cam1.sync"`; `value` = `None` volta ao padrão),
+`marker_add` (`at`, ou `start` e `end`; `text`, `color` `#RRGGBB`, `group`), `marker_set` (`index` ou
+`ref`: `"marker:<texto>"`; os campos a mudar) e `marker_remove` (`index` ou `ref`).
 
 ```
 edit_project("meu-reel", {"type": "split", "index": 1, "at": 2.5})
@@ -545,6 +547,28 @@ edit_project("meu-reel", {"type": "set_field", "path": "timeline.2.speed", "valu
 `project.tracks` (`dict[id da trilha] -> {"muted", "hidden", "locked"}`, ex.: `{"A2": {"muted": true}}`)
 guarda o mudo/oculto/bloqueio por trilha da interface (botões M/H/cadeado); vale para a prévia E para o
 render final (`domain.tracks.apply_track_state`), então uma faixa marcada aqui some do vídeo exportado.
+
+### Marcadores (`markers`, a trilha MK)
+
+`markers` é uma lista no tempo do **vídeo final**: `{"at": 42}` (instante) ou `{"start": 60, "end": 75}` (região),
+com `text`, `color` (`#RRGGBB`) e `group` (cada grupo é uma trilha, `MK:<grupo>`; vazio é a trilha padrão `MK`).
+Não entram em hash de mezanino nem mudam a imagem ou o som.
+
+- **Nome no lugar do instante**: onde a operação do `edit_project` pede um instante vale `"marker:<texto>"` (ou
+  `"marker:<grupo>/<texto>"` se o texto se repete): `{"type": "split", "at": "marker:refrão"}` corta exatamente no
+  marcador (sem `index`, no trecho que o contém) e `overlay_span` aceita o marcador em `start` e `end`. A busca
+  ignora maiúscula, acento e espaço; nome repetido ou que não existe é erro claro.
+- **Acompanham a edição**: `remove`, `trim`, `move`, `duplicate`, `insert` e `set_field` de trechos deslocam os
+  marcadores (cortar 3 s antes de um marcador o puxa 3 s). O que estava no trecho removido some e o aviso vem em
+  `edit_warnings` na resposta do `edit_project`; uma região que perdeu só uma parte encolhe. Desfazer um corte do
+  `autocut` empurra os marcadores seguintes para a frente.
+- **Audacity**: `markers_import(name, file, group, replace)` lê o `.txt` de rótulos do Audacity (início, fim e texto
+  separados por tabulação, em segundos; a linha de frequência `\` dos rótulos espectrais fica em `low_hz` e `high_hz`),
+  e `markers_export(name, out, group, newline)` escreve o mesmo formato, com seis casas decimais: a ida e volta
+  devolve o arquivo idêntico, byte a byte.
+- **Regulares**: `markers_regular(name, interval | parts, start, end, prefix, first_number, digits, group, color,
+  kind, replace)` cria um marcador a cada `interval` segundos ou em `parts` partes iguais (60 s a cada 15 s dá 4
+  regiões numeradas).
 
 ## Legendas automáticas
 

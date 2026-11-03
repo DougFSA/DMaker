@@ -266,6 +266,9 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "render_infographic_frame": "devolve imagem e o modelo local de texto não enxerga; confere-se com validate_project",
     "models": "baixa e apaga modelos grandes pela rede; é decisão de quem usa, em `dmaker models`",
     "list_jobs": "job_status com o número da tarefa já basta",
+    "markers_import": "lê um arquivo do Audacity que a pessoa tem no disco; o agente marca instantes por edit_project",
+    "markers_export": "grava um arquivo para o Audacity; é uma exportação que se pede por `dmaker markers export`",
+    "markers_regular": "gera dezenas de marcadores de uma vez; o modelo pequeno marca um a um por edit_project",
 }
 
 # Só com configuração explícita (`DMAKER_AGENT_FREE_HTML`, medida na avaliação) o modelo ganha HTML livre; com

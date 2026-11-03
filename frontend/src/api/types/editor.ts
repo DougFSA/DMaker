@@ -57,13 +57,13 @@ export interface CaptionsSaved {
 
 /* ---------- linha do tempo ---------- */
 
-export type TrackKind = 'video' | 'audio' | 'text' | 'graphics' | 'captions'
+export type TrackKind = 'video' | 'audio' | 'text' | 'graphics' | 'captions' | 'markers'
 
-/** Um item de uma trilha da vista (trecho, sobreposição, faixa de áudio, narração, música ou legenda). */
+/** Um item de uma trilha da vista (trecho, sobreposição, faixa de áudio, narração, música, legenda ou marcador). */
 export interface TimelineItem {
   id: string
   kind: string
-  /** Posição de origem do item: em `timeline`, `overlays` ou `audio.tracks`. */
+  /** Posição de origem do item: em `timeline`, `overlays`, `audio.tracks` ou `markers`. */
   index: number
   label: string
   start: number
@@ -194,7 +194,7 @@ export interface InstantFrame {
   percent?: number
 }
 
-/** As dez operações de POST /api/projects/{nome}/edit. */
+/** As treze operações de POST /api/projects/{nome}/edit. */
 export type EditOperation =
   | { type: 'split'; index: number; at: number }
   | { type: 'remove'; index: number }
@@ -206,10 +206,24 @@ export type EditOperation =
   | { type: 'overlay_remove'; index: number }
   | { type: 'overlay_duplicate'; index: number }
   | { type: 'set_field'; path: string; value: unknown }
+  | { type: 'marker_add'; at?: number; start?: number; end?: number; text?: string; color?: string; group?: string }
+  | {
+      type: 'marker_set'
+      index: number
+      at?: number
+      start?: number
+      end?: number
+      text?: string
+      color?: string | null
+      group?: string
+    }
+  | { type: 'marker_remove'; index: number }
 
 export interface EditResponse {
   spec: SpecDocument
   timeline: TimelineView
+  /** Os marcadores que a edição apagou por estarem num trecho cortado (um aviso por marcador). */
+  edit_warnings?: string[]
 }
 
 /* ---------- tema e cartões ---------- */
