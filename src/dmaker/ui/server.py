@@ -23,7 +23,9 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, config
+from ..domain.audio_presets import list_audio_presets
 from ..domain.brand import available_brands, load_theme
+from ..domain.outputs import frame_preset, output_extension, resolve_output
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
 from ..media.probe import MEDIA_EXTS
@@ -34,6 +36,7 @@ from ..pipeline.jobs import Job, JobManager
 from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
 from .agent_routes import build_agent_router
+from .audio_routes import audio_catalog, build_audio_router
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
@@ -72,6 +75,7 @@ app.include_router(build_voice_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
+app.include_router(build_audio_router(jobs))
 app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
@@ -212,7 +216,12 @@ def _output_entry(path: Path) -> dict:
 def _project_outputs(name: str) -> list[dict]:
     if not config.OUTPUT_DIR.exists():
         return []
-    files = sorted(config.OUTPUT_DIR.glob(f"{name}__*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    suffixes = (".mp4", *(preset.extension for preset in list_audio_presets()))
+    files = sorted(
+        (p for suffix in suffixes for p in config.OUTPUT_DIR.glob(f"{name}__*{suffix}")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return [_output_entry(p) for p in files]
 
 
@@ -220,7 +229,7 @@ def _summary_dict(summary: Any) -> dict:
     return {
         "name": summary.name,
         "preset": summary.preset.id,
-        "resolution": f"{summary.preset.width}x{summary.preset.height}",
+        "resolution": summary.preset.resolution,
         "theme": summary.theme.name,
         "total_s": round(summary.total, 2),
         "segments": [
@@ -250,7 +259,7 @@ def _result_dict(result: Any) -> dict:
         "duration_s": round(result.duration, 2),
         "size_mb": round(result.size_bytes / 1e6, 2),
         "preset": result.preset.id,
-        "resolution": f"{result.preset.width}x{result.preset.height}",
+        "resolution": result.preset.resolution,
         "captions_file": str(result.captions_file) if result.captions_file else None,
         "warnings": result.warnings,
     }
@@ -258,7 +267,7 @@ def _result_dict(result: Any) -> dict:
 
 def _run_render(job: Job, name: str, req: RenderRequest, preset: str | None = None) -> dict:
     from ..media.ffmpeg import SubprocessRunner
-    from ..pipeline import RenderOptions, RenderPipeline
+    from ..pipeline import RenderOptions, create_renderer
     from ..pipeline.projects import load_project, parse_segments
 
     project = load_project(name)
@@ -271,7 +280,7 @@ def _run_render(job: Job, name: str, req: RenderRequest, preset: str | None = No
         quiet=True,
         segments=parse_segments(req.segments),
     )
-    pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
+    pipeline = create_renderer(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     return _result_dict(pipeline.run())
 
 
@@ -301,6 +310,7 @@ def state() -> dict:
             }
             for p in list_presets()
         ],
+        **audio_catalog(),
         "brands": [
             {"key": b, "name": load_theme(b).name, "colors": load_theme(b).colors} for b in available_brands()
         ],
@@ -486,7 +496,7 @@ def project_boxes(name: str, services: Services, req: BoxesRequest | None = None
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
     try:
-        preset = get_preset(project.output.preset)
+        preset = frame_preset(project.output.preset)
         theme = load_theme(project.brand, project.theme)
     except (KeyError, FileNotFoundError, ValueError) as exc:
         raise _error(422, str(exc)) from exc
@@ -593,9 +603,9 @@ def qa_project(name: str, req: QaRequest | None = None) -> dict:
             if not _allowed_file(output):
                 raise _error(404, "arquivo não encontrado ou não permitido")
         else:
-            preset_id = get_preset(project.output.preset).id.replace("/", "-")
+            preset = resolve_output(project.output.preset)
             files = sorted(
-                config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"),
+                config.OUTPUT_DIR.glob(f"{name}__{preset.id.replace('/', '-')}{output_extension(preset)}"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -610,7 +620,7 @@ def qa_project(name: str, req: QaRequest | None = None) -> dict:
 def render_project(name: str, req: RenderRequest) -> dict:
     if req.preset:
         try:
-            get_preset(req.preset)
+            resolve_output(req.preset)
         except KeyError as exc:
             raise _error(400, str(exc)) from exc
     job = jobs.start(
@@ -625,7 +635,7 @@ def render_project(name: str, req: RenderRequest) -> dict:
 def export_project(name: str, req: ExportRequest) -> dict:
     for p in req.presets:
         try:
-            get_preset(p)
+            resolve_output(p)
         except KeyError as exc:
             raise _error(400, str(exc)) from exc
 

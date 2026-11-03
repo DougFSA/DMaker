@@ -15,7 +15,9 @@ from rich.table import Column, Table
 from typer.core import TyperGroup
 
 from . import __version__, config
+from .domain.audio_presets import list_audio_presets
 from .domain.models import format_size
+from .domain.outputs import resolve_output
 from .domain.presets import get_preset, list_presets
 
 
@@ -80,7 +82,7 @@ def _print_result(result) -> None:
     mb = result.size_bytes / 1e6
     console.print(
         f"[green]Pronto:[/green] {result.output}  ({result.duration:.1f}s, {mb:.1f} MB, "
-        f"{result.preset.id} {result.preset.width}x{result.preset.height})"
+        f"{result.preset.id} {result.preset.resolution})"
     )
     if result.thumbnail:
         console.print(f"  thumbnail: {result.thumbnail}")
@@ -323,6 +325,13 @@ def presets(
             p.notes,
         )
     console.print(table)
+    if platform is None or platform.lower() == "audio":
+        audio_table = Table(title="Presets de áudio (saída só de som, sem imagem)")
+        for col in ("id", "formato", "taxa e canais", "padrão", "obs"):
+            audio_table.add_column(col)
+        for a in list_audio_presets():
+            audio_table.add_row(a.id, a.name, a.resolution, a.default_label, a.notes)
+        console.print(audio_table)
 
 
 @app.command()
@@ -621,7 +630,7 @@ def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")])
         _fail(str(exc))
     console.print(
         f"[green]Spec válida.[/green] {s.name}: {len(s.segments)} trechos, {s.total:.1f}s, "
-        f"{s.preset.id} ({s.preset.width}x{s.preset.height}), tema {s.theme.name}"
+        f"{s.preset.id} ({s.preset.resolution}), tema {s.theme.name}"
     )
     for seg in s.segments:
         console.print(f"  [{seg.index}] {seg.type:5s} {seg.duration:6.2f}s  {seg.label}")
@@ -652,7 +661,7 @@ def render(
 ) -> None:
     """Renderiza o projeto no formato da plataforma. Por padrão abre a interface para acompanhar."""
     from .media.ffmpeg import FFmpegError, NullSink, RichSink
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
     from .pipeline.projects import parse_segments
 
     project = _load(spec)
@@ -686,7 +695,7 @@ def render(
         return
 
     try:
-        result = RenderPipeline(project, options).run()
+        result = create_renderer(project, options).run()
     except (FFmpegError, *RENDER_ERRORS) as exc:
         _fail(str(exc))
     if dry_run:
@@ -712,11 +721,11 @@ def export(
 ) -> None:
     """Exporta o mesmo projeto para vários formatos de uma vez. Por padrão abre a interface para acompanhar."""
     from .media.ffmpeg import FFmpegError, RichSink
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
 
     project = _load(spec)
     for p in presets:
-        get_preset(p)
+        resolve_output(p)
 
     dispatcher = None
     ui_name = None if no_ui else _project_name_for_ui(spec, project)
@@ -740,7 +749,7 @@ def export(
             _print_ui_result(snapshot.get("result") or {})
             continue
         try:
-            result = RenderPipeline(project, RenderOptions(preview=preview, preset=p)).run()
+            result = create_renderer(project, RenderOptions(preview=preview, preset=p)).run()
         except (FFmpegError, *RENDER_ERRORS) as exc:
             _fail(str(exc))
         _print_result(result)
@@ -2559,7 +2568,7 @@ def lexicon_remove(
 # ---------- áudio ----------
 
 audio_app = typer.Typer(
-    help="Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs.",
+    help="Áudio: exportar o projeto como WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF (inteiro, por região, por trilha ou só um trecho), importar áudio bruto e isolar a voz (voz de um lado, música e ruído do outro) com o modelo local Demucs.",
     no_args_is_help=True,
 )
 app.add_typer(audio_app, name="audio")
@@ -2818,6 +2827,167 @@ def markers_regular_command(
     console.print(
         f"[green]{result.added} marcador(es) criado(s).[/green] O projeto tem {len(result.project.markers)}."
     )
+
+
+# ---------- áudio: projeto só de som, exportação e áudio bruto ----------
+
+
+def _seconds_or_marker(value: str | None) -> float | str | None:
+    """Um tempo da linha de comando: segundos (`12.5`) ou uma referência a marcador (`marker:Introdução`)."""
+    if value is None:
+        return None
+    try:
+        return float(value.replace(",", "."))
+    except ValueError:
+        return value
+
+
+@audio_app.command("presets")
+def audio_presets_command() -> None:
+    """Lista os formatos de arquivo de áudio com o padrão de cada um e os alvos de loudness."""
+    from .domain.loudness import LOUDNESS_TARGETS
+
+    table = Table(title="Formatos de áudio")
+    for col in ("id", "formato", "taxa e canais", "padrão", "opções", "obs"):
+        table.add_column(col)
+    for a in list_audio_presets():
+        if a.bit_depths:
+            options = "bits: " + ", ".join(str(depth) for depth in a.bit_depths)
+        else:
+            options = "modos: " + ", ".join(a.bitrate_modes)
+        table.add_row(a.id, a.name, a.resolution, a.default_label, options, a.notes)
+    console.print(table)
+    targets = ", ".join(f"{name} ({lufs:g})" for name, lufs in LOUDNESS_TARGETS.items())
+    console.print(f"Alvos de loudness (--loudness): {targets} LUFS, ou um número.")
+
+
+@audio_app.command("export")
+def audio_export_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json (ou o nome do projeto).")],
+    preset: Annotated[
+        str | None,
+        typer.Option(help="Formato do arquivo: audio/mp3, audio/wav, audio/flac... (padrão: o do projeto)."),
+    ] = None,
+    mode: Annotated[
+        str, typer.Option(help="mix (inteiro), regions (um por região), stems (um por trilha) ou selection.")
+    ] = "mix",
+    out: Annotated[Path | None, typer.Option(help="Arquivo de saída (mix e seleção).")] = None,
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (regiões e trilhas).")] = None,
+    group: Annotated[str | None, typer.Option(help="Regiões: só deste grupo de marcadores.")] = None,
+    pauses: Annotated[
+        bool, typer.Option("--pauses", help="Regiões: exporta também o áudio entre elas (pausa-01...).")
+    ] = False,
+    numbered: Annotated[bool, typer.Option("--numbered", help="Regiões: número na frente do nome.")] = False,
+    start: Annotated[str | None, typer.Option(help="Seleção: início em segundos ou marker:<texto>.")] = None,
+    end: Annotated[
+        str | None, typer.Option(help="Seleção: fim em segundos ou marker:<texto> (padrão: o fim).")
+    ] = None,
+    tracks: Annotated[
+        str | None, typer.Option(help="Trilhas: quais, separadas por vírgula (NAR,VO,MUS,SFX,A1).")
+    ] = None,
+    loudness: Annotated[
+        str | None,
+        typer.Option(
+            help="Alvo de loudness: redes (-14), podcast (-16), broadcast (-23) ou um número em LUFS."
+        ),
+    ] = None,
+    sample_rate: Annotated[int | None, typer.Option(help="Taxa de amostragem em Hz.")] = None,
+    channels: Annotated[int | None, typer.Option(help="1 (mono) ou 2 (estéreo).")] = None,
+    bit_depth: Annotated[
+        int | None, typer.Option(help="16, 24 ou 32 (ponto flutuante); WAV, FLAC e AIFF.")
+    ] = None,
+    bitrate: Annotated[int | None, typer.Option(help="Taxa de bits em kbps (MP3, OGG, Opus, M4A).")] = None,
+    bitrate_mode: Annotated[str | None, typer.Option(help="cbr, vbr ou abr.")] = None,
+    quality: Annotated[
+        float | None, typer.Option(help="Qualidade do modo VBR (MP3: 0 a 9; OGG: -1 a 10).")
+    ] = None,
+) -> None:
+    """Exporta o áudio do projeto, sem imagem, como um arquivo (ou vários, por região ou por trilha)."""
+    from .domain.audio_presets import AudioFormatError, EncodingChoices
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_service import export_audio_project, export_request, result_dict
+
+    choices = EncodingChoices(sample_rate, channels, bit_depth, bitrate_mode, bitrate, quality)  # type: ignore[arg-type]
+    try:
+        request = export_request(
+            mode,
+            group=group,
+            pauses=pauses,
+            numbered=numbered,
+            start=_seconds_or_marker(start),
+            end=_seconds_or_marker(end),
+            tracks=[item.strip() for item in tracks.split(",") if item.strip()] if tracks else None,
+        )
+        result = export_audio_project(
+            spec,
+            request,
+            preset=preset,
+            out=out,
+            out_dir=out_dir,
+            loudness=loudness,
+            choices=None if choices.empty else choices,
+        )
+    except (FFmpegError, AudioFormatError, ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    for item in result_dict(result)["files"]:
+        console.print(
+            f"[green]Pronto:[/green] {item['path']}  ({item['duration_s']:.2f}s, {item['size_mb']:.2f} MB)",
+            highlight=False,
+            soft_wrap=True,
+        )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("import-raw")
+def audio_import_raw_command(
+    spec: Annotated[
+        Path, typer.Argument(help="Caminho do spec.json ou nome do projeto (criado se não existir).")
+    ],
+    raw: Annotated[Path, typer.Argument(help="Arquivo de áudio bruto (PCM sem cabeçalho).")],
+    encoding: Annotated[
+        str, typer.Option(help="s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw.")
+    ] = "s16",
+    byte_order: Annotated[str, typer.Option(help="little ou big.")] = "little",
+    channels: Annotated[int, typer.Option(help="Canais (1 mono, 2 estéreo).")] = 1,
+    sample_rate: Annotated[int, typer.Option(help="Taxa de amostragem em Hz.")] = 44100,
+    offset_bytes: Annotated[int, typer.Option(help="Bytes a pular no começo do arquivo.")] = 0,
+    percent: Annotated[float, typer.Option(help="Quanto do arquivo importar, em por cento.")] = 100.0,
+    start: Annotated[
+        float, typer.Option(help="Instante do projeto em que o áudio entra, em segundos.")
+    ] = 0.0,
+    volume: Annotated[float, typer.Option(help="Volume do áudio importado.")] = 1.0,
+    name: Annotated[str | None, typer.Option(help="Nome do WAV gerado (sem a extensão).")] = None,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Troca um WAV que já exista.")] = False,
+) -> None:
+    """Importa áudio bruto como voz gravada do projeto: converte para um WAV na pasta dele (o arquivo original não muda)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_import import RawImportError, import_raw_audio
+
+    try:
+        imported = import_raw_audio(
+            spec,
+            raw,
+            encoding=encoding,
+            byte_order=byte_order,
+            channels=channels,
+            sample_rate=sample_rate,
+            offset_bytes=offset_bytes,
+            percent=percent,
+            start=start,
+            volume=volume,
+            name=name,
+            overwrite=overwrite,
+        )
+    except (FFmpegError, RawImportError, ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Importado:[/green] {imported.wav}  ({imported.duration:.2f}s) como voz gravada em {start:g}s.",
+        highlight=False,
+        soft_wrap=True,
+    )
+    if imported.created_project:
+        console.print("Projeto novo, só de áudio (saída audio/wav).")
 
 
 # ---------- modelos ----------

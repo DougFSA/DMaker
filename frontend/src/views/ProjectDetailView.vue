@@ -4,6 +4,7 @@ import {
   api,
   ApiError,
   errorMessage,
+  type AudioExportRequest,
   type ProjectDetail,
   type QaReport,
   type RenderResult,
@@ -15,6 +16,7 @@ import VideoPlayerDialog, { type PlayableVideo } from '@/components/outputs/Vide
 import CutsCard from '@/components/projects/CutsCard.vue'
 import JobProgressCard from '@/components/projects/JobProgressCard.vue'
 import QaReportCard from '@/components/projects/QaReportCard.vue'
+import AudioExportDialog from '@/components/projects/AudioExportDialog.vue'
 import RenderDialog, { type RenderChoice } from '@/components/projects/RenderDialog.vue'
 import ValidationCard from '@/components/projects/ValidationCard.vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
@@ -22,6 +24,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { useAudioExport } from '@/composables/useAudioExport'
 import { playableFromOutput, playableFromRender } from '@/lib/outputs'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
@@ -45,6 +48,8 @@ const busy = ref<'validate' | 'qa' | null>(null)
 const undoingCut = ref<number | null>(null)
 
 const renderOpen = ref(false)
+const audioOpen = ref(false)
+const audioExport = useAudioExport()
 const starting = ref(false)
 const playing = ref<PlayableVideo | null>(null)
 const playerOpen = ref(false)
@@ -127,6 +132,10 @@ async function runQa(): Promise<void> {
   }
 }
 
+async function startAudioExport(request: AudioExportRequest): Promise<void> {
+  if (await audioExport.start(props.name, request)) audioOpen.value = false
+}
+
 async function startRender(choice: RenderChoice): Promise<void> {
   starting.value = true
   try {
@@ -202,6 +211,7 @@ watch(() => props.name, load, { immediate: true })
           <AppIcon name="film" :size="18" />
           Abrir no editor
         </AppButton>
+        <AppButton @click="audioOpen = true">Exportar áudio</AppButton>
         <AppButton variant="primary" @click="renderOpen = true">
           <AppIcon name="play" :size="18" />
           Renderizar
@@ -240,6 +250,13 @@ watch(() => props.name, load, { immediate: true })
       </div>
 
       <RenderDialog v-model:open="renderOpen" :project-name="detail.name" :busy="starting" @submit="startRender" />
+      <AudioExportDialog
+        v-model:open="audioOpen"
+        :project-name="detail.name"
+        :current-preset="detail.spec.output?.preset"
+        :busy="audioExport.starting.value"
+        @submit="startAudioExport"
+      />
       <VideoPlayerDialog v-model:open="playerOpen" :video="playing" />
     </template>
   </div>

@@ -44,6 +44,9 @@ DEFAULT_THEME = {
     },
     "card_layouts": {},
     "looks": {},
+    # modelo das etiquetas do arquivo de áudio (artista, álbum, comentário...): o que `output.metadata` da spec
+    # não preenche vem daqui (ver `domain/audio_metadata.py`)
+    "metadata": {},
 }
 
 
@@ -72,6 +75,7 @@ class Theme:
     captions: dict = field(default_factory=dict)
     card_layouts: dict[str, dict] = field(default_factory=dict)
     looks: dict[str, dict] = field(default_factory=dict)  # acabamentos visuais da marca (ver domain/looks.py)
+    metadata: dict[str, str] = field(default_factory=dict)  # modelo das etiquetas do áudio exportado
     base_dir: Path | None = None  # pasta da marca, para resolver fundos, imagens e fontes de layout
     key: str = "default"
 
@@ -131,7 +135,17 @@ class Theme:
 
 def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
     merged = json.loads(json.dumps(DEFAULT_THEME))
-    for section in ("colors", "fonts", "rules", "cta", "style", "captions", "card_layouts", "looks"):
+    for section in (
+        "colors",
+        "fonts",
+        "rules",
+        "cta",
+        "style",
+        "captions",
+        "card_layouts",
+        "looks",
+        "metadata",
+    ):
         merged[section].update(data.get(section, {}))
     merged["name"] = data.get("name", merged["name"])
     logos = {}
@@ -160,6 +174,7 @@ def _from_dict(data: dict, base: Path | None, key: str) -> Theme:
         captions=merged["captions"],
         card_layouts=merged["card_layouts"],
         looks=merged["looks"],
+        metadata={str(k): str(v) for k, v in merged["metadata"].items()},
         base_dir=base,
         key=key,
     )

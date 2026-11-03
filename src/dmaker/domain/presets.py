@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from .audio_presets import is_audio_preset
+
 
 @dataclass(frozen=True)
 class SafeZone:
@@ -32,6 +34,11 @@ class Preset:
     audio_k: int = 192
     safe: SafeZone = SafeZone()
     notes: str = ""
+
+    @property
+    def resolution(self) -> str:
+        """O tamanho do quadro como aparece nos resumos (`1080x1920`); o preset de áudio mostra taxa e canais."""
+        return f"{self.width}x{self.height}"
 
     @property
     def aspect(self) -> float:
@@ -334,8 +341,15 @@ ALIASES: dict[str, str] = {
 
 
 def get_preset(name: str) -> Preset:
+    """O preset de VÍDEO. Os de áudio (`audio/mp3`...) têm a sua própria função (`get_audio_preset`); quem aceita
+    os dois usa `resolve_output` (`domain/outputs.py`)."""
     key = name.strip().lower()
     key = ALIASES.get(key, key)
+    if is_audio_preset(key):
+        raise KeyError(
+            f"{name!r} é um preset de áudio e não tem imagem: use um preset de áudio só onde a saída é um "
+            "arquivo de som (render ou exportação)"
+        )
     if key not in PRESETS:
         options = ", ".join(sorted(PRESETS))
         raise KeyError(f"Preset desconhecido: {name!r}. Opções: {options}")

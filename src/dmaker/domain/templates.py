@@ -43,6 +43,7 @@ from typing import Any
 from .. import config
 from .audiogram_template import prepare_audiogram
 from .explainer import prepare_explainer
+from .podcast_template import prepare_podcast
 
 _VALID_TYPES = {"text", "path", "paths", "dir", "number", "bool", "list"}
 _NAME = r"[a-zA-Z_][a-zA-Z0-9_]*"
@@ -202,6 +203,7 @@ ParamPreparer = Callable[[dict[str, Any]], dict[str, Any]]
 PARAM_PREPARERS: dict[str, ParamPreparer] = {
     "explicativo": prepare_explainer,
     "audiograma": prepare_audiogram,
+    "podcast": prepare_podcast,
 }
 
 

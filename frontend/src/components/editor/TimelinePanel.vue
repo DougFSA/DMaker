@@ -422,6 +422,7 @@ onBeforeUnmount(() => {
   --tl-track: #24555a;
   --tl-music: #245a4e;
   --tl-narration: #6b3f73;
+  --tl-voiceover: #8a3f5e;
   --tl-captions: #555a5e;
   --tl-progress: #3a3f44;
   --tl-other: #1f5c63;

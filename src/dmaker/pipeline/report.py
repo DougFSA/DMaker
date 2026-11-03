@@ -30,6 +30,7 @@ from ..text.overlays import ROLE_DEFAULTS, effective_style, wrap_lines
 from .context import Prober
 from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
+from .output_kinds import qa_builder
 from .overlay_boxes import OverlayBox, overlay_boxes
 from .sync import OffsetFinder
 from .voiceover import known_voices
@@ -667,7 +668,11 @@ def build_report(
     output: Path | None = None,
     runner: FFmpegRunner | None = None,
 ) -> QAReport:
-    """Roda as checagens estáticas sempre; as da saída renderizada só quando `output` é informado."""
+    """Roda as checagens estáticas sempre; as da saída renderizada só quando `output` é informado. Uma saída só de
+    áudio tem o seu conferidor (`pipeline/audio_qa.py`), escolhido pelo tipo do preset."""
+    audio_qa = qa_builder(project)
+    if audio_qa is not None:
+        return audio_qa(project, prober=prober, offset_finder=offset_finder, output=output, runner=runner)
     layout = to_presentation(project, project_layout(project, prober, offset_finder))
     findings: list[Finding] = []
     checks: list[str] = []

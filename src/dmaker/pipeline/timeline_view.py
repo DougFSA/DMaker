@@ -5,7 +5,7 @@ Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-pic
 faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem, barra de progresso
 e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
 clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
-(narrações por texto), "MUS" (música), "CC" (legendas) e, por último, uma trilha de marcadores por grupo
+(narrações por texto), "VO" (arquivos de voz gravada, `audio.voiceover`), "MUS" (música), "CC" (legendas) e, por último, uma trilha de marcadores por grupo
 ("MK" para o grupo padrão, "MK:<grupo>" para os nomeados)."""
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .layout import ProjectLayout, to_presentation
 from .missing import MissingMedia
 from .sources import physical_source_names
 from .track_slices import track_slice, track_window
+from .voicefiles import voice_file_playtimes
 from .voiceover import estimate_narration_duration, narration_label
 
 
@@ -460,6 +461,37 @@ def _narration_track(
     return Track(id="NAR", kind="audio", label="NAR", items=items, muted=muted, hidden=hidden, locked=locked)
 
 
+def _voiceover_track(project: Project, layout: ProjectLayout) -> Track | None:
+    """Um item por arquivo de voz gravada (`audio.voiceover`), do instante em que entra até onde o trecho dele termina.
+    Arquivo ausente ou ilegível aparece com um segundo de largura, marcado como ausente pelo `missing`."""
+    clips = project.audio.voiceover
+    if not clips:
+        return None
+    muted, hidden, locked = _track_state(project, "VO")
+    playtimes = voice_file_playtimes(project, layout.prober)
+    items = []
+    for i, (clip, playtime) in enumerate(zip(clips, playtimes, strict=True)):
+        items.append(
+            TrackItem(
+                id=_item_id("VO", i),
+                kind="voiceover",
+                index=i,
+                label=clip.src,
+                start=clip.start,
+                end=clip.start + (playtime if playtime else 1.0),
+                in_point=clip.offset,
+                out_point=clip.end,
+                src=clip.src,
+                source=None,
+                transition=None,
+                muted=clip.volume <= 0 or muted,
+                extra={"volume": clip.volume},
+                path=str(project.resolve(clip.src)),
+            )
+        )
+    return Track(id="VO", kind="audio", label="VO", items=items, muted=muted, hidden=hidden, locked=locked)
+
+
 def _music_track(
     project: Project, layout: ProjectLayout, music_duration: float | None = None
 ) -> Track | None:
@@ -661,6 +693,10 @@ def build_timeline_view(
     narration_track = _narration_track(project, layout, narration_durations)
     if narration_track is not None:
         tracks.append(narration_track)
+
+    voiceover_track = _voiceover_track(project, layout)
+    if voiceover_track is not None:
+        tracks.append(voiceover_track)
 
     music_track = _music_track(project, layout, music_duration)
     if music_track is not None:

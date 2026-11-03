@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .. import config
-from ..domain.presets import get_preset
+from ..domain.outputs import frame_preset
 from ..domain.spec import HtmlOverlay, Project, Transition
 from ..domain.timeline import frame_range, instant_window, transitions_of
 from ..domain.tracks import apply_track_state
@@ -169,7 +169,7 @@ class InstantFrameRenderer:
 
     @staticmethod
     def _fps(project: Project) -> float:
-        return project.output.fps or get_preset(project.output.preset).fps
+        return project.output.fps or frame_preset(project.output.preset).fps
 
     def key(self, project: Project, t: float) -> str:
         """Hash da spec, do quadro pedido e dos arquivos que o quadro lê (data e tamanho): trocar um deles muda a

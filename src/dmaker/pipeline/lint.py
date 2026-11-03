@@ -49,7 +49,7 @@ def lint(
                 warnings.append(
                     f"{where}: contém travessão/meia-risca. Regra da marca {theme.name}: usar vírgula, ponto ou dois-pontos."
                 )
-    if segments[0].transition:
+    if segments and segments[0].transition:
         warnings.append("timeline[0].transition é ignorada (não existe trecho anterior).")
     for i in range(1, len(segments)):
         tr = segments[i].transition

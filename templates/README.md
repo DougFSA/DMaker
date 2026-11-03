@@ -120,8 +120,9 @@ chave `"prepare": "<nome>"` aponta para uma função pura registrada em `PARAM_P
 (`src/dmaker/domain/templates.py`). Ela recebe os parâmetros já validados, devolve os mesmos mais os valores
 derivados, e o JSON usa o resultado como qualquer outro parâmetro. Um `ValueError` da função vira
 `TemplateError` com o nome do template. Um template novo nessa situação registra a sua função, sem mexer no
-resto do motor. Hoje usam o `explicativo` (`src/dmaker/domain/explainer.py`) e o `audiograma`
-(`src/dmaker/domain/audiogram_template.py`, que confere o estilo e monta o trecho de fundo).
+resto do motor. Hoje usam o `explicativo` (`src/dmaker/domain/explainer.py`), o `audiograma`
+(`src/dmaker/domain/audiogram_template.py`, que confere o estilo e monta o trecho de fundo) e o `podcast`
+(`src/dmaker/domain/podcast_template.py`, que soma abertura, voz e encerramento e junta as etiquetas).
 
 Um parâmetro numérico pode declarar `"duration_of": "<outro parâmetro>"` (um arquivo de áudio ou vídeo): se o
 pedido o omite, quem cria o projeto (`new-from-template`, `new_from_template`, a interface) mede o arquivo com o
@@ -158,6 +159,7 @@ falta ou o que está errado, e chega assim até a CLI e o MCP.
 | `tutorial-tela-webcam.json` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
 | `explicativo.json` | Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima (região `topo`) livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro e o fundo trocando a cada assunto. | `gravacao`, `assuntos` (obrigatórios), `legendas`, `legenda_modo`, `foco`, `marca` |
 | `audiograma.json` | Audiograma para divulgar um corte de podcast, entrevista ou áudio de WhatsApp sem vídeo: a capa num círculo no meio, a onda ou as barras animadas no ritmo da fala (em volta da foto ou embaixo dela), o título no alto e a legenda automática. | `audio`, `capa` (obrigatórios), `titulo`, `estilo` (`circle`, `bars`, `wave`), `seguir`, `cor`, `fundo`, `legendas`, `legenda_modo`, `idioma`, `marca`; `duracao` omitida é a do áudio |
+| `podcast.json` | Episódio de podcast só de áudio: música de abertura, a voz gravada e música de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio. Sem imagem; a limpeza da voz entra quando o editor de áudio a oferecer. | `voz`, `trilha` (arquivos, obrigatórios), `abertura`, `encerramento`, `artista`, `titulo`, `album`, `faixa`, `ano`, `genero`, `comentario`, `loudness`, `formato`, `marca`; `duracao_voz` omitida é a do áudio |
 | `casamento-pascom.json` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (bloco `multicam`), cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data`, `trilha` (obrigatórios), `titulo`, `igreja`, `cidade`, `celebrante`, `diacono`, `cerimonial`, `musicos`, `inicio`, `fim` |
 
 Todos validam como `Project` quando renderizados com os valores padrão (mais valores fictícios

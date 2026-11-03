@@ -11,6 +11,7 @@ import { speechApi } from './speech'
 import { voiceApi } from './voice'
 import type {
   AppState,
+  AudioExportRequest,
   AutoCutRequest,
   BatchListItem,
   BatchReport,
@@ -58,6 +59,9 @@ export const api = {
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/render`, request),
     export: (name: string, presets: string[]) =>
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/export`, { presets }),
+    /** Exporta só o áudio (inteiro, por região, por trilha ou um trecho); um arquivo que já existe devolve 409. */
+    exportAudio: (name: string, request: AudioExportRequest) =>
+      http.post<JobStartResponse>(`/api/projects/${enc(name)}/audio-export`, request),
     /** Devolve ao projeto o trecho de um corte automático; responde com a lista de cortes atualizada. */
     undoCut: (name: string, cutId: number) =>
       http.post<CutReport>(`/api/projects/${enc(name)}/cuts/${cutId}/undo`),

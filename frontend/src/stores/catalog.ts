@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api, type BrandInfo, type PresetInfo, type TemplateInfo } from '@/api'
+import { api, type AudioPresetInfo, type BrandInfo, type LoudnessTargets, type PresetInfo, type TemplateInfo } from '@/api'
 
 /** Listas de referência que as telas só leem: presets, marcas e templates. */
 export const useCatalogStore = defineStore('catalog', () => {
   const presets = ref<PresetInfo[]>([])
+  const audioPresets = ref<AudioPresetInfo[]>([])
+  const loudnessTargets = ref<LoudnessTargets>({})
   const brands = ref<BrandInfo[]>([])
   const templates = ref<TemplateInfo[]>([])
   const loaded = ref(false)
@@ -17,6 +19,8 @@ export const useCatalogStore = defineStore('catalog', () => {
       try {
         const [state, templateList] = await Promise.all([api.state(), api.templates.list()])
         presets.value = state.presets
+        audioPresets.value = state.audio_presets ?? []
+        loudnessTargets.value = state.loudness_targets ?? {}
         brands.value = state.brands
         templates.value = templateList
         loaded.value = true
@@ -27,5 +31,5 @@ export const useCatalogStore = defineStore('catalog', () => {
     await loading
   }
 
-  return { presets, brands, templates, loaded, load }
+  return { presets, audioPresets, loudnessTargets, brands, templates, loaded, load }
 })

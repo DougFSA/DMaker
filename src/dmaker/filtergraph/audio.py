@@ -9,7 +9,7 @@ from typing import Protocol
 
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
-from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
+from .common import AUDIO_FMT_MIX, LOUDNORM_TRUE_PEAK_DB, Inputs
 from .sfx import SfxInput, sfx_streams
 
 
@@ -42,6 +42,31 @@ class AudioTaps:
 
     wanted: frozenset[str]
     labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class StemTaps:
+    """Cópias de cada barramento de som, tiradas antes da normalização, para exportar uma trilha por arquivo.
+
+    `wanted` diz quais trilhas (`A1`: o som dos trechos, com os PiPs; `NAR`: as narrações; `VO`: as vozes gravadas;
+    `MUS`: a música, já abaixada pelo ducking que sofre na mixagem; `SFX`: os efeitos sonoros) e `labels` volta
+    preenchido com o rótulo de cada cópia. Cada cópia é a trilha com o ganho que ela tem na mixagem e nada mais:
+    somadas, dão a mixagem inteira antes da normalização, que é o que permite a soma dos arquivos reproduzir o mix."""
+
+    wanted: frozenset[str]
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+STEM_TRACKS = ("A1", "NAR", "VO", "MUS", "SFX")
+
+
+def silent_base(lines: list[str], inputs: Inputs, total: float) -> str:
+    """O barramento de base de um projeto sem trechos de vídeo: silêncio da duração do projeto, no formato da
+    mixagem. Faz o papel do áudio dos clipes, e como o `amix` da mixagem acaba com a primeira entrada
+    (`duration=first`), é ele que fixa a duração do arquivo em `total`."""
+    index = inputs.add_silence(total)
+    lines.append(f"[{index}:a]{AUDIO_FMT_MIX}[ta_base]")
+    return "[ta_base]"
 
 
 def resolve_span(
@@ -81,6 +106,7 @@ def audio_graph(
     sfx: Sequence[SfxInput] = (),
     voice_files: Sequence[VoiceFileInput] = (),
     taps: AudioTaps | None = None,
+    stems: StemTaps | None = None,
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
@@ -90,6 +116,8 @@ def audio_graph(
     `sfx` (efeitos sonoros) somam-se por último, depois do ducking e antes do loudnorm: a música não abaixa
     por causa deles (o sidechain só enxerga a voz) e o loudnorm os conta. Sem `sfx` o grafo é o de sempre.
     `taps` pede cópias do barramento para o audiograma (ver `AudioTaps`); sem ele o grafo é o de sempre.
+    `stems` pede uma cópia de cada trilha para a exportação por trilha (ver `StemTaps`); sem ele o grafo é o de
+    sempre, linha por linha.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -104,8 +132,11 @@ def audio_graph(
     elif audio.voice_gain != 1:
         lines.append(f"{a}volume={audio.voice_gain:.3f}[a_gain]")
         a = "[a_gain]"
+    a = _stem_tap(lines, stems, "A1", a)
 
-    spoken = narration_streams(lines, inputs, narrations) + voice_file_streams(lines, inputs, voice_files)
+    narration_labels = _stem_group(lines, stems, "NAR", narration_streams(lines, inputs, narrations))
+    voice_file_labels = _stem_group(lines, stems, "VO", voice_file_streams(lines, inputs, voice_files))
+    spoken = narration_labels + voice_file_labels
     if spoken:
         lines.append(
             f"{a}{''.join(spoken)}amix=inputs={1 + len(spoken)}:duration=first"
@@ -120,12 +151,16 @@ def audio_graph(
         if music.ducking and (spoken or not audio.mute_clips):
             lines.append(f"{a}asplit=2[voice][sc]")
             sidechain_compress(lines, mus, "[sc]", music)
-            lines.append("[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
+            ducked = _stem_tap(lines, stems, "MUS", "[musd]")
+            lines.append(
+                f"[voice]{ducked}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]"
+            )
         else:
+            mus = _stem_tap(lines, stems, "MUS", mus)
             lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         a = "[amix]"
 
-    effects = sfx_streams(lines, inputs, sfx)
+    effects = _stem_group(lines, stems, "SFX", sfx_streams(lines, inputs, sfx))
     if effects:
         # sem normalizar (`normalize=0`): o nível de cada efeito já foi acertado contra a voz, e dividir por
         # N entradas o rebaixaria; `duration=first` corta o que passa do fim do vídeo
@@ -137,15 +172,8 @@ def audio_graph(
     a = _tap(lines, taps, "mix", a)
 
     if audio.normalize != "off" and include_norm:
-        ln = f"loudnorm=I={audio.target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11"
-        if measured:
-            ln += (
-                f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
-                f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-                f":offset={measured['target_offset']}:linear=true"
-            )
         # o loudnorm entrega 192 kHz; volta para 48 kHz
-        lines.append(f"{a}{ln},aresample=48000[a_norm]")
+        lines.append(f"{a}{loudnorm_filter(audio.target_lufs, measured)},aresample=48000[a_norm]")
         a = "[a_norm]"
     lines.append(f"{a}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]")
     return "[aout]"
@@ -170,6 +198,37 @@ def sidechain_compress(lines: list[str], music_bus: str, sidechain: str, music: 
     )
 
 
+def _stem_tap(lines: list[str], stems: StemTaps | None, name: str, a: str) -> str:
+    """Se a trilha `name` foi pedida, divide `a` em duas: a cópia fica em `stems.labels[name]` e o resto segue."""
+    if stems is None or name not in stems.wanted:
+        return a
+    lines.append(f"{a}asplit=2[stem_{name}_main][stem_{name}_tap]")
+    stems.labels[name] = f"[stem_{name}_tap]"
+    return f"[stem_{name}_main]"
+
+
+def _stem_group(lines: list[str], stems: StemTaps | None, name: str, labels: list[str]) -> list[str]:
+    """Como `_stem_tap`, para uma trilha que vem em vários fluxos (cada narração, cada voz gravada, cada efeito):
+    cada fluxo é dividido em dois, e as cópias se somam na trilha. Sem a trilha pedida devolve os fluxos como vieram."""
+    if stems is None or name not in stems.wanted or not labels:
+        return labels
+    mains, copies = [], []
+    for position, label in enumerate(labels):
+        main, copy = f"[stem_{name}{position}_main]", f"[stem_{name}{position}_tap]"
+        lines.append(f"{label}asplit=2{main}{copy}")
+        mains.append(main)
+        copies.append(copy)
+    if len(copies) == 1:
+        stems.labels[name] = copies[0]
+    else:
+        lines.append(
+            "".join(copies)
+            + f"amix=inputs={len(copies)}:duration=longest:dropout_transition=0:normalize=0[stem_{name}]"
+        )
+        stems.labels[name] = f"[stem_{name}]"
+    return mains
+
+
 def _tap(lines: list[str], taps: AudioTaps | None, name: str, a: str) -> str:
     """Se o audiograma pediu `name`, divide `a` em duas: a cópia fica em `taps.labels[name]` e o resto segue."""
     if taps is None or name not in taps.wanted:
@@ -177,6 +236,19 @@ def _tap(lines: list[str], taps: AudioTaps | None, name: str, a: str) -> str:
     lines.append(f"{a}asplit=2[a_{name}_main][a_{name}_tap]")
     taps.labels[name] = f"[a_{name}_tap]"
     return f"[a_{name}_main]"
+
+
+def loudnorm_filter(target_lufs: float, measured: dict | None = None) -> str:
+    """O `loudnorm` da normalização final. Com a medição da primeira passada (`measured`) ele aplica um ganho linear
+    único (modo de duas passadas); sem ela, trabalha de forma dinâmica numa passada só."""
+    ln = f"loudnorm=I={target_lufs:g}:TP={LOUDNORM_TRUE_PEAK_DB:g}:LRA=11"
+    if measured:
+        ln += (
+            f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
+            f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
+            f":offset={measured['target_offset']}:linear=true"
+        )
+    return ln
 
 
 def loudnorm_measure_graph(cur_a: str, target_lufs: float, out: str = "[ameas]") -> str:
