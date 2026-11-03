@@ -8,6 +8,7 @@ import { readStored, writeStored } from '@/lib/storage'
 import { useEditorStore } from './editor'
 
 const VOLUME_KEY = 'dmaker.editor.volume'
+const SAFE_ZONE_KEY = 'dmaker.editor.safe-zone'
 
 /** De onde vêm o relógio e os quadros: o navegador, ou um relógio falso nos testes. */
 export interface Scheduler {
@@ -34,6 +35,10 @@ function storedVolume(): number {
   return readStored(VOLUME_KEY) !== null && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1
 }
 
+function storedSafeZoneShown(): boolean {
+  return readStored(SAFE_ZONE_KEY) === '1'
+}
+
 export const usePlayerStore = defineStore('player', () => {
   const editor = useEditorStore()
 
@@ -41,6 +46,8 @@ export const usePlayerStore = defineStore('player', () => {
   const rate = ref(0)
   /** O volume geral do player, de 0 a 1 (vale para a mixagem e para o som ao vivo). */
   const volume = ref(storedVolume())
+  /** A zona segura do formato está desenhada sobre o palco (as margens que o app da rede social cobre). */
+  const safeZoneShown = ref(storedSafeZoneShown())
 
   const playing = computed(() => rate.value !== 0)
   const label = computed(() => rateLabel(rate.value))
@@ -119,6 +126,11 @@ export const usePlayerStore = defineStore('player', () => {
     seek(editor.total)
   }
 
+  function setSafeZoneShown(next: boolean): void {
+    safeZoneShown.value = next
+    writeStored(SAFE_ZONE_KEY, next ? '1' : '0')
+  }
+
   function setVolume(next: number): void {
     volume.value = Math.min(1, Math.max(0, next))
     writeStored(VOLUME_KEY, String(volume.value))
@@ -133,6 +145,8 @@ export const usePlayerStore = defineStore('player', () => {
   return {
     rate,
     volume,
+    safeZoneShown,
+    setSafeZoneShown,
     playing,
     label,
     maxLevel: MAX_SPEED_LEVEL,

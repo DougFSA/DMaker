@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /* As sobreposições do vídeo (texto, imagem, picture-in-picture e barra de progresso), uma por cartão. */
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import { OPEN_CARDS_LIMIT, useCardExpansion } from '@/composables/useCardExpansion'
 import { OVERLAY_TYPES, OVERLAY_TYPE_LABEL, newOverlay, stableKey, type OverlayType } from '@/lib/editorSpec'
@@ -13,6 +13,19 @@ const editor = useEditorStore()
 
 const overlays = computed(() => (editor.get('overlays') as Array<Record<string, unknown>> | undefined) ?? [])
 const cards = useCardExpansion(overlays.value.length)
+const list = ref<HTMLElement | null>(null)
+
+/** Mostra a sobreposição escolhida no palco: abre o bloco e o cartão e leva o cartão para dentro da tela. */
+function revealSelected(): void {
+  const index = editor.selectedOverlay
+  if (index === null) return
+  open.value = true
+  cards.reveal(overlays.value[index])
+  void nextTick(() => list.value?.querySelector(`[data-overlay-card="${index}"]`)?.scrollIntoView?.({ block: 'nearest' }))
+}
+
+watch(() => editor.overlayReveal, revealSelected)
+onMounted(revealSelected)
 
 function add(type: OverlayType): void {
   editor.mutate((spec) => {
@@ -35,8 +48,8 @@ function add(type: OverlayType): void {
     </p>
     <p v-if="overlays.length === 0" class="hint">Sem sobreposições ainda: textos, logos, vídeos em PiP e barra de progresso.</p>
 
-    <ul class="cards">
-      <li v-for="(overlay, index) in overlays" :key="stableKey(overlay)">
+    <ul ref="list" class="cards">
+      <li v-for="(overlay, index) in overlays" :key="stableKey(overlay)" :data-overlay-card="index">
         <OverlayCard
           :index="index"
           :overlay="overlay"

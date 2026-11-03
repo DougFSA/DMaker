@@ -9,6 +9,20 @@ export type SpecDocument = Record<string, unknown>
 export interface SaveProjectResponse {
   ok: boolean
   spec_path: string
+  /** A revisão do `spec.json` depois da gravação; servidor antigo não manda. */
+  revision?: string
+}
+
+/** GET /api/projects/{nome}/revision: a revisão do `spec.json` no disco, leve para consultar a cada poucos segundos. */
+export interface RevisionResponse {
+  revision: string
+}
+
+/** O corpo do 409 de PUT /api/projects/{nome} com `If-Match`: o disco mudou desde a última leitura. */
+export interface SaveConflictBody {
+  detail?: string
+  /** A revisão que está no disco agora; nula se o projeto deixou de existir. */
+  revision: string | null
 }
 
 /* ---------- legendas automáticas ---------- */
@@ -98,6 +112,64 @@ export interface TimelineView {
   tracks: TimelineTrack[]
   sources: Record<string, TimelineSource>
   warnings: string[]
+}
+
+/* ---------- caixas das sobreposições ---------- */
+
+/** O tipo da sobreposição de uma caixa: `progress-bar` e `audiogram` têm área mas não se movem. */
+export type BoxKind = 'text' | 'image' | 'video' | 'html' | 'progress-bar' | 'audiogram'
+
+/** De onde vem o lugar da sobreposição: `xy` (campos `x`/`y`), `position` (nomeada), `region`, `anchor` (HTML presa a
+ * uma palavra da legenda) ou `full` (HTML no quadro todo). */
+export type BoxPlacement = 'xy' | 'position' | 'region' | 'anchor' | 'full'
+
+/** Como a caixa se redimensiona: pela largura da quebra (texto), mantendo o aspecto (imagem, PiP), livre (HTML) ou não. */
+export type BoxResize = 'text_width' | 'keep_aspect' | 'free' | 'none'
+
+export type SafeZoneSide = 'top' | 'bottom' | 'left' | 'right'
+
+/** A caixa de uma sobreposição no quadro nativo do preset. Medidas em fração do quadro; ficam nulas onde o servidor
+ * não sabe o lugar (HTML presa a palavra, mídia sumida, modelo inválido), e então `movable` é falso. */
+export interface OverlayBox {
+  /** O índice da sobreposição em `spec.overlays`. */
+  index: number
+  kind: BoxKind
+  start: number
+  /** Nulo quando a sobreposição vai até o fim do vídeo. */
+  end: number | null
+  left: number | null
+  top: number | null
+  width: number | null
+  height: number | null
+  /** O ponto que o `x`/`y` da spec representa (o centro, ou a borda no texto alinhado à esquerda ou à direita). */
+  anchor: { x: number; y: number } | null
+  placement: BoxPlacement
+  region: string | null
+  resize: BoxResize
+  /** Só no texto: a área da quebra (`style.max_width`), com o preenchimento das duas pontas. */
+  wrap: { left: number; width: number } | null
+  movable: boolean
+  locked_reason: string | null
+  /** Os lados em que a caixa invade a zona segura (com 1 px de folga). */
+  outside_safe_zone: SafeZoneSide[]
+}
+
+/** As margens da zona segura do preset em fração do quadro (`top` e `bottom` sobre a altura, o resto sobre a largura). */
+export interface SafeZoneFractions {
+  top: number
+  bottom: number
+  left: number
+  right: number
+}
+
+/** POST /api/projects/{nome}/boxes: a conta única do render, do QA da zona segura e do palco. */
+export interface BoxLayout {
+  /** A resolução nativa do preset do projeto. */
+  width: number
+  height: number
+  safe_zone: SafeZoneFractions
+  /** Na ordem de `spec.overlays`. */
+  boxes: OverlayBox[]
 }
 
 /** As dez operações de POST /api/projects/{nome}/edit. */

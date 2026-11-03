@@ -1,7 +1,17 @@
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { editorSchema, outputFile, projectDetail, projectSpec, timelineItem, timelineView } from '@/test/editorFixtures'
+import {
+  boxLayout,
+  DISK_REVISION,
+  editorSchema,
+  outputFile,
+  overlayBox,
+  projectDetail,
+  projectSpec,
+  timelineItem,
+  timelineView,
+} from '@/test/editorFixtures'
 import { reply, routedFetch, type RoutedFetch } from '@/test/routedFetch'
 import { useToastsStore } from './toasts'
 import { useEditorStore, VIEW_REFRESH_DELAY_MS } from './editor'
@@ -14,6 +24,8 @@ function serve(extra: Record<string, unknown> = {}): RoutedFetch {
     'GET /api/schema': editorSchema,
     'GET /api/transitions': { curves: ['linear'], transitions: [{ name: 'fade', kind: 'xfade', summary: '' }] },
     'POST /api/projects/demo/timeline': () => timelineView(),
+    'POST /api/projects/demo/boxes': () => boxLayout(),
+    'GET /api/projects/demo/revision': { revision: DISK_REVISION },
     'PUT /api/projects/demo': { ok: true, spec_path: 'x' },
     ...extra,
   })
@@ -609,5 +621,451 @@ describe('digitação em espera (os campos com atraso do painel Filtros)', () =>
     field.stop()
     store.flushPendingEdits()
     expect(field.flush).not.toHaveBeenCalled()
+  })
+})
+
+describe('as caixas das sobreposições', () => {
+  it('pede as caixas junto da vista, sobre a spec podada, e guarda a resposta', async () => {
+    serve()
+    const store = await opened()
+    await flushPromises()
+    expect(fetch.to('POST /api/projects/demo/boxes')).toHaveLength(1)
+    expect(fetch.to('POST /api/projects/demo/boxes')[0]?.body).toMatchObject({ spec: { name: 'demo' } })
+    expect(store.boxes?.width).toBe(1080)
+    expect(store.boxes?.boxes[0]).toMatchObject({ index: 0, kind: 'text' })
+    expect(store.boxesError).toBe('')
+  })
+
+  it('uma mudança na spec pede as caixas de novo, com o mesmo atraso da vista', async () => {
+    serve()
+    const store = await opened()
+    await flushPromises()
+    store.setField('overlays.0.text', 'Outro')
+    store.setField('overlays.0.text', 'Outro título')
+    await vi.advanceTimersByTimeAsync(VIEW_REFRESH_DELAY_MS - 1)
+    expect(fetch.to('POST /api/projects/demo/boxes')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(2)
+    await flushPromises()
+    expect(fetch.to('POST /api/projects/demo/boxes')).toHaveLength(2)
+    const sent = fetch.to('POST /api/projects/demo/boxes')[1]?.body as { spec: { overlays: Array<{ text: string }> } }
+    expect(sent.spec.overlays[0]?.text).toBe('Outro título')
+  })
+
+  it('erro nas caixas (spec incompleta) fica em boxesError, mantém as anteriores e não atrapalha a vista', async () => {
+    serve()
+    const store = await opened()
+    await flushPromises()
+    fetch.set('POST /api/projects/demo/boxes', reply(422, { detail: 'texto vazio' }))
+    await store.refreshView()
+    await flushPromises()
+    expect(store.boxesError).toBe('texto vazio')
+    expect(store.boxes?.boxes).toHaveLength(1)
+    expect(store.viewError).toBe('')
+    expect(store.view).not.toBeNull()
+  })
+
+  it('servidor sem a rota ou resposta fora do contrato deixam o palco na posição aproximada', async () => {
+    serve({ 'POST /api/projects/demo/boxes': { nada: true } })
+    const store = await opened()
+    await flushPromises()
+    expect(store.boxes).toBeNull()
+    expect(store.status).toBe('ready')
+    fetch.set('POST /api/projects/demo/boxes', reply(404, { detail: 'não existe' }))
+    await store.refreshBoxes()
+    expect(store.boxes).toBeNull()
+    expect(store.boxesError).toBe('não existe')
+  })
+
+  it('uma resposta atrasada não sobrescreve a mais nova', async () => {
+    serve()
+    const store = await opened()
+    await flushPromises()
+    const late: Array<(value: unknown) => void> = []
+    let calls = 0
+    fetch.set('POST /api/projects/demo/boxes', () => {
+      calls += 1
+      return calls === 1 ? new Promise((resolve) => late.push(resolve)) : boxLayout([overlayBox({ index: 0, left: 0.3 })])
+    })
+    const first = store.refreshBoxes()
+    await flushPromises()
+    await store.refreshBoxes()
+    expect(store.boxes?.boxes[0]?.left).toBe(0.3)
+    late[0]?.(boxLayout([overlayBox({ index: 0, left: 0.9 })]))
+    await first
+    expect(store.boxes?.boxes[0]?.left).toBe(0.3)
+  })
+
+  it('uma operação da linha do tempo também refaz as caixas', async () => {
+    serve({ 'POST /api/projects/demo/edit': { spec: projectSpec(), timeline: timelineView() } })
+    const store = await opened()
+    await flushPromises()
+    await store.applyOp({ type: 'duplicate', index: 0 })
+    await flushPromises()
+    expect(fetch.to('POST /api/projects/demo/boxes')).toHaveLength(2)
+  })
+
+  it('fechar o projeto apaga as caixas, e uma resposta que chega depois não as traz de volta', async () => {
+    serve()
+    const store = await opened()
+    await flushPromises()
+    let release: (value: unknown) => void = () => undefined
+    fetch.set('POST /api/projects/demo/boxes', () => new Promise((resolve) => (release = resolve)))
+    const pending = store.refreshBoxes()
+    store.close()
+    release(boxLayout())
+    await pending
+    expect(store.boxes).toBeNull()
+  })
+})
+
+describe('a revisão do disco e o salvar', () => {
+  it('guarda a revisão que veio ao abrir e a manda no If-Match do Salvar', async () => {
+    serve({ 'PUT /api/projects/demo': { ok: true, spec_path: 'x', revision: 'rev-2' } })
+    const store = await opened()
+    expect(store.revision).toBe(DISK_REVISION)
+    store.setField('output.quality', 'draft')
+    expect(await store.save()).toBe(true)
+    expect(fetch.to('PUT /api/projects/demo')[0]?.headers).toMatchObject({ 'If-Match': DISK_REVISION })
+    // a gravação deu a revisão nova, e é ela que o próximo Salvar leva
+    expect(store.revision).toBe('rev-2')
+    store.setField('output.quality', 'medium')
+    await store.save()
+    expect(fetch.to('PUT /api/projects/demo')[1]?.headers).toMatchObject({ 'If-Match': 'rev-2' })
+  })
+
+  it('servidor sem revisão: grava como sempre, sem cabeçalho', async () => {
+    serve({ 'GET /api/projects/demo': () => ({ ...projectDetail(), revision: undefined }) })
+    const store = await opened()
+    expect(store.revision).toBeNull()
+    store.setField('output.quality', 'draft')
+    expect(await store.save()).toBe(true)
+    expect(fetch.to('PUT /api/projects/demo')[0]?.headers['If-Match']).toBeUndefined()
+  })
+
+  it('a spec inválida do disco também traz a revisão', async () => {
+    serve({
+      'GET /api/projects/demo': reply(422, { detail: [{ loc: ['timeline'], msg: 'vazia' }], raw_spec: { name: 'demo', timeline: [] }, revision: 'rev-9' }),
+    })
+    const store = await opened()
+    expect(store.revision).toBe('rev-9')
+  })
+
+  it('salvar em silêncio não mostra o aviso "Projeto salvo"', async () => {
+    serve()
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    await store.save({ quiet: true })
+    expect(store.dirty).toBe(false)
+    expect(useToastsStore().items.map((toast) => toast.title)).not.toContain('Projeto salvo')
+  })
+
+  it('409: nada é gravado, o editor abre a escolha e a spec da pessoa fica como está', async () => {
+    serve({ 'PUT /api/projects/demo': reply(409, { detail: 'O projeto mudou no disco desde a última leitura.', revision: 'rev-2' }) })
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    expect(await store.save()).toBe(false)
+    expect(store.conflict).toEqual({ revision: 'rev-2' })
+    expect(store.saveError).toBe('')
+    expect(store.dirty).toBe(true)
+    expect(store.get('output.quality')).toBe('draft')
+    expect(useToastsStore().items.filter((toast) => toast.tone === 'error')).toHaveLength(0)
+  })
+
+  it('"Manter o meu" grava por cima com a revisão do 409 e fecha a escolha', async () => {
+    let attempt = 0
+    serve({
+      'PUT /api/projects/demo': () =>
+        ++attempt === 1 ? reply(409, { detail: 'mudou', revision: 'rev-2' }) : { ok: true, spec_path: 'x', revision: 'rev-3' },
+    })
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    await store.save()
+    expect(await store.keepMine()).toBe(true)
+    const puts = fetch.to('PUT /api/projects/demo')
+    expect(puts[1]?.headers).toMatchObject({ 'If-Match': 'rev-2' })
+    expect(puts[1]?.body).toMatchObject({ output: { quality: 'draft' } })
+    expect(store.conflict).toBeNull()
+    expect(store.revision).toBe('rev-3')
+    expect(store.dirty).toBe(false)
+  })
+
+  it('"Manter o meu" depois que o projeto sumiu do disco grava sem cabeçalho', async () => {
+    let attempt = 0
+    serve({
+      'PUT /api/projects/demo': () => (++attempt === 1 ? reply(409, { detail: 'sumiu', revision: null }) : { ok: true, spec_path: 'x', revision: 'rev-1' }),
+    })
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    await store.save()
+    expect(store.conflict).toEqual({ revision: null })
+    await store.keepMine()
+    expect(fetch.to('PUT /api/projects/demo')[1]?.headers['If-Match']).toBeUndefined()
+    expect(store.conflict).toBeNull()
+  })
+
+  it('"Manter o meu" que leva outro 409 continua mostrando a escolha, com a revisão mais nova', async () => {
+    let attempt = 0
+    serve({ 'PUT /api/projects/demo': () => reply(409, { detail: 'mudou', revision: `rev-${++attempt + 1}` }) })
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    await store.save()
+    expect(await store.keepMine()).toBe(false)
+    expect(store.conflict).toEqual({ revision: 'rev-3' })
+  })
+
+  it('"Recarregar do disco" descarta o que não foi salvo, vira um passo do desfazer e devolve a escolha', async () => {
+    const onDisk = { ...projectSpec(), output: { ...(projectSpec().output as object), quality: 'max' } }
+    serve({
+      'PUT /api/projects/demo': reply(409, { detail: 'mudou', revision: 'rev-2' }),
+    })
+    const store = await opened()
+    store.setField('output.quality', 'draft')
+    await store.save()
+    fetch.set('GET /api/projects/demo', () => projectDetail({ spec: onDisk as never, revision: 'rev-2' }))
+    expect(await store.reloadFromConflict()).toBe(true)
+    expect(store.get('output.quality')).toBe('max')
+    expect(store.conflict).toBeNull()
+    expect(store.dirty).toBe(false)
+    expect(store.revision).toBe('rev-2')
+    expect(useToastsStore().items.at(-1)?.title).toBe('Projeto recarregado do disco')
+    // o que a pessoa tinha na tela volta pelo desfazer
+    expect(store.undo()).toBe(true)
+    expect(store.get('output.quality')).toBe('draft')
+    expect(store.dirty).toBe(true)
+  })
+})
+
+describe('a mudança de fora (consulta da revisão)', () => {
+  const changedOnDisk = () => ({ ...projectSpec(), output: { ...(projectSpec().output as object), quality: 'max' } })
+
+  async function openedWithDiskChange(revision = 'rev-2', spec: Record<string, unknown> = changedOnDisk()) {
+    serve({
+      'GET /api/projects/demo': () => projectDetail(),
+    })
+    const store = await opened()
+    await flushPromises()
+    fetch.set('GET /api/projects/demo/revision', { revision })
+    fetch.set('GET /api/projects/demo', () => projectDetail({ spec: spec as never, revision }))
+    return store
+  }
+
+  it('a mesma revisão não faz nada', async () => {
+    serve()
+    const store = await opened()
+    fetch.calls.length = 0
+    await store.checkDisk()
+    expect(fetch.to('GET /api/projects/demo/revision')).toHaveLength(1)
+    expect(fetch.to('GET /api/projects/demo')).toHaveLength(0)
+    expect(store.conflict).toBeNull()
+  })
+
+  it('sem nada por salvar, recarrega sozinho como um passo do desfazer e avisa', async () => {
+    const store = await openedWithDiskChange()
+    await store.checkDisk()
+    await flushPromises()
+    expect(store.get('output.quality')).toBe('max')
+    expect(store.revision).toBe('rev-2')
+    expect(store.dirty).toBe(false)
+    expect(store.conflict).toBeNull()
+    expect(useToastsStore().items.at(-1)?.title).toBe('O projeto foi atualizado fora do editor')
+    // Ctrl+Z devolve a versão que estava na tela (que agora difere do disco)
+    expect(store.undo()).toBe(true)
+    expect(store.get('output.quality')).toBe('high')
+    expect(store.dirty).toBe(true)
+  })
+
+  it('a vista e as caixas acompanham a spec recarregada', async () => {
+    const store = await openedWithDiskChange()
+    fetch.calls.length = 0
+    await store.checkDisk()
+    await flushPromises()
+    expect(fetch.to('POST /api/projects/demo/timeline')).toHaveLength(1)
+    expect(fetch.to('POST /api/projects/demo/boxes')).toHaveLength(1)
+  })
+
+  it('a revisão mudou mas o conteúdo é o mesmo: atualiza a revisão sem passo nem aviso', async () => {
+    const store = await openedWithDiskChange('rev-2', projectSpec())
+    await store.checkDisk()
+    await flushPromises()
+    expect(store.revision).toBe('rev-2')
+    expect(store.canUndo).toBe(false)
+    expect(useToastsStore().items).toHaveLength(0)
+  })
+
+  it('com mudança não salva, mostra a escolha e não toca na spec nem no disco', async () => {
+    const store = await openedWithDiskChange()
+    store.setField('output.quality', 'draft')
+    fetch.calls.length = 0
+    await store.checkDisk()
+    expect(store.conflict).toEqual({ revision: 'rev-2' })
+    expect(store.get('output.quality')).toBe('draft')
+    expect(store.dirty).toBe(true)
+    expect(fetch.to('GET /api/projects/demo')).toHaveLength(0)
+    expect(fetch.to('PUT /api/projects/demo')).toHaveLength(0)
+  })
+
+  it('com a escolha na tela, uma mudança nova só atualiza a revisão e nunca recarrega sozinho', async () => {
+    const store = await openedWithDiskChange()
+    store.setField('output.quality', 'draft')
+    await store.checkDisk()
+    // a pessoa desfaz tudo e o editor ficaria "limpo", mas a escolha continua para ela decidir
+    store.undo()
+    expect(store.dirty).toBe(false)
+    fetch.set('GET /api/projects/demo/revision', { revision: 'rev-3' })
+    fetch.calls.length = 0
+    await store.checkDisk()
+    expect(store.conflict).toEqual({ revision: 'rev-3' })
+    expect(fetch.to('GET /api/projects/demo')).toHaveLength(0)
+  })
+
+  it('campo ainda em digitação conta como mudança não salva (a escolha, e não o recarregamento)', async () => {
+    const store = await openedWithDiskChange()
+    store.onPendingEdits(() => store.setField('output.quality', 'draft'))
+    await store.checkDisk()
+    expect(store.conflict).toEqual({ revision: 'rev-2' })
+    expect(store.get('output.quality')).toBe('draft')
+  })
+
+  it('não consulta durante um gesto nem durante a gravação', async () => {
+    const store = await openedWithDiskChange()
+    fetch.calls.length = 0
+    store.beginGesture()
+    await store.checkDisk()
+    expect(fetch.to('GET /api/projects/demo/revision')).toHaveLength(0)
+    store.endGesture()
+    await store.checkDisk()
+    expect(fetch.to('GET /api/projects/demo/revision')).toHaveLength(1)
+  })
+
+  it('a resposta que chega durante um gesto é descartada, e a próxima consulta a trata', async () => {
+    const store = await openedWithDiskChange()
+    await store.checkDisk()
+    await flushPromises()
+    expect(store.revision).toBe('rev-2')
+    let release: (value: unknown) => void = () => undefined
+    fetch.set('GET /api/projects/demo/revision', () => new Promise((resolve) => (release = resolve)))
+    const pending = store.checkDisk()
+    store.beginGesture()
+    release({ revision: 'rev-3' })
+    await pending
+    expect(store.revision).toBe('rev-2')
+    expect(store.conflict).toBeNull()
+  })
+
+  it('descarta a resposta de uma consulta que saiu antes de uma gravação nossa', async () => {
+    serve({ 'PUT /api/projects/demo': { ok: true, spec_path: 'x', revision: 'rev-2' } })
+    const store = await opened()
+    let release: (value: unknown) => void = () => undefined
+    fetch.set('GET /api/projects/demo/revision', () => new Promise((resolve) => (release = resolve)))
+    const pending = store.checkDisk()
+    await flushPromises()
+    store.setField('output.quality', 'draft')
+    await store.save()
+    // a consulta saiu antes da gravação e traz a revisão de antes dela: não pode virar "mudou por fora"
+    release({ revision: DISK_REVISION })
+    await pending
+    expect(store.revision).toBe('rev-2')
+    expect(store.conflict).toBeNull()
+    expect(store.dirty).toBe(false)
+  })
+
+  it('uma consulta de cada vez', async () => {
+    const store = await openedWithDiskChange()
+    fetch.calls.length = 0
+    let release: (value: unknown) => void = () => undefined
+    fetch.set('GET /api/projects/demo/revision', () => new Promise((resolve) => (release = resolve)))
+    const first = store.checkDisk()
+    await store.checkDisk()
+    expect(fetch.to('GET /api/projects/demo/revision')).toHaveLength(1)
+    release({ revision: store.revision })
+    await first
+  })
+
+  it('sem revisão conhecida na abertura, a primeira consulta só aprende a revisão', async () => {
+    serve({ 'GET /api/projects/demo': () => ({ ...projectDetail(), revision: undefined }) })
+    const store = await opened()
+    expect(store.revision).toBeNull()
+    await store.checkDisk()
+    expect(store.revision).toBe(DISK_REVISION)
+    expect(store.conflict).toBeNull()
+    expect(useToastsStore().items).toHaveLength(0)
+  })
+
+  it('consulta que falha (servidor ocupado, projeto sumiu) é silenciosa', async () => {
+    serve({ 'GET /api/projects/demo/revision': reply(404, { detail: 'sumiu' }) })
+    const store = await opened()
+    await store.checkDisk()
+    expect(store.conflict).toBeNull()
+    expect(useToastsStore().items).toHaveLength(0)
+  })
+
+  it('se não der para ler o disco, a escolha vai para a tela em vez de um erro a cada consulta', async () => {
+    const store = await openedWithDiskChange()
+    fetch.set('GET /api/projects/demo', reply(500, { detail: 'disco ocupado' }))
+    await store.checkDisk()
+    expect(store.conflict).toEqual({ revision: 'rev-2' })
+    expect(useToastsStore().items.filter((toast) => toast.tone === 'error')).toHaveLength(0)
+  })
+
+  it('disco com spec inválida: abre para consertar na aba JSON, como na abertura', async () => {
+    const store = await openedWithDiskChange()
+    fetch.set(
+      'GET /api/projects/demo',
+      reply(422, { detail: [{ loc: ['timeline'], msg: 'vazia' }], raw_spec: { name: 'demo', timeline: [] }, revision: 'rev-2' }),
+    )
+    await store.checkDisk()
+    await flushPromises()
+    expect(store.specErrors).toEqual(['timeline: vazia'])
+    expect(store.revision).toBe('rev-2')
+    expect((store.spec?.timeline as unknown[]).length).toBe(0)
+  })
+
+  it('trocar de projeto durante a consulta não deixa a resposta velha valer no projeto novo', async () => {
+    serve({ 'GET /api/projects/outro': () => projectDetail({ name: 'outro' }) })
+    const store = await opened()
+    let release: (value: unknown) => void = () => undefined
+    fetch.set('GET /api/projects/demo/revision', () => new Promise((resolve) => (release = resolve)))
+    const pending = store.checkDisk()
+    await store.open('outro')
+    release({ revision: 'rev-estranha' })
+    await pending
+    expect(store.name).toBe('outro')
+    expect(store.revision).toBe(DISK_REVISION)
+    expect(store.conflict).toBeNull()
+  })
+})
+
+describe('a sobreposição escolhida', () => {
+  it('escolher guarda o índice; "revelar" pede ao inspetor para mostrá-la', async () => {
+    serve()
+    const store = await opened()
+    expect(store.selectedOverlay).toBeNull()
+    store.selectOverlay(0)
+    expect(store.selectedOverlay).toBe(0)
+    expect(store.overlayReveal).toBe(0)
+    store.selectOverlay(0, { reveal: true })
+    store.selectOverlay(0, { reveal: true })
+    expect(store.overlayReveal).toBe(2)
+    store.selectOverlay(null, { reveal: true })
+    expect(store.selectedOverlay).toBeNull()
+    expect(store.overlayReveal).toBe(2)
+  })
+
+  it('um índice que deixou de existir (a sobreposição foi removida) não conta como escolhido', async () => {
+    serve()
+    const store = await opened()
+    store.selectOverlay(0)
+    store.mutate((spec) => {
+      ;(spec.overlays as unknown[]).length = 0
+    })
+    expect(store.selectedOverlay).toBeNull()
+  })
+
+  it('abrir outro projeto começa sem escolha', async () => {
+    serve({ 'GET /api/projects/outro': () => projectDetail({ name: 'outro' }) })
+    const store = await opened()
+    store.selectOverlay(0)
+    await store.open('outro')
+    expect(store.selectedOverlay).toBeNull()
   })
 })

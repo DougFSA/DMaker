@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /* A moldura de um cartão da lista de trechos ou de sobreposições: número, resumo, tipo e as ações de subir,
-   descer, duplicar e remover. O formulário do item entra pelo slot e só é desenhado com o cartão aberto. */
+   descer, duplicar e remover. O formulário do item entra pelo slot e só é desenhado com o cartão aberto. Quem usa
+   pode marcar o cartão como escolhido (`selected`) e ouvir `select`, que sai quando a pessoa clica ou foca nele. */
 import { computed } from 'vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -24,17 +25,25 @@ const props = defineProps<{
   typeOptions: TypeOption[]
   canMoveUp: boolean
   canMoveDown: boolean
+  /** O cartão é o escolhido (a caixa dele no palco está em destaque). */
+  selected?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'change-type': [type: string]
   up: []
   down: []
   duplicate: []
   remove: []
+  select: []
 }>()
 
 const expanded = defineModel<boolean>('expanded', { default: false })
+
+function toggle(): void {
+  expanded.value = !expanded.value
+  emit('select')
+}
 
 /** "o trecho 2" / "a sobreposição 2", e as contrações "do" / "da". */
 const article = computed(() => (props.feminine ? 'a' : 'o'))
@@ -42,9 +51,9 @@ const named = computed(() => `${props.noun} ${props.position}`)
 </script>
 
 <template>
-  <article class="card" :data-expanded="expanded">
+  <article class="card" :data-expanded="expanded" :data-selected="selected ? 'true' : undefined" @focusin="$emit('select')">
     <header class="card__head">
-      <button type="button" class="card__toggle" :aria-expanded="expanded" @click="expanded = !expanded">
+      <button type="button" class="card__toggle" :aria-expanded="expanded" @click="toggle">
         <AppIcon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="16" />
         <AppBadge>{{ position }}</AppBadge>
         <span class="card__summary">{{ summary || 'sem conteúdo ainda' }}</span>
@@ -85,6 +94,11 @@ const named = computed(() => `${props.noun} ${props.position}`)
      calcula quando chegam perto; a altura do cartão recolhido (ou a última medida) segura a barra de rolagem */
   content-visibility: auto;
   contain-intrinsic-size: auto 3.25rem;
+}
+
+.card[data-selected='true'] {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
 }
 
 .card__head {

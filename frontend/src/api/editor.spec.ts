@@ -15,6 +15,30 @@ describe('cliente do editor: projeto, legendas e linha do tempo', () => {
     })
   })
 
+  it('salva com a revisão lida no If-Match, e sem ela salva como sempre', async () => {
+    const fetch = stubFetch({ ok: true, spec_path: 'x', revision: 'r2' })
+    await editorApi.saveProject('a', { name: 'a' }, 'r1')
+    expect(fetch.last().headers).toEqual({ 'Content-Type': 'application/json', 'If-Match': 'r1' })
+    await editorApi.saveProject('a', { name: 'a' })
+    expect(fetch.last().headers).toEqual({ 'Content-Type': 'application/json' })
+    await editorApi.saveProject('a', { name: 'a' }, null)
+    expect(fetch.last().headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
+  it('consulta a revisão do spec.json no disco', async () => {
+    const fetch = stubFetch({ revision: 'r1' })
+    expect(await editorApi.revision('meu projeto')).toEqual({ revision: 'r1' })
+    expect(fetch.last()).toMatchObject({ url: '/api/projects/meu%20projeto/revision', method: 'GET' })
+  })
+
+  it('pede as caixas das sobreposições da edição na tela ou do arquivo', async () => {
+    const fetch = stubFetch({ width: 1080, height: 1920, safe_zone: {}, boxes: [] })
+    await editorApi.boxes('a')
+    expect(fetch.last()).toMatchObject({ url: '/api/projects/a/boxes', method: 'POST', body: { spec: null } })
+    await editorApi.boxes('a', { name: 'a', overlays: [] })
+    expect(fetch.last().body).toEqual({ spec: { name: 'a', overlays: [] } })
+  })
+
   it('lê e grava as legendas', async () => {
     const fetch = stubFetch({})
     await editorApi.captions.get('a')

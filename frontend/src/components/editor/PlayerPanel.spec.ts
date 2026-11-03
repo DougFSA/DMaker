@@ -279,6 +279,28 @@ describe('transporte', () => {
     expect(panel.find('.transport__volume output').text()).toBe('50%')
   })
 
+  it('o botão da zona segura liga e desliga as margens do formato e guarda a preferência', async () => {
+    const panel = await mountPlayer()
+    const button = () => panel.find('button[aria-label="Zona segura"]')
+    expect(button().attributes('aria-pressed')).toBe('false')
+    expect(panel.find('[data-layer="safe-zone"]').exists()).toBe(false)
+    await button().trigger('click')
+    expect(button().attributes('aria-pressed')).toBe('true')
+    expect(panel.find('[data-layer="safe-zone"]').exists()).toBe(true)
+    expect(usePlayerStore().safeZoneShown).toBe(true)
+    expect(window.localStorage.getItem('dmaker.editor.safe-zone')).toBe('1')
+    await button().trigger('click')
+    expect(panel.find('[data-layer="safe-zone"]').exists()).toBe(false)
+    expect(window.localStorage.getItem('dmaker.editor.safe-zone')).toBe('0')
+  })
+
+  it('a zona segura ligada numa sessão volta ligada na próxima', async () => {
+    window.localStorage.setItem('dmaker.editor.safe-zone', '1')
+    const panel = await mountPlayer()
+    expect(panel.find('button[aria-label="Zona segura"]').attributes('aria-pressed')).toBe('true')
+    expect(panel.find('[data-layer="safe-zone"]').exists()).toBe(true)
+  })
+
   it('fechar o painel para o relógio e solta os áudios', async () => {
     await mountPlayer()
     usePlayerStore().play()

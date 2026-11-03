@@ -10,6 +10,8 @@ export interface RoutedCall {
   body: unknown
   /** O multipart, quando a chamada enviou arquivo (o `body` fica indefinido). */
   form: FormData | null
+  /** Os cabeçalhos que a chamada mandou (o `If-Match` da gravação, por exemplo). */
+  headers: Record<string, string>
 }
 
 export interface ReplyWith {
@@ -54,6 +56,7 @@ export function routedFetch(routes: Record<string, Handler>): RoutedFetch {
         url: String(input),
         body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
         form: init.body instanceof FormData ? init.body : null,
+        headers: (init.headers ?? {}) as Record<string, string>,
       }
       calls.push(call)
       const handler = table.get(`${method} ${path}`)

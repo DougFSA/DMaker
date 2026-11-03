@@ -1,21 +1,33 @@
 /* O que o palco do player desenha em cada instante: o trecho da V1 (vídeo, imagem ou cartão), as imagens e a barra
    de progresso (GR), os vídeos sobrepostos (PiP) e o texto (TX), cada um com o estilo já calculado. Puro: a tela
    só traduz estas descrições em elementos. Não mostra transições, movimento de câmera, legendas nem cor: a prévia
-   é aproximada, e o render é o que vale. */
-import { api, type ProjectTheme, type SpecDocument, type TimelineItem, type TimelineView } from '@/api'
+   é aproximada, e o render é o que vale. Texto, imagem e PiP ficam na caixa que o servidor calculou (`POST /boxes`,
+   a mesma conta do render); enquanto ela não chega, cada um cai numa posição aproximada pela spec. */
+import { api, type BoxLayout, type ProjectTheme, type SpecDocument, type TimelineItem, type TimelineView } from '@/api'
+import { boxRectStyle, placedBoxOf, textAlignOf, type PlacedBox } from './overlayBoxes'
 import { clipPlayback, fileTime, itemAt, mediaUrl, type SourceOffsetOf } from './player'
 
 type Loose = Record<string, unknown>
 
-/** Tamanhos de texto (px na base 1080) quando a sobreposição não define o seu, por papel. */
+/** Tamanhos de texto (Fontsize do ASS, na base 1080) quando a sobreposição não define o seu, por papel: os mesmos de
+ * `ROLE_DEFAULTS` em `text/overlays.py`, que o render usa. */
 const DEFAULT_TEXT_SIZES: Record<string, number> = {
-  hook: 90,
-  title: 90,
-  subtitle: 56,
-  cta: 60,
-  'lower-third': 56,
-  custom: 60,
+  hook: 92,
+  title: 80,
+  subtitle: 50,
+  cta: 54,
+  'lower-third': 48,
+  custom: 64,
 }
+
+/** O libass dimensiona o Fontsize pela célula da linha (winAscent + winDescent do OS/2), e o corpo que ele desenha é
+ * o Fontsize dividido por ela. Na Poppins, a fonte da marca, a célula vale 1,76 do corpo (`media/fonts.py`); o
+ * navegador usa o corpo, então o texto do palco divide o tamanho por este número para ocupar a caixa que o servidor mediu. */
+const LIBASS_CELL_RATIO = 1.76
+
+const FONT_WEIGHTS: Record<string, number> = { light: 300, regular: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800 }
+/** O peso de cada papel no render (`ROLE_DEFAULTS`): a legenda de apoio é média e os outros, em negrito. */
+const DEFAULT_TEXT_WEIGHT: Record<string, number> = { subtitle: 500 }
 
 export type CssStyle = Record<string, string>
 
@@ -24,6 +36,8 @@ export interface StageInput {
   spec: SpecDocument
   theme: ProjectTheme | null
   proxyUrls: Readonly<Record<string, string>>
+  /** As caixas do servidor para a spec na tela; sem elas, o palco desenha uma posição aproximada. */
+  boxes?: BoxLayout | null
 }
 
 export interface V1Layer {
@@ -234,23 +248,37 @@ function grLayers(t: number, input: StageInput): GrLayer[] {
       })
       continue
     }
+    // a composição HTML também mora na trilha GR, mas o palco não a desenha (só a caixa dela): sem isto sairia
+    // como uma imagem quebrada apontando para o arquivo .html
+    if (item.kind !== 'image') continue
     const url = item.missing ? null : overlayImageUrl(item, input)
     if (!url) continue
-    const margin = numberOf(overlay, 'margin', 24)
-    const position = typeof item.extra?.position === 'string' ? item.extra.position : 'top-right'
-    layers.push({
-      id: item.id,
-      kind: 'image',
-      url,
-      fraction: 0,
-      style: {
-        width: `${(numberOf(overlay, 'width', 0.22) * 100).toFixed(2)}%`,
-        opacity: String(numberOf(overlay, 'opacity', 1)),
-        ...cornerStyle(position, view.width ? (margin / view.width) * 100 : 3, view.height ? (margin / view.height) * 100 : 3),
-      },
-    })
+    layers.push({ id: item.id, kind: 'image', url, fraction: 0, style: imageStyle(item, overlay, input) })
   }
   return layers
+}
+
+/** A imagem na caixa do servidor (lugar e tamanho exatos do render); sem ela, no canto ou no centro `x`/`y`. */
+function imageStyle(item: TimelineItem, overlay: Loose, input: StageInput): CssStyle {
+  const { view } = input
+  const opacity = String(numberOf(overlay, 'opacity', 1))
+  const placed = placedBoxOf(input.boxes ?? null, item.index, 'image')
+  if (placed) return { ...boxRectStyle(placed), opacity }
+  const margin = numberOf(overlay, 'margin', 24)
+  const position = typeof item.extra?.position === 'string' ? item.extra.position : 'top-right'
+  return {
+    width: `${(numberOf(overlay, 'width', 0.22) * 100).toFixed(2)}%`,
+    opacity,
+    ...(anchoredPosition(overlay) ??
+      cornerStyle(position, view.width ? (margin / view.width) * 100 : 3, view.height ? (margin / view.height) * 100 : 3)),
+  }
+}
+
+/** `x` e `y` da spec são o centro da imagem ou do PiP (e não o canto): só valem os dois juntos, como no render. */
+function anchoredPosition(overlay: Loose): CssStyle | null {
+  const { x, y } = overlay
+  if (typeof x !== 'number' || typeof y !== 'number') return null
+  return { left: `${x * 100}%`, top: `${y * 100}%`, transform: 'translate(-50%, -50%)' }
 }
 
 /** A proporção do quadro do PiP: o círculo é sempre 1:1, `aspect` ("16:9", "1:1") manda, e sem ele vale 16:9. */
@@ -260,26 +288,32 @@ function pipAspect(overlay: Loose, shape: string): string {
   return width && height ? `${width} / ${height}` : '16 / 9'
 }
 
-function pipStyle(item: TimelineItem, overlay: Loose, view: TimelineView): CssStyle {
+function pipStyle(item: TimelineItem, overlay: Loose, input: StageInput): CssStyle {
+  const { view } = input
   const shape = stringOf(overlay, 'shape') ?? 'rounded'
   const radius = shape === 'circle' ? '50%' : shape === 'rounded' ? `${numberOf(overlay, 'radius', 0.08) * 100}%` : '0'
+  const border = numberOf(overlay, 'border', 0)
+  const borderColor = stringOf(overlay, 'border_color') ?? 'white'
+  const common = { opacity: String(numberOf(overlay, 'opacity', 1)), borderRadius: radius }
+  const placed = placedBoxOf(input.boxes ?? null, item.index, 'video')
+  if (placed) {
+    // a caixa é só o vídeo; no render a borda cresce para fora dele, então vira um anel e não encolhe o conteúdo
+    const ring = border > 0 && view.height ? `0 0 0 calc(var(--stage-h, 600px) * ${border / view.height}) ${borderColor}` : 'none'
+    return { ...boxRectStyle(placed), ...common, boxShadow: ring }
+  }
   const margin = numberOf(overlay, 'margin', 20)
-  const x = overlay.x
-  const y = overlay.y
   const position =
-    typeof x === 'number' && typeof y === 'number'
-      ? { left: `${x * 100}%`, top: `${y * 100}%` }
-      : cornerStyle(
-          typeof item.extra?.position === 'string' ? item.extra.position : 'bottom-right',
-          view.width ? (margin / view.width) * 100 : 3,
-          view.height ? (margin / view.height) * 100 : 3,
-        )
+    anchoredPosition(overlay) ??
+    cornerStyle(
+      typeof item.extra?.position === 'string' ? item.extra.position : 'bottom-right',
+      view.width ? (margin / view.width) * 100 : 3,
+      view.height ? (margin / view.height) * 100 : 3,
+    )
   return {
     width: `${numberOf(overlay, 'width', 0.28) * 100}%`,
-    opacity: String(numberOf(overlay, 'opacity', 1)),
     aspectRatio: pipAspect(overlay, shape),
-    borderRadius: radius,
-    border: `${numberOf(overlay, 'border', 0)}px solid ${stringOf(overlay, 'border_color') ?? 'white'}`,
+    border: `${border}px solid ${borderColor}`,
+    ...common,
     ...position,
   }
 }
@@ -297,11 +331,62 @@ function pipLayers(t: number, input: StageInput): PipLayer[] {
       path,
       url: mediaUrl(path, input.proxyUrls),
       fileTime: fileTime(item, t, 1, sourceOffsetFor(view)),
-      style: pipStyle(item, overlayOf(spec, item.index), view),
+      style: pipStyle(item, overlayOf(spec, item.index), input),
       missing: !!item.missing,
     })
   }
   return layers
+}
+
+/** O tamanho do texto acompanha a altura do palco. No render, `size` vale na base 1080 do lado menor (a escala do
+ * `Canvas`), então em px do quadro é `size * min(largura, altura) / 1080`, e a fração da altura é essa conta sobre
+ * a altura: num quadro vertical o mesmo `size` é menor, em fração, que num horizontal. O corpo da fonte é essa
+ * medida (a célula do libass) dividida por `LIBASS_CELL_RATIO`. */
+function textFontSize(size: number, view: TimelineView): string {
+  const cell = view.width > 0 && view.height > 0 ? (size * Math.min(view.width, view.height)) / 1080 / view.height : size / 1080
+  return `calc(var(--stage-h, 600px) * ${cell / LIBASS_CELL_RATIO})`
+}
+
+function textWeight(role: string, style: Loose): number {
+  const named = stringOf(style, 'weight')
+  return (named && FONT_WEIGHTS[named]) || DEFAULT_TEXT_WEIGHT[role] || 700
+}
+
+const FLEX_JUSTIFY = { left: 'flex-start', center: 'center', right: 'flex-end' } as const
+
+/** O lugar do texto: a faixa vertical da caixa, com o texto no meio dela (a folga da caixa de fundo fica igual em cima
+ * e embaixo) e, na horizontal, a área da quebra do servidor, começando na âncora se o texto é alinhado à esquerda e
+ * acabando nela se é à direita. Sem a caixa, a faixa de cima, do meio ou de baixo pelo papel ou pela `position`. */
+function textPlacement(role: string, overlay: Loose, placed: PlacedBox | null): CssStyle {
+  if (placed) {
+    const align = textAlignOf(placed)
+    const area = placed.wrap ?? { left: placed.left, width: placed.width }
+    let left = area.left
+    let width = area.width
+    if (placed.anchor && align === 'left') {
+      left = placed.anchor.x
+      width = area.left + area.width - placed.anchor.x
+    } else if (placed.anchor && align === 'right') {
+      width = placed.anchor.x - area.left
+    }
+    return {
+      top: `${(placed.top * 100).toFixed(4)}%`,
+      height: `${(placed.height * 100).toFixed(4)}%`,
+      left: `${(left * 100).toFixed(4)}%`,
+      width: `${(width * 100).toFixed(4)}%`,
+      right: 'auto',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: FLEX_JUSTIFY[align],
+      textAlign: align,
+    }
+  }
+  const position = textPosition(role, overlay.position)
+  return position === 'top'
+    ? { top: '8%' }
+    : position === 'center'
+      ? { top: '50%', transform: 'translateY(-50%)' }
+      : { bottom: '10%' }
 }
 
 function txLayers(t: number, input: StageInput): TxLayer[] {
@@ -314,18 +399,15 @@ function txLayers(t: number, input: StageInput): TxLayer[] {
     const role = typeof item.extra?.role === 'string' ? item.extra.role : 'custom'
     const style = record(overlay.style)
     const size = numberOf(style, 'size', DEFAULT_TEXT_SIZES[role] ?? 60)
-    const position = textPosition(role, overlay.position)
+    const placed = placedBoxOf(input.boxes ?? null, item.index, 'text')
     layers.push({
       id: item.id,
       text: item.label || '',
       role,
       style: {
-        ...(position === 'top'
-          ? { top: '8%' }
-          : position === 'center'
-            ? { top: '50%', transform: 'translateY(-50%)' }
-            : { bottom: '10%' }),
-        fontSize: `calc(var(--stage-h, 600px) * ${size / 1080})`,
+        ...textPlacement(role, overlay, placed),
+        fontSize: textFontSize(size, input.view),
+        fontWeight: String(textWeight(role, style)),
         color: stringOf(style, 'color') ?? input.theme?.colors.text ?? '#FFFFFF',
         fontFamily: input.theme?.font || 'inherit',
         ...(style.uppercase ? { textTransform: 'uppercase' } : {}),

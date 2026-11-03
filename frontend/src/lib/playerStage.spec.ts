@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectTheme, TimelineView } from '@/api'
-import { timelineItem, timelineTrack, timelineView } from '@/test/editorFixtures'
+import { boxLayout, overlayBox, timelineItem, timelineTrack, timelineView } from '@/test/editorFixtures'
 import { cornerStyle, sourceOffsetFor, sourcePathOf, stageLayers, textPosition, v1ItemAt, type StageInput } from './playerStage'
 
 const theme: ProjectTheme = {
@@ -136,6 +136,20 @@ describe('camada GR', () => {
     expect(stageLayers(5, input(hidden, spec)).gr).toEqual([])
   })
 
+  it('a composição HTML da trilha GR não vira imagem: o palco só mostra a caixa dela', () => {
+    const withHtml = viewOf([
+      timelineTrack(
+        'GR',
+        [
+          timelineItem(0, { id: 'GR-0', kind: 'html', start: 0, end: 9, src: 'comp.html', path: 'C:/comp.html' }),
+          timelineItem(1, { id: 'GR-1', kind: 'image', start: 0, end: 9, src: 'selo.png', path: 'C:/selo.png' }),
+        ],
+        { kind: 'graphics' },
+      ),
+    ])
+    expect(stageLayers(1, input(withHtml, { overlays: [{ type: 'html' }, { type: 'image' }] })).gr.map((layer) => layer.id)).toEqual(['GR-1'])
+  })
+
   it('imagem com arquivo ausente não aparece como imagem quebrada', () => {
     const missing = viewOf([
       timelineTrack('GR', [timelineItem(0, { id: 'GR-0', kind: 'image', start: 0, end: 9, src: 'a.png', path: 'C:/a.png', missing: true })]),
@@ -174,12 +188,20 @@ describe('camada PiP', () => {
     expect(aspectOf({ aspect: 'quebrado' })).toBe('16 / 9')
   })
 
-  it('x e y da spec mandam na posição, e o PiP de fonte ausente vem marcado', () => {
+  it('sem caixa do servidor, x e y da spec são o centro do PiP, e o de fonte ausente vem marcado', () => {
     const pip = timelineItem(0, { id: 'V2-0', kind: 'video', start: 0, end: 8, path: 'C:/w.mp4', missing: true })
     const view = viewOf([timelineTrack('V2', [pip])])
     const [layer] = stageLayers(1, input(view, { overlays: [{ type: 'video', x: 0.5, y: 0.25 }] })).pips
-    expect(layer?.style).toMatchObject({ left: '50%', top: '25%' })
+    expect(layer?.style).toMatchObject({ left: '50%', top: '25%', transform: 'translate(-50%, -50%)' })
     expect(layer?.missing).toBe(true)
+  })
+
+  it('x sem y não vale (o render também exige os dois): o PiP fica no canto', () => {
+    const pip = timelineItem(0, { id: 'V2-0', kind: 'video', start: 0, end: 8, path: 'C:/w.mp4', extra: { position: 'bottom-left' } })
+    const view = viewOf([timelineTrack('V2', [pip])])
+    const [layer] = stageLayers(1, input(view, { overlays: [{ type: 'video', x: 0.5 }] })).pips
+    expect(layer?.style).toMatchObject({ bottom: expect.any(String), left: expect.any(String) })
+    expect(layer?.style.transform).toBeUndefined()
   })
 
   it('PiP de uma fonte sincronizada desconta o deslocamento dela', () => {
@@ -200,7 +222,10 @@ describe('camada TX', () => {
     const [layer] = stageLayers(1, input(view, { overlays: [{ type: 'text' }] })).tx
     expect(layer).toMatchObject({ id: 'TX-0', text: 'Gancho', role: 'hook' })
     expect(layer?.style).toMatchObject({ top: '8%', color: '#EEEEEE', fontFamily: 'Poppins' })
-    expect(layer?.style.fontSize).toBe(`calc(var(--stage-h, 600px) * ${90 / 1080})`)
+    // o gancho vale 92 (como no render), na base 1080 do lado menor: num quadro de 1080x1920 isso é 92 px de 1920,
+    // e o corpo da fonte é a célula do libass (a Poppins tem 1,76) dividida por 1,76
+    expect(layer?.style.fontSize).toBe(`calc(var(--stage-h, 600px) * ${92 / 1920 / 1.76})`)
+    expect(layer?.style.fontWeight).toBe('700')
   })
 
   it('posição, tamanho, cor e maiúsculas vêm do estilo da sobreposição', () => {
@@ -208,7 +233,30 @@ describe('camada TX', () => {
     const spec = { overlays: [{ position: 'center', style: { size: 120, color: '#FF0000', uppercase: true } }] }
     const [layer] = stageLayers(1, input(view, spec)).tx
     expect(layer?.style).toMatchObject({ top: '50%', transform: 'translateY(-50%)', color: '#FF0000', textTransform: 'uppercase' })
-    expect(layer?.style.fontSize).toBe(`calc(var(--stage-h, 600px) * ${120 / 1080})`)
+    expect(layer?.style.fontSize).toBe(`calc(var(--stage-h, 600px) * ${120 / 1920 / 1.76})`)
+  })
+
+  it('o tamanho e o peso de cada papel são os do render, e `weight` da spec manda no peso', () => {
+    const sizeOf = (role: string, style: Record<string, unknown> = {}) => {
+      const view = viewOf([timelineTrack('TX', [text({ role })], { kind: 'text' })])
+      return stageLayers(1, input(view, { overlays: [{ style }] })).tx[0]?.style
+    }
+    const fraction = (size: number) => `calc(var(--stage-h, 600px) * ${size / 1920 / 1.76})`
+    expect(sizeOf('title')?.fontSize).toBe(fraction(80))
+    expect(sizeOf('subtitle')?.fontSize).toBe(fraction(50))
+    expect(sizeOf('cta')?.fontSize).toBe(fraction(54))
+    expect(sizeOf('lower-third')?.fontSize).toBe(fraction(48))
+    expect(sizeOf('custom')?.fontSize).toBe(fraction(64))
+    expect(sizeOf('subtitle')?.fontWeight).toBe('500')
+    expect(sizeOf('title')?.fontWeight).toBe('700')
+    expect(sizeOf('title', { weight: 'light' })?.fontWeight).toBe('300')
+    expect(sizeOf('title', { weight: 'inexistente' })?.fontWeight).toBe('700')
+  })
+
+  it('num quadro horizontal o mesmo `size` pesa mais, em fração da altura', () => {
+    const view = viewOf([timelineTrack('TX', [text()], { kind: 'text' })], { width: 1920, height: 1080 })
+    const [layer] = stageLayers(1, input(view, { overlays: [{ style: { size: 108 } }] })).tx
+    expect(layer?.style.fontSize).toBe(`calc(var(--stage-h, 600px) * ${108 / 1080 / 1.76})`)
   })
 
   it('sem tema, o texto fica branco; trilha oculta some', () => {
@@ -216,6 +264,94 @@ describe('camada TX', () => {
     expect(stageLayers(1, input(view, { overlays: [{}] }, { theme: null })).tx[0]?.style).toMatchObject({ bottom: '10%', color: '#FFFFFF' })
     const hidden = viewOf([timelineTrack('TX', [text()], { kind: 'text', hidden: true })])
     expect(stageLayers(1, input(hidden, { overlays: [{}] })).tx).toEqual([])
+  })
+})
+
+describe('as caixas do servidor mandam no lugar', () => {
+  const layout = boxLayout([
+    overlayBox({ index: 0, kind: 'text', left: 0.1, top: 0.2, width: 0.5, height: 0.07, anchor: { x: 0.1, y: 0.235 }, wrap: { left: 0.08, width: 0.84 } }),
+    overlayBox({ index: 1, kind: 'image', left: 0.7, top: 0.05, width: 0.2, height: 0.1, resize: 'keep_aspect', wrap: null }),
+    overlayBox({ index: 2, kind: 'video', left: 0.5, top: 0.6, width: 0.4, height: 0.225, resize: 'keep_aspect', wrap: null }),
+  ])
+  const view = viewOf([
+    timelineTrack('V2', [timelineItem(2, { id: 'V2-2', kind: 'video', start: 0, end: 8, path: 'C:/w.mp4' })]),
+    timelineTrack('TX', [timelineItem(0, { id: 'TX-0', kind: 'text', start: 0, end: 5, label: 'Gancho', path: null, extra: { role: 'hook' } })], { kind: 'text' }),
+    timelineTrack('GR', [timelineItem(1, { id: 'GR-1', kind: 'image', start: 0, end: 5, src: 'selo.png', path: 'C:/selo.png' })], { kind: 'graphics' }),
+  ])
+  const spec = {
+    overlays: [
+      { type: 'text', style: { size: 90 } },
+      { type: 'image', src: 'selo.png', opacity: 0.5, x: 0.3, y: 0.3, width: 0.2 },
+      { type: 'video', shape: 'circle', border: 6, border_color: '#fff', opacity: 0.9, x: 0.1, y: 0.1, width: 0.4 },
+    ],
+  }
+  const withBoxes = (extra: Record<string, unknown> = {}) => input(view, { ...spec, ...extra }, { boxes: layout })
+
+  it('o texto alinhado à esquerda começa na âncora, dentro da faixa da caixa, com o texto no meio dela', () => {
+    const [text] = stageLayers(1, withBoxes()).tx
+    expect(text?.style).toMatchObject({
+      top: '20.0000%',
+      height: '7.0000%',
+      // começa na âncora (0,10) e vai até o fim da área da quebra (0,08 + 0,84)
+      left: '10.0000%',
+      width: '82.0000%',
+      right: 'auto',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      textAlign: 'left',
+    })
+    // nada de faixa fixa nem de centralizar na vertical: o lugar é o da caixa
+    expect(text?.style.bottom).toBeUndefined()
+    expect(text?.style.transform).toBeUndefined()
+  })
+
+  it('o texto centralizado ocupa a área da quebra inteira, e o alinhado à direita acaba na âncora', () => {
+    const centered = boxLayout([overlayBox({ index: 0, kind: 'text', left: 0.1, width: 0.8, anchor: { x: 0.5, y: 0.2 }, wrap: { left: 0.07, width: 0.86 } })])
+    const [middle] = stageLayers(1, input(view, spec, { boxes: centered })).tx
+    expect(middle?.style).toMatchObject({ left: '7.0000%', width: '86.0000%', justifyContent: 'center', textAlign: 'center' })
+    const right = boxLayout([overlayBox({ index: 0, kind: 'text', left: 0.1, width: 0.8, anchor: { x: 0.88, y: 0.2 }, wrap: { left: 0.07, width: 0.86 } })])
+    const [end] = stageLayers(1, input(view, spec, { boxes: right })).tx
+    expect(end?.style).toMatchObject({ left: '7.0000%', width: '81.0000%', justifyContent: 'flex-end', textAlign: 'right' })
+  })
+
+  it('a imagem ocupa exatamente a caixa, e x/y da spec não mandam mais', () => {
+    const image = stageLayers(1, withBoxes()).gr[0]
+    expect(image?.style).toMatchObject({ left: '70.0000%', top: '5.0000%', width: '20.0000%', height: '10.0000%', opacity: '0.5' })
+    expect(image?.style.transform).toBeUndefined()
+  })
+
+  it('o PiP ocupa a caixa do vídeo e a borda vira um anel por fora', () => {
+    const pip = stageLayers(1, withBoxes()).pips[0]
+    expect(pip?.style).toMatchObject({
+      left: '50.0000%',
+      top: '60.0000%',
+      width: '40.0000%',
+      height: '22.5000%',
+      borderRadius: '50%',
+      opacity: '0.9',
+      boxShadow: `0 0 0 calc(var(--stage-h, 600px) * ${6 / 1920}) #fff`,
+    })
+    expect(pip?.style.aspectRatio).toBeUndefined()
+    expect(pip?.style.border).toBeUndefined()
+  })
+
+  it('PiP sem borda não desenha anel', () => {
+    const pip = stageLayers(1, withBoxes({ overlays: [{}, {}, { type: 'video' }] })).pips[0]
+    expect(pip?.style.boxShadow).toBe('none')
+  })
+
+  it('caixa de outro tipo no mesmo índice (a spec mudou e a caixa ainda não chegou) não vale', () => {
+    const stale = boxLayout([overlayBox({ index: 0, kind: 'image' })])
+    const [text] = stageLayers(1, input(view, spec, { boxes: stale })).tx
+    // volta para a faixa de cima do gancho
+    expect(text?.style).toMatchObject({ top: '8%' })
+    expect(text?.style.textAlign).toBeUndefined()
+  })
+
+  it('sem caixa nenhuma, a imagem com x e y fica centrada neles', () => {
+    const image = stageLayers(1, input(view, spec)).gr[0]
+    expect(image?.style).toMatchObject({ left: '30%', top: '30%', width: '20.00%', transform: 'translate(-50%, -50%)' })
   })
 })
 
