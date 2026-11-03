@@ -15,6 +15,8 @@ from ..media.matting import Matter
 from ..media.probe import MediaInfo
 
 if TYPE_CHECKING:  # pragma: no cover
+    from ..filtergraph.audio_effects import Measure
+    from .audio_effects import EffectProcessor
     from .isolation import IsolationService
     from .narration import NarrationService
 
@@ -69,6 +71,12 @@ class RenderContext:
     session: dict[str, Any] = field(
         default_factory=dict
     )  # fontes sincronizadas por nome (pipeline.sources.Source)
+    # efeitos de áudio (ver `pipeline/audio_effects.py`): o processador, criado no primeiro item com efeito; os
+    # arquivos já processados das faixas externas (um por faixa de `audio.tracks`); e a medida da mistura que
+    # cada efeito do master pede, pela posição dele em `audio.master_effects`
+    audio_fx: EffectProcessor | None = None
+    track_audio: tuple[Path | None, ...] | None = None
+    master_measures: dict[int, Measure] = field(default_factory=dict)
 
     @property
     def width(self) -> int:

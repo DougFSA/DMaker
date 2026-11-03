@@ -263,6 +263,7 @@ class CaptionPipeline:
             include_music=False,
             include_norm=False,
             voice_files=voice_files,
+            include_master=False,  # a transcrição ouve a voz, não o tratamento do master
         )
         wav = ctx.job_dir / "voice.wav"
         args = inputs.args + [

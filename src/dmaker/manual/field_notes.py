@@ -230,6 +230,9 @@ FIELD_NOTES: dict[str, str] = {
     "Region.y": "Centro da região na vertical, de 0 a 1.",
     "Region.width": "Largura, em fração do quadro.",
     "Region.height": "Altura, em fração do quadro.",
+    # cadeia de efeitos de áudio (ver "Edição de áudio")
+    "*.effects": "Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele.",
+    "AudioSettings.master_effects": "Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima.",
     # audiograma, áudio como voz e texto atrás da pessoa
     "AudioSettings.voiceover": "Arquivos de áudio (corte de podcast, áudio de WhatsApp) que viram a voz do vídeo, sem trecho de vídeo.",
     "VoiceoverClip.src": "Arquivo de áudio, relativo à pasta da spec.",

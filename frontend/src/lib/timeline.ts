@@ -164,6 +164,7 @@ const TRACK_NAMES: Record<string, string> = {
   GR: 'Gráficos: imagens e barra de progresso',
   A1: 'Áudio dos clipes',
   NAR: 'Narração',
+  VO: 'Voz gravada',
   MUS: 'Música',
   CC: 'Legendas automáticas',
 }

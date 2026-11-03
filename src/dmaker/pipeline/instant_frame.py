@@ -32,6 +32,7 @@ from ..media.html_site import composition_files
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from .assembly import Assembly
+from .audio_effects import effect_processor
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions
 from .html_layer import HtmlLayerBuilder, ResolvedHtmlOverlay
@@ -297,7 +298,8 @@ class InstantFrameRenderer:
 
         prepared = self._prepare(ctx, layout, window.first, window.last)
         self.log(f"quadro de {at:.2f} s: trechos {window.first + 1} a {window.last + 1}")
-        voice_files = prepare_voice_files(layout.project, self.prober)
+        # a voz já com os efeitos: é o que o render transcreve, e a chave das legendas em cache depende do arquivo
+        voice_files = prepare_voice_files(layout.project, self.prober, effect_processor(ctx))
         captions = self.captions.produce_cached(ctx, layout.sources, voice_files)
         tones = [item.tone for item in prepared]
         text = build_text_layer(

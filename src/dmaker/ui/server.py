@@ -34,6 +34,7 @@ from ..pipeline.jobs import Job, JobManager
 from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
 from .agent_routes import build_agent_router
+from .audio_effect_routes import build_audio_effects_router
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
@@ -76,6 +77,7 @@ app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
 app.include_router(build_transitions_router())
+app.include_router(build_audio_effects_router())
 app.include_router(build_looks_router())
 app.include_router(build_infographics_router())
 app.include_router(build_agent_router(jobs))

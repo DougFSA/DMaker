@@ -19,6 +19,7 @@ from ..domain.edits import (
     split_segment,
     trim_segment,
 )
+from ..domain.effect_edits import apply_effect_op
 from ..domain.spec import ClipSegment, Project
 from ..media.probe import probe
 from .context import Prober
@@ -80,6 +81,10 @@ def _op_set_field(project: Project, op: dict, layout: OriginAggregate) -> Projec
     return set_field(project, op["path"], op.get("value"))
 
 
+def _op_audio_effect(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    return apply_effect_op(project, op)
+
+
 EDIT_OPERATIONS: dict[str, Operation] = {
     "split": _op_split,
     "remove": _op_remove,
@@ -91,6 +96,7 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     "overlay_remove": _op_overlay_remove,
     "overlay_duplicate": _op_overlay_duplicate,
     "set_field": _op_set_field,
+    "audio_effect": _op_audio_effect,
 }
 
 

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from ..domain.audio_effects import active_effects
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
+from .audio_effects import Measure, chain_lines
 from .common import LOUDNORM_TRUE_PEAK_DB, Inputs
 from .sfx import SfxInput, sfx_streams
 
@@ -81,8 +83,16 @@ def audio_graph(
     sfx: Sequence[SfxInput] = (),
     voice_files: Sequence[VoiceFileInput] = (),
     taps: AudioTaps | None = None,
+    master_measures: Mapping[int, Measure] | None = None,
+    master_upto: int | None = None,
+    include_master: bool = True,
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
+    `audio.master_effects` (a cadeia de efeitos do master) entra depois da mistura inteira e antes da
+    normalização, que continua valendo por cima; `master_measures` traz a medida da mistura que cada efeito do
+    master pede (pela posição dele na lista), `master_upto` corta a cadeia nos `n` primeiros efeitos (é assim que
+    se mede o sinal que entra no efeito seguinte) e `include_master=False` deixa a cadeia de fora (a voz sozinha,
+    para acertar os efeitos sonoros, e a transcrição).
     `extra_voices` são rótulos de áudio já alinhados à linha do tempo (PiP) somados à voz.
     `narrations` e `voice_files` (arquivos de áudio gravados) entram no barramento de voz depois do ganho e
     do mudo dos clipes (narrar sobre clipes mudos é o caso comum) e antes do ducking: a música abaixa sob
@@ -134,6 +144,12 @@ def audio_graph(
             ":dropout_transition=0:normalize=0[a_fx]"
         )
         a = "[a_fx]"
+    master = audio.master_effects if master_upto is None else audio.master_effects[:master_upto]
+    if include_master and active_effects(master):
+        # a cadeia espera o formato da mixagem (48 kHz, estéreo, ponto flutuante), o mesmo dos itens
+        lines.append(f"{a}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a_master_in]")
+        lines += chain_lines("[a_master_in]", "[a_master]", master, total, master_measures, tag="mfx")
+        a = "[a_master]"
     a = _tap(lines, taps, "mix", a)
 
     if audio.normalize != "off" and include_norm:

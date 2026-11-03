@@ -1,6 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TimelineItem, TimelineView } from '@/api'
+import { effectContextFor } from '@/lib/audioEffects'
 import { MEDIA_DND_MIME, TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineItem, timelineTrack } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
@@ -653,5 +654,61 @@ describe('a barra de ferramentas e o timecode', () => {
     expect(panel.find('[role="toolbar"]').exists()).toBe(true)
     expect(panel.find('.timecode__now').text()).toBe('00:00:00:00')
     expect(panel.find('.timecode__total').text()).toBe('/ 00:00:12:00')
+  })
+})
+
+describe('a trilha VO (voz gravada)', () => {
+  /** A V1 com um clipe e a trilha VO com dois arquivos de voz, o segundo com dois efeitos. */
+  function voiceoverView(): TimelineView {
+    const voice = (index: number, extra: Partial<TimelineItem> = {}) =>
+      timelineItem(index, { id: `VO-${index}`, kind: 'voiceover', start: index * 4, end: index * 4 + 4, label: `voz${index}.wav`, path: `C:/voz${index}.wav`, ...extra })
+    return {
+      total: 8,
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      warnings: [],
+      sources: {},
+      tracks: [
+        timelineTrack('V1', [timelineItem(0, { id: 'V1-0', start: 0, end: 8, label: 'clip0.mp4' })]),
+        timelineTrack('VO', [voice(0), voice(1, { extra: { effects: 2 } })], { kind: 'audio' }),
+      ],
+    }
+  }
+
+  it('desenha o item voiceover com a classe e a cor próprias, ao lado da narração', async () => {
+    await mountTimeline(voiceoverView())
+    expect(rows()).toEqual(['V1', 'VO'])
+    expect(item('VO-0').classes()).toContain('item--voiceover')
+    expect(item('VO-0').classes()).not.toContain('item--narration')
+    expect(item('VO-0').text()).toBe('voz0.wav')
+    expect((wrapper as VueWrapper).find('.row[data-track-id="VO"] .row__header').attributes('title')).toBe('Voz gravada (VO)')
+  })
+
+  it('clicar no item o seleciona e o alvo dos efeitos é audio.voiceover.<índice>', async () => {
+    await mountTimeline(voiceoverView())
+    await item('VO-1').trigger('mousedown', { button: 0 })
+    expect(opened.store.selection).toEqual(['VO-1'])
+    const context = effectContextFor(opened.store.selectedItems[0] ?? null, opened.store.view)
+    expect(context).toMatchObject({
+      kind: 'chain',
+      chain: { targetKey: 'audio.voiceover.N', listPath: 'audio.voiceover.1.effects' },
+    })
+  })
+
+  it('o mudo da trilha funciona como nas outras de áudio: M e cadeado, sem ocultar', async () => {
+    await mountTimeline(voiceoverView())
+    const letters = (wrapper as VueWrapper).findAll('.row[data-track-id="VO"] .row__button').map((button) => button.text())
+    expect(letters).toEqual(['M', 'L'])
+    await (wrapper as VueWrapper).find('.row[data-track-id="VO"] [data-track-action="muted"]').trigger('click')
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'set_field', path: 'tracks.VO.muted', value: true } })
+  })
+
+  it('a trilha VO silenciada fica esmaecida como as outras', async () => {
+    const view = voiceoverView()
+    view.tracks[1]!.muted = true
+    const panel = await mountTimeline(view)
+    expect(panel.find('.row[data-track-id="VO"]').classes()).toContain('row--muted')
   })
 })

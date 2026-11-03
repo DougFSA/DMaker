@@ -1311,8 +1311,8 @@ def clean(
     ] = False,
 ) -> None:
     """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
-    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor
-    pede ao pipeline (cache/frames)."""
+    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com
+    efeitos aplicados (cache/audio-fx) e os quadros que o editor pede ao pipeline (cache/frames)."""
     import shutil
 
     n = 0
@@ -1321,6 +1321,7 @@ def clean(
         config.PROXY_DIR,
         config.WAVEFORM_DIR,
         config.PREVIEW_AUDIO_DIR,
+        config.AUDIO_FX_DIR,
         config.FRAMES_DIR,
     ):
         if d.exists():
@@ -2559,7 +2560,8 @@ def lexicon_remove(
 # ---------- áudio ----------
 
 audio_app = typer.Typer(
-    help="Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs.",
+    help="Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs, e a "
+    "cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, Repetir).",
     no_args_is_help=True,
 )
 app.add_typer(audio_app, name="audio")
@@ -2607,6 +2609,181 @@ def audio_isolate(
     console.print(f"[green]Voz:[/green]   {stems.vocals}", highlight=False, soft_wrap=True)
     console.print(f"[green]Fundo:[/green] {stems.background}", highlight=False, soft_wrap=True)
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
+
+
+@audio_app.command("effects")
+def audio_effects_list(
+    effect: Annotated[
+        str | None, typer.Argument(help="Tipo de um efeito, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os efeitos de áudio que a spec aceita em `effects` (e em `audio.master_effects`): o nome em
+    português e no Audacity, o que faz e os parâmetros com unidade, faixa e padrão."""
+    from .domain.audio_effects import catalog_payload
+
+    try:
+        payload = catalog_payload(effect)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Efeitos de áudio",
+    )
+    for info in payload["effects"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["effects"]:
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}", highlight=False)
+    console.print("Em todo efeito: `enabled` (liga e desliga), `start` e `end` (o intervalo, em segundos).")
+    console.print("Alvos: " + ", ".join(t["target"] for t in payload["targets"]), highlight=False)
+
+
+def _effect_param_text(param: dict) -> str:
+    unit = f" {param['unit']}" if param["unit"] else ""
+    low, high = param["minimum"], param["maximum"]
+    span = (
+        ""
+        if low is None and high is None
+        else f" [{'' if low is None else f'{low:g}'}..{'' if high is None else f'{high:g}'}]"
+    )
+    return f"{param['name']} ({param['label']}{unit}{span}, padrão {param['default']!r})"
+
+
+audio_effect_app = typer.Typer(
+    help="Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, desligar e ajustar.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_effect_app, name="effect")
+
+_EFFECT_SPEC = Annotated[Path, typer.Argument(help="Caminho do spec.json.")]
+_EFFECT_TARGET = Annotated[
+    str,
+    typer.Argument(
+        help="Onde fica a cadeia: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.music, "
+        "audio.tracks.N ou audio.master."
+    ),
+]
+
+
+def _parse_effect_params(raw: list[str] | None) -> dict:
+    """`gain_db=6` vira {"gain_db": 6}: o valor é lido como JSON (número, true/false) e, se não for, fica texto."""
+    params: dict = {}
+    for item in raw or []:
+        name, separator, value = item.partition("=")
+        if not separator or not name:
+            _fail(f"Parâmetro mal escrito: {item!r}. Use nome=valor, por exemplo gain_db=6.")
+        try:
+            params[name] = json.loads(value)
+        except json.JSONDecodeError:
+            params[name] = value
+    return params
+
+
+def _apply_effect_op(spec: Path, op: dict) -> None:
+    """Aplica a operação à spec e a grava de volta; erro de pedido ou de spec sai como mensagem, sem traceback."""
+    from .domain.edits import EditError
+    from .pipeline.edits import apply_edit
+
+    project = _load(spec)
+    try:
+        edited = apply_edit(project, {"type": "audio_effect", **op})
+    except EditError as exc:
+        _fail(str(exc))
+    edited.save(spec)
+    console.print(f"[green]Cadeia de efeitos atualizada:[/green] {spec}", highlight=False, soft_wrap=True)
+
+
+@audio_effect_app.command("add")
+def audio_effect_add(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito (veja `dmaker audio effects`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do efeito, nome=valor (repetível).")
+    ] = None,
+    start: Annotated[float | None, typer.Option(help="Início do intervalo, em segundos do item.")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do intervalo, em segundos do item.")] = None,
+    position: Annotated[int | None, typer.Option(help="Posição na cadeia (padrão: no fim).")] = None,
+    disabled: Annotated[bool, typer.Option(help="Adiciona já desligado.")] = False,
+) -> None:
+    """Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify
+    -p gain_db=6)."""
+    data: dict = {"type": effect, **_parse_effect_params(param)}
+    if start is not None:
+        data["start"] = start
+    if end is not None:
+        data["end"] = end
+    if disabled:
+        data["enabled"] = False
+    op: dict = {"action": "add", "target": target, "effect": data}
+    if position is not None:
+        op["index"] = position
+    _apply_effect_op(spec, op)
+
+
+@audio_effect_app.command("remove")
+def audio_effect_remove(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Tira o efeito da posição `index` da cadeia."""
+    _apply_effect_op(spec, {"action": "remove", "target": target, "index": index})
+
+
+@audio_effect_app.command("move")
+def audio_effect_move(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição atual na cadeia.")],
+    to: Annotated[int, typer.Argument(help="Nova posição.")],
+) -> None:
+    """Muda a ordem da cadeia: o efeito de `index` vai para `to`."""
+    _apply_effect_op(spec, {"action": "move", "target": target, "index": index, "to": to})
+
+
+@audio_effect_app.command("enable")
+def audio_effect_enable(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Liga o efeito da posição `index`."""
+    _apply_effect_op(spec, {"action": "enable", "target": target, "index": index})
+
+
+@audio_effect_app.command("disable")
+def audio_effect_disable(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Desliga o efeito da posição `index` sem apagá-lo (o botão de bypass)."""
+    _apply_effect_op(spec, {"action": "disable", "target": target, "index": index})
+
+
+@audio_effect_app.command("set")
+def audio_effect_set(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro a mudar, nome=valor (repetível).")
+    ] = None,
+) -> None:
+    """Muda os parâmetros do efeito da posição `index` (os que não forem citados ficam como estão)."""
+    params = _parse_effect_params(param)
+    if not params:
+        _fail("Informe ao menos um parâmetro: --param nome=valor.")
+    _apply_effect_op(spec, {"action": "set", "target": target, "index": index, "params": params})
 
 
 # ---------- efeitos sonoros ----------

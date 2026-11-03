@@ -12,18 +12,66 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .. import config
 from .atomic_file import read_bytes_retrying, write_bytes_atomic
+from .audio_effects import AudioEffect
 from .curves import Curve
 from .transitions import all_transition_names
 
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# ---------- cadeia de efeitos de áudio ----------
+
+# onde um efeito que muda a duração do item (Repetir) é aceito; a mensagem de recusa cita estes lugares
+GROWABLE_AUDIO = "voz gravada (audio.voiceover) e música (audio.music)"
+
+
+class EffectsOwner(Strict):
+    """Item da spec que tem uma lista de efeitos de áudio (`effects`, ou `master_effects` no barramento final).
+
+    Fica de fora do dump a lista vazia: um projeto sem efeitos gera exatamente os mesmos bytes e o mesmo hash de
+    cache de antes de o campo existir. E recusa, na hora de carregar a spec, o efeito que muda a duração onde o
+    item não pode crescer (os vídeos, as faixas externas e a narração têm a duração presa ao resto da edição)."""
+
+    effect_fields: ClassVar[tuple[str, ...]] = ("effects",)
+    effects_place: ClassVar[str] = "item"  # como a mensagem de recusa chama o lugar
+    effects_may_grow: ClassVar[bool] = False  # se um efeito que muda a duração é aceito aqui
+
+    @model_validator(mode="after")
+    def _effects_fit_here(self) -> EffectsOwner:
+        if self.effects_may_grow:
+            return self
+        for name in self.effect_fields:
+            for effect in getattr(self, name):
+                if effect.changes_duration:
+                    raise ValueError(
+                        f"{self.effects_place}: o efeito {effect.label} muda a duração do item e não vale "
+                        f"aqui. Ele vale em {GROWABLE_AUDIO}."
+                    )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_effects(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for name in self.effect_fields:
+            if name in data and not data[name]:
+                del data[name]
+        return data
 
 
 # Camada de uma sobreposição na pilha de profundidade: "front" fica na frente de tudo; "behind-person" fica entre o
@@ -169,7 +217,7 @@ class SegmentBase(Strict):
     look: str | None = None
 
 
-class ClipSegment(SegmentBase):
+class ClipSegment(SegmentBase, EffectsOwner):
     """Trecho de vídeo. Com `src`, start/end são tempos no arquivo. Com `source` (nome em
     `project.sources`), start/end são tempos no relógio da sessão (o da fonte principal): é assim
     que se corta entre câmeras sincronizadas sem calcular pontos de entrada na mão.
@@ -192,6 +240,10 @@ class ClipSegment(SegmentBase):
     # fade de áudio curto nas duas pontas do clipe, sem escurecer a imagem (ao contrário de fade_in/fade_out):
     # tira o estalo de um corte seco no meio da fala, como os de `autocut`. 0 = sem fade
     audio_fade: float = Field(0.0, ge=0, le=0.5)
+    # cadeia de efeitos no som da própria câmera do trecho (ver `domain/audio_effects`), em ordem
+    effects: list[AudioEffect] = []
+
+    effects_place: ClassVar[str] = "clipe"
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
@@ -364,7 +416,7 @@ class ProgressBar(Strict):
     track_alpha: float = Field(0.25, ge=0, le=1)
 
 
-class VideoOverlay(Strict):
+class VideoOverlay(EffectsOwner):
     """Picture-in-picture: um segundo vídeo (webcam, câmera 2) sobre a linha do tempo, como no
     Shotcut (Size & Position + Crop Circle/Mask): retângulo, formato, borda, sombra e o áudio misturado."""
 
@@ -396,9 +448,12 @@ class VideoOverlay(Strict):
     opacity: float = Field(1.0, ge=0, le=1)
     margin: float = Field(40, ge=0)
     volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
+    effects: list[AudioEffect] = []  # cadeia de efeitos no áudio do PiP, em ordem
     animation: Literal["none", "fade", "slide"] = "fade"
     fade: float = Field(0.3, ge=0)
     sound: SoundSpec | None = None  # som na entrada do quadro (em `start`)
+
+    effects_place: ClassVar[str] = "sobreposição de vídeo (PiP)"
 
     @model_validator(mode="after")
     def _origin(self) -> VideoOverlay:
@@ -655,7 +710,7 @@ class MusicSpan(Strict):
         return self
 
 
-class Music(Strict):
+class Music(EffectsOwner):
     src: str
     volume: float = Field(0.18, ge=0, le=2)
     fade_in: float = Field(1.0, ge=0)
@@ -667,17 +722,26 @@ class Music(Strict):
     duck_threshold: float = Field(0.02, gt=0, le=1)
     duck_ratio: float = Field(6, ge=1, le=20)
     duck_release: float = Field(350, ge=10, le=5000)
+    effects: list[AudioEffect] = []  # cadeia de efeitos na música inteira (antes das janelas e do loop)
+
+    effects_place: ClassVar[str] = "música"
+    effects_may_grow: ClassVar[bool] = True
 
 
-class AudioTrack(Strict):
+class AudioTrack(EffectsOwner):
     """Faixa externa sincronizada (gravador no altar, mesa do DJ) que segue os cortes dos clipes
     com `source`. É misturada ao áudio das câmeras em cada trecho."""
 
     source: str
     volume: float = Field(1.0, ge=0, le=4)
+    effects: list[
+        AudioEffect
+    ] = []  # cadeia de efeitos no arquivo inteiro da faixa, antes de fatiar por trecho
+
+    effects_place: ClassVar[str] = "faixa externa (audio.tracks)"
 
 
-class Narration(Strict):
+class Narration(EffectsOwner):
     """Fala sintetizada por texto, misturada como voz do vídeo (a música abaixa sob ela). O texto vem de
     `text` ou de `script` (arquivo .txt relativo ao projeto, como os outros caminhos), nunca dos dois.
     `voice` é o id de uma voz de `assets/voices`; sem ela, a voz automática do motor."""
@@ -691,6 +755,9 @@ class Narration(Strict):
     speed: float = Field(1.0, ge=0.5, le=2)
     language: str = "pt"
     seed: int | None = None  # fixa a síntese: o mesmo texto soa igual a cada render
+    effects: list[AudioEffect] = []  # cadeia de efeitos na fala já sintetizada
+
+    effects_place: ClassVar[str] = "narração (audio.narration)"
 
     @model_validator(mode="after")
     def _one_source(self) -> Narration:
@@ -701,7 +768,7 @@ class Narration(Strict):
         return self
 
 
-class VoiceoverClip(Strict):
+class VoiceoverClip(EffectsOwner):
     """Arquivo de áudio gravado (corte de podcast, entrevista, áudio de WhatsApp) posto na linha do tempo como
     voz do vídeo, sem precisar de um trecho de vídeo nem de uma fonte sincronizada. Entra no mesmo barramento
     de voz da narração: a música abaixa sob ele, os efeitos sonoros se nivelam por ele e a legenda `auto` o
@@ -714,6 +781,10 @@ class VoiceoverClip(Strict):
     offset: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     volume: float = Field(1.0, ge=0, le=4)
+    effects: list[AudioEffect] = []  # cadeia de efeitos no trecho do arquivo (de `offset` a `end`), em ordem
+
+    effects_place: ClassVar[str] = "voz gravada (audio.voiceover)"
+    effects_may_grow: ClassVar[bool] = True
 
     @model_validator(mode="after")
     def _range(self) -> VoiceoverClip:
@@ -722,7 +793,7 @@ class VoiceoverClip(Strict):
         return self
 
 
-class AudioSettings(Strict):
+class AudioSettings(EffectsOwner):
     music: Music | None = None
     tracks: list[AudioTrack] = []
     narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
@@ -735,6 +806,12 @@ class AudioSettings(Strict):
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
     mute_clips: bool = False
+    # cadeia de efeitos na mistura inteira: depois da música, da voz e dos efeitos sonoros e antes da
+    # normalização final, que continua valendo por cima
+    master_effects: list[AudioEffect] = []
+
+    effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
+    effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
 
 
 # ---------- saída e projeto ----------
