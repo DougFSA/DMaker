@@ -126,7 +126,15 @@ def test_the_json_schema_publishes_the_new_fields():
     assert defs["AudiogramOverlay"]["properties"]["style"]["enum"] == ["wave", "bars", "circle"]
     assert defs["AudiogramOverlay"]["properties"]["follow"]["enum"] == ["auto", "voice", "mix"]
     assert "sound" not in defs["AudiogramOverlay"]["properties"]
-    assert set(defs["VoiceoverClip"]["properties"]) == {"src", "start", "offset", "end", "volume", "pan", "effects"}
+    assert set(defs["VoiceoverClip"]["properties"]) == {
+        "src",
+        "start",
+        "offset",
+        "end",
+        "volume",
+        "pan",
+        "effects",
+    }
     assert "voiceover" in defs["AudioSettings"]["properties"]
     assert defs["ImageOverlay"]["properties"]["shape"]["enum"] == ["rect", "circle"]
 

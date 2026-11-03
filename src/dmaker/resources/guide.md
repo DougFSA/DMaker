@@ -21,6 +21,9 @@ picture-in-picture, legendas e receitas. Leia isto pela ferramenta MCP `dmaker_g
 
 Atalhos aceitos: reels, stories, shorts, youtube, feed, square, tiktok, status, linkedin.
 
+Os formatos só de áudio (`audio_presets` no MCP, `dmaker audio presets` na CLI) são `audio/wav`, `audio/mp3`, `audio/flac`,
+`audio/ogg`, `audio/opus`, `audio/m4a` e `audio/aiff`; veja "Saída só de áudio e exportação" mais abaixo.
+
 ## Templates parametrizados
 
 `list_templates()` lista os templates de `templates/*.json` com descrição, resumo e parâmetros (tipo,
@@ -616,6 +619,35 @@ Não entram em hash de mezanino nem mudam a imagem ou o som.
 - **Regulares**: `markers_regular(name, interval | parts, start, end, prefix, first_number, digits, group, color,
   kind, replace)` cria um marcador a cada `interval` segundos ou em `parts` partes iguais (60 s a cada 15 s dá 4
   regiões numeradas).
+
+### Saída só de áudio e exportação (`audio_export`, `import_raw_audio`)
+
+Com `output.preset` de áudio (`audio/mp3`...) o render grava só o arquivo de som: nenhum quadro, nenhum mezanino de
+vídeo, nenhum `-c:v`. A `timeline` pode ficar vazia, e a duração vem do que toca: a narração, a voz gravada
+(`audio.voiceover`) e a janela de música com `end`; a música sem janela só decide quando está sozinha (uma passada).
+`validate_project` explica o que falta quando nada dá duração. A saída do `render_project` e do `export_project` com um
+preset de áudio é o arquivo (`.mp3`, `.wav`...), sem miniatura; o `qa_report` confere loudness, pico, taxa e canais.
+
+- **O arquivo** (`output.audio_format`): `sample_rate`, `channels` (1 ou 2), `bit_depth` (16, 24 ou 32 em ponto
+  flutuante; WAV, FLAC e AIFF), `bitrate_mode` (`cbr`, `vbr`, `abr`), `bitrate_k` e `quality` (MP3, OGG, Opus, M4A). O
+  formato recusa o que não existe nele (profundidade num MP3, taxa de bits num WAV, 44,1 kHz num Opus) com uma
+  mensagem. Valem só quando o preset exportado é o da spec.
+- **Etiquetas** (`output.metadata`): `artist`, `title`, `album`, `track`, `year`, `genre`, `comment`. O modelo da marca
+  (`metadata` no `brand.json`) é o ponto de partida e o que vem na spec vale por cima; texto vazio apaga a do modelo.
+  ID3v2.3 no MP3, comentários Vorbis no FLAC, OGG e Opus; o AIFF só guarda título, artista e comentário.
+- **Volume de saída**: `audio.target_lufs`; `loudness` do `audio_export` aceita `redes` (-14), `podcast` (-16),
+  `broadcast` (-23) ou um número.
+- **`audio_export(name, preset, mode, ...)`**: `mix` (inteiro), `regions` (um arquivo por região de marcador, nome pelo
+  texto do marcador saneado, numerado se falta ou se repete; `pauses`, `numbered`, `group`), `stems` (um arquivo por
+  trilha: `A1`, `NAR`, `VO`, `MUS`, `SFX`; todas levam o mesmo ganho linear da normalização do mix e a soma reproduz o
+  mix; os efeitos do master ficam de fora) e `selection` (`start` e `end` em segundos ou `marker:<texto>`). Cada
+  região e a seleção são normalizadas sozinhas. `out` é o arquivo, `out_dir` a pasta. Grava por cima do que existir, e
+  o agente local pergunta antes.
+- **`import_raw_audio(name, src, encoding, byte_order, channels, sample_rate, ...)`**: PCM sem cabeçalho vira um WAV na
+  pasta do projeto e entra em `audio.voiceover`; o original não muda. Um WAV que já existe só é trocado com `overwrite`.
+- **Modelo `podcast`**: `new_from_template("podcast", nome, {"voz": ..., "trilha": ...})` monta abertura, voz e
+  encerramento a -16 LUFS em MP3 com etiquetas (`artista`, `titulo`, `faixa`...); a limpeza da voz entra com o editor de
+  áudio.
 
 ## Legendas automáticas
 

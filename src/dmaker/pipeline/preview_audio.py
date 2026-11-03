@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .. import config
 from ..domain.brand import load_theme
-from ..domain.presets import get_preset
+from ..domain.outputs import frame_preset
 from ..domain.spec import ClipSegment, Project, Segment, VideoOverlay
 from ..domain.timeline import transitions_of
 from ..domain.tracks import apply_track_state
@@ -251,12 +251,12 @@ class PreviewAudioBuilder:
         self._drop_old_pieces(pieces_dir)
 
         ctx = self._context(layout, job_dir, pieces_dir)
-        prepared = self._pieces(ctx, layout, missing)
+        prepared = self.pieces(ctx, layout, missing)
         transitions = transitions_of(layout.project.timeline)
         total = layout.total
         voiceovers = processed_voiceovers(ctx, self._voiceovers(ctx))
         voice_files = self._voice_files(ctx)
-        pips = self._pip_audio(ctx, total, missing)
+        pips = self.pip_audio(ctx, total, missing)
         processed_pips(ctx, pips)
         music = ctx.project.audio.music
         music_path = processed_music(ctx, ctx.project.resolve(music.src) if music else None)
@@ -314,7 +314,7 @@ class PreviewAudioBuilder:
 
     def _context(self, layout: ProjectLayout, job_dir: Path, pieces_dir: Path) -> RenderContext:
         project = layout.project
-        preset = get_preset(project.output.preset)
+        preset = frame_preset(project.output.preset)
         return RenderContext(
             project=project,
             options=RenderOptions(quiet=True, thumbnail=False),
@@ -332,7 +332,7 @@ class PreviewAudioBuilder:
 
     # ---------- pedaços: o som de cada trecho ----------
 
-    def _pieces(
+    def pieces(
         self, ctx: RenderContext, layout: ProjectLayout, missing: MissingMedia
     ) -> list[PreparedSegment]:
         """Um WAV por trecho, do cache ou recém-gerado. O que a spec pede e o disco não tem vira silêncio."""
@@ -466,7 +466,7 @@ class PreviewAudioBuilder:
             ctx.warn(f"As locuções não entraram na prévia: {exc}")
             return []
 
-    def _pip_audio(
+    def pip_audio(
         self, ctx: RenderContext, total: float, missing: MissingMedia
     ) -> list[ResolvedVideoOverlay]:
         """Os PiPs com som, só com o que a mixagem lê deles (arquivo, ponto de entrada, instante e volume): o

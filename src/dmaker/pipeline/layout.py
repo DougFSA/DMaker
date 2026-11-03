@@ -12,11 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from ..domain.brand import Theme, load_theme
-from ..domain.presets import Preset, get_preset
+from ..domain.outputs import OutputPreset, frame_preset, resolve_output
+from ..domain.presets import Preset
 from ..domain.spec import Project
 from ..domain.timeline import segment_duration, timeline_spans, transitions_of
 from ..media.ffmpeg import SubprocessRunner
 from ..media.probe import probe
+from .audio_duration import audio_extent
 from .context import Prober
 from .missing import MissingMedia
 from .sources import Source, expand_parts, resolve_session, resolve_sources
@@ -41,6 +43,9 @@ class ProjectLayout:
     # a sonda com que o layout foi calculado: quem precisa olhar outra mídia do projeto (a proporção de uma
     # imagem ou de um PiP, no QA) usa a mesma, e os testes que injetam uma falsa continuam valendo
     prober: Prober = probe
+    # o preset de saída de verdade: o mesmo de `preset` num projeto de vídeo, e o formato de áudio (`audio/mp3`) num
+    # projeto só de áudio, onde `preset` é só o quadro neutro que as contas de tamanho pedem
+    output: OutputPreset | None = None
 
 
 def project_layout(
@@ -54,7 +59,7 @@ def project_layout(
     físico, já descontando transições. Com `missing`, um arquivo ausente vira um substituto em vez de
     derrubar o cálculo: é como o editor abre um projeto cuja fonte foi movida."""
     theme = load_theme(project.brand, project.theme)
-    preset = get_preset(project.output.preset)
+    preset = frame_preset(project.output.preset)
     finder = offset_finder or ffmpeg_offset_finder(SubprocessRunner(quiet=True))
     store = (project.base_dir / "sync.json") if project.base_dir else None
     resolution = SyncResolver(finder, prober=prober, missing=missing).resolve(project, store)
@@ -65,7 +70,8 @@ def project_layout(
         segment_duration(seg, s.info, s.offset) for seg, s in zip(physical.timeline, sources, strict=True)
     ]
     spans = timeline_spans(durations, transitions_of(physical.timeline))
-    total = spans[-1][1] if spans else 0.0
+    # sem trechos de vídeo (saída só de áudio), quem dá a duração é o som dos itens de `audio`
+    total = spans[-1][1] if spans else audio_extent(physical, prober)
     return ProjectLayout(
         sources,
         durations,
@@ -79,6 +85,7 @@ def project_layout(
         resolution.warnings,
         session,
         prober,
+        resolve_output(project.output.preset),
     )
 
 

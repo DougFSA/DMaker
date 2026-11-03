@@ -45,9 +45,10 @@ onMounted(() => {
   catalog.load().catch(() => undefined)
 })
 
-const presets = computed<OptionItem[]>(() =>
-  catalog.presets.map((preset) => ({ value: preset.id, label: `${preset.platform} · ${preset.name} (${preset.id})` })),
-)
+const presets = computed<OptionItem[]>(() => [
+  ...catalog.presets.map((preset) => ({ value: preset.id, label: `${preset.platform} · ${preset.name} (${preset.id})` })),
+  ...catalog.audioPresets.map((preset) => ({ value: preset.id, label: `Áudio · ${preset.name} (${preset.id})` })),
+])
 
 /** O item de que os filtros falam: o último que a pessoa selecionou (Ctrl soma, e o painel segue o mais recente). */
 const primary = computed(() => {

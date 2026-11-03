@@ -12,7 +12,7 @@ from pathlib import Path
 from ..config import FONTS_DIR
 from ..domain.audio_effects import active_effects
 from ..domain.spec import Transition
-from ..filtergraph.audio import AudioTaps, audio_graph, loudnorm_measure_graph
+from ..filtergraph.audio import AudioTaps, StemTaps, audio_graph, loudnorm_measure_graph, silent_base
 from ..filtergraph.audio_effects import Measure, measure_lines, parse_astats, span_samples
 from ..filtergraph.audiogram import audiogram_graph, normalization_gain_db
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
@@ -86,25 +86,33 @@ def audio_only_graph(
     measured: dict | None = None,
     include_master: bool = True,
     master_upto: int | None = None,
+    stems: StemTaps | None = None,
 ) -> tuple[Inputs, list[str], str]:
     """Entradas e linhas do grafo só de áudio, com a mesma mixagem da montagem final. Sem `include_norm` é a
     mistura antes da normalização (a que se mede); com ele, já normalizada, como sai do render (`measured` é a
-    medição do modo two-pass). É o que o render mede e o que a prévia da linha do tempo mixa. A cadeia do master
+    medição do modo two-pass). É o que o render mede e o que a prévia da linha do tempo mixa. Sem nenhum trecho
+    (projeto só de áudio), a base é um silêncio da duração do projeto no lugar do som dos clipes. A cadeia do master
     (`audio.master_effects`) vem com as medidas de `ctx.master_measures`; `include_master` e `master_upto` a
-    desligam ou a cortam (ver `filtergraph.audio.audio_graph`)."""
+    desligam ou a cortam (ver `filtergraph.audio.audio_graph`). `stems` pede uma cópia de cada trilha, tirada antes
+    do master (ver `StemTaps`)."""
     inputs = Inputs()
     for item in prepared:
         inputs.add(item.mezzanine)
-    graph = timeline_graph(
-        len(prepared), [p.duration for p in prepared], transitions, ctx.fps, want_video=False
-    )
-    lines = list(graph.lines)
+    if prepared:
+        graph = timeline_graph(
+            len(prepared), [p.duration for p in prepared], transitions, ctx.fps, want_video=False
+        )
+        lines = list(graph.lines)
+        base = graph.audio
+    else:
+        lines = []
+        base = silent_base(lines, inputs, total)
     # o áudio dos PiPs entra na medição como entra na mixagem final; sem ele a medida não vale
     pip_audio = pip_audio_graph(lines, inputs, list(video_overlays))
     aout = audio_graph(
         lines,
         inputs,
-        graph.audio,
+        base,
         ctx.project.audio,
         music_path,
         total,
@@ -119,11 +127,12 @@ def audio_only_graph(
         master_measures=ctx.master_measures,
         master_upto=master_upto,
         include_master=include_master,
+        stems=stems,
     )
     return inputs, lines, aout
 
 
-def _loudnorm_report(stderr: str) -> dict | None:
+def loudnorm_report(stderr: str) -> dict | None:
     """O último bloco JSON que o loudnorm imprime em modo de medição (None se não imprimiu nenhum)."""
     blocks = re.findall(r"\{[^{}]*\}", stderr)
     return json.loads(blocks[-1]) if blocks else None
@@ -170,7 +179,7 @@ class LoudnessMeter:
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
         args = [*graph_args(ctx, inputs, lines, "loudness.txt"), "-map", "[ameas]", "-f", "null", "-"]
         stderr = ctx.runner.capture(args, label="medição de loudness")
-        data = _loudnorm_report(stderr)
+        data = loudnorm_report(stderr)
         if data is None:
             return LoudnessMeasure(None)
         (ctx.job_dir / "loudnorm.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
@@ -316,7 +325,7 @@ class VoiceLevelMeter:
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs, "[vmeas]"))
         args = [*graph_args(ctx, inputs, lines, "voice_level.txt"), "-map", "[vmeas]", "-f", "null", "-"]
-        data = _loudnorm_report(ctx.runner.capture(args, label="medição da voz"))
+        data = loudnorm_report(ctx.runner.capture(args, label="medição da voz"))
         if data is None or LoudnessMeasure(data).silent:
             return None
         loudness, true_peak = _finite(data.get("input_i")), _finite(data.get("input_tp"))
