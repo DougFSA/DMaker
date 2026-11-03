@@ -1,5 +1,5 @@
 /* Dados de mentira do editor para os testes: um projeto, a vista dele e o que as rotas do servidor devolvem. */
-import type { OutputFile, ProjectDetail, TimelineItem, TimelineTrack, TimelineView } from '@/api'
+import type { BoxLayout, OutputFile, OverlayBox, ProjectDetail, TimelineItem, TimelineTrack, TimelineView } from '@/api'
 
 export function timelineItem(index: number, extra: Partial<TimelineItem> = {}): TimelineItem {
   return {
@@ -69,11 +69,49 @@ export function outputFile(extra: Partial<OutputFile> = {}): OutputFile {
   }
 }
 
+/** A revisão que o servidor devolve para o `spec.json` de mentira, ao abrir o projeto e na consulta leve. */
+export const DISK_REVISION = 'rev-1'
+
+/** A caixa de uma sobreposição como o `POST /boxes` a devolve: por padrão um texto centralizado com caixa de fundo. */
+export function overlayBox(extra: Partial<OverlayBox> = {}): OverlayBox {
+  return {
+    index: 0,
+    kind: 'text',
+    start: 0,
+    end: null,
+    left: 0.1,
+    top: 0.2,
+    width: 0.8,
+    height: 0.07,
+    anchor: { x: 0.5, y: 0.235 },
+    placement: 'xy',
+    region: null,
+    resize: 'text_width',
+    wrap: { left: 0.08, width: 0.84 },
+    movable: true,
+    locked_reason: null,
+    outside_safe_zone: [],
+    ...extra,
+  }
+}
+
+/** A resposta de `POST /boxes` num quadro 1080x1920 (Reels), com a zona segura do formato. */
+export function boxLayout(boxes: OverlayBox[] = [overlayBox()], extra: Partial<BoxLayout> = {}): BoxLayout {
+  return {
+    width: 1080,
+    height: 1920,
+    safe_zone: { top: 0.115, bottom: 0.219, left: 0.056, right: 0.139 },
+    boxes,
+    ...extra,
+  }
+}
+
 export function projectDetail(extra: Partial<ProjectDetail> = {}): ProjectDetail {
   return {
     name: 'demo',
     spec_path: 'C:/projects/demo/spec.json',
     spec: projectSpec() as ProjectDetail['spec'],
+    revision: DISK_REVISION,
     captions_exists: false,
     outputs: [],
     cuts: null,

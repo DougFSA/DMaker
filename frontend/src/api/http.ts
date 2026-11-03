@@ -30,13 +30,19 @@ export function messageFromDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+/** Cabeçalhos a mais numa chamada (o `If-Match` da gravação da spec, por exemplo). */
+export interface RequestOptions {
+  headers?: Record<string, string>
+}
+
+async function request<T>(method: Method, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
   const init: RequestInit = { method }
   if (body instanceof FormData) {
     // sem Content-Type de propósito: o navegador o monta com o limite (boundary) do multipart
     init.body = body
+    if (options.headers) init.headers = { ...options.headers }
   } else if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' }
+    init.headers = { 'Content-Type': 'application/json', ...options.headers }
     init.body = JSON.stringify(body)
   }
 
@@ -105,7 +111,7 @@ export const http = {
   postForm: <T>(path: string, form: FormData) => request<T>('POST', path, form),
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
-  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body ?? {}),
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>('PUT', path, body ?? {}, options),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
   delete: <T>(path: string) => request<T>('DELETE', path),
 }

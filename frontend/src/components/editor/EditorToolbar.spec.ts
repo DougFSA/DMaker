@@ -82,7 +82,7 @@ describe('EditorToolbar', () => {
     await barButton('Validar')?.trigger('click')
     await flushPromises()
     const order = opened.fetch.calls
-      .filter((call) => call.method !== 'GET' && !call.path.endsWith('/timeline'))
+      .filter((call) => call.method !== 'GET' && !call.path.endsWith('/timeline') && !call.path.endsWith('/boxes'))
       .map((call) => `${call.method} ${call.path}`)
     expect(order).toEqual(['PUT /api/projects/demo', 'POST /api/projects/demo/validate'])
     expect(opened.store.validation?.total_s).toBe(6)
@@ -119,7 +119,7 @@ describe('EditorToolbar', () => {
     inputs[1]!.dispatchEvent(new Event('input'))
     dialogButton('Gerar prévia')?.click()
     await flushPromises()
-    const order = opened.fetch.calls.filter((c) => c.method !== 'GET' && !c.path.endsWith('/timeline')).map((c) => `${c.method} ${c.path}`)
+    const order = opened.fetch.calls.filter((c) => c.method !== 'GET' && !c.path.endsWith('/timeline') && !c.path.endsWith('/boxes')).map((c) => `${c.method} ${c.path}`)
     expect(order).toEqual(['PUT /api/projects/demo', 'POST /api/projects/demo/render'])
     expect(opened.fetch.to('POST /api/projects/demo/render')[0]?.body).toEqual({ preview: true, segments: '0-1' })
     expect(useJobsStore(opened.pinia).forProject('demo')).toHaveLength(1)

@@ -60,6 +60,8 @@ export interface ProjectDetail {
   name: string
   spec_path: string
   spec: ProjectSpec
+  /** A revisão do `spec.json` no disco; o editor a manda no `If-Match` ao salvar. Servidor antigo não manda. */
+  revision?: string | null
   captions_exists: boolean
   outputs: OutputFile[]
   /** A lista do que o corte automático removeu; null em projeto que não nasceu dele. */

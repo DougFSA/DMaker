@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /* O transporte do player: ir ao início e ao fim, andar quadro a quadro, tocar e pausar, voltar (J), parar (K) e
-   avançar (L) com velocidade que dobra, o timecode HH:MM:SS:QQ e o volume. Só chama o store do player; o relógio é dele. */
+   avançar (L) com velocidade que dobra, o timecode HH:MM:SS:QQ, o volume e o botão da zona segura. Só chama o store
+   do player; o relógio é dele. */
 import { computed } from 'vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppSlider from '@/components/ui/AppSlider.vue'
@@ -77,6 +78,18 @@ function volumeText(value: number): string {
       <TransportIcon name="volume" />
       <AppSlider v-model="volume" label="Volume" hide-label :min="0" :max="1" :step="0.05" :format="volumeText" />
     </div>
+
+    <AppButton
+      size="sm"
+      :variant="player.safeZoneShown ? 'primary' : 'ghost'"
+      icon-only
+      aria-label="Zona segura"
+      :aria-pressed="player.safeZoneShown"
+      :title="player.safeZoneShown ? 'Esconder a zona segura' : 'Mostrar a zona segura do formato'"
+      @click="player.setSafeZoneShown(!player.safeZoneShown)"
+    >
+      <TransportIcon name="safe-zone" />
+    </AppButton>
   </div>
 </template>
 

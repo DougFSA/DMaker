@@ -5,6 +5,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import type { RenderResult } from '@/api'
+import DiskChangeBanner from '@/components/editor/DiskChangeBanner.vue'
 import EditorInspector from '@/components/editor/EditorInspector.vue'
 import EditorProjectPicker from '@/components/editor/EditorProjectPicker.vue'
 import EditorToolbar from '@/components/editor/EditorToolbar.vue'
@@ -20,6 +21,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { provideEditorFilePicker } from '@/composables/useEditorFilePicker'
 import { useConfirm } from '@/composables/useConfirm'
+import { useDiskWatch } from '@/composables/useDiskWatch'
 import { useEditorShortcuts } from '@/composables/useEditorShortcuts'
 import { renderResultsFromJob } from '@/lib/outputs'
 import { readStored, writeStored } from '@/lib/storage'
@@ -76,6 +78,17 @@ onBeforeRouteUpdate((to, from) => (to.params.name === from.params.name ? true : 
 // o teclado do editor (Ctrl+S, a linha do tempo, o player) e o aviso ao fechar a aba com mudança não salva
 useEditorShortcuts()
 
+// o projeto pode mudar no disco por fora (Claude, agente, CLI): consulta a revisão enquanto o editor está aberto
+useDiskWatch()
+
+// clicar numa caixa do palco leva o inspetor à aba Propriedades, onde o cartão da sobreposição se abre
+watch(
+  () => editor.overlayReveal,
+  () => {
+    tab.value = 'properties'
+  },
+)
+
 // um render deste projeto terminou: as saídas se atualizam e, se saiu vídeo, a aba Preview abre nele
 const stopListening = jobs.onJobEnd(async (job) => {
   if (!editor.name || job.project !== editor.name) return
@@ -125,6 +138,7 @@ function showRendered(_result: RenderResult): void {
         <AppIcon name="alert" :size="18" />
         <span>Não foi possível salvar: {{ editor.saveError }}</span>
       </p>
+      <DiskChangeBanner />
       <p v-if="editor.viewError" class="notice notice--warning" role="status">
         <AppIcon name="info" :size="18" />
         <span>A linha do tempo não foi atualizada com a última mudança: {{ editor.viewError }}</span>
