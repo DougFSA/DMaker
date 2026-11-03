@@ -34,6 +34,10 @@ OverlayLayer = Literal["front", "behind-person"]
 
 # ---------- efeitos sonoros ----------
 
+# Teto do `volume` de um efeito (1 = o nível padrão, 6 dB abaixo da voz): num só lugar para a spec e o modelo
+# "explicativo" (`sons` de cada assunto) recusarem o mesmo valor.
+SFX_VOLUME_MAX = 1.5
+
 
 class SfxCue(Strict):
     """Efeito sonoro solto num instante da linha do tempo (item de `audio.sfx`).
@@ -44,7 +48,7 @@ class SfxCue(Strict):
 
     sound: str = Field(min_length=1)
     at: float = Field(ge=0)  # instante do vídeo final, em segundos
-    volume: float = Field(1.0, ge=0, le=1.5)
+    volume: float = Field(1.0, ge=0, le=SFX_VOLUME_MAX)
 
 
 class EntrySound(Strict):
@@ -54,7 +58,7 @@ class EntrySound(Strict):
     entrada: negativo antecipa o som, como num whoosh que chega um instante antes do elemento."""
 
     sound: str | None = Field(None, min_length=1)
-    volume: float = Field(1.0, ge=0, le=1.5)
+    volume: float = Field(1.0, ge=0, le=SFX_VOLUME_MAX)
     offset: float = Field(0.0, ge=-2, le=2)
 
 
