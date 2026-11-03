@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, get_default_environment, stdio_client
 
 from dmaker import config
 
@@ -106,8 +108,6 @@ def _fake_clone(parent: Path, name: str) -> Path:
 
 def _env(**extra: str) -> dict[str, str]:
     """O ambiente de um servidor MCP: o enxuto do SDK, mais a pasta de dados do teste e o PYTHONPATH do worktree."""
-    from mcp.client.stdio import get_default_environment
-
     return {
         **get_default_environment(),
         "DMAKER_DATA_DIR": str(config.DATA_DIR),
@@ -117,21 +117,23 @@ def _env(**extra: str) -> dict[str, str]:
     }
 
 
-def _tool_names(env: dict[str, str], cwd: Path) -> set[str]:
-    """Sobe o servidor com o comando do `.mcp.json`, faz o aperto de mão e lista as ferramentas."""
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
+def _tool_names(env: dict[str, str], cwd: Path, errlog: Path) -> set[str]:
+    """Sobe o servidor com o comando do `.mcp.json`, faz o aperto de mão e lista as ferramentas.
 
+    O stderr do servidor vai para um arquivo do teste, e não para o `sys.stderr`, que um teste anterior pode ter
+    trocado por algo sem descritor de arquivo (o SDK entrega o `errlog` direto ao processo filho).
+    """
     command, args = _command_and_args()
     params = StdioServerParameters(command=command, args=args, env=env, cwd=str(cwd))
 
-    async def handshake() -> set[str]:
-        async with stdio_client(params) as (read, write):
+    async def handshake(log) -> set[str]:
+        async with stdio_client(params, errlog=log) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return {tool.name for tool in (await session.list_tools()).tools}
 
-    return asyncio.run(asyncio.wait_for(handshake(), timeout=120))
+    with errlog.open("w", encoding="utf-8") as log:
+        return asyncio.run(asyncio.wait_for(handshake(log), timeout=120))
 
 
 @ONLY_WINDOWS
@@ -140,7 +142,7 @@ def test_server_starts_from_the_project_dir_even_when_the_working_dir_is_elsewhe
     root = _fake_clone(tmp_path, root_name)
     elsewhere = tmp_path / "outra pasta"
     elsewhere.mkdir()
-    names = _tool_names(_env(CLAUDE_PROJECT_DIR=str(root)), cwd=elsewhere)
+    names = _tool_names(_env(CLAUDE_PROJECT_DIR=str(root)), cwd=elsewhere, errlog=tmp_path / "stderr.txt")
     assert "dmaker_guide" in names and len(names) > 20
 
 
@@ -148,7 +150,7 @@ def test_server_starts_from_the_project_dir_even_when_the_working_dir_is_elsewhe
 def test_without_the_variable_the_server_starts_from_the_current_folder(tmp_path):
     """Um Claude Code que ainda não manda a variável cai na pasta atual, em vez de falhar calado."""
     root = _fake_clone(tmp_path, "clone com espaço")
-    assert "dmaker_guide" in _tool_names(_env(), cwd=root)
+    assert "dmaker_guide" in _tool_names(_env(), cwd=root, errlog=tmp_path / "stderr.txt")
 
 
 @ONLY_WINDOWS

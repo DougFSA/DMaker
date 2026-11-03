@@ -3848,6 +3848,7 @@ Tamanho natural da página: 900x500 px (base 1080); duração sugerida: 4 s.
 | A interface está com código antigo | Ela mesma detecta e reinicia no próximo render, desde que não haja job em andamento. Senão, feche a janela (`Ctrl+C`) e rode `dmaker ui` de novo. |
 | Job com erro | O painel de andamento ou `job_status` mostram a mensagem; erros do ffmpeg trazem as últimas linhas do `stderr` e o comando, para reproduzir com `--dry-run`. |
 | "Extra inputs are not permitted" | A spec tem um campo que o modelo não reconhece (nome errado ou a mais). Confira o nome na referência de campos da spec. |
+| O servidor MCP `dmaker` não conecta no Claude Code (`CONNECTION_CLOSED`, ou a mensagem "nao existe" com a pasta onde ele procurou o `.venv`) | O Claude Code tem que estar aberto na raiz do clone, que tem a pasta `.venv` (`dmaker setup` e a instalação a criam); uma sessão aberta num worktree não tem `.venv`. Numa sessão nova, aprove o servidor `dmaker` quando o Claude Code pedir. Veja "MCP em outras ferramentas". |
 | Porta 8765 ocupada | `dmaker ui --port 8770`, ou defina `DMAKER_UI_URL` para onde a interface já roda, para a CLI e o MCP a encontrarem. |
 | Cache grande, ou um trecho preso numa versão antiga | `dmaker clean` (mezaninos, proxies, formas de onda); `dmaker clean --jobs` limpa também o histórico; `dmaker render --force` ignora o cache só naquele render. |
 | Disco cheio por causa dos modelos de IA | Veja "Ver, baixar e apagar os modelos de IA". |
