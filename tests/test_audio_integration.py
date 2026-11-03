@@ -289,6 +289,27 @@ def test_the_stems_add_up_to_the_mix(tmp_path):
     assert float(np.max(np.abs(difference))) < 0.001  # poucos degraus de 16 bits
 
 
+def test_item_and_master_effects_reach_the_audio_file(tmp_path):
+    """A cadeia de efeitos (DMK-51) vale na saída de áudio: +6 dB no item e -6 dB no master, medidos no arquivo."""
+    tone(tmp_path / "voz.wav", 10, slow_tremolo=False)
+
+    def level(**audio) -> float:
+        project = make_project(
+            tmp_path,
+            output={"preset": "audio/wav"},
+            audio={"voiceover": [{"src": "voz.wav", **audio.pop("item", {})}], "normalize": "off", **audio},
+        )
+        result = AudioExporter(pipeline(project, tmp_path, out=tmp_path / "x.wav")).run(ExportRequest())
+        samples, _ = read_wav_channels(result.files[0].path)
+        return float(20 * np.log10(np.sqrt(np.mean(np.square(samples.astype(np.float64))))))
+
+    plain = level()
+    louder = level(item={"effects": [{"type": "amplify", "gain_db": 6}]})
+    quieter = level(master_effects=[{"type": "amplify", "gain_db": -6}])
+    assert louder - plain == pytest.approx(6.0, abs=0.1)
+    assert quieter - plain == pytest.approx(-6.0, abs=0.1)
+
+
 def test_the_music_stem_carries_the_ducking_it_suffers_in_the_mix(tmp_path):
     tone(tmp_path / "voz.wav", 20, 220, slow_tremolo=False)
     tone(tmp_path / "musica.wav", 20, 330, slow_tremolo=False)

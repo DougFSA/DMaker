@@ -341,3 +341,31 @@ def test_the_timeline_preview_also_mixes_an_audio_only_project(media, tmp_path):
     final = commands(runner)[-1]
     assert "anullsrc" in final and "-vn" in final.split() and "aac" in final
     assert "libx264" not in final and "-c:v" not in final.split()
+
+
+def test_the_stems_are_taken_before_the_master_effects_and_the_export_says_so(media, tmp_path):
+    audio = {
+        "voiceover": [{"src": "voz.wav"}],
+        "master_effects": [{"type": "amplify", "gain_db": 6}],
+        "target_lufs": -16,
+    }
+    result, runner = export(audio_project(media, audio=audio), tmp_path, ExportRequest(mode="stems"))
+    run = commands(runner)[-1]
+    # a cópia da trilha é tirada antes de a mistura entrar na cadeia do master
+    assert run.index("stem_VO0_tap") < run.index("a_master_in") < run.index("anullsink")
+    assert any(
+        "efeitos do master" in warning and "não reproduz a mixagem" in warning for warning in result.warnings
+    )
+    quiet = export(audio_project(media), tmp_path, ExportRequest(mode="stems"))[0]
+    assert not any("efeitos do master" in warning for warning in quiet.warnings)
+
+
+def test_an_item_effect_is_processed_before_the_audio_graph_like_in_the_video_render(media, tmp_path):
+    audio = {
+        "voiceover": [{"src": "voz.wav", "effects": [{"type": "amplify", "gain_db": 6}]}],
+        "target_lufs": -16,
+    }
+    _, runner = export(audio_project(media, audio=audio), tmp_path, ExportRequest())
+    # o item com efeito vira um WAV processado em cache, que entra no grafo no lugar do arquivo original
+    assert any("pcm_f32le" in line and "voz.wav" in line for line in commands(runner))
+    assert "voz.wav" not in commands(runner)[-1]

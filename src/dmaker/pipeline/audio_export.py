@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..domain.audio_effects import active_effects
 from ..domain.audio_export import (
     ExportFile,
     ExportMode,
@@ -133,6 +134,10 @@ class AudioExporter:
     ) -> ExportResult:
         pipeline = self.pipeline
         encoding = pipeline.encoding()
+        if out is None and request.mode in ("mix", "selection"):
+            out = (
+                pipeline.options.out
+            )  # o `--out` do render vale para o arquivo único, como no render de vídeo
         planned, folder = destinations(
             pipeline.project,
             request,
@@ -171,6 +176,11 @@ class AudioExporter:
             job.ctx.warnings.append(
                 "a normalização da mixagem não é linear neste projeto (o pico ou a variação de volume passam do "
                 "limite): as trilhas levam o ganho limitado pelo pico, e a soma delas pode diferir do arquivo da mixagem."
+            )
+        if active_effects(job.project.audio.master_effects):
+            job.ctx.warnings.append(
+                "os efeitos do master (audio.master_effects) não entram nas trilhas: elas saem antes dele, e a soma "
+                "delas não reproduz a mixagem."
             )
         taps = StemTaps(frozenset(item.track for item, _ in planned if item.track))
         inputs, lines, aout = pipeline.mix_graph(job, plan=None, stems=taps)
