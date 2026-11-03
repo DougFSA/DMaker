@@ -66,7 +66,8 @@ def _rich_graph(measured=None, sfx=()):
     return inputs.args, lines
 
 
-# O grafo que a `develop` gerava para este caso antes dos efeitos sonoros (DMK-25), colado como estava.
+# O grafo que a `develop` gerava para este caso antes dos efeitos sonoros (DMK-25), colado como estava. A única
+# mudança desde então são as duas linhas `apad` do ducking (DMK-47), que não têm relação com os efeitos.
 BEFORE_ARGS = ["-i", "a.mov", "-i", "n1.wav", "-i", "n2.wav", "-stream_loop", "-1", "-i", "m.mp3"]
 BEFORE_NO_MEASURE = (
     "[ta0][pip0]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_voices];"
@@ -78,7 +79,8 @@ BEFORE_NO_MEASURE = (
     "aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.200,afade=t=in:st=0:d=1.000,"
     "afade=t=out:st=10.000:d=2.000[mus0];"
     "[a_narrated]asplit=2[voice][sc];"
-    "[mus0][sc]sidechaincompress=threshold=0.0200:ratio=6:attack=20:release=350:makeup=1:level_sc=1[musd];"
+    "[sc]apad[scp];[mus0]apad[musp];"
+    "[musp][scp]sidechaincompress=threshold=0.0200:ratio=6:attack=20:release=350:makeup=1:level_sc=1[musd];"
     "[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix];"
     "[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a_norm];"
     "[a_norm]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]"

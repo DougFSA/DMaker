@@ -863,7 +863,9 @@ def test_a_partial_render_ignores_the_voiceover_like_it_does_with_the_narration(
 # ---------- sem audiograma e sem voiceover, o grafo é o de antes ----------
 
 # Gravado a partir do código da `develop` antes do DMK-34 (o mesmo projeto, a mesma montagem): o caminho dos
-# fontes do ASS é o único trecho que varia com a máquina e é trocado por FONTS.
+# fontes do ASS é o único trecho que varia com a máquina e é trocado por FONTS. A única mudança desde então são
+# as duas linhas `apad` do ducking (DMK-47): o `sidechaincompress` passou a ler as entradas preenchidas com
+# silêncio, para o fim da mistura não depender de uma corrida entre threads do ffmpeg.
 GRAPH_BEFORE_DMK_34 = (
     "[0:v]fps=30,settb=AVTB,format=yuv420p,setsar=1[tv0];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ta0];"
     "[1:v]fps=30,settb=AVTB,format=yuv420p,setsar=1[tv1];[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ta1];"
@@ -875,7 +877,8 @@ GRAPH_BEFORE_DMK_34 = (
     "[vo0]ass=filename='overlay.ass':fontsdir='FONTS'[v_ass];[v_ass]format=yuv420p[vout];"
     "[4:a]atrim=start=0.000:duration=3.600,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
     "volume=0.200,afade=t=in:st=0:d=1.000,afade=t=out:st=1.600:d=2.000[mus0];"
-    "[xa1]asplit=2[voice][sc];[mus0][sc]sidechaincompress=threshold=0.0200:ratio=6:attack=20:release=350:makeup=1:level_sc=1[musd];"
+    "[xa1]asplit=2[voice][sc];[sc]apad[scp];[mus0]apad[musp];"
+    "[musp][scp]sidechaincompress=threshold=0.0200:ratio=6:attack=20:release=350:makeup=1:level_sc=1[musd];"
     "[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix];"
     "[amix]loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=-23.5:measured_TP=-4.0:measured_LRA=7.0:measured_thresh=-33.9:offset=0.3:linear=true,aresample=48000[a_norm];"
     "[a_norm]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]"
