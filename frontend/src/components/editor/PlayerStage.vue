@@ -1,8 +1,12 @@
 <script setup lang="ts">
 /* O palco do player: o quadro na proporção do formato com as camadas na ordem do render (trecho da V1, imagens e
    barra de progresso, vídeos sobrepostos, texto). Todo `<video>` daqui é mudo: o som é de um `<audio>` só, preso ao
-   mesmo relógio (ver `PlayerPanel`). Trecho ou sobreposição de arquivo ausente aparece marcado "fonte não encontrada". */
+   mesmo relógio (ver `PlayerPanel`). Trecho ou sobreposição de arquivo ausente aparece marcado "fonte não encontrada".
+   Texto, imagem e PiP ficam nas caixas que o servidor calcula; por cima vão a zona segura (se ligada) e uma caixa
+   clicável por sobreposição ativa, que a escolhe no inspetor. Os gestos de arrastar e redimensionar entram nesta
+   camada de caixas. */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { boxRectStyle, safeZoneStyles, sidesText, stageBoxes, type StageBox } from '@/lib/overlayBoxes'
 import { syncVideo } from '@/lib/playerEngine'
 import { stageLayers, type PipLayer, type StageLayers } from '@/lib/playerStage'
 import { baseName } from '@/lib/format'
@@ -14,6 +18,9 @@ const editor = useEditorStore()
 const player = usePlayerStore()
 const media = usePlayerMediaStore()
 
+/** Do topo do quadro para baixo (fração), a caixa que começa antes disto leva o rótulo por dentro, senão ele sairia do palco. */
+const LABEL_OUTSIDE_MIN_TOP = 0.05
+
 const stage = ref<HTMLElement | null>(null)
 const videos = new Map<string, HTMLVideoElement>()
 // endereços que o navegador não conseguiu abrir (HEVC, por exemplo): enquanto o proxy não chega, não adianta tocar
@@ -23,8 +30,42 @@ const layers = computed<StageLayers | null>(() => {
   const view = editor.view
   const spec = editor.spec
   if (!view || !spec) return null
-  return stageLayers(editor.playhead, { view, spec, theme: media.theme, proxyUrls: media.proxyUrls })
+  return stageLayers(editor.playhead, { view, spec, theme: media.theme, proxyUrls: media.proxyUrls, boxes: editor.boxes })
 })
+
+/** As caixas das sobreposições que estão na tela neste instante. */
+const boxes = computed<StageBox[]>(() => stageBoxes(editor.playhead, editor.view, editor.boxes))
+
+/** As margens da zona segura do formato, quando o botão do player a liga. */
+const safeZone = computed(() => (player.safeZoneShown && editor.boxes ? safeZoneStyles(editor.boxes.safe_zone) : null))
+
+function boxClasses(entry: StageBox): Array<string | Record<string, boolean>> {
+  const { box } = entry
+  return [
+    'box',
+    `box--${box.kind}`,
+    {
+      'box--selected': editor.selectedOverlay === box.index,
+      'box--warn': box.outside_safe_zone.length > 0,
+      'box--locked': !box.movable,
+      // o rótulo fica acima da caixa para não cobrir o conteúdo; colada no topo do quadro, ele passa para dentro
+      'box--label-in': box.top < LABEL_OUTSIDE_MIN_TOP,
+    },
+  ]
+}
+
+/** O nome acessível da caixa: o rótulo, o motivo de não se mover e os lados que invadem a zona segura. */
+function boxName(entry: StageBox): string {
+  const { box } = entry
+  const parts = [entry.label]
+  if (!box.movable && box.locked_reason) parts.push(box.locked_reason)
+  if (box.outside_safe_zone.length > 0) parts.push(`fora da zona segura ${sidesText(box.outside_safe_zone)}`)
+  return parts.join(', ')
+}
+
+function chooseBox(entry: StageBox): void {
+  editor.selectOverlay(entry.box.index, { reveal: true })
+}
 
 const ratio = computed(() => {
   const view = editor.view
@@ -100,7 +141,7 @@ function pipKey(pip: PipLayer): string {
     <div
       ref="stage"
       class="stage"
-      role="img"
+      role="group"
       :aria-label="`Palco do player, quadro de ${editor.view?.width ?? 0} por ${editor.view?.height ?? 0}`"
       :style="{ '--ratio': String(ratio) }"
     >
@@ -161,6 +202,31 @@ function pipKey(pip: PipLayer): string {
             {{ text.text }}
           </div>
         </div>
+
+        <div v-if="safeZone" class="layer layer--safe" data-layer="safe-zone" aria-hidden="true">
+          <div class="safe safe--band" :style="safeZone.top" />
+          <div class="safe safe--band" :style="safeZone.bottom" />
+          <div class="safe safe--band" :style="safeZone.left" />
+          <div class="safe safe--band" :style="safeZone.right" />
+          <div class="safe safe--edge" :style="safeZone.inside"><span class="safe__label">Zona segura</span></div>
+        </div>
+
+        <div class="layer layer--boxes" data-layer="boxes">
+          <button
+            v-for="entry in boxes"
+            :key="entry.itemId"
+            type="button"
+            :class="boxClasses(entry)"
+            :style="boxRectStyle(entry.box)"
+            :data-overlay="entry.box.index"
+            :aria-label="boxName(entry)"
+            :aria-pressed="editor.selectedOverlay === entry.box.index"
+            :title="entry.box.locked_reason ?? boxName(entry)"
+            @click="chooseBox(entry)"
+          >
+            <span class="box__label">{{ entry.label }}</span>
+          </button>
+        </div>
       </template>
     </div>
   </div>
@@ -192,7 +258,9 @@ function pipKey(pip: PipLayer): string {
 
 .layer--gr,
 .layer--pip,
-.layer--tx {
+.layer--tx,
+.layer--safe,
+.layer--boxes {
   pointer-events: none;
 }
 
@@ -261,8 +329,101 @@ function pipKey(pip: PipLayer): string {
   left: 6%;
   right: 6%;
   text-align: center;
-  font-weight: 600;
-  line-height: 1.15;
+  /* o libass põe cada linha numa célula de 1,76 do corpo da Poppins (veja `LIBASS_CELL_RATIO`) */
+  line-height: 1.76;
   text-shadow: 0 2px 6px rgb(0 0 0 / 0.6);
+}
+
+/* a zona segura: o que o app da rede social cobre fica escurecido, e a área livre ganha um contorno tracejado */
+.safe {
+  position: absolute;
+}
+
+.safe--band {
+  background: rgb(255 122 122 / 0.22);
+}
+
+.safe--edge {
+  border: 1px dashed rgb(255 255 255 / 0.85);
+}
+
+.safe__label {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 10px;
+  line-height: 1;
+  color: rgb(255 255 255 / 0.9);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
+}
+
+/* a caixa de cada sobreposição: contorno por cima do vídeo, que só aceita o clique na própria caixa */
+.box {
+  position: absolute;
+  padding: 0;
+  border: 1px dashed rgb(255 255 255 / 0.9);
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.5);
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.box:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.box:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.box--html {
+  background: rgb(143 163 255 / 0.12);
+}
+
+.box--locked {
+  border-style: dotted;
+  cursor: default;
+}
+
+.box--warn {
+  border-color: #f2c14e;
+}
+
+.box--selected {
+  z-index: 1;
+  border: 2px solid var(--color-accent);
+}
+
+.box--selected.box--warn {
+  border-color: #f2c14e;
+}
+
+.box__label {
+  position: absolute;
+  left: -1px;
+  bottom: calc(100% + 1px);
+  padding: 1px 4px;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: rgb(0 0 0 / 0.65);
+}
+
+.box--label-in .box__label {
+  top: 0;
+  bottom: auto;
+}
+
+.box--selected .box__label {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+.box--warn .box__label {
+  color: #1b1300;
+  background: #f2c14e;
 }
 </style>

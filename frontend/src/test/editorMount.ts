@@ -4,7 +4,7 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import type { Component } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useEditorStore } from '@/stores/editor'
-import { editorSchema, projectDetail, projectSpec, timelineView } from './editorFixtures'
+import { boxLayout, DISK_REVISION, editorSchema, projectDetail, projectSpec, timelineView } from './editorFixtures'
 import { routedFetch, type RoutedFetch } from './routedFetch'
 
 type Spec = Record<string, unknown>
@@ -33,6 +33,8 @@ export function editorRoutes(spec: Spec, extra: Record<string, unknown> = {}): R
     },
     'GET /api/templates': [],
     'POST /api/projects/demo/timeline': () => timelineView(),
+    'POST /api/projects/demo/boxes': () => boxLayout([]),
+    'GET /api/projects/demo/revision': { revision: DISK_REVISION },
     'PUT /api/projects/demo': { ok: true, spec_path: 'x' },
     ...extra,
   }

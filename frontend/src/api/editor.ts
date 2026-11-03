@@ -3,6 +3,7 @@
    interface clássica já usava). Ler o projeto, validar, renderizar e exportar continuam em `api.projects`. */
 import { http, withQuery } from './http'
 import type {
+  BoxLayout,
   CaptionCue,
   CaptionsDocument,
   CaptionsSaved,
@@ -18,6 +19,7 @@ import type {
   QaFrameResponse,
   QaSheetRequest,
   QaSheetResponse,
+  RevisionResponse,
   SaveProjectResponse,
   ScreenLayout,
   SpecDocument,
@@ -31,8 +33,12 @@ const enc = encodeURIComponent
 const project = (name: string) => `/api/projects/${enc(name)}`
 
 export const editorApi = {
-  /** Grava a spec do projeto (o servidor valida e responde 422 com a lista de erros se ela não vale). */
-  saveProject: (name: string, spec: SpecDocument) => http.put<SaveProjectResponse>(project(name), spec),
+  /** Grava a spec do projeto (o servidor valida e responde 422 com a lista de erros se ela não vale). Com `ifMatch`
+   * (a revisão lida), o servidor só grava se o disco ainda está nela; senão responde 409 com a revisão atual. */
+  saveProject: (name: string, spec: SpecDocument, ifMatch?: string | null) =>
+    http.put<SaveProjectResponse>(project(name), spec, ifMatch ? { headers: { 'If-Match': ifMatch } } : undefined),
+  /** A revisão do `spec.json` no disco: barata, para o editor perceber que o Claude, o agente ou a CLI mexeram nele. */
+  revision: (name: string) => http.get<RevisionResponse>(`${project(name)}/revision`),
 
   captions: {
     /** As legendas automáticas do projeto; 404 se ainda não foram geradas. */
@@ -43,6 +49,10 @@ export const editorApi = {
   /** A vista multitrilha. Com `spec`, calcula sobre a edição ainda não salva; sem ela, sobre o arquivo do projeto. */
   timeline: (name: string, spec?: SpecDocument | null) =>
     http.post<TimelineView>(`${project(name)}/timeline`, { spec: spec ?? null }),
+  /** A caixa de cada sobreposição no quadro nativo do preset, pela mesma conta do render. Com `spec`, sobre a edição
+   * ainda não salva; sem ela, sobre o arquivo do projeto. */
+  boxes: (name: string, spec?: SpecDocument | null) =>
+    http.post<BoxLayout>(`${project(name)}/boxes`, { spec: spec ?? null }),
   /** Aplica uma operação de edição à spec dada e devolve a nova spec com a vista dela. Não grava nada. */
   edit: (name: string, spec: SpecDocument, op: EditOperation) =>
     http.post<EditResponse>(`${project(name)}/edit`, { spec, op }),

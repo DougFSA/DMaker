@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /* Os ícones do transporte do player (início, quadro, play, pause, fim, voltar, parar, avançar, volume), em traço
-   de 24x24 como os outros ícones da interface. Ficam aqui para não mexer na lista compartilhada dos ícones. */
+   de 24x24 como os outros ícones da interface, mais o da zona segura. Ficam aqui para não mexer na lista compartilhada
+   dos ícones. */
 export type TransportIconName =
   | 'start'
   | 'step-back'
@@ -12,6 +13,7 @@ export type TransportIconName =
   | 'stop'
   | 'forward'
   | 'volume'
+  | 'safe-zone'
 
 defineProps<{ name: TransportIconName; size?: number }>()
 
@@ -26,6 +28,8 @@ const paths: Record<TransportIconName, string> = {
   stop: 'M6 6h12v12H6z',
   forward: 'M13 5l8 7-8 7zM3 5l8 7-8 7z',
   volume: 'M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11',
+  // o quadro e, dentro dele, a área que o app da rede social deixa livre
+  'safe-zone': 'M3 3h18v18H3zM7 6.5h10v11H7z',
 }
 </script>
 

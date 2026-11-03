@@ -36,6 +36,7 @@ const expanded = defineModel<boolean>('expanded', { default: false })
 const editor = useEditorStore()
 
 const base = computed(() => `overlays.${props.index}`)
+const selected = computed(() => editor.selectedOverlay === props.index)
 const type = computed(() => String(props.overlay.type ?? ''))
 const knownType = computed(() => OVERLAY_TYPES.includes(type.value as OverlayType))
 const typeOptions = computed(() => {
@@ -92,6 +93,8 @@ function changeType(next: string): void {
 
 function move(delta: -1 | 1): void {
   editor.mutate((spec) => moveInList(spec.overlays as unknown[], props.index, delta))
+  // a escolha acompanha a sobreposição que subiu ou desceu
+  if (selected.value) editor.selectOverlay(props.index + delta)
 }
 
 function duplicate(): void {
@@ -100,6 +103,7 @@ function duplicate(): void {
 
 function remove(): void {
   editor.mutate((spec) => removeFromList(spec.overlays as unknown[], props.index))
+  if (selected.value) editor.selectOverlay(null)
 }
 </script>
 
@@ -114,6 +118,8 @@ function remove(): void {
     :type-options="typeOptions"
     :can-move-up="index > 0"
     :can-move-down="index < count - 1"
+    :selected="selected"
+    @select="editor.selectOverlay(index)"
     @change-type="changeType"
     @up="move(-1)"
     @down="move(1)"

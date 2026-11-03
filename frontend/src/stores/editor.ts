@@ -1,5 +1,6 @@
 /* O store do editor: o projeto aberto para edição e tudo que as telas do editor compartilham.
-   Guarda a spec editável, o "não salvo", a vista de linha do tempo, o cursor, a seleção e a pilha de desfazer.
+   Guarda a spec editável, o "não salvo", a vista de linha do tempo, as caixas das sobreposições no quadro, o cursor,
+   a seleção, a pilha de desfazer e a revisão do `spec.json` (para não apagar em silêncio o que mudou no disco).
    As telas nunca falam com a rota de edição direto: leem daqui e mudam por aqui. */
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
@@ -7,8 +8,10 @@ import {
   api,
   ApiError,
   errorMessage,
+  type BoxLayout,
   type EditOperation,
   type OutputFile,
+  type SaveConflictBody,
   type SpecDocument,
   type TimelineItem,
   type TimelineView,
@@ -23,12 +26,26 @@ import { useWorkspaceStore } from './workspace'
 /** Espera de silêncio antes de recalcular a vista: a cada tecla digitada seria um pedido por caractere. */
 export const VIEW_REFRESH_DELAY_MS = 250
 
+/** De quanto em quanto tempo o editor aberto pergunta ao servidor se o `spec.json` mudou no disco. */
+export const DISK_CHECK_INTERVAL_MS = 2000
+
 export type EditorStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'failed'
 
 /** Um item selecionado na linha do tempo, junto da trilha onde ele está. */
 export interface SelectedItem {
   trackId: string
   item: TimelineItem
+}
+
+/** O disco mudou por fora enquanto o editor tinha mudanças suas: a pessoa escolhe entre recarregar e manter a dela. */
+export interface DiskConflict {
+  /** A revisão que está no disco agora; nula se o projeto deixou de existir. */
+  revision: string | null
+}
+
+export interface SaveOptions {
+  /** Sem o aviso "Projeto salvo": para quem grava a cada gesto e não quer um aviso por gesto. */
+  quiet?: boolean
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -55,16 +72,29 @@ export const useEditorStore = defineStore('editor', () => {
   const outputs = ref<OutputFile[]>([])
   const captionsExists = ref(false)
   const validation = ref<ValidationSummary | null>(null)
+  /** A revisão do `spec.json` na última vez que o editor leu ou gravou o disco; vai no `If-Match` do Salvar. */
+  const revision = ref<string | null>(null)
+  /** Preenchido quando o disco mudou por fora e há mudança não salva (ou o Salvar levou 409): a faixa de escolha. */
+  const conflict = ref<DiskConflict | null>(null)
+  /** Há um gesto direto em andamento (arrastar, redimensionar): nesse tempo o disco não é consultado. */
+  const gesturing = ref(false)
 
   /* ---------- vista, cursor e seleção ---------- */
 
   const view = shallowRef<TimelineView | null>(null)
   const viewError = ref('')
   const viewBusy = ref(false)
+  /** A caixa de cada sobreposição no quadro, calculada pelo servidor (a mesma conta do render e do QA). */
+  const boxes = shallowRef<BoxLayout | null>(null)
+  const boxesError = ref('')
   /** Posição do cursor na linha do tempo, em segundos. */
   const playhead = ref(0)
   /** Ids (`TimelineItem.id`) dos itens selecionados. */
   const selection = ref<string[]>([])
+  /** O índice (em `spec.overlays`) da sobreposição escolhida no palco ou no inspetor; as duas telas a destacam. */
+  const selectedOverlayIndex = ref<number | null>(null)
+  /** Sobe a cada pedido para o inspetor mostrar a sobreposição escolhida (abrir a aba, o bloco e o cartão). */
+  const overlayReveal = ref(0)
 
   /* ---------- listas de referência ---------- */
 
@@ -85,6 +115,10 @@ export const useEditorStore = defineStore('editor', () => {
   // aberto com spec inválida, o servidor não deu as saídas nem as legendas: depois de salvar é preciso pedir
   let detailsStale = false
   let viewTicket = 0
+  let boxesTicket = 0
+  // sobe no começo e no fim de cada gravação: uma consulta de revisão que saiu antes dela vem velha e é descartada
+  let writeSerial = 0
+  let diskCheckBusy = false
   let viewTimer: ReturnType<typeof setTimeout> | null = null
   let referenceLoading: Promise<void> | null = null
   let opChain: Promise<unknown> = Promise.resolve()
@@ -104,6 +138,12 @@ export const useEditorStore = defineStore('editor', () => {
     )
   })
   const total = computed(() => view.value?.total ?? 0)
+  /** A sobreposição escolhida, se ainda existe na spec (remover ou desfazer pode ter tirado o índice). */
+  const selectedOverlay = computed<number | null>(() => {
+    const index = selectedOverlayIndex.value
+    const overlays = spec.value?.overlays
+    return index !== null && Array.isArray(overlays) && index < overlays.length ? index : null
+  })
   /** Cada `src` cru da spec e o caminho absoluto que o servidor resolveu para ele, lidos da vista. */
   const resolvedPaths = computed(() => {
     const map = new Map<string, string>()
@@ -145,8 +185,16 @@ export const useEditorStore = defineStore('editor', () => {
     view.value = null
     viewError.value = ''
     viewBusy.value = false
+    boxesTicket += 1
+    boxes.value = null
+    boxesError.value = ''
+    revision.value = null
+    conflict.value = null
+    gesturing.value = false
+    diskCheckBusy = false
     playhead.value = 0
     selection.value = []
+    selectedOverlayIndex.value = null
     history.clear()
     historyVersion.value += 1
     coalescedPath = null
@@ -179,6 +227,7 @@ export const useEditorStore = defineStore('editor', () => {
       const detail = await api.projects.get(projectName)
       if (generation !== openGeneration) return
       adoptSpec(detail.spec as SpecDocument)
+      revision.value = detail.revision ?? null
       outputs.value = detail.outputs
       captionsExists.value = detail.captions_exists
       status.value = 'ready'
@@ -186,10 +235,11 @@ export const useEditorStore = defineStore('editor', () => {
       await refreshView()
     } catch (error) {
       if (generation !== openGeneration) return
-      const body = error instanceof ApiError ? (error.detail as { raw_spec?: unknown } | null) : null
+      const body = error instanceof ApiError ? (error.detail as { raw_spec?: unknown; revision?: string | null } | null) : null
       if (error instanceof ApiError && error.status === 422 && body && typeof body.raw_spec === 'object' && body.raw_spec) {
         // a spec do disco não passa na validação: abre mesmo assim, para a pessoa consertar no JSON e salvar
         adoptSpec(body.raw_spec as SpecDocument)
+        revision.value = body.revision ?? null
         specErrors.value = errorLines(error)
         detailsStale = true
         status.value = 'ready'
@@ -334,8 +384,11 @@ export const useEditorStore = defineStore('editor', () => {
     if (!target || !current) return
     const ticket = (viewTicket += 1)
     viewBusy.value = true
+    const body = pruneEmpty(current)
+    // as caixas seguem a mesma spec e o mesmo gatilho da vista, mas cada pedido tem o seu fim: um não segura o outro
+    void loadBoxes(target, body)
     try {
-      const next = await api.editor.timeline(target, pruneEmpty(current))
+      const next = await api.editor.timeline(target, body)
       if (ticket !== viewTicket || name.value !== target) return
       applyView(next)
       // o servidor montou a vista, então a spec vale: os erros de quando o projeto abriu já não se aplicam
@@ -354,6 +407,31 @@ export const useEditorStore = defineStore('editor', () => {
     viewTimer = setTimeout(() => void refreshView(), VIEW_REFRESH_DELAY_MS)
   }
 
+  /* ---------- as caixas das sobreposições ---------- */
+
+  async function loadBoxes(target: string, body: SpecDocument): Promise<void> {
+    const ticket = (boxesTicket += 1)
+    try {
+      const next = await api.editor.boxes(target, body)
+      if (ticket !== boxesTicket || name.value !== target) return
+      // uma resposta fora do contrato (servidor antigo) deixa as caixas como estavam
+      if (!next || !Array.isArray(next.boxes)) return
+      boxes.value = next
+      boxesError.value = ''
+    } catch (error) {
+      if (ticket !== boxesTicket || name.value !== target) return
+      // spec incompleta ou servidor sem a rota: as caixas anteriores ficam, e o palco cai na posição aproximada
+      boxesError.value = errorMessage(error)
+    }
+  }
+
+  /** Pede as caixas já, sobre a spec na tela (depois de um gesto, por exemplo), sem esperar o atraso da vista. */
+  function refreshBoxes(): Promise<void> {
+    const target = name.value
+    const current = spec.value
+    return target && current ? loadBoxes(target, pruneEmpty(current)) : Promise.resolve()
+  }
+
   /* ---------- as operações de edição do servidor ---------- */
 
   /** Chama o servidor com uma operação e adota a spec e a vista que voltam. Quem chama decide o passo do desfazer. */
@@ -367,6 +445,7 @@ export const useEditorStore = defineStore('editor', () => {
       specErrors.value = []
       validation.value = null
       applyView(result.timeline)
+      void refreshBoxes()
       return true
     } catch (error) {
       toasts.push({ tone: 'error', title: 'Não foi possível editar', description: errorMessage(error) })
@@ -423,10 +502,10 @@ export const useEditorStore = defineStore('editor', () => {
     validation.value = summary
   }
 
-  /* ---------- salvar ---------- */
+  /* ---------- salvar e coerência com o disco ---------- */
 
-  /** Grava a spec no projeto (sem os campos vazios). Devolve se deu certo; o erro fica em `saveError`. */
-  async function save(): Promise<boolean> {
+  /** Grava a spec no disco (sem os campos vazios) com a revisão dada no `If-Match`. Devolve se deu certo. */
+  async function writeSpec(ifMatch: string | null, options: SaveOptions): Promise<boolean> {
     flushPendingEdits()
     const target = name.value
     const current = spec.value
@@ -434,13 +513,16 @@ export const useEditorStore = defineStore('editor', () => {
     saving.value = true
     saveError.value = ''
     const sent = currentJson.value
+    writeSerial += 1
     try {
-      await api.editor.saveProject(target, pruneEmpty(current))
+      const result = await api.editor.saveProject(target, pruneEmpty(current), ifMatch)
       if (name.value !== target) return true
       savedJson.value = sent
+      if (result?.revision) revision.value = result.revision
+      conflict.value = null
       const wasInvalid = specErrors.value.length > 0 || detailsStale
       specErrors.value = []
-      toasts.push({ tone: 'success', title: 'Projeto salvo' })
+      if (!options.quiet) toasts.push({ tone: 'success', title: 'Projeto salvo' })
       if (wasInvalid) {
         detailsStale = false
         await reloadDetails()
@@ -448,12 +530,144 @@ export const useEditorStore = defineStore('editor', () => {
       }
       return true
     } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        // o disco mudou desde a última leitura: nada foi gravado, e quem escolhe é a pessoa (faixa no topo)
+        const body = error.detail as SaveConflictBody | null
+        if (name.value === target) conflict.value = { revision: body?.revision ?? null }
+        return false
+      }
       saveError.value = errorMessage(error)
       toasts.push({ tone: 'error', title: 'Não foi possível salvar', description: saveError.value })
       return false
     } finally {
+      writeSerial += 1
       saving.value = false
     }
+  }
+
+  /** Grava a spec no projeto. Devolve se deu certo; o erro fica em `saveError`, e um 409 (o disco mudou por fora)
+   * vira `conflict`, que a tela mostra como escolha. */
+  function save(options: SaveOptions = {}): Promise<boolean> {
+    return writeSpec(revision.value, options)
+  }
+
+  /** "Manter o meu": grava por cima do que mudou no disco, com a revisão nova que o servidor mostrou no conflito. */
+  function keepMine(): Promise<boolean> {
+    const pending = conflict.value
+    return pending ? writeSpec(pending.revision, {}) : save()
+  }
+
+  /** Troca a spec da tela pela do disco. Se o conteúdo mudou, a de antes vira um passo do desfazer, e o que não estava
+   * salvo ainda pode voltar por ele. Devolve se o conteúdo mudou. */
+  function takeDiskSpec(next: SpecDocument, diskRevision: string | null): boolean {
+    const before = currentJson.value
+    const replacement = normalizeSpec(cloneJson(next))
+    const changed = JSON.stringify(replacement) !== before
+    if (changed) recordHistory(before)
+    spec.value = replacement
+    savedJson.value = JSON.stringify(replacement)
+    coalescedPath = null
+    revision.value = diskRevision ?? revision.value
+    conflict.value = null
+    validation.value = null
+    return changed
+  }
+
+  /** Lê o projeto do disco e o adota (descarta o que não estava salvo). O aviso só sai se o conteúdo mudou de fato. */
+  async function reloadFromDisk(options: { notice: string; quiet?: boolean }): Promise<boolean> {
+    const target = name.value
+    if (!target) return false
+    const generation = openGeneration
+    try {
+      let changed: boolean
+      let invalid = false
+      try {
+        const detail = await api.projects.get(target)
+        if (generation !== openGeneration) return false
+        changed = takeDiskSpec(detail.spec as SpecDocument, detail.revision ?? null)
+        specErrors.value = []
+        outputs.value = detail.outputs
+        captionsExists.value = detail.captions_exists
+      } catch (error) {
+        const body = error instanceof ApiError ? (error.detail as { raw_spec?: unknown; revision?: string | null } | null) : null
+        if (!(error instanceof ApiError && error.status === 422 && body && typeof body.raw_spec === 'object' && body.raw_spec)) throw error
+        // o que está no disco não passa na validação: abre para consertar na aba JSON, como na abertura do projeto
+        changed = takeDiskSpec(body.raw_spec as SpecDocument, body.revision ?? null)
+        specErrors.value = errorLines(error)
+        detailsStale = true
+        invalid = true
+      }
+      if (changed) {
+        toasts.push({ tone: 'info', title: options.notice, description: 'Desfazer (Ctrl+Z) volta à versão que estava na tela.' })
+      }
+      // sem vista para uma spec inválida: ela só vem depois que a pessoa a conserta, como ao abrir o projeto
+      if (!invalid) await refreshView()
+      return true
+    } catch (error) {
+      if (!options.quiet) {
+        toasts.push({ tone: 'error', title: 'Não foi possível recarregar do disco', description: errorMessage(error) })
+      }
+      return false
+    }
+  }
+
+  /** "Recarregar do disco": descarta o que não foi salvo e fica com o que o disco tem. */
+  function reloadFromConflict(): Promise<boolean> {
+    return reloadFromDisk({ notice: 'Projeto recarregado do disco' })
+  }
+
+  async function onDiskChanged(onDisk: string): Promise<void> {
+    // já há uma escolha na tela: ela só ganha a revisão mais nova, para o "Manter o meu" gravar sobre ela
+    if (conflict.value) {
+      conflict.value = { revision: onDisk }
+      return
+    }
+    flushPendingEdits()
+    if (dirty.value) {
+      conflict.value = { revision: onDisk }
+      return
+    }
+    // se não deu para ler o disco, a escolha vai para a tela em vez de um erro a cada consulta
+    const reloaded = await reloadFromDisk({ notice: 'O projeto foi atualizado fora do editor', quiet: true })
+    if (!reloaded && name.value) conflict.value = { revision: onDisk }
+  }
+
+  /**
+   * Pergunta ao servidor qual é a revisão do `spec.json` e reage se ela não é a que o editor conhece: sem nada por
+   * salvar recarrega sozinho; com mudança não salva abre a escolha. Não consulta durante um gesto nem uma gravação, e
+   * descarta a resposta que saiu antes de uma gravação nossa (ela traria a revisão de antes dela).
+   */
+  async function checkDisk(): Promise<void> {
+    const target = name.value
+    if (!target || status.value !== 'ready' || diskCheckBusy || saving.value || gesturing.value) return
+    diskCheckBusy = true
+    const serial = writeSerial
+    const generation = openGeneration
+    try {
+      const answer = await api.editor.revision(target)
+      if (generation !== openGeneration || serial !== writeSerial || saving.value || gesturing.value) return
+      const onDisk = answer?.revision
+      if (typeof onDisk !== 'string' || onDisk === revision.value) return
+      // sem revisão conhecida (servidor antigo na abertura): a primeira vista não é uma mudança por fora
+      if (revision.value === null) {
+        revision.value = onDisk
+        return
+      }
+      await onDiskChanged(onDisk)
+    } catch {
+      // sem resposta agora (servidor ocupado, projeto sumiu): a próxima consulta tenta de novo
+    } finally {
+      diskCheckBusy = false
+    }
+  }
+
+  /** Um gesto direto começa: o disco não é consultado até ele acabar. */
+  function beginGesture(): void {
+    gesturing.value = true
+  }
+
+  function endGesture(): void {
+    gesturing.value = false
   }
 
   /* ---------- desfazer e refazer ---------- */
@@ -499,6 +713,13 @@ export const useEditorStore = defineStore('editor', () => {
     selection.value = []
   }
 
+  /** Escolhe a sobreposição de índice `index` (ou nenhuma). Com `reveal`, o inspetor abre nela; é o que o clique numa
+   * caixa do palco pede. */
+  function selectOverlay(index: number | null, options: { reveal?: boolean } = {}): void {
+    selectedOverlayIndex.value = index
+    if (index !== null && options.reveal) overlayReveal.value += 1
+  }
+
   /** O caminho absoluto de um `src` da spec (que pode ser relativo ao projeto); sem a vista, o próprio `src`. */
   function resolvePath(src: string): string {
     return resolvedPaths.value.get(src) ?? src
@@ -536,6 +757,15 @@ export const useEditorStore = defineStore('editor', () => {
     reloadDetails,
     setValidation,
     save,
+    // coerência com o disco
+    revision,
+    conflict,
+    gesturing,
+    keepMine,
+    reloadFromConflict,
+    checkDisk,
+    beginGesture,
+    endGesture,
     // listas de referência
     schema,
     transitions,
@@ -557,6 +787,10 @@ export const useEditorStore = defineStore('editor', () => {
     total,
     refreshView,
     scheduleViewRefresh,
+    // caixas das sobreposições
+    boxes,
+    boxesError,
+    refreshBoxes,
     // desfazer
     canUndo,
     canRedo,
@@ -569,6 +803,9 @@ export const useEditorStore = defineStore('editor', () => {
     setPlayhead,
     select,
     clearSelection,
+    selectedOverlay,
+    overlayReveal,
+    selectOverlay,
     findItem,
     resolvePath,
     isMissing,

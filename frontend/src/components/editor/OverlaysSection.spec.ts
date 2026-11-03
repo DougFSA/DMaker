@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { projectSpec } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor } from '@/test/editorMount'
 import OverlaysSection from './OverlaysSection.vue'
@@ -125,3 +125,71 @@ describe('OverlaysSection', () => {
     expect(opened.store.dirty).toBe(false)
   })
 })
+
+describe('OverlaysSection: a sobreposição escolhida', () => {
+  const texts = [{ type: 'text', text: 'A' }, { type: 'text', text: 'B' }, { type: 'text', text: 'C' }]
+  const scrollIntoView = vi.fn()
+
+  // o jsdom não rola a tela: o método não existe nele, e o teste só confere que o cartão foi pedido
+  beforeEach(() => {
+    scrollIntoView.mockClear()
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+  afterEach(() => Reflect.deleteProperty(Element.prototype, 'scrollIntoView'))
+
+  it('o cartão da sobreposição escolhida fica marcado, e só ele', async () => {
+    const opened = await openEditor(withOverlays(texts))
+    const wrapper = await mountEditorPart(OverlaysSection, opened)
+    expect(cards(wrapper).map((card) => card.attributes('data-selected'))).toEqual([undefined, undefined, undefined])
+    opened.store.selectOverlay(1)
+    await wrapper.vm.$nextTick()
+    expect(cards(wrapper).map((card) => card.attributes('data-selected'))).toEqual([undefined, 'true', undefined])
+  })
+
+  it('clicar no cartão, ou focar um campo dele, escolhe a sobreposição (e a caixa dela ganha destaque no palco)', async () => {
+    const opened = await openEditor(withOverlays(texts))
+    const wrapper = await mountEditorPart(OverlaysSection, opened)
+    await cards(wrapper)[2]?.find('.card__toggle').trigger('click')
+    expect(opened.store.selectedOverlay).toBe(2)
+    await cards(wrapper)[0]?.find('input').trigger('focusin')
+    expect(opened.store.selectedOverlay).toBe(0)
+    // escolher no inspetor não manda o inspetor se mostrar de novo
+    expect(opened.store.overlayReveal).toBe(0)
+  })
+
+  it('a escolha vinda do palco abre o cartão, mesmo numa lista longa que começa recolhida, e leva o cartão à tela', async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({ type: 'text', text: `T${index}` }))
+    const opened = await openEditor(withOverlays(many))
+    const wrapper = await mountEditorPart(OverlaysSection, opened, {}, true)
+    expect(cards(wrapper)[4]?.attributes('data-expanded')).toBe('false')
+    opened.store.selectOverlay(4, { reveal: true })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(cards(wrapper)[4]?.attributes('data-expanded')).toBe('true')
+    expect(cards(wrapper)[3]?.attributes('data-expanded')).toBe('false')
+    expect(scrollIntoView).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('já escolhida quando o bloco aparece, a sobreposição abre na hora', async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({ type: 'text', text: `T${index}` }))
+    const opened = await openEditor(withOverlays(many))
+    opened.store.selectOverlay(6)
+    const wrapper = await mountEditorPart(OverlaysSection, opened)
+    expect(cards(wrapper)[6]?.attributes('data-expanded')).toBe('true')
+  })
+
+  it('subir ou descer leva a escolha junto, e remover a tira', async () => {
+    const opened = await openEditor(withOverlays(texts))
+    const wrapper = await mountEditorPart(OverlaysSection, opened)
+    opened.store.selectOverlay(0)
+    await button(wrapper, 'Descer a sobreposição 1')?.trigger('click')
+    expect(opened.store.selectedOverlay).toBe(1)
+    expect((opened.store.get('overlays') as Array<{ text: string }>)[1]?.text).toBe('A')
+    await button(wrapper, 'Subir a sobreposição 2')?.trigger('click')
+    expect(opened.store.selectedOverlay).toBe(0)
+    await button(wrapper, 'Remover a sobreposição 1')?.trigger('click')
+    expect(opened.store.selectedOverlay).toBeNull()
+  })
+})
+

@@ -29,6 +29,13 @@ describe('http', () => {
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
+  it('junta cabeçalhos extras (o If-Match) ao Content-Type nos PUT', async () => {
+    const fetchMock = stubFetch(200, { ok: true })
+    await http.put('/api/projects/a', { name: 'a' }, { headers: { 'If-Match': 'r1' } })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'If-Match': 'r1' })
+  })
+
   it('manda o corpo como JSON nos PATCH', async () => {
     const fetchMock = stubFetch(200, { id: 'c1' })
     await http.patch('/api/agent/conversations/c1', { title: 'Novo nome' })

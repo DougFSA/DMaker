@@ -1,15 +1,16 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { editorRoutes } from '@/test/editorMount'
-import { outputFile, projectDetail, projectSpec } from '@/test/editorFixtures'
+import { DISK_REVISION, outputFile, projectDetail, projectSpec } from '@/test/editorFixtures'
 import { FakeEventSource } from '@/test/fetch'
 import { mountRoute } from '@/test/routes'
 import { reply, routedFetch } from '@/test/routedFetch'
 import { useConfirmStore } from '@/stores/confirm'
-import { useEditorStore } from '@/stores/editor'
+import { DISK_CHECK_INTERVAL_MS, useEditorStore } from '@/stores/editor'
 import { useJobsStore } from '@/stores/jobs'
 import { useKeymapStore } from '@/stores/keymap'
 import { usePlayerStore, useScheduler } from '@/stores/player'
+import { useToastsStore } from '@/stores/toasts'
 // os painéis carregam sob demanda; já importados, o teste não espera a compilação deles
 import '@/components/editor/CaptionsPanel.vue'
 import '@/components/editor/JsonPanel.vue'
@@ -259,5 +260,144 @@ describe('EditorView (/editor/:name)', () => {
     await settle()
     expect(useKeymapStore().dialogOpen).toBe(true)
     expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Atalhos de teclado')
+  })
+})
+
+describe('EditorView: coerência com o disco', () => {
+  const REVISION_ROUTE = 'GET /api/projects/demo/revision'
+  const revisionCalls = (fetch: { to: (route: string) => unknown[] }) => fetch.to(REVISION_ROUTE).length
+  let visibility: 'visible' | 'hidden' = 'visible'
+
+  beforeEach(() => {
+    visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+    // só o relógio da consulta é de mentira: o resto da tela usa os temporizadores de verdade
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    Reflect.deleteProperty(document, 'visibilityState')
+  })
+
+  const changedSpec = () => ({ ...projectSpec(), output: { ...(projectSpec().output as object), quality: 'max' } })
+
+  it('consulta a revisão a cada 2 s enquanto o editor está aberto', async () => {
+    const { fetch } = await openRoute('/editor/demo')
+    expect(revisionCalls(fetch)).toBe(0)
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS)
+    await settle()
+    expect(revisionCalls(fetch)).toBe(1)
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS)
+    await settle()
+    expect(revisionCalls(fetch)).toBe(2)
+  })
+
+  it('com a aba escondida não consulta, e ao voltar consulta na hora', async () => {
+    const { fetch } = await openRoute('/editor/demo')
+    visibility = 'hidden'
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS * 3)
+    await settle()
+    expect(revisionCalls(fetch)).toBe(0)
+    visibility = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+    await settle()
+    expect(revisionCalls(fetch)).toBe(1)
+  })
+
+  it('ao sair do editor a consulta para', async () => {
+    const { fetch, router } = await openRoute('/editor/demo')
+    await router.push('/projetos')
+    await settle()
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS * 3)
+    await settle()
+    expect(revisionCalls(fetch)).toBe(0)
+  })
+
+  it('o Claude mudou o projeto e não há nada por salvar: o editor recarrega sozinho e avisa', async () => {
+    const { fetch } = await openRoute('/editor/demo')
+    const editor = useEditorStore()
+    fetch.set(REVISION_ROUTE, { revision: 'rev-2' })
+    fetch.set('GET /api/projects/demo', () => projectDetail({ spec: changedSpec() as never, revision: 'rev-2' }))
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS)
+    await settle()
+    expect(editor.get('output.quality')).toBe('max')
+    expect(editor.dirty).toBe(false)
+    expect(editor.revision).toBe('rev-2')
+    expect(useToastsStore().items.map((toast) => toast.title)).toContain('O projeto foi atualizado fora do editor')
+  })
+
+  it('com algo sem salvar, a faixa aparece e "Recarregar do disco" troca a edição pela do disco', async () => {
+    const { wrapper, fetch } = await openRoute('/editor/demo')
+    const editor = useEditorStore()
+    expect(wrapper.text()).not.toContain('O projeto mudou fora do editor')
+    editor.setField('output.quality', 'draft')
+    fetch.set(REVISION_ROUTE, { revision: 'rev-2' })
+    fetch.set('GET /api/projects/demo', () => projectDetail({ spec: changedSpec() as never, revision: 'rev-2' }))
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS)
+    await settle()
+    const banner = wrapper.find('[role="alert"]')
+    expect(banner.text()).toContain('O projeto mudou fora do editor (pelo Claude, pelo agente ou pela CLI)')
+    // nada se perde sem a pessoa escolher
+    expect(editor.get('output.quality')).toBe('draft')
+    expect(fetch.to('PUT /api/projects/demo')).toHaveLength(0)
+
+    await buttonOf(wrapper, 'Recarregar do disco')?.trigger('click')
+    await settle()
+    expect(editor.get('output.quality')).toBe('max')
+    expect(editor.dirty).toBe(false)
+    expect(wrapper.text()).not.toContain('O projeto mudou fora do editor')
+    expect(fetch.to('PUT /api/projects/demo')).toHaveLength(0)
+  })
+
+  it('"Manter o meu" grava a edição por cima, com a revisão nova, e a faixa some', async () => {
+    const { wrapper, fetch } = await openRoute('/editor/demo')
+    const editor = useEditorStore()
+    editor.setField('output.quality', 'draft')
+    fetch.set(REVISION_ROUTE, { revision: 'rev-2' })
+    vi.advanceTimersByTime(DISK_CHECK_INTERVAL_MS)
+    await settle()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+
+    fetch.set('PUT /api/projects/demo', { ok: true, spec_path: 'x', revision: 'rev-3' })
+    await buttonOf(wrapper, 'Manter o meu')?.trigger('click')
+    await settle()
+    const puts = fetch.to('PUT /api/projects/demo')
+    expect(puts).toHaveLength(1)
+    expect(puts[0]?.headers).toMatchObject({ 'If-Match': 'rev-2' })
+    expect(editor.revision).toBe('rev-3')
+    expect(editor.dirty).toBe(false)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('o Salvar recusado com 409 mostra a mesma escolha, sem mensagem de erro de gravação', async () => {
+    const { wrapper } = await openRoute('/editor/demo', {
+      'PUT /api/projects/demo': reply(409, { detail: 'O projeto mudou no disco desde a última leitura.', revision: 'rev-2' }),
+    })
+    const editor = useEditorStore()
+    editor.setField('output.quality', 'draft')
+    await buttonOf(wrapper, 'Salvar')?.trigger('click')
+    await settle()
+    expect(wrapper.find('[role="alert"]').text()).toContain('O projeto mudou fora do editor')
+    expect(wrapper.find('.notice--error').exists()).toBe(false)
+    expect(editor.dirty).toBe(true)
+  })
+
+  it('o Salvar leva a revisão lida no If-Match', async () => {
+    const { fetch } = await openRoute('/editor/demo')
+    useEditorStore().setField('output.quality', 'draft')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true }))
+    await settle()
+    expect(fetch.to('PUT /api/projects/demo')[0]?.headers).toMatchObject({ 'If-Match': DISK_REVISION })
+  })
+
+  it('clicar numa caixa do palco leva o inspetor à aba Propriedades', async () => {
+    window.localStorage.setItem('dmaker.editor.tab', 'json')
+    const { wrapper } = await openRoute('/editor/demo')
+    expect(wrapper.find('[role="tab"][data-state="active"]').text()).toBe('JSON')
+    useEditorStore().selectOverlay(0, { reveal: true })
+    await settle()
+    expect(wrapper.find('[role="tab"][data-state="active"]').text()).toBe('Propriedades')
+    // a troca automática não vira a aba preferida da pessoa
+    expect(window.localStorage.getItem('dmaker.editor.tab')).toBe('json')
   })
 })
