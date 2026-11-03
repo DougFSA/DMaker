@@ -258,6 +258,63 @@ class Assembly:
     graph: list[str]
 
 
+def compose_front_layers(
+    ctx: RenderContext,
+    lines: list[str],
+    inputs: Inputs,
+    cur_v: str,
+    layer: TextLayer,
+    html_layers: Sequence[ResolvedHtmlLayer],
+    person_layers: Sequence[ResolvedPersonLayer],
+    total: float,
+    video_overlays: Sequence[ResolvedVideoOverlay] | None = None,
+) -> tuple[str, list[str]]:
+    """As camadas de imagem sobre a linha do tempo, na ordem do render: a pilha de trás da pessoa e a pessoa, as
+    imagens, as composições da frente e o PiP. Devolve o rótulo do vídeo e os rótulos de áudio dos PiPs. É o
+    pedaço que a montagem final e o quadro de um instante compartilham; `video_overlays` troca os PiPs da
+    camada de texto (o quadro de um instante os usa mudos, porque não monta áudio)."""
+    # a pilha de profundidade vem logo depois da linha do tempo: o que fica atrás da pessoa, depois a pessoa; as
+    # imagens, as composições da frente, o PiP, os audiogramas e o ASS da frente entram por cima de tudo isso
+    behind: list[BehindLayer] = [HtmlBehindLayer(item, ctx.fps) for item in html_layers if item.behind]
+    if layer.has_behind_text:
+        behind.append(AssBehindLayer("overlay_behind.ass", _relpath(FONTS_DIR, ctx.job_dir)))
+    if behind or person_layers:
+        cur_v = behind_person_graph(lines, inputs, cur_v, behind, list(person_layers), ctx.fps)
+    cur_v = image_overlay_graph(
+        lines,
+        inputs,
+        cur_v,
+        layer.image_overlays,
+        ctx.width,
+        ctx.height,
+        ctx.fps,
+        total,
+        ctx.scale,
+        ctx.preset.safe,
+    )
+    cur_v = html_overlay_graph(
+        lines, inputs, cur_v, [item for item in html_layers if not item.behind], ctx.fps
+    )
+    return video_overlay_graph(
+        lines,
+        inputs,
+        cur_v,
+        list(layer.video_overlays if video_overlays is None else video_overlays),
+        ctx.width,
+        ctx.height,
+        ctx.fps,
+        total,
+        ctx.scale,
+        ctx.preset.safe,
+    )
+
+
+def text_layer_line(ctx: RenderContext, cur_v: str) -> str:
+    """O filtro que queima o ASS da frente sobre `cur_v` (caminhos relativos à pasta do trabalho, que é o `cwd` do
+    comando: isso evita escapar o `C:` do Windows nos filtros). O rótulo da saída é `[v_ass]`."""
+    return f"{cur_v}ass=filename={ffq('overlay.ass')}:fontsdir={ffq(_relpath(FONTS_DIR, ctx.job_dir))}[v_ass]"
+
+
 def build_assembly(
     ctx: RenderContext,
     prepared: list[PreparedSegment],
@@ -295,40 +352,8 @@ def build_assembly(
         size=(ctx.width, ctx.height),
     )
     lines = list(graph.lines)
-    cur_v = graph.video or ""
-    # a pilha de profundidade vem logo depois da linha do tempo: o que fica atrás da pessoa, depois a pessoa; as
-    # imagens, as composições da frente, o PiP, os audiogramas e o ASS da frente entram por cima de tudo isso
-    behind: list[BehindLayer] = [HtmlBehindLayer(item, ctx.fps) for item in html_layers if item.behind]
-    if layer.has_behind_text:
-        behind.append(AssBehindLayer("overlay_behind.ass", _relpath(FONTS_DIR, ctx.job_dir)))
-    if behind or person_layers:
-        cur_v = behind_person_graph(lines, inputs, cur_v, behind, person_layers, ctx.fps)
-    cur_v = image_overlay_graph(
-        lines,
-        inputs,
-        cur_v,
-        layer.image_overlays,
-        ctx.width,
-        ctx.height,
-        ctx.fps,
-        total,
-        ctx.scale,
-        ctx.preset.safe,
-    )
-    cur_v = html_overlay_graph(
-        lines, inputs, cur_v, [item for item in html_layers if not item.behind], ctx.fps
-    )
-    cur_v, pip_audio = video_overlay_graph(
-        lines,
-        inputs,
-        cur_v,
-        layer.video_overlays,
-        ctx.width,
-        ctx.height,
-        ctx.fps,
-        total,
-        ctx.scale,
-        ctx.preset.safe,
+    cur_v, pip_audio = compose_front_layers(
+        ctx, lines, inputs, graph.video or "", layer, html_layers, person_layers, total
     )
     # o áudio entra primeiro numa lista própria: o audiograma precisa das cópias que ele devolve, e as linhas
     # do áudio seguem no fim do grafo, onde sempre estiveram
@@ -366,9 +391,7 @@ def build_assembly(
             ctx.preset.safe,
         )
     if layer.has_text:
-        lines.append(
-            f"{cur_v}ass=filename={ffq('overlay.ass')}:fontsdir={ffq(_relpath(FONTS_DIR, ctx.job_dir))}[v_ass]"
-        )
+        lines.append(text_layer_line(ctx, cur_v))
         cur_v = "[v_ass]"
     lines.append(f"{cur_v}format=yuv420p[vout]")
     lines += audio_lines

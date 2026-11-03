@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -466,9 +466,16 @@ class MezzanineBuilder:
     def __init__(self, preparers: dict[type, SegmentPreparer] | None = None):
         self.preparers = preparers or DEFAULT_PREPARERS
 
-    def prepare(self, ctx: RenderContext, sources: list[Source]) -> list[PreparedSegment]:
+    def prepare(
+        self, ctx: RenderContext, sources: list[Source], only: Sequence[int] | None = None
+    ) -> list[PreparedSegment]:
+        """Prepara todos os trechos, ou só os de `only` (índices da linha do tempo, em ordem): o quadro de um
+        instante precisa de dois ou três trechos, e gerar o mezanino dos outros seria trabalho jogado fora."""
         prepared: list[PreparedSegment] = []
+        wanted = None if only is None else set(only)
         for i, (segment, source) in enumerate(zip(ctx.project.timeline, sources, strict=True)):
+            if wanted is not None and i not in wanted:
+                continue
             preparer = self.preparers.get(type(segment))
             if preparer is None:
                 raise TypeError(f"timeline[{i}]: nenhum preparador para {type(segment).__name__}")

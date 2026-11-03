@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import string
 import threading
 import time
@@ -28,6 +29,7 @@ from ..domain.spec import Project
 from ..media.probe import MEDIA_EXTS
 from ..pipeline.batch_files import SHEET_SUFFIXES
 from ..pipeline.build import build_id
+from ..pipeline.instant_frame_tasks import InstantFrameStatus, InstantFrameTasks
 from ..pipeline.jobs import Job, JobManager
 from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
@@ -65,6 +67,7 @@ app = FastAPI(title="DMaker", version=__version__)
 jobs = JobManager()
 layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
 preview_audio_tasks = PreviewAudioTasks()
+instant_frame_tasks = InstantFrameTasks()
 app.include_router(build_voice_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
@@ -146,6 +149,11 @@ class TimelineRequest(BaseModel):
 
 class BoxesRequest(BaseModel):
     spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
+
+
+class InstantFrameRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
+    t: float = Field(ge=0, allow_inf_nan=False)  # o instante, em segundos do vídeo final
 
 
 class EditRequest(BaseModel):
@@ -483,6 +491,75 @@ def project_boxes(name: str, services: Services, req: BoxesRequest | None = None
     except (KeyError, FileNotFoundError, ValueError) as exc:
         raise _error(422, str(exc)) from exc
     return overlay_boxes(project, preset, theme, services.prober or probe).to_dict()
+
+
+def _instant_frame_renderer(services: VoiceServices):
+    """Fábrica do renderizador do quadro de um instante, com os serviços da requisição (ffmpeg, probe e isolamento)
+    que os testes trocam por dublês; a legenda automática só é lida do cache, nunca transcrita."""
+    from ..media.probe import probe
+    from ..pipeline.instant_frame import InstantFrameRenderer
+
+    def make(runner, log):
+        return InstantFrameRenderer(
+            runner=services.runner or runner,
+            prober=services.prober or probe,
+            isolator=services.isolation,
+            log=log,
+        )
+
+    return make
+
+
+def _instant_frame_dict(status: InstantFrameStatus) -> dict:
+    """O estado de um quadro de instante como o editor o lê: `ready` traz `url` (para um `<img>`), `error` traz a
+    mensagem, `pending` traz a etapa e o andamento, e `superseded` diz que um pedido mais novo tomou o lugar."""
+    body: dict = {"key": status.key, "status": status.state, "t": status.at, "notes": status.notes}
+    if status.state == "ready" and status.frame is not None:
+        body["url"] = _file_url(status.frame.path)
+    elif status.state == "error":
+        body["error"] = status.error
+    elif status.state == "pending":
+        body.update(label=status.label, percent=status.percent)
+    return body
+
+
+@app.post("/api/projects/{name}/frame")
+def request_instant_frame(name: str, req: InstantFrameRequest, services: Services) -> dict:
+    """Pede o quadro do projeto no instante `t`, renderizado pelo pipeline de verdade (resolução da prévia, sem
+    áudio). Já no cache responde `ready` com a `url`; senão começa em segundo plano e responde `pending` com a
+    chave, que `GET .../frame/{key}` acompanha. Um pedido novo do mesmo projeto supera o anterior (`superseded`)."""
+    from ..pipeline.projects import load_project
+
+    if req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    try:
+        status = instant_frame_tasks.request(project, req.t, _instant_frame_renderer(services))
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise _error(422, str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)) from exc
+    return _instant_frame_dict(status)
+
+
+@app.get("/api/projects/{name}/frame/{key}")
+def get_instant_frame(name: str, key: str, services: Services) -> dict:
+    """Estado do quadro de uma chave pedida antes (o editor consulta isto enquanto ele é feito)."""
+    from ..media.ffmpeg import SubprocessRunner
+
+    status = None
+    if re.fullmatch(
+        r"[0-9a-f]{16}", key
+    ):  # a chave que o servidor deu; barra qualquer outra coisa no nome do arquivo
+        renderer = _instant_frame_renderer(services)(SubprocessRunner(quiet=True), lambda message: None)
+        status = instant_frame_tasks.status(name, key, renderer)
+    if status is None:
+        raise _error(404, "quadro desconhecido: peça de novo com POST")
+    return _instant_frame_dict(status)
 
 
 @app.post("/api/projects/{name}/validate")

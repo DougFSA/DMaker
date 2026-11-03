@@ -272,7 +272,7 @@ Vídeos em formatos que o navegador não decodifica (HEVC, ProRes, alguns MOV de
 
 ### Cache
 
-O DMaker guarda resultados intermediários para reeditar rápido: **mezaninos** (`cache/mez/`: um trecho já cortado, reenquadrado e codificado no tamanho final, por hash de conteúdo, então mudar um campo que não afeta aquele trecho não o invalida), as animações em HTML já desenhadas (também em `cache/mez/`, por hash do HTML, dos arquivos da pasta, do tamanho, da duração e dos dados), proxies, formas de onda, falas sintetizadas, vozes separadas do fundo e, por job, o grafo de filtros e os comandos usados. `dmaker clean` limpa mezaninos, proxies e formas de onda; `dmaker clean --jobs` limpa também o histórico de jobs.
+O DMaker guarda resultados intermediários para reeditar rápido: **mezaninos** (`cache/mez/`: um trecho já cortado, reenquadrado e codificado no tamanho final, por hash de conteúdo, então mudar um campo que não afeta aquele trecho não o invalida), as animações em HTML já desenhadas (também em `cache/mez/`, por hash do HTML, dos arquivos da pasta, do tamanho, da duração e dos dados), proxies, formas de onda, falas sintetizadas, vozes separadas do fundo, os **quadros do editor** (`cache/frames/`: o quadro do projeto num instante, renderizado pelo pipeline de verdade na resolução da prévia e sem áudio, por hash da spec, do quadro pedido e dos arquivos que ele lê; os 24 mais recentes de cada projeto ficam) e, por job, o grafo de filtros e os comandos usados. `dmaker clean` limpa mezaninos, proxies, formas de onda, o áudio da prévia e os quadros do editor; `dmaker clean --jobs` limpa também o histórico de jobs.
 
 ### Jobs e saídas
 
@@ -2616,7 +2616,7 @@ São 74 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
   - `--preset` TEXTO: (padrão instagram/reels)
   - `--variant` TEXTO: light | dark
   - `--out` CAMINHO
-- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform) e o áudio da prévia da linha do tempo (cache/preview-audio).
+- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor pede ao pipeline (cache/frames).
   - `--jobs` / `--no-jobs`: Apaga também cache/jobs (grafos, ASS, áudio de transcrição).
 - **`dmaker cuts NAME`**: Lista o que o autocut removeu do projeto (tempo na gravação original e motivo).
 - **`dmaker doctor`**: Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet.

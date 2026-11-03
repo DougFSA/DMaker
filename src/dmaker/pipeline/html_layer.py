@@ -33,6 +33,8 @@ from .segments import cache_key
 # h2: a página passou a receber o raio dos cantos da marca, a fonte dela de verdade (não só a Poppins) e os arquivos
 # do projeto declarados pela composição.
 HTML_LAYER_VERSION = "h2"
+# O mesmo para o quadro avulso da composição (o quadro de um instante): muda se o jeito de pedir o quadro mudar.
+HTML_STILL_VERSION = "s1"
 
 # Peso CSS de cada papel de peso da marca (`fonts.title`, `body`...): as `@font-face` da família cobrem os seis.
 _CSS_WEIGHTS = (
@@ -118,6 +120,29 @@ def resolve_html_overlay(
     box = html_box(overlay, ctx.width, ctx.height)
     files = {name: ctx.project.resolve(path) for name, path in overlay.files.items()}
     return ResolvedHtmlOverlay(overlay, source, overlay.start, end, box, index, files)
+
+
+def page_composition(
+    ctx: RenderContext, item: ResolvedHtmlOverlay
+) -> tuple[HtmlComposition, tuple[int, int]]:
+    """A página como o renderizador a recebe, e o tamanho (px, base 1080) com que ela é desenhada.
+
+    A página é desenhada na base 1080, como o resto do DMaker: na prévia (metade do tamanho) o mesmo desenho sai
+    menor, em vez de a página ver uma janela menor e se reorganizar."""
+    _left, _top, box_width, box_height = item.box
+    overlay = item.overlay
+    size = overlay.size or (max(round(box_width / ctx.scale), 1), max(round(box_height / ctx.scale), 1))
+    composition = HtmlComposition(
+        source=item.source,
+        size=size,
+        scale=ctx.scale,
+        fps=ctx.fps,
+        duration=item.end - item.start,
+        data=overlay.data,
+        files=item.files,
+        **brand_page_fields(ctx.theme),
+    )
+    return composition, size
 
 
 def files_digest(files: Mapping[str, Path], faces: tuple[FontFace, ...]) -> str:
@@ -207,19 +232,7 @@ class HtmlLayerBuilder:
         if count <= 0:
             return None
         left, top, box_width, box_height = item.box
-        # a página é desenhada na base 1080, como o resto do DMaker: na prévia (metade do tamanho) o mesmo
-        # desenho sai menor, em vez de a página ver uma janela menor e se reorganizar
-        size = overlay.size or (max(round(box_width / ctx.scale), 1), max(round(box_height / ctx.scale), 1))
-        composition = HtmlComposition(
-            source=item.source,
-            size=size,
-            scale=ctx.scale,
-            fps=fps,
-            duration=item.end - item.start,
-            data=overlay.data,
-            files=item.files,
-            **brand_page_fields(ctx.theme),
-        )
+        composition, size = page_composition(ctx, item)
         output_size = composition.output_size
         # o instante da página no primeiro quadro: 0 quando o início cai na grade de quadros, uma fração dele
         # quando não cai (a composição acompanha o início pedido, não o quadro mais próximo)
@@ -273,6 +286,53 @@ class HtmlLayerBuilder:
             stream, output_size, fps, count, partial, label=f"composição html ({overlay.src})"
         )
         return PreparedHtmlLayer(resolved, partial, sidecar, (command,), stream, warnings)
+
+    def still(self, ctx: RenderContext, item: ResolvedHtmlOverlay, frame: int) -> ResolvedHtmlLayer | None:
+        """A composição só no quadro `frame` do vídeo final, como imagem com alfa (ou None se ela não aparece nele).
+
+        Serve ao quadro de um instante: a página vai direto ao instante pedido, sem desenhar os quadros de antes
+        nem gerar o vídeo inteiro. O quadro fica em cache por conteúdo, como o vídeo da composição."""
+        fps = ctx.fps
+        first, stop = frame_range(item.start, item.end, fps)
+        if not first <= frame < stop:
+            return None
+        left, top, box_width, box_height = item.box
+        composition, size = page_composition(ctx, item)
+        output_size = composition.output_size
+        # o instante da página neste quadro, o mesmo que o vídeo da composição usa para ele (ver `_prepare_one`)
+        at = max(round(frame / fps - item.start, 6), 0.0)
+        key = cache_key(
+            HTML_STILL_VERSION,
+            content_digest(item.source),
+            size,
+            round(ctx.scale, 6),
+            fps,
+            at,
+            round(composition.duration, 6),
+            item.overlay.data,
+            composition.colors,
+            composition.font_family,
+            composition.radius,
+            files_digest(composition.files, composition.fonts),
+        )
+        out = ctx.cache_dir / f"{key}_htmlstill.png"
+        if not out.exists():
+            label = f"overlays[{item.index}] (html {item.overlay.src})"
+            png = self.renderer.still(composition, at, lambda message: ctx.warn(f"{label}: {message}"))
+            partial = out.with_name(f"{out.stem}.part.png")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            partial.write_bytes(png)
+            partial.replace(out)
+        return ResolvedHtmlLayer(
+            out,
+            frame / fps,
+            (frame + 1) / fps,
+            str(left),
+            str(top),
+            None if output_size == (box_width, box_height) else (box_width, box_height),
+            behind=item.overlay.layer == "behind-person",
+            still=True,
+        )
 
     @staticmethod
     def _stored_warnings(sidecar: Path) -> list[str]:

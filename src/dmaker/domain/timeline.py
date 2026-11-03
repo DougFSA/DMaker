@@ -204,3 +204,20 @@ def timeline_window(
         transitions=(None, *transitions[first + 1 : last + 1]),
         overlaps=tuple(round(spans[i - 1][1] - spans[i][0], 6) for i in range(first + 1, last + 1)),
     )
+
+
+def instant_window(
+    durations: Sequence[float], transitions: Sequence[Transition | None], index: int, fps: float
+) -> TimelineWindow | None:
+    """Janela da linha do tempo para mostrar só o quadro `index` do vídeo final, ou None se nenhum trecho o mostra.
+
+    Se uma transição já está andando no quadro, a janela parte de onde ela começou (o início do segundo trecho):
+    o grafo das transições conta o progresso a partir do começo da janela, e partir no meio dela daria o segundo
+    trecho desalinhado (ele começaria no primeiro quadro em vez de no que a transição já alcançou). O quadro pedido
+    é então o de número `index - first_frame` da saída da janela. Fora de transição a janela começa no próprio quadro,
+    e o primeiro trecho é aberto direto nele (`seek`), sem decodificar o que vem antes."""
+    spans = timeline_spans(list(durations), list(transitions))
+    at, end = index / fps, (index + 1) / fps
+    visible = [i for i, (a, b) in enumerate(spans) if b > at + TIME_EPSILON and a < end - TIME_EPSILON]
+    start = min(spans[visible[1]][0], at) if len(visible) > 1 else at
+    return timeline_window(durations, transitions, start, end, fps, 0)

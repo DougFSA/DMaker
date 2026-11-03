@@ -29,6 +29,7 @@ class ResolvedHtmlLayer:
     y: str
     scale_to: tuple[int, int] | None = None
     behind: bool = False
+    still: bool = False  # o arquivo é uma imagem de um quadro só (o quadro de um instante), não um vídeo
 
 
 def html_layer_command(
@@ -59,11 +60,18 @@ def attach_html_layer(
     O `overlay` trabalha em `yuv420`: o fundo passa intacto onde a composição é transparente, e só muda o que ela
     de fato cobre."""
     quarter, half = 0.25 / fps, 0.5 / fps
-    index = inputs.add(layer.path)
     chain = []
     if layer.scale_to is not None:
         chain.append(f"scale={layer.scale_to[0]}:{layer.scale_to[1]}:flags=lanczos")
-    chain += ["tpad=stop_mode=clone:stop=1", f"setpts=PTS-STARTPTS{layer.start - quarter:+.6f}/TB"]
+    if layer.still:
+        # uma imagem parada vai até o fim da janela, como as imagens da montagem: não tem o ritmo de um vídeo, e o
+        # instante dela não é o do primeiro quadro (a base de tempo de uma imagem é a de 25 quadros por segundo, que
+        # arredondaria o `setpts` abaixo para 40 ms)
+        index = inputs.add_looped_image(layer.path, fps, layer.stop)
+        chain.append("format=rgba")
+    else:
+        index = inputs.add(layer.path)
+        chain += ["tpad=stop_mode=clone:stop=1", f"setpts=PTS-STARTPTS{layer.start - quarter:+.6f}/TB"]
     lines.append(f"[{index}:v]{','.join(chain)}[{tag}_src]")
     window = f"gte(t,{layer.start - half:.6f})*lt(t,{layer.stop - half:.6f})"
     lines.append(

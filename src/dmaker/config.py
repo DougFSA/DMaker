@@ -42,6 +42,7 @@ PROXY_DIR = CACHE_DIR / "proxy"
 PREVIEW_AUDIO_DIR = (
     CACHE_DIR / "preview-audio"
 )  # som da prévia da linha do tempo: pedaços por trecho e a mixagem
+FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
 STEMS_DIR = CACHE_DIR / "stems"  # voz e fundo separados (isolamento vocal), por trecho de arquivo
@@ -75,6 +76,7 @@ def ensure_dirs() -> None:
         MEZ_DIR,
         PROXY_DIR,
         PREVIEW_AUDIO_DIR,
+        FRAMES_DIR,
         WAVEFORM_DIR,
         JOBS_DIR,
         MODELS_DIR,
