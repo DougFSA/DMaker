@@ -25,7 +25,7 @@ from ..domain.edits import (
     trim_segment,
 )
 from ..domain.effect_edits import apply_effect_op
-from ..domain.marker_edits import add_marker, marker_index, remove_marker, set_marker
+from ..domain.marker_edits import add_marker, marker_index, remove_marker, set_group_markers, set_marker
 from ..domain.markers import MarkerError, is_marker_ref, resolve_instant
 from ..domain.spec import ClipSegment, Project
 from ..domain.time_map import TimeMap, shift_markers
@@ -156,6 +156,10 @@ def _op_marker_remove(project: Project, op: dict, layout: OriginAggregate) -> Pr
     return remove_marker(project, marker_index(project, op))
 
 
+def _op_marker_group_set(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    return set_group_markers(project, str(op.get("group", "")), op.get("markers") or [])
+
+
 EDIT_OPERATIONS: dict[str, Operation] = {
     "split": _op_split,
     "remove": _op_remove,
@@ -171,6 +175,7 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     "marker_add": _op_marker_add,
     "marker_set": _op_marker_set,
     "marker_remove": _op_marker_remove,
+    "marker_group_set": _op_marker_group_set,
 }
 
 

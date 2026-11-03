@@ -53,5 +53,3 @@ Rode `dmaker validate` e olhe a duração: o Repetir numa voz gravada mostra o �
 - **Não ouvi diferença**: confira se o efeito está ligado (`enabled`), se o intervalo (`start`/`end`) cobre o trecho e se o item não está mudo.
 - **O Normalizar não fez nada**: o trecho é silêncio, ou o intervalo está fora do item.
 - **A primeira prévia ou o primeiro render demora**: o item é tratado uma vez e guardado em `cache/audio-fx` (uns 23 MB por minuto de estéreo); `dmaker clean` o apaga.
-
----

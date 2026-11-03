@@ -3,7 +3,7 @@ nunca é alterada), como as de `edits.py`, e levanta `EditError` em português q
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .edits import EditError, _check_index, _clone
@@ -73,6 +73,23 @@ def remove_marker(project: Project, index: int) -> Project:
 
     def mutate(data: dict) -> None:
         del data["markers"][index]
+
+    return _clone(project, mutate)
+
+
+def set_group_markers(project: Project, group: str, markers: Sequence[Mapping[str, Any]]) -> Project:
+    """Troca TODOS os marcadores do grupo `group` pelos `markers` dados (cada um com `at`, ou `start` e `end`, mais
+    `text` e `color`), de uma vez: é um passo só do desfazer. Os marcadores dos outros grupos não são tocados, e o
+    grupo vazio (a trilha padrão, da pessoa) é recusado: quem marca automaticamente escreve num grupo com nome."""
+    group = group.strip()
+    if not group:
+        raise EditError(
+            "informe o nome do grupo: o grupo vazio é a trilha padrão de marcadores da pessoa e não é substituído"
+        )
+    created = [{**_only_marker_fields(item), "group": group} for item in markers]
+
+    def mutate(data: dict) -> None:
+        data["markers"] = [item for item in data["markers"] if item.get("group", "") != group] + created
 
     return _clone(project, mutate)
 

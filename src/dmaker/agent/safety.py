@@ -56,6 +56,7 @@ PATH_ARGUMENTS = frozenset(
         "others",
         "reference_audio",
         "file_path",
+        "file",
         "music",
         "sheet",
     }
@@ -429,6 +430,7 @@ OVERWRITES_EXISTING_OUTPUT = (
     "dub_stems",
     "markers_export",
     "audio_export",
+    "audio_analyze",
 )
 # Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, com a flag de sobrescrita ligada, o substituem
 # inteiro, com as traduções que a pessoa revisou. Sem a flag o próprio servidor recusa o projeto que já existe

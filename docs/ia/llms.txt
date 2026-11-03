@@ -44,6 +44,8 @@
 ## Edição de áudio
 
 - [Aplicar efeitos de áudio em um item ou no master](efeitos-de-audio.md): Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original.
+- [Analisar o áudio: estouro, nível, contraste, espectro e sons](analisar-audio.md): Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
+- [Cortar os clipes no ritmo da música](cortar-no-ritmo.md): Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
 
 ## Tarefas de dublagem e modelos
 
