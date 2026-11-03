@@ -29,6 +29,9 @@ def _out_of_range(label: str, index: int, count: int) -> EditError:
 
 
 def _total(layout: OriginAggregate) -> float:
+    """A duração do projeto: a do layout (num projeto só de áudio ela vem do som dos itens, não de trechos de vídeo)."""
+    if layout.physical is not None:
+        return layout.physical.total
     return layout.spans[-1][1] if layout.spans else 0.0
 
 

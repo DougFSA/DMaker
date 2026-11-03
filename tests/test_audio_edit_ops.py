@@ -562,3 +562,36 @@ def test_the_envelope_rebase_keeps_the_sound_of_the_stretch_the_same():
     piece = envelope.rebased(3.0, 2.0)  # de 3 a 5 s do item
     assert [(p.at, p.db) for p in piece.points] == [(0.0, -3.0), (2.0, -9.0)]
     assert piece.gain_db_at(1.0) == pytest.approx(envelope.gain_db_at(4.0))
+
+
+# ---------- projeto só de áudio (sem imagem) ----------
+
+
+def audio_only(folder: Path) -> Project:
+    project = Project.model_validate(
+        {
+            "name": "so-audio",
+            "output": {"preset": "audio/mp3"},
+            "timeline": [],
+            "audio": {"voiceover": [{"src": "fala.wav", "start": 2.0}], "music": {"src": "musica.wav"}},
+        }
+    )
+    project.base_dir = folder
+    return project
+
+
+def test_the_wave_edits_work_in_a_project_that_has_no_picture_at_all(folder):
+    project = audio_only(folder)
+    silenced = edit(project, type="audio_silence", target="audio.voiceover.0", start=3, end=4)
+    assert chain(silenced.audio.voiceover[0].effects) == [("silence", 1.0, 2.0)]
+    cut = edit(silenced, type="audio_cut", target="audio.voiceover.0", start=5, end=6)
+    assert [e.type for e in cut.audio.voiceover[0].effects] == ["silence", "cut"]
+    pasted = edit(project, type="audio_paste", target="audio.voiceover.0", start=3, end=5, at=20)
+    assert (pasted.audio.voiceover[1].start, pasted.audio.voiceover[1].offset) == (20.0, 1.0)
+    assert edit(project, type="track_set", track="MUS", gain_db=-6).tracks["MUS"].gain_db == -6.0
+    enveloped = edit(
+        project, type="audio_envelope", target="audio.music", points=[{"at": 1, "db": -6}, {"at": 5, "db": 0}]
+    )
+    assert enveloped.audio.music.effects[0].type == "envelope"
+    mono = edit(project, type="audio_channels", target="audio.voiceover.0", mode="mono")
+    assert mono.audio.voiceover[0].effects[0].mode == "mono"
