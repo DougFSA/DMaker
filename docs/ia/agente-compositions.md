@@ -4,7 +4,7 @@ Pôr sobre o vídeo um infográfico pronto com parâmetros (contador, gráfico, 
 
 ## Ferramentas deste kit
 
-`probe_media`, `job_status`, `search_manual`, `list_infographics`, `add_infographic`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `timeline_view`, `render_project`, `qa_report`.
+`probe_media`, `job_status`, `search_manual`, `list_infographics`, `add_infographic`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `undo_edit`, `redo_edit`, `timeline_view`, `render_project`, `qa_report`.
 
 ## Pedidos e as chamadas certas
 

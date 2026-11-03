@@ -8,7 +8,6 @@ de um grupo de marcadores que a pessoa já tem).
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from ..analysis.rhythm import BoundaryProposal, propose_beat_cuts
 from ..domain.spec import ClipSegment, Project
 from .analysis_items import TargetError
 from .audio_analysis import AnalysisRequest, AudioAnalysisService
+from .edit_history import EditHistory
 from .edit_time import owned_intervals
 from .edits import apply_edit_report
 from .layout import aggregate_by_origin, project_layout
@@ -115,12 +115,11 @@ def cut_on_beat(
     group: str | None = None,
     params: dict | None = None,
     service: AudioAnalysisService | None = None,
-    save: Callable[[Project], Any] | None = None,
 ) -> BeatCutOutcome:
     """Propõe (e, com `apply`, aplica) o corte de cada fronteira entre clipes na batida mais perto."""
     if tolerance <= 0:
         raise ValueError("a tolerância precisa ser maior que zero")
-    project = load_project(name_or_path)
+    project = original = load_project(name_or_path)
     service = service or AudioAnalysisService()
     beats, bpm = _beat_instants(project, service, source, group, dict(params or {}))
     boundaries, skipped = _boundaries(project, service)
@@ -158,5 +157,10 @@ def cut_on_beat(
             )
     outcome.project = project
     if outcome.moved:
-        (save or (lambda changed: save_project(changed, project_path(name_or_path).parent)))(project)
+        # todos os cortes são UM passo do histórico (o `undo_edit` devolve a spec exatamente como estava)
+        spec_path = project_path(name_or_path)
+        EditHistory(original.base_dir or spec_path.parent, spec_path=spec_path).record(
+            original, project, f"Cortar no ritmo ({outcome.moved} corte(s))"
+        )
+        save_project(project, spec_path.parent)
     return outcome

@@ -59,6 +59,9 @@ class EffectsOwner(Strict):
     effect_fields: ClassVar[tuple[str, ...]] = ("effects",)
     effects_place: ClassVar[str] = "item"  # como a mensagem de recusa chama o lugar
     effects_may_grow: ClassVar[bool] = False  # se um efeito que muda a duração é aceito aqui
+    # campos de mixagem (deslocamento, pan) que ficam fora do dump enquanto valem o padrão, pelo mesmo motivo da
+    # lista vazia: o hash de cache e o `spec.json` de um projeto antigo seguem idênticos
+    omitted_at_default: ClassVar[dict[str, Any]] = {}
 
     @model_validator(mode="after")
     def _effects_fit_here(self) -> EffectsOwner:
@@ -66,7 +69,7 @@ class EffectsOwner(Strict):
             return self
         for name in self.effect_fields:
             for effect in getattr(self, name):
-                if effect.changes_duration:
+                if effect.alters_duration():
                     raise ValueError(
                         f"{self.effects_place}: o efeito {effect.label} muda a duração do item e não vale "
                         f"aqui. Ele vale em {GROWABLE_AUDIO}."
@@ -79,7 +82,15 @@ class EffectsOwner(Strict):
         for name in self.effect_fields:
             if name in data and not data[name]:
                 del data[name]
+        for name, default in self.omitted_at_default.items():
+            if name in data and data[name] == default:
+                del data[name]
         return data
+
+
+# Quanto o som de um clipe, de um PiP ou de uma faixa externa pode andar em relação à imagem (segundos): o
+# bastante para corrigir uma câmera dessincronizada, sem deixar uma troca de arquivo passar por deslocamento
+MAX_AUDIO_OFFSET = 60.0
 
 
 # Camada de uma sobreposição na pilha de profundidade: "front" fica na frente de tudo; "behind-person" fica entre o
@@ -248,10 +259,16 @@ class ClipSegment(SegmentBase, EffectsOwner):
     # fade de áudio curto nas duas pontas do clipe, sem escurecer a imagem (ao contrário de fade_in/fade_out):
     # tira o estalo de um corte seco no meio da fala, como os de `autocut`. 0 = sem fade
     audio_fade: float = Field(0.0, ge=0, le=0.5)
+    # desloca o som em relação à imagem, em segundos da linha do tempo: positivo atrasa o som (a fala chega depois
+    # do lábio), negativo adianta. O som pode vir de fora de `start`/`end` na fonte; onde a fonte não tem som, sai silêncio
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
+    # equilíbrio esquerda/direita do som do trecho, de -1 (tudo à esquerda) a 1 (tudo à direita)
+    pan: float = Field(0.0, ge=-1, le=1)
     # cadeia de efeitos no som da própria câmera do trecho (ver `domain/audio_effects`), em ordem
     effects: list[AudioEffect] = []
 
     effects_place: ClassVar[str] = "clipe"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0}
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
@@ -456,12 +473,15 @@ class VideoOverlay(EffectsOwner):
     opacity: float = Field(1.0, ge=0, le=1)
     margin: float = Field(40, ge=0)
     volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
+    # desloca o som do PiP em relação à imagem dele (positivo atrasa o som), como em `ClipSegment.audio_offset`
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
     effects: list[AudioEffect] = []  # cadeia de efeitos no áudio do PiP, em ordem
     animation: Literal["none", "fade", "slide"] = "fade"
     fade: float = Field(0.3, ge=0)
     sound: SoundSpec | None = None  # som na entrada do quadro (em `start`)
 
     effects_place: ClassVar[str] = "sobreposição de vídeo (PiP)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0}
 
     @model_validator(mode="after")
     def _origin(self) -> VideoOverlay:
@@ -730,10 +750,12 @@ class Music(EffectsOwner):
     duck_threshold: float = Field(0.02, gt=0, le=1)
     duck_ratio: float = Field(6, ge=1, le=20)
     duck_release: float = Field(350, ge=10, le=5000)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[AudioEffect] = []  # cadeia de efeitos na música inteira (antes das janelas e do loop)
 
     effects_place: ClassVar[str] = "música"
     effects_may_grow: ClassVar[bool] = True
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
 
 
 class AudioTrack(EffectsOwner):
@@ -742,11 +764,16 @@ class AudioTrack(EffectsOwner):
 
     source: str
     volume: float = Field(1.0, ge=0, le=4)
+    # desloca a faixa em relação à sessão, em segundos: positivo atrasa o som da faixa (corrige um gravador que
+    # começou adiantado em relação às câmeras), negativo adianta
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[
         AudioEffect
     ] = []  # cadeia de efeitos no arquivo inteiro da faixa, antes de fatiar por trecho
 
     effects_place: ClassVar[str] = "faixa externa (audio.tracks)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0}
 
 
 class Narration(EffectsOwner):
@@ -763,9 +790,11 @@ class Narration(EffectsOwner):
     speed: float = Field(1.0, ge=0.5, le=2)
     language: str = "pt"
     seed: int | None = None  # fixa a síntese: o mesmo texto soa igual a cada render
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[AudioEffect] = []  # cadeia de efeitos na fala já sintetizada
 
     effects_place: ClassVar[str] = "narração (audio.narration)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
 
     @model_validator(mode="after")
     def _one_source(self) -> Narration:
@@ -789,10 +818,12 @@ class VoiceoverClip(EffectsOwner):
     offset: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     volume: float = Field(1.0, ge=0, le=4)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[AudioEffect] = []  # cadeia de efeitos no trecho do arquivo (de `offset` a `end`), em ordem
 
     effects_place: ClassVar[str] = "voz gravada (audio.voiceover)"
     effects_may_grow: ClassVar[bool] = True
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
 
     @model_validator(mode="after")
     def _range(self) -> VoiceoverClip:
@@ -817,9 +848,14 @@ class AudioSettings(EffectsOwner):
     # cadeia de efeitos na mistura inteira: depois da música, da voz e dos efeitos sonoros e antes da
     # normalização final, que continua valendo por cima
     master_effects: list[AudioEffect] = []
+    # ganho (dB) e equilíbrio (-1 a 1) do barramento dos efeitos sonoros: o que o estado da trilha SFX
+    # (`Project.tracks`) vira na hora de renderizar, junto com o mudo (-120 dB). Ficam fora do dump no padrão
+    sfx_gain_db: float = Field(0.0, ge=-120, le=24)
+    sfx_pan: float = Field(0.0, ge=-1, le=1)
 
     effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
     effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"sfx_gain_db": 0.0, "sfx_pan": 0.0}
 
 
 # ---------- saída e projeto ----------
@@ -952,6 +988,20 @@ class TrackState(Strict):
     muted: bool = False
     hidden: bool = False
     locked: bool = False
+    # controles de mixagem das trilhas de áudio (A1, A2..., MUS, NAR, VO, SFX), como no cabeçalho de trilha do
+    # Audacity: ganho em dB, equilíbrio de -1 (esquerda) a 1 (direita) e solo (com alguma trilha em solo, as outras
+    # trilhas de áudio ficam mudas). Valem para a prévia E para o render e ficam fora do dump no padrão
+    gain_db: float = Field(0.0, ge=-60, le=24)
+    pan: float = Field(0.0, ge=-1, le=1)
+    solo: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_mix_defaults(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for name, default in (("gain_db", 0.0), ("pan", 0.0), ("solo", False)):
+            if name in data and data[name] == default:
+                del data[name]
+        return data
 
 
 MARKER_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")

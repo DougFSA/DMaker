@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -74,8 +75,7 @@ def test_the_mcp_lists_the_effect_catalog_and_edits_a_chain_over_stdio():
 
     spec_path = config.PROJECTS_DIR / "mcp-efeitos-teste" / "spec.json"
     assert saved(spec_path)["audio"]["master_effects"][0]["gain_db"] == 3
-    spec_path.unlink()
-    spec_path.parent.rmdir()
+    shutil.rmtree(spec_path.parent)  # a pasta tem também o histórico de edições (`history`)
 
 
 # ---------- CLI ----------

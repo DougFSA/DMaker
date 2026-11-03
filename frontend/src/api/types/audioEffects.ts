@@ -1,7 +1,7 @@
 /* Tipos do catálogo dos efeitos de áudio (GET /api/audio-effects, ui/audio_effect_routes.py), com os nomes de campo do
    backend. O painel "Efeitos de áudio" monta o menu e o formulário só a partir dele: efeito novo aparece sem mexer aqui. */
 
-export type AudioEffectParamKind = 'number' | 'integer' | 'boolean' | 'choice'
+export type AudioEffectParamKind = 'number' | 'integer' | 'boolean' | 'choice' | 'points'
 
 /** O valor de um parâmetro na spec: número, caixa de marcar ou uma das opções de uma escolha. */
 export type AudioEffectValue = number | boolean | string
@@ -33,6 +33,8 @@ export interface AudioEffectInfo {
   /** A saída dura diferente da entrada (Repetir): só vale onde o item pode crescer. */
   changes_duration: boolean
   parameters: AudioEffectParam[]
+  /** Só existe com uma seleção ou uma curva desenhada (Cortar, Envelope): o menu "+ Efeito" não o oferece. */
+  needs_selection?: boolean
 }
 
 /** Onde uma cadeia de efeitos pode ficar, escrito como o caminho dela na spec (`audio.voiceover.N`). */

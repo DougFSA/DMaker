@@ -46,9 +46,15 @@ def test_every_registered_effect_class_has_a_builder_and_the_other_way_around():
     assert set(EFFECT_CLASSES) == builder_types()
 
 
+# os efeitos que só existem com um intervalo (o Cortar tira "do instante tal ao instante tal")
+REQUIRED_FIELDS = {"cut": {"start": 1.0, "end": 2.0}}
+
+
 def test_every_effect_builds_a_graph_that_runs_from_the_input_to_the_output_label():
-    for cls in EFFECT_CLASSES.values():
-        lines = build_effect(request(cls(), measure=Measure((levels(0.5), levels(0.5)))))
+    for name, cls in EFFECT_CLASSES.items():
+        lines = build_effect(
+            request(cls(**REQUIRED_FIELDS.get(name, {})), measure=Measure((levels(0.5), levels(0.5))))
+        )
         assert lines[0].startswith("[in]") or "[in]" in lines[0]
         assert lines[-1].endswith("[out]")
 

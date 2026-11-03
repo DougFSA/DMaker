@@ -141,7 +141,9 @@ def test_spectrum_analyzer_finds_the_tone_the_note_and_exports_csv():
     frequency, level = lines[1 + 85].split(",")
     assert float(frequency) == pytest.approx(85 * RATE / 4096, abs=1e-3)
     assert float(level) == pytest.approx(result.levels_db[85], abs=1e-3)
-    assert result.peaks[0].frequency == pytest.approx(result.peak_hz, abs=0.01)  # o pico da lista é refinado como o principal
+    assert result.peaks[0].frequency == pytest.approx(
+        result.peak_hz, abs=0.01
+    )  # o pico da lista é refinado como o principal
     assert all(peak.frequency >= 20 for peak in result.peaks)  # o piso de baixa frequência não é um pico
 
 

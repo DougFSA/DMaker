@@ -28,6 +28,7 @@ from ..text.captions import Cue, Word, flatten_words, from_json, remap_to_ranges
 from ..text.transcribe import Transcriber, WhisperTranscriber, extract_audio_wav
 from ..voice.cut_plan import REASON_LABELS, CutOptions, CutPlan, plan_cuts
 from .context import Prober
+from .edit_history import EditHistory
 from .edit_time import restored_gap_time_map
 from .layout import OriginAggregate, aggregate_by_origin, project_layout
 from .missing import MissingMedia
@@ -392,6 +393,14 @@ def undo_cut(name_or_path: str | Path, cut_id: int, prober: Prober = probe) -> C
         raise ValueError(f"o corte {cut_id} já foi desfeito")
     restored = restore_gap(project, record.start, record.end, origin=report.source)
     restored = _carry_markers(project, restored, prober)
+    # o corte devolvido também entra no histórico de edições (`undo_edit` o refaz), com a lista de cortes de antes:
+    # sem ela, depois de desfazer o desfazer a lista diria "já foi desfeito" de um corte que voltou a estar na spec
+    EditHistory(folder, spec_path=project_path(name_or_path)).record(
+        project,
+        restored,
+        f"Desfazer o corte {cut_id}",
+        {REPORT_FILE: (folder / REPORT_FILE).read_text(encoding="utf-8")},
+    )
     record.undone = True
     save_project(restored, folder)
     save_cut_report(folder, report)

@@ -2571,8 +2571,9 @@ def lexicon_remove(
 audio_app = typer.Typer(
     help="Áudio: exportar o projeto como WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF (inteiro, por região, por trilha ou só "
     "um trecho), importar áudio bruto, isolar a voz (voz de um lado, música e ruído do outro) com o modelo local "
-    "Demucs e a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, "
-    "Repetir).",
+    "Demucs, a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, "
+    "Repetir) e a edição de onda como no Audacity (silenciar, cortar, envelope, canais, colar, dividir, juntar, "
+    "aparar, deslocar no tempo e o ganho e o pan da trilha).",
     no_args_is_help=True,
 )
 app.add_typer(audio_app, name="audio")
@@ -2699,16 +2700,16 @@ def _parse_effect_params(raw: list[str] | None) -> dict:
 
 
 def _apply_effect_op(spec: Path, op: dict) -> None:
-    """Aplica a operação à spec e a grava de volta; erro de pedido ou de spec sai como mensagem, sem traceback."""
+    """Aplica a operação à spec e a grava de volta, com o passo no histórico (`dmaker undo` o desfaz); erro de
+    pedido ou de spec sai como mensagem, sem traceback."""
     from .domain.edits import EditError
-    from .pipeline.edits import apply_edit
+    from .pipeline.edit_history import edit_and_record
 
-    project = _load(spec)
+    _load(spec)  # a spec ilegível sai com a mensagem de sempre
     try:
-        edited = apply_edit(project, {"type": "audio_effect", **op})
+        edit_and_record(spec, {"type": "audio_effect", **op})
     except EditError as exc:
         _fail(str(exc))
-    edited.save(spec)
     console.print(f"[green]Cadeia de efeitos atualizada:[/green] {spec}", highlight=False, soft_wrap=True)
 
 
@@ -3036,6 +3037,304 @@ def sfx_build(
 
 # ---------- marcadores ----------
 
+# ---------- edição de onda e histórico ----------
+
+_WAVE_SPEC = Annotated[Path, typer.Argument(help="Caminho do spec.json.")]
+_WAVE_TARGET = Annotated[
+    str,
+    typer.Argument(
+        help="O item de áudio: timeline.N (som do clipe), overlays.N (PiP), audio.voiceover.N, audio.narration.N, "
+        "audio.tracks.N, audio.music ou audio.master."
+    ),
+]
+_WAVE_START = Annotated[
+    str | None, typer.Option("--start", help="Início, em segundos do vídeo final (ou marker:<texto>).")
+]
+_WAVE_END = Annotated[
+    str | None, typer.Option("--end", help="Fim, em segundos do vídeo final (ou marker:<texto>).")
+]
+_WAVE_REGION = Annotated[
+    str | None,
+    typer.Option("--region", help="Uma região de marcador (marker:<texto>), no lugar de --start e --end."),
+]
+
+
+def _instant_arg(value: str | None) -> float | str | None:
+    """Um instante da linha de comando: um número de segundos, ou `marker:<texto>` (que o servidor resolve)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _wave_op(operation: str, target: str | None = None, **fields: object) -> dict:
+    """O pedido de `edit_project` a partir dos argumentos da linha de comando: só entra o que foi dado."""
+    op: dict = {"type": operation}
+    if target is not None:
+        op["target"] = target
+    op.update({name: value for name, value in fields.items() if value is not None})
+    return op
+
+
+def _run_wave_edit(spec: Path, op: dict, done: str) -> None:
+    """Aplica a edição à spec, guarda o passo no histórico (`dmaker undo` o desfaz) e grava; recusa sai como mensagem."""
+    from .domain.edits import EditError
+    from .pipeline.edit_history import edit_and_record
+
+    try:
+        report, _ = edit_and_record(spec, op)
+    except EditError as exc:
+        _fail(str(exc))
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]{done}[/green] (desfaça com `dmaker undo`)", highlight=False)
+    for warning in report.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("silence")
+def audio_silence_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Silencia um intervalo do som de um item, sem mexer na duração nem na imagem (o Silence Audio do Audacity)."""
+    op = _wave_op("audio_silence", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Intervalo silenciado.")
+
+
+@audio_app.command("cut")
+def audio_cut_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Corta um intervalo do som: o resto recua. Em clipe e PiP o fim completa com silêncio; na voz gravada e na
+    música o item encolhe, e a voz gravada que vem depois recua junto (o Delete do Audacity)."""
+    op = _wave_op("audio_cut", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Intervalo cortado.")
+
+
+@audio_app.command("envelope")
+def audio_envelope_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    point: Annotated[
+        list[str],
+        typer.Option(
+            "--point",
+            "-p",
+            help="Um ponto da curva, instante=ganho em dB (repetível): -p 10=0 -p 12=-12 baixa 12 dB entre 10 e 12 s.",
+        ),
+    ],
+) -> None:
+    """Desenha o volume ao longo do item por pontos, com retas em dB entre eles (a ferramenta Envelope do Audacity)."""
+    points = []
+    for raw in point:
+        instant, separator, gain = raw.rpartition("=")
+        if not separator or not instant:
+            _fail(f"Ponto mal escrito: {raw!r}. Use instante=ganho, por exemplo 10=0.")
+        try:
+            points.append({"at": _instant_arg(instant), "db": float(gain)})
+        except ValueError:
+            _fail(f"Ganho inválido em {raw!r}: use um número de dB.")
+    _run_wave_edit(spec, _wave_op("audio_envelope", target, points=points), "Envelope aplicado.")
+
+
+@audio_app.command("channels")
+def audio_channels_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    mode: Annotated[
+        str,
+        typer.Argument(
+            help="mono (mistura os dois canais), swap (troca esquerdo e direito), left ou right (esse canal sai "
+            "nos dois lados)."
+        ),
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+) -> None:
+    """Mexe nos canais do som de um item (estéreo para mono, trocar canais, usar só um lado: o caso da lapela)."""
+    op = _wave_op("audio_channels", target, mode=mode, start=_instant_arg(start), end=_instant_arg(end))
+    _run_wave_edit(spec, op, "Canais ajustados.")
+
+
+@audio_app.command("paste")
+def audio_paste_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    at: Annotated[
+        str, typer.Option("--at", help="Onde colar, em segundos do vídeo final (ou marker:<texto>).")
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Copia um trecho do som de um item (sem --start e --end, o item inteiro) e cola num instante como uma voz
+    gravada nova, que aponta para o mesmo arquivo (Copy e Paste do Audacity)."""
+    op = _wave_op(
+        "audio_paste",
+        target,
+        at=_instant_arg(at),
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+    )
+    _run_wave_edit(spec, op, "Trecho colado.")
+
+
+@audio_app.command("duplicate")
+def audio_duplicate_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Duplica o item (ou um trecho dele) como uma voz gravada nova, logo depois do original."""
+    op = _wave_op("audio_duplicate", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Som duplicado.")
+
+
+@audio_app.command("split")
+def audio_split_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    at: Annotated[
+        str, typer.Option("--at", help="Onde dividir, em segundos do vídeo final (ou marker:<texto>).")
+    ],
+) -> None:
+    """Divide uma voz gravada em duas, que se encontram no ponto, no mesmo arquivo."""
+    _run_wave_edit(spec, _wave_op("audio_split", target, at=_instant_arg(at)), "Voz dividida.")
+
+
+@audio_app.command("join")
+def audio_join_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    other: Annotated[
+        str | None,
+        typer.Option("--with", help="A voz a juntar (audio.voiceover.M ou só o número); padrão: a seguinte."),
+    ] = None,
+) -> None:
+    """Junta duas vozes gravadas vizinhas que são pedaços seguidos do mesmo arquivo (o contrário de dividir)."""
+    value: object = None
+    if other is not None:
+        value = int(other) if other.isdigit() else other
+    _run_wave_edit(spec, _wave_op("audio_join", target, **{"with": value}), "Vozes juntadas.")
+
+
+@audio_app.command("trim")
+def audio_trim_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Apara o item fora da seleção: a voz gravada fica só com o trecho; nos outros itens o resto é silenciado."""
+    op = _wave_op("audio_trim", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Item aparado.")
+
+
+@audio_app.command("shift")
+def audio_shift_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    delta: Annotated[
+        float | None, typer.Option("--delta", help="Quanto mover, em segundos (positivo atrasa).")
+    ] = None,
+    to: Annotated[float | None, typer.Option("--to", help="O deslocamento final, em segundos.")] = None,
+) -> None:
+    """Desloca o som no tempo: em clipe, PiP e faixa externa muda o `audio_offset` (corrige câmera dessincronizada);
+    na voz gravada e na narração muda o instante de início."""
+    _run_wave_edit(spec, _wave_op("audio_shift", target, delta=delta, to=to), "Som deslocado.")
+
+
+@audio_app.command("split-stereo")
+def audio_split_stereo_command(spec: _WAVE_SPEC, target: _WAVE_TARGET) -> None:
+    """Divide um som estéreo em dois itens mono: um com o canal esquerdo e outro com o direito."""
+    _run_wave_edit(spec, _wave_op("audio_split_stereo", target), "Estéreo dividido.")
+
+
+@audio_app.command("track")
+def audio_track_command(
+    spec: _WAVE_SPEC,
+    track: Annotated[str, typer.Argument(help="A trilha: A1, A2..., MUS, NAR, VO ou SFX.")],
+    gain_db: Annotated[float | None, typer.Option("--gain-db", help="Ganho da trilha, em dB.")] = None,
+    pan: Annotated[
+        float | None, typer.Option("--pan", help="Equilíbrio, de -1 (esquerda) a 1 (direita).")
+    ] = None,
+    mute: Annotated[bool | None, typer.Option("--mute/--no-mute", help="Muda ou desmuda a trilha.")] = None,
+    solo: Annotated[
+        bool | None, typer.Option("--solo/--no-solo", help="Solo: as outras trilhas de áudio ficam mudas.")
+    ] = None,
+) -> None:
+    """Ganho, pan, mudo e solo de uma trilha de áudio (os controles do cabeçalho de trilha do Audacity)."""
+    op = _wave_op("track_set", track=track, gain_db=gain_db, pan=pan, muted=mute, solo=solo)
+    _run_wave_edit(spec, op, f"Trilha {track} ajustada.")
+
+
+def _history_outcome(outcome) -> None:
+    console.print(
+        f"[green]{outcome.label}[/green]: feito. Restam {outcome.undo_steps} para desfazer e {outcome.redo_steps} para refazer.",
+        highlight=False,
+    )
+    for warning in outcome.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@app.command("undo")
+def undo_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Desfaz a última edição gravada no projeto: a spec volta exatamente a como estava antes dela."""
+    from .pipeline.edit_history import HistoryError, undo_edit
+
+    try:
+        outcome = undo_edit(spec)
+    except (HistoryError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print("[bold]Desfeito.[/bold]", end=" ")
+    _history_outcome(outcome)
+
+
+@app.command("redo")
+def redo_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Refaz a última edição desfeita por `dmaker undo`."""
+    from .pipeline.edit_history import HistoryError, redo_edit
+
+    try:
+        outcome = redo_edit(spec)
+    except (HistoryError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print("[bold]Refeito.[/bold]", end=" ")
+    _history_outcome(outcome)
+
+
+@app.command("history")
+def history_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Lista os passos do histórico de edições do projeto (o que `undo` desfaria e o que `redo` refaria)."""
+    from .pipeline.edit_history import history_listing
+
+    try:
+        listing = history_listing(spec)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    for title, steps in (
+        ("Para desfazer (do mais recente)", listing["undo"]),
+        ("Para refazer", listing["redo"]),
+    ):
+        console.print(f"[bold]{title}[/bold]", highlight=False)
+        for step in steps or [{"label": "nenhum", "at": ""}]:
+            console.print(f"  {escape(step['label'])}  [dim]{step['at']}[/dim]", highlight=False)
+
+
 markers_app = typer.Typer(
     help="Marcadores da linha do tempo (trilha MK): ver, acrescentar, importar e exportar o .txt do Audacity e gerar regulares.",
     no_args_is_help=True,
@@ -3072,19 +3371,17 @@ def markers_add(
     group: Annotated[str, typer.Option(help="Trilha de marcadores (vazio = a padrão).")] = "",
 ) -> None:
     """Acrescenta um marcador (um instante com --at, ou uma região com --start e --end)."""
-    from .pipeline.edits import apply_edit_report
-    from .pipeline.projects import save_project
+    from .pipeline.edit_history import edit_and_record
 
     operation = {"type": "marker_add", "text": text, "group": group}
     for key, value in (("at", at), ("start", start), ("end", end), ("color", color)):
         if value is not None:
             operation[key] = value
-    project = _load(spec)
+    _load(spec)
     try:
-        report = apply_edit_report(project, operation)
+        report, _ = edit_and_record(spec, operation)
     except RENDER_ERRORS as exc:
         _fail(str(exc))
-    save_project(report.project, spec.parent)
     console.print(f"[green]Marcador acrescentado.[/green] O projeto tem {len(report.project.markers)}.")
 
 
@@ -3094,17 +3391,15 @@ def markers_remove(
     ref: Annotated[str, typer.Argument(help="O número do marcador (dmaker markers list) ou marker:<texto>.")],
 ) -> None:
     """Remove um marcador pelo número ou pelo texto (`marker:refrão`, ou `marker:grupo/refrão`)."""
-    from .pipeline.edits import apply_edit_report
-    from .pipeline.projects import save_project
+    from .pipeline.edit_history import edit_and_record
 
     operation: dict[str, Any] = {"type": "marker_remove"}
     operation["index" if ref.strip().isdigit() else "ref"] = int(ref) if ref.strip().isdigit() else ref
-    project = _load(spec)
+    _load(spec)
     try:
-        report = apply_edit_report(project, operation)
+        report, _ = edit_and_record(spec, operation)
     except RENDER_ERRORS as exc:
         _fail(str(exc))
-    save_project(report.project, spec.parent)
     console.print(f"[green]Marcador removido.[/green] Sobram {len(report.project.markers)}.")
 
 

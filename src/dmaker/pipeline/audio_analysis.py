@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,11 +28,11 @@ from ..media.wavio import read_wav_float
 from .analysis_items import ItemAudio, ItemClock, TargetError, resolve_item
 from .audio_effects import AudioItem, EffectProcessor
 from .context import Prober
-from .edits import apply_edit_report
+from .edit_history import edit_and_record
 from .final_output import latest_final_output
 from .layout import ProjectLayout, project_layout, to_presentation
 from .missing import MissingMedia
-from .projects import load_project, project_path, save_project
+from .projects import load_project
 from .sync import OffsetFinder
 
 # O teto do que uma análise carrega na memória: 60 milhões de amostras em ponto flutuante são 240 MB, uns 10 minutos
@@ -318,14 +318,15 @@ def _with_color(data: dict[str, Any], color: str | None) -> dict[str, Any]:
 
 
 def apply_marks(
-    project: Project,
+    name_or_path: str | Path,
     outcome: AnalysisOutcome,
     request: AnalysisRequest,
     loaded_clock: ItemClock | None,
     total: float,
-    prober: Prober,
+    service: AudioAnalysisService,
 ) -> Project:
-    """Grava os marcadores da análise no grupo certo (a operação `marker_group_set`), um passo só do desfazer."""
+    """Grava os marcadores da análise no grupo certo (a operação `marker_group_set`), como uma edição qualquer do projeto:
+    um passo só do histórico, que o `undo_edit` desfaz."""
     cls = analyzer_class(request.analyzer)
     group = (request.group or cls.marker_group).strip()
     if not group:
@@ -340,9 +341,8 @@ def apply_marks(
     markers = marker_dicts(
         outcome.result.markers(), outcome.interval[0], loaded_clock, total, cls.marker_color
     )
-    report = apply_edit_report(
-        project, {"type": "marker_group_set", "group": group, "markers": markers}, prober
-    )
+    op = {"type": "marker_group_set", "group": group, "markers": markers}
+    report, _ = edit_and_record(name_or_path, op, service.prober, service.offset_finder)
     outcome.marker_group = group
     outcome.markers_written = len(markers)
     outcome.edit_warnings = report.warnings
@@ -388,9 +388,8 @@ def analyze_project(
     *,
     out: Path | str | None = None,
     service: AudioAnalysisService | None = None,
-    save: Callable[[Project], Any] | None = None,
 ) -> AnalysisOutcome:
-    """Carrega o projeto, analisa e, se o pedido manda, marca (e salva o projeto) e exporta o arquivo `out`."""
+    """Carrega o projeto, analisa e, se o pedido manda, marca (grava a spec, com o passo no histórico) e exporta o arquivo `out`."""
     project = load_project(name_or_path)
     service = service or AudioAnalysisService()
     service.check(request)  # pedido inválido falha antes de decodificar
@@ -400,9 +399,7 @@ def analyze_project(
     outcome = service.analyze_loaded(project, request, loaded)
     if wants_mark:
         total = _project_total(project, service)
-        outcome.project = apply_marks(project, outcome, request, loaded.clock, total, service.prober)
-        # a spec volta para o lugar de onde veio (o nome do projeto, ou o caminho do `spec.json` dado)
-        (save or (lambda changed: save_project(changed, project_path(name_or_path).parent)))(outcome.project)
+        outcome.project = apply_marks(name_or_path, outcome, request, loaded.clock, total, service)
     if out is not None:
         outcome.exported = str(export_result(outcome.result, Path(out)))
     return outcome

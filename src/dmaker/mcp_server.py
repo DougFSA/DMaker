@@ -246,34 +246,103 @@ def validate_project(name_or_path: str) -> dict:
         'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove '
         "(marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, "
         'enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
-        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). `op` é um dict com "type" e os '
-        'parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a operação pede um instante '
-        '(`at` do split, `start`/`end` do overlay_span) vale "marker:<texto>", o instante de um marcador (com '
-        'grupo: "marker:<grupo>/<texto>"); no split, sem `index`, corta o trecho que contém o marcador. Cortar, '
-        "remover, aparar ou mover trechos desloca os marcadores junto; um marcador que estava num trecho removido "
-        "some, e o aviso vem em `edit_warnings`."
+        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). Edição de onda, sobre o som de um '
+        "item (`target`: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.tracks.N, audio.music "
+        "ou audio.master; `start`/`end` em segundos da linha do tempo): audio_silence, audio_cut, audio_envelope "
+        "(`points`: [{at, db}]), audio_channels (`mode`: mono, swap, left, right), audio_paste (`at`, e "
+        "`start`/`end` do trecho a copiar), audio_duplicate, audio_split (`at`), audio_join, audio_trim (aparar "
+        "fora da seleção), audio_shift (`delta` ou `to`, em segundos), audio_split_stereo e track_set (`track`: "
+        "A1, A2..., MUS, NAR, VO, SFX; `gain_db`, `pan`, `muted`, `solo`); nada disso mexe na imagem. `op` é um "
+        'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
+        "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
+        '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
+        "`index`, corta o trecho que contém o marcador. Cortar, remover, aparar ou mover trechos desloca os "
+        "marcadores junto; um marcador que estava num trecho removido some, e o aviso vem em `edit_warnings`. "
+        "Toda edição entra no histórico do projeto: desfaça com `undo_edit` e refaça com `redo_edit`."
     )
 )
 def edit_project(name: str, op: dict) -> dict:
     from mcp.server.mcpserver.exceptions import ToolError
 
     from .domain.edits import EditError
-    from .pipeline.edits import apply_edit_report
-    from .pipeline.projects import load_project, summarize
-    from .pipeline.projects import save_project as _save
+    from .pipeline.edit_history import edit_and_record
+    from .pipeline.projects import summarize
 
-    project = load_project(name)
     try:
-        report = apply_edit_report(project, op)
+        report, path = edit_and_record(name, op)
     except EditError as exc:
         # o pedido recusado chega ao cliente com o motivo (um erro inesperado só diria "falhou")
         raise ToolError(str(exc)) from exc
-    path = _save(report.project)
     summary = summarize(report.project)
     result = {"spec_path": str(path), **_summary_dict(summary)}
     if report.warnings:
         result["edit_warnings"] = report.warnings
     return result
+
+
+def _history_result(outcome) -> dict:
+    """A resposta de `undo_edit` e `redo_edit`: o que foi desfeito ou refeito, quantos passos sobram e o resumo."""
+    from .pipeline.projects import summarize
+
+    result = {
+        "spec_path": str(outcome.path),
+        "step": outcome.label,
+        "undo_steps": outcome.undo_steps,
+        "redo_steps": outcome.redo_steps,
+        **_summary_dict(summarize(outcome.project)),
+    }
+    if outcome.warnings:
+        result["edit_warnings"] = outcome.warnings
+    return result
+
+
+@server.tool(
+    description=(
+        "Desfaz a última edição gravada no projeto (de `edit_project`, das ferramentas de marcadores e de "
+        "`undo_cut`): a spec volta exatamente a como estava antes. Devolve o nome do passo desfeito e quantos "
+        "passos sobram para desfazer e para refazer. Refaça com `redo_edit`; veja a lista com `edit_history`."
+    )
+)
+def undo_edit(name: str) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.edit_history import HistoryError
+    from .pipeline.edit_history import undo_edit as _undo
+
+    try:
+        return _history_result(_undo(name))
+    except HistoryError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Refaz a última edição desfeita por `undo_edit`. Uma edição nova esvazia a pilha do refazer. Devolve o "
+        "nome do passo refeito e quantos passos sobram."
+    )
+)
+def redo_edit(name: str) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.edit_history import HistoryError
+    from .pipeline.edit_history import redo_edit as _redo
+
+    try:
+        return _history_result(_redo(name))
+    except HistoryError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "A lista dos passos do histórico de edições do projeto, do mais recente para o mais antigo: o que "
+        "`undo_edit` desfaria (`undo`) e o que `redo_edit` refaria (`redo`), com o nome e a hora de cada um."
+    )
+)
+def edit_history(name: str) -> dict:
+    from .pipeline.edit_history import history_listing
+
+    return history_listing(name)
 
 
 @server.tool(

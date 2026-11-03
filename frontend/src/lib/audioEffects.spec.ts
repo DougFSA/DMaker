@@ -157,6 +157,11 @@ describe('onde o Repetir vale', () => {
     expect(effectsFor(catalog.effects, false).map((effect) => effect.type)).toEqual(['amplify', 'normalize', 'invert', 'reverse'])
     expect(effectsFor(catalog.effects, true).map((effect) => effect.type)).toEqual(['amplify', 'normalize', 'invert', 'reverse', 'repeat'])
   })
+
+  it('o menu não oferece o efeito que só existe com uma seleção ou uma curva (Cortar, Envelope)', () => {
+    const cut = { ...info('invert'), type: 'cut', needs_selection: true }
+    expect(effectsFor([...catalog.effects, cut], true).map((effect) => effect.type)).not.toContain('cut')
+  })
 })
 
 describe('o efeito novo', () => {

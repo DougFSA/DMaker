@@ -4,7 +4,7 @@ Ler, transcrever e corrigir as legendas de um vídeo ou de um projeto.
 
 ## Ferramentas deste kit
 
-`probe_media`, `job_status`, `search_manual`, `read_captions`, `fix_captions`, `transcribe_media`, `get_project`, `validate_project`, `edit_project`, `render_project`, `qa_report`.
+`probe_media`, `job_status`, `search_manual`, `read_captions`, `fix_captions`, `transcribe_media`, `get_project`, `validate_project`, `edit_project`, `undo_edit`, `redo_edit`, `render_project`, `qa_report`.
 
 ## Pedidos e as chamadas certas
 

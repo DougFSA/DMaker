@@ -21,6 +21,7 @@ class SfxTrack:
     at: float
     gain_db: float
     origin: str = ""
+    pan: float = 0.0
 
 
 def resolve_files(project: Project, items: Sequence[SfxItem]) -> list[tuple[SfxItem, Path]]:
@@ -35,12 +36,19 @@ def resolve_files(project: Project, items: Sequence[SfxItem]) -> list[tuple[SfxI
     return resolved
 
 
-def level_tracks(resolved: Sequence[tuple[SfxItem, Path]], reference_db: float | None) -> list[SfxTrack]:
+def level_tracks(
+    resolved: Sequence[tuple[SfxItem, Path]],
+    reference_db: float | None,
+    bus_gain_db: float = 0.0,
+    bus_pan: float = 0.0,
+) -> list[SfxTrack]:
     """Efeitos com o ganho que os põe abaixo do pico de referência da voz. Sem voz medida (simulação, vídeo
-    sem fala), vale um pico de voz típico, o que mantém o nível dos efeitos previsível."""
+    sem fala), vale um pico de voz típico, o que mantém o nível dos efeitos previsível. O ganho e o pan do
+    barramento dos efeitos (a trilha SFX) entram por cima do nível já acertado contra a voz."""
     reference = FALLBACK_VOICE_PEAK_DB if reference_db is None else reference_db
     return [
-        SfxTrack(path, item.at, sfx_gain_db(item.volume, reference), item.origin) for item, path in resolved
+        SfxTrack(path, item.at, sfx_gain_db(item.volume, reference) + bus_gain_db, item.origin, bus_pan)
+        for item, path in resolved
     ]
 
 
@@ -81,4 +89,4 @@ def leveled_effects(
             else " (sem voz medida)"
         )
     )
-    return level_tracks(resolved, reference)
+    return level_tracks(resolved, reference, ctx.project.audio.sfx_gain_db, ctx.project.audio.sfx_pan)

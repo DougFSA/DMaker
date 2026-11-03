@@ -89,6 +89,12 @@ export interface TimelineTrack {
   muted: boolean
   hidden: boolean
   locked: boolean
+  /** Controles de mixagem salvos em `tracks` (só as trilhas de áudio os usam): ganho em dB, pan de -1 a 1 e solo. */
+  gain_db?: number
+  pan?: number
+  solo?: boolean
+  /** A trilha não soa: está muda, ou outra trilha de áudio está em solo. */
+  silenced?: boolean
   items: TimelineItem[]
 }
 

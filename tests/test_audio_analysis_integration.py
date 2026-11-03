@@ -20,6 +20,7 @@ from dmaker.media.wavio import write_wav_channels
 from dmaker.pipeline.audio_analysis import AnalysisRequest, AudioAnalysisService, analyze_project
 from dmaker.pipeline.audio_checks import audio_findings, voice_contrast_findings
 from dmaker.pipeline.beat_cut import cut_on_beat
+from dmaker.pipeline.edit_history import undo_edit
 from dmaker.pipeline.layout import project_layout
 from dmaker.pipeline.projects import load_project
 from dmaker.pipeline.report import build_report
@@ -210,6 +211,8 @@ def test_label_sounds_marks_a_group_without_touching_the_users_markers(work):
     analyze_project(work / "spec.json", custom, service=service())
     groups = sorted({m.group for m in load_project(work / "spec.json").markers})
     assert groups == ["", "falas", "sons"]
+    undo_edit(work / "spec.json")  # marcar é uma edição como as outras: um passo do histórico, que se desfaz
+    assert sorted({m.group for m in load_project(work / "spec.json").markers}) == ["", "sons"]
     no_marks = AnalysisRequest("sounds", target="audio.voiceover.0", mark=False)
     assert analyze_project(work / "spec.json", no_marks, service=service()).marker_group is None
 
@@ -371,6 +374,7 @@ def test_cut_on_beat_proposes_first_and_only_moves_the_cuts_when_asked(work):
     assert [round(p.shift, 2) for p in proposal.proposals] == [0.15, 0.05]
     assert boundaries(work) == before  # só propôs: a spec não mudou
 
+    spec_before = load_project(work / "spec.json").to_bytes()
     applied = cut_on_beat(work / "spec.json", apply=True, service=service())
     assert applied.moved == 2
     assert boundaries(work) == [pytest.approx(2.25, abs=0.02), pytest.approx(4.25, abs=0.02)]
@@ -382,6 +386,10 @@ def test_cut_on_beat_proposes_first_and_only_moves_the_cuts_when_asked(work):
     assert [m.begin for m in after.markers] == [
         pytest.approx(5.0, abs=0.02)
     ]  # o marcador acompanha pelo mapa de tempo
+    undo_edit(
+        work / "spec.json"
+    )  # os dois cortes são UM passo do histórico, e a spec volta exatamente a como era
+    assert load_project(work / "spec.json").to_bytes() == spec_before
 
 
 def test_cut_on_beat_skips_a_boundary_with_a_transition_and_refuses_a_single_clip(work):

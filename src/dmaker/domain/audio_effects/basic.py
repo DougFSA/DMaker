@@ -90,6 +90,7 @@ class Reverse(EffectBase):
     label: ClassVar[str] = "Reverter"
     audacity_name: ClassVar[str] = "Reverse"
     summary: ClassVar[str] = "Toca o trecho de trás para a frente."
+    reorders_time: ClassVar[bool] = True
 
 
 @register_effect
@@ -103,6 +104,7 @@ class Repeat(EffectBase):
         "Repete o trecho em sequência. Aumenta a duração: só vale em voz gravada e em música."
     )
     changes_duration: ClassVar[bool] = True
+    reorders_time: ClassVar[bool] = True
 
     times: int = param(
         2,
