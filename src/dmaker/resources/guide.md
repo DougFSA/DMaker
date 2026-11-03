@@ -58,6 +58,13 @@ Na CLI: `dmaker new-from-template explicativo meu-explicativo --param gravacao=D
   deve ser a duração da gravação: gravação mais curta gera aviso. `fundo`: `escuro`, `claro`, `bege`, uma
   cor `#RRGGBB`, uma chave do tema ou o caminho de uma imagem (preenche a tela); sem ele os fundos se
   alternam. `imagem` (opcional) entra na região `topo` durante o assunto, inteira e centrada, sem distorcer.
+- **Sons do assunto** (`sons`, opcional): lista de `{som, em, volume}` com efeitos da biblioteca (tabela em
+  "Efeitos sonoros"), por exemplo `"sons": [{"som": "whoosh"}, {"som": "ding", "em": 8, "volume": 0.8}]`. `em`
+  são os segundos desde o começo do assunto (0 se omitido; não passa do fim dele) e `volume` é o mesmo de
+  `audio.sfx` (0 a 1,5; 1 é o nível padrão). O modelo os põe em `audio.sfx` no tempo do vídeo (início do
+  assunto mais `em`), então cabem o som de entrada e um som no meio, como o "ding" do contador. Nome que não
+  é da biblioteca, ou `em` fora do assunto, falha dizendo o assunto e os nomes disponíveis; sem `sons` a spec
+  sai como sempre. A receita `build_explainer_video` aceita o mesmo campo em `subjects`.
 - **A gravação é uma sobreposição de vídeo só**, do começo ao fim, com o áudio dela: a troca de fundo
   nunca corta a fala. Gravação horizontal ou vertical: o quadro preenche cortando o excesso, sem distorcer;
   `foco` ([x, y], padrão [0.5, 0.3]) diz o ponto que a janela do corte mantém visível (o rosto de uma

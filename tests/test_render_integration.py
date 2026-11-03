@@ -1106,3 +1106,24 @@ def test_a_project_without_sfx_keeps_its_audio_bit_for_bit(speech_clip, tmp_path
     plain = _render(_speech_project(speech_clip, tmp_path, "sfx_igual"), tmp_path / "a.mp4")
     empty = _render(_speech_project(speech_clip, tmp_path, "sfx_igual_vazio", sfx=[]), tmp_path / "b.mp4")
     assert np.array_equal(_decode_audio(plain, tmp_path), _decode_audio(empty, tmp_path))
+
+
+def test_explainer_topic_sounds_play_at_the_start_of_the_topic_plus_em(speech_clip, tmp_path):
+    """DMK-46: os `sons` de cada assunto do modelo "explicativo" tocam no instante do vídeo (começo do assunto
+    mais `em`), com a gravação falada tocando junto; o erro medido por correlação fica abaixo de 20 ms."""
+    from dmaker.domain.templates import find_template, render_template
+
+    topics = [
+        {"fim": 4, "fundo": "escuro", "sons": [{"som": "whoosh"}, {"som": "ding", "em": 2.5}]},
+        {"fim": 8, "fundo": "bege", "sons": [{"som": "pop"}]},
+        {"fim": 12, "fundo": "claro", "sons": [{"som": "click"}]},
+        {"fim": 16, "fundo": "escuro", "sons": [{"som": "impact", "em": 1.25, "volume": 1.2}]},
+    ]
+    spec = render_template(
+        find_template("explicativo"), {"gravacao": str(speech_clip), "assuntos": topics, "legendas": False}
+    )
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    mono = _decode_audio(_render(project, tmp_path / "sons.mp4"), tmp_path).mean(axis=1)
+    for name, at in (("whoosh", 0.0), ("ding", 2.5), ("pop", 4.0), ("click", 8.0), ("impact", 13.25)):
+        assert abs(_sfx_onset_seconds(mono, name, at) - at) < 0.020, name
