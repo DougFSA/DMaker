@@ -132,6 +132,48 @@ def test_overlay_end_none_becomes_total(tmp_path):
     assert progress_item.start == 0 and progress_item.end == view.total
 
 
+def test_html_overlays_get_an_item_in_the_graphics_track(tmp_path):
+    """A composição HTML aparece como bloco na trilha GR, com o índice dela em `overlays` (é o que o
+    `overlay_span` recebe), e a presa a uma palavra da legenda diz que o tempo dela vem da palavra."""
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    spec = {
+        "name": "vista-html",
+        "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 6}],
+        "overlays": [
+            {"type": "text", "text": "Gancho", "start": 0, "end": 2},
+            {
+                "type": "html",
+                "src": "comp.html",
+                "x": 0.5,
+                "y": 0.5,
+                "width": 0.5,
+                "height": 0.2,
+                "start": 1,
+                "end": 3,
+            },
+            {"type": "html", "infographic": "contador", "data": {"ate": 5}, "layer": "behind-person"},
+            {"type": "html", "src": "grifo.html", "anchor": {"word": "frio"}},
+            {"type": "image", "src": "logo"},
+        ],
+    }
+    project = Project.model_validate(spec)
+    project.base_dir = tmp_path
+    view = build_timeline_view(project, project_layout(project, prober=fake_prober))
+    gr = next(t for t in view.tracks if t.id == "GR")
+    html = [item for item in gr.items if item.kind == "html"]
+    assert [item.index for item in html] == [1, 2, 3]
+    assert [item.id for item in html] == ["GR-1", "GR-2", "GR-3"]
+    first, shortcut, pinned = html
+    assert (first.start, first.end, first.label) == (1, 3, "comp.html")
+    assert (
+        shortcut.end == view.total
+        and shortcut.label == "contador"
+        and shortcut.extra["layer"] == "behind-person"
+    )
+    assert pinned.extra["anchored"] is True and first.extra["anchored"] is False
+    assert [item.kind for item in gr.items] == ["html", "html", "html", "image"]  # na ordem de `overlays`
+
+
 def test_a1_muted_flags(tmp_path):
     (tmp_path / "muted.mp4").write_bytes(b"x")
     spec = {

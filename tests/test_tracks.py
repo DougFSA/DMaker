@@ -87,6 +87,19 @@ def test_gr_hidden_removes_image_and_progress_bar():
     assert any(isinstance(ov, TextOverlay) for ov in new.overlays)
 
 
+def test_gr_hidden_removes_the_html_composition_too():
+    """A composição HTML mora na trilha GR: ocultá-la na interface também a tira do render."""
+    project = make_project(
+        overlays=[
+            {"type": "html", "src": "comp.html", "start": 0, "end": 1},
+            {"type": "text", "text": "Oi", "start": 0, "end": 1},
+        ],
+        tracks={"GR": {"hidden": True}},
+    )
+    new = apply_track_state(project)
+    assert [ov.type for ov in new.overlays] == ["text"]
+
+
 def test_v2_hidden_removes_only_overlays_in_that_lane():
     # dois PiPs que não se sobrepõem no tempo dividem a mesma faixa (V2); um terceiro que cruza
     # com o segundo abre uma faixa nova (V3).

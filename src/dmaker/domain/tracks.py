@@ -7,7 +7,7 @@ seleção/arraste dos itens da trilha) e não muda nada aqui."""
 
 from __future__ import annotations
 
-from .spec import ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
+from .spec import HtmlOverlay, ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
 from .timeline import stack_lanes
 
 
@@ -48,7 +48,7 @@ def apply_track_state(project: Project) -> Project:
     - NAR muda -> `audio.narration = []` (as narrações somem da mixagem e das legendas).
     - CC oculta -> `captions.enabled = False`.
     - TX oculta -> remove as sobreposições de texto.
-    - GR oculta -> remove as sobreposições de imagem e a barra de progresso.
+    - GR oculta -> remove as sobreposições de imagem e de composição HTML e a barra de progresso.
     - V<n> oculta, n>=2 -> remove as sobreposições de vídeo (PiP) daquela faixa
       (`video_overlay_lanes` decide qual PiP é de qual faixa).
     - V1 oculta é ignorada (é a linha do tempo principal; não há como renderizar sem ela) e
@@ -92,7 +92,7 @@ def apply_track_state(project: Project) -> Project:
             ov
             for i, ov in enumerate(overlays)
             if not (tx_hidden and isinstance(ov, TextOverlay))
-            and not (gr_hidden and isinstance(ov, ImageOverlay | ProgressBar))
+            and not (gr_hidden and isinstance(ov, ImageOverlay | HtmlOverlay | ProgressBar))
             and not (isinstance(ov, VideoOverlay) and lanes.get(i) in hidden_lanes)
         ]
 

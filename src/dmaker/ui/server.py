@@ -12,9 +12,9 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -142,6 +142,10 @@ class CaptionsUpdate(BaseModel):
 
 class TimelineRequest(BaseModel):
     spec: dict | None = None
+
+
+class BoxesRequest(BaseModel):
+    spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
 
 
 class EditRequest(BaseModel):
@@ -368,10 +372,10 @@ def _cut_report(folder: Path) -> dict | None:
 
 @app.get("/api/projects/{name}", response_model=None)
 def get_project(name: str) -> dict | JSONResponse:
-    from ..pipeline.projects import load_project, project_path
+    from ..pipeline.projects import load_project_with_revision, project_path, spec_revision
 
     try:
-        project = load_project(name)
+        project, revision = load_project_with_revision(name)
     except FileNotFoundError as exc:
         raise _error(404, str(exc)) from exc
     except ValidationError as exc:
@@ -384,22 +388,55 @@ def get_project(name: str) -> dict | JSONResponse:
         except (OSError, json.JSONDecodeError):
             raw_spec = None
         return JSONResponse(
-            status_code=422, content={"detail": _validation_detail(exc), "raw_spec": raw_spec}
+            status_code=422,
+            content={
+                "detail": _validation_detail(exc),
+                "raw_spec": raw_spec,
+                "revision": spec_revision(name),
+            },
         )
     folder = project_path(name).parent
     return {
         "name": project.name,
         "spec_path": str(project_path(name)),
         "spec": json.loads(project.model_dump_json(exclude_none=True)),
+        "revision": revision,
         "captions_exists": (folder / "captions.auto.json").exists(),
         "outputs": _project_outputs(name),
         "cuts": _cut_report(folder),
     }
 
 
-@app.put("/api/projects/{name}")
-def save_spec(name: str, spec: dict) -> dict:
-    from ..pipeline.projects import save_project
+@app.get("/api/projects/{name}/revision")
+def project_spec_revision(name: str) -> dict:
+    """A revisão do `spec.json` no disco, barata o bastante para o editor consultar a cada poucos segundos e
+    perceber que o Claude, o agente ou a CLI mudaram o projeto por fora."""
+    from ..pipeline.projects import project_path, spec_revision
+
+    revision = spec_revision(name)
+    if revision is None:
+        raise _error(404, f"Spec não encontrada: {project_path(name)}")
+    return {"revision": revision}
+
+
+def _clean_etag(value: str) -> str:
+    """O valor de um `If-Match` sem aspas nem o prefixo de validador fraco (`W/`), como clientes HTTP o mandam."""
+    value = value.strip()
+    if value.startswith("W/"):
+        value = value[2:]
+    return value.strip('"')
+
+
+# Uma gravação de spec por vez neste processo: a conferência da revisão e a troca do arquivo não podem se
+# intercalar com outra gravação da interface (o MCP e a CLI escrevem por fora, e isso a revisão pega).
+_spec_write_lock = threading.Lock()
+
+
+@app.put("/api/projects/{name}", response_model=None)
+def save_spec(name: str, spec: dict, if_match: Annotated[str | None, Header()] = None) -> dict | JSONResponse:
+    """Grava a spec. Com `If-Match: <revisão>`, só grava se o disco ainda está nessa revisão; senão devolve 409 com
+    a revisão atual, sem escrever nada. Sem o cabeçalho grava como sempre (a interface clássica não o manda)."""
+    from ..pipeline.projects import project_revision, save_project, spec_revision
 
     spec = dict(spec)
     spec["name"] = name
@@ -407,8 +444,45 @@ def save_spec(name: str, spec: dict) -> dict:
         project = Project.model_validate(spec)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
-    path = save_project(project)
-    return {"ok": True, "spec_path": str(path)}
+    with _spec_write_lock:
+        if if_match is not None:
+            current = spec_revision(name)
+            expected = _clean_etag(if_match)
+            if current is None or (expected != "*" and expected != current):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "O projeto mudou no disco desde a última leitura.",
+                        "revision": current,
+                    },
+                )
+        path = save_project(project)
+    return {"ok": True, "spec_path": str(path), "revision": project_revision(project)}
+
+
+@app.post("/api/projects/{name}/boxes")
+def project_boxes(name: str, services: Services, req: BoxesRequest | None = None) -> dict:
+    """A caixa de cada sobreposição no quadro nativo do preset, em fração, pela mesma conta do render e do QA da
+    zona segura. Com `spec` vale a que o editor tem na tela (ainda não salva); sem ela, a do disco."""
+    from ..media.probe import probe
+    from ..pipeline.overlay_boxes import overlay_boxes
+    from ..pipeline.projects import load_project
+
+    if req is not None and req.spec is not None:
+        project = _project_from_body(name, req.spec)
+    else:
+        try:
+            project = load_project(name)
+        except FileNotFoundError as exc:
+            raise _error(404, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
+    try:
+        preset = get_preset(project.output.preset)
+        theme = load_theme(project.brand, project.theme)
+    except (KeyError, FileNotFoundError, ValueError) as exc:
+        raise _error(422, str(exc)) from exc
+    return overlay_boxes(project, preset, theme, services.prober or probe).to_dict()
 
 
 @app.post("/api/projects/{name}/validate")

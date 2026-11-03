@@ -2,7 +2,49 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import ast
+import operator
+from collections.abc import Callable, Mapping, Sequence
+
+_BINARY: dict[type, Callable[[float, float], float]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+_UNARY: dict[type, Callable[[float], float]] = {ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+
+def evaluate(expression: str, variables: Mapping[str, float]) -> float:
+    """Valor de uma expressão aritmética do FFmpeg (`W-w-60`, `(W-w)/2`, `540.00-w/2`) com as variáveis dadas.
+
+    Quem precisa saber ONDE o `overlay` pôs uma camada (a caixa de uma sobreposição na interface, a zona segura
+    no QA) avalia a mesma expressão que o grafo usa, em vez de repetir a tabela de posições em outra conta.
+    Só aceita números, as variáveis, `+ - * /` e parênteses: o resto levanta ValueError.
+    """
+    try:
+        tree = ast.parse(expression.strip(), mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"expressão inválida: {expression!r}") from exc
+    return _evaluate_node(tree.body, variables, expression)
+
+
+def _evaluate_node(node: ast.expr, variables: Mapping[str, float], source: str) -> float:
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int | float)
+        and not isinstance(node.value, bool)
+    ):
+        return float(node.value)
+    if isinstance(node, ast.Name) and node.id in variables:
+        return float(variables[node.id])
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
+        return _UNARY[type(node.op)](_evaluate_node(node.operand, variables, source))
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
+        left = _evaluate_node(node.left, variables, source)
+        right = _evaluate_node(node.right, variables, source)
+        return _BINARY[type(node.op)](left, right)
+    raise ValueError(f"expressão fora do que sei avaliar: {source!r}")
 
 
 def number(value: float, digits: int = 4) -> str:

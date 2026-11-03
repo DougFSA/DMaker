@@ -8,6 +8,7 @@ from pathlib import Path
 from ..domain.presets import SafeZone
 from ..domain.spec import ImageOverlay
 from .common import Inputs, even
+from .expressions import evaluate
 
 
 @dataclass
@@ -40,6 +41,35 @@ def overlay_position(position: str, W: int, H: int, margin: float, safe: SafeZon
 def overlay_center_position(x: float, y: float, W: int, H: int) -> tuple[str, str]:
     """Expressões x/y do filtro overlay para pôr o CENTRO da imagem em (x, y), frações do quadro."""
     return f"{x * W:.2f}-w/2", f"{y * H:.2f}-h/2"
+
+
+def image_overlay_expressions(
+    ov: ImageOverlay, W: int, H: int, scale: float, safe: SafeZone
+) -> tuple[str, str]:
+    """Expressões x/y do `overlay` da imagem: o centro em `x`/`y` quando a spec os dá, senão a posição nomeada
+    (que respeita a zona segura quando `safe_zone` está ligado)."""
+    if ov.x is not None and ov.y is not None:
+        return overlay_center_position(ov.x, ov.y, W, H)
+    return overlay_position(ov.position, W, H, ov.margin * scale, safe if ov.safe_zone else SafeZone())
+
+
+def image_overlay_size(ov: ImageOverlay, W: int, source_aspect: float) -> tuple[int, int]:
+    """Largura e altura (px) da imagem no quadro, como o grafo a escala. A largura é par (truncada, a conta de
+    `even`); a altura vem do `scale=w:-2`, que mantém a proporção e arredonda para o PAR mais próximo. No recorte
+    circular a imagem é o maior quadrado central dela, então fica `w` x `w`."""
+    width = even(W * ov.width)
+    if ov.shape == "circle":
+        return width, width
+    return width, max(2, 2 * round(width / source_aspect / 2))
+
+
+def image_overlay_origin(
+    ov: ImageOverlay, size: tuple[int, int], W: int, H: int, scale: float, safe: SafeZone
+) -> tuple[float, float]:
+    """Canto superior esquerdo da imagem (px), avaliando as MESMAS expressões que o grafo entrega ao `overlay`."""
+    x, y = image_overlay_expressions(ov, W, H, scale, safe)
+    names = {"W": W, "H": H, "w": size[0], "h": size[1]}
+    return evaluate(x, names), evaluate(y, names)
 
 
 def image_overlay_graph(
@@ -78,12 +108,7 @@ def image_overlay_graph(
                     f"fade=t=out:st={max(item.end - ov.fade, item.start):.3f}:d={ov.fade:.3f}:alpha=1"
                 )
         lines.append(",".join(chain) + f"[ov{k}]")
-        if ov.x is not None and ov.y is not None:
-            x, y = overlay_center_position(ov.x, ov.y, W, H)
-        else:
-            x, y = overlay_position(
-                ov.position, W, H, ov.margin * scale, safe if ov.safe_zone else SafeZone()
-            )
+        x, y = image_overlay_expressions(ov, W, H, scale, safe)
         lines.append(
             f"{cur_v}[ov{k}]overlay=x={x}:y={y}:enable='between(t,{item.start:.3f},{item.end:.3f})':format=auto[vo{k}]"
         )

@@ -17,6 +17,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import config
+from .atomic_file import read_bytes_retrying, write_bytes_atomic
 from .curves import Curve
 from .transitions import all_transition_names
 
@@ -907,15 +908,23 @@ class Project(Strict):
     @classmethod
     def load(cls, path: Path | str) -> Project:
         path = Path(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        project = cls.model_validate(data)
-        project.base_dir = path.parent.resolve()
+        return cls.from_bytes(read_bytes_retrying(path), path.parent.resolve())
+
+    @classmethod
+    def from_bytes(cls, data: bytes, base_dir: Path) -> Project:
+        """O projeto de um `spec.json` já lido: quem também precisa da revisão dos bytes lê uma vez só."""
+        project = cls.model_validate(json.loads(data.decode("utf-8")))
+        project.base_dir = base_dir
         return project
 
+    def to_bytes(self) -> bytes:
+        """Os bytes que `save` grava; a revisão do arquivo depois de salvo é a deste conteúdo."""
+        return self.model_dump_json(indent=2, exclude_none=True).encode("utf-8")
+
     def save(self, path: Path | str) -> Path:
+        """Grava por troca atômica: a interface, o MCP e a CLI escrevem a mesma spec e nenhum lê metade dela."""
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
+        write_bytes_atomic(path, self.to_bytes())
         return path
 
     # -- utilidades --

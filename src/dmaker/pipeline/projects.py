@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import config
+from ..domain.atomic_file import content_revision, read_bytes_retrying
 from ..domain.brand import Theme
 from ..domain.presets import Preset, get_preset
 from ..domain.spec import (
@@ -55,6 +56,31 @@ def load_project(name_or_path: str | Path) -> Project:
     if not path.exists():
         raise FileNotFoundError(f"Spec não encontrada: {path}")
     return Project.load(path)
+
+
+def load_project_with_revision(name_or_path: str | Path) -> tuple[Project, str]:
+    """O projeto e a revisão dos MESMOS bytes lidos: se o arquivo mudar no meio, a revisão ainda é a do que foi
+    carregado, e a interface percebe a diferença na próxima conferência."""
+    path = project_path(name_or_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Spec não encontrada: {path}")
+    data = read_bytes_retrying(path)
+    return Project.from_bytes(data, path.parent.resolve()), content_revision(data)
+
+
+def spec_revision(name_or_path: str | Path) -> str | None:
+    """A revisão do `spec.json` no disco, ou None se ele não existe. Não valida a spec: serve também para o
+    arquivo que o schema atual já não aceita."""
+    path = project_path(name_or_path)
+    try:
+        return content_revision(read_bytes_retrying(path))
+    except FileNotFoundError:
+        return None
+
+
+def project_revision(project: Project) -> str:
+    """A revisão que o `spec.json` de `project` terá depois de `save_project` (a gravação escreve `to_bytes`)."""
+    return content_revision(project.to_bytes())
 
 
 def save_project(project: Project, folder: Path | None = None) -> Path:

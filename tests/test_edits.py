@@ -221,6 +221,54 @@ def test_overlay_span_on_progress_bar_errors(tmp_path):
         set_overlay_span(project, 1, 0.0, 2.0)  # progress-bar não tem start/end
 
 
+def html_project(tmp_path: Path) -> Project:
+    project = Project.model_validate(
+        {
+            "name": "edits-html",
+            "timeline": [{"type": "clip", "src": "a.mp4", "start": 0, "end": 6}],
+            "overlays": [
+                {
+                    "type": "html",
+                    "src": "comp.html",
+                    "x": 0.5,
+                    "y": 0.6,
+                    "width": 0.5,
+                    "height": 0.2,
+                    "start": 1,
+                }
+            ],
+        }
+    )
+    project.base_dir = tmp_path
+    return project
+
+
+def test_overlay_span_serves_the_html_overlay_and_keeps_its_place(tmp_path):
+    """O bloco da composição HTML na linha do tempo arrasta pela mesma operação das outras sobreposições."""
+    project = html_project(tmp_path)
+    moved = set_overlay_span(project, 0, 2.0, 5.0)
+    html = moved.overlays[0]
+    assert (html.start, html.end) == (2.0, 5.0)
+    assert (html.x, html.y, html.width, html.height) == (0.5, 0.6, 0.5, 0.2)  # só o tempo muda
+    open_ended = set_overlay_span(project, 0, 2.0, None)
+    assert open_ended.overlays[0].end is None
+    assert project.overlays[0].start == 1  # a spec original não é tocada
+
+
+def test_overlay_span_of_an_html_overlay_refuses_an_end_before_the_start(tmp_path):
+    with pytest.raises(EditError):
+        set_overlay_span(html_project(tmp_path), 0, 4.0, 3.0)
+
+
+def test_overlay_span_op_reaches_the_html_overlay_through_the_dispatcher(tmp_path):
+    result = apply_edit(
+        html_project(tmp_path),
+        {"type": "overlay_span", "index": 0, "start": 0.5, "end": 4.5},
+        prober=fake_prober,
+    )
+    assert (result.overlays[0].start, result.overlays[0].end) == (0.5, 4.5)
+
+
 def test_overlay_invalid_index_errors(tmp_path):
     project = make_project(tmp_path)
     with pytest.raises(EditError):

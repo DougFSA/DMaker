@@ -286,6 +286,18 @@ def _colorize(mask: str, color: str, out: str) -> str:
     )
 
 
+def audiogram_expressions(
+    ov: AudiogramOverlay, W: int, H: int, scale: float, safe: SafeZone
+) -> tuple[str, str]:
+    """Expressões x/y do `overlay` do audiograma: o centro em `x`/`y` quando a spec os dá, senão a posição nomeada
+    (no centro, se nenhuma foi pedida)."""
+    if ov.x is not None and ov.y is not None:
+        return overlay_center_position(ov.x, ov.y, W, H)
+    return overlay_position(
+        ov.position or "center", W, H, ov.margin * scale, safe if ov.safe_zone else SafeZone()
+    )
+
+
 def audiogram_graph(
     lines: list[str],
     inputs: Inputs,
@@ -322,17 +334,7 @@ def audiogram_graph(
         mask = style.draw(ctx)
         layer = f"[vizlayer{index}]"
         lines.append(_colorize(mask, item.color, layer))
-        ov = item.overlay
-        if ov.x is not None and ov.y is not None:
-            x, y = overlay_center_position(ov.x, ov.y, width, height)
-        else:
-            x, y = overlay_position(
-                ov.position or "center",
-                width,
-                height,
-                ov.margin * scale,
-                safe if ov.safe_zone else SafeZone(),
-            )
+        x, y = audiogram_expressions(item.overlay, width, height, scale, safe)
         out = f"[viza{index}]"
         lines.append(
             f"{cur_v}{layer}overlay=x={x}:y={y}:format=auto:enable='between(t,{item.start:.3f},{item.end:.3f})'{out}"

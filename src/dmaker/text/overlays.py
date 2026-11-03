@@ -305,10 +305,52 @@ def _typewriter(text: str, dur: float) -> str:
     return "".join(out)
 
 
-def add_text_overlay(
-    doc: AssDoc, canvas: Canvas, ov: TextOverlay, index: int, tone: str | None = None
-) -> None:
-    """`tone` = "light"/"dark" quando o texto fica sobre fundo gerado pelo tema; None sobre vídeo/foto."""
+@dataclass(frozen=True)
+class TextLayout:
+    """O que o desenho de um texto decide antes de emitir qualquer evento ASS: a quebra, as medidas, a âncora e a
+    caixa. É a conta única do render e da caixa que a interface mostra (`pipeline/overlay_boxes.py`)."""
+
+    style: dict
+    ref: fonts.FontRef
+    size: float
+    spacing: float
+    lines: list[str]
+    line_widths: list[float]  # uma por linha de `lines`, mais a da segunda linha quando existe
+    line_heights: list[float]
+    block_width: float
+    block_height: float
+    secondary: str | None
+    secondary_size: float
+    wrap_width: float  # px em que o texto quebra: a largura permitida menos o padding das duas pontas
+    padding: float  # px entre o texto e a borda da caixa
+    align: str
+    anchor_x: float  # a borda do texto se `align` é left/right; o centro se é center
+    anchor_y: float  # sempre o centro vertical do bloco
+    box: RoundedBox | None
+
+    def area(self) -> tuple[float, float, float, float]:
+        """(esquerda, topo, largura, altura) em px do que o texto desenha: a caixa de fundo quando há, senão o
+        bloco de texto. A caixa usa a mesma âncora do texto, deslocada pelo padding quando alinhada à borda."""
+        if self.box is not None:
+            width, height = self.box.width, self.box.height
+            reach = self.padding
+        else:
+            width, height = self.block_width, self.block_height
+            reach = 0.0
+        if self.align == "left":
+            left = self.anchor_x - reach
+        elif self.align == "right":
+            left = self.anchor_x + reach - width
+        else:
+            left = self.anchor_x - width / 2
+        return left, self.anchor_y - height / 2, width, height
+
+
+def layout_text_overlay(
+    canvas: Canvas, ov: TextOverlay, tone: str | None = None, measure: MeasureFn | None = None
+) -> TextLayout:
+    """Quebra e mede o texto, acha a âncora e desenha a caixa, sem emitir nada. `measure` troca a régua das
+    formas de caixa (os testes dão uma fixa); sem ela vale a do libass, que é quem desenha o texto."""
     theme = canvas.theme
     st = effective_style(ov, theme, tone)
     s = canvas.scale
@@ -317,30 +359,27 @@ def add_text_overlay(
     size = st["size"] * s
     spacing = st["spacing"] * s
     text = ov.text.upper() if st["uppercase"] else ov.text
-    max_w = W * st["max_width"] - 2 * st["box_padding"] * s
+    padding = st["box_padding"] * s
+    wrap_width = W * st["max_width"] - 2 * padding
     shape = BOX_SHAPES[st["box_shape"] if st["box"] else "block"]
-    lines = wrap_lines(text, ref, size, max_w, spacing, shape.measure)
+    if measure is not None:
+        shape = BoxShape(measure, shape.draw)
+    lines = wrap_lines(text, ref, size, wrap_width, spacing, shape.measure)
     line_widths = [shape.measure(ln, ref, size, spacing)[0] for ln in lines]
     line_heights = [size] * len(lines)
     block_w = max(line_widths) if line_widths else 0
     block_h = size * len(lines)
 
     secondary_size = size * 0.7
+    secondary = None
     if ov.secondary:
-        sec_text = ov.secondary.upper() if st["uppercase"] else ov.secondary
+        secondary = ov.secondary.upper() if st["uppercase"] else ov.secondary
         sec_ref = fonts.resolve(st["font"] or theme.font_family, "regular")
-        sec_w = shape.measure(sec_text, sec_ref, secondary_size)[0]
+        sec_w = shape.measure(secondary, sec_ref, secondary_size)[0]
         line_widths.append(sec_w)
         line_heights.append(secondary_size)
         block_w = max(block_w, sec_w)
         block_h += secondary_size
-
-    start = ov.start
-    end = ov.end if ov.end is not None else canvas.total
-    end = min(end, canvas.total)
-    if end <= start:
-        return
-    dur = end - start
 
     # posição da âncora
     align = st["align"]
@@ -364,6 +403,48 @@ def add_text_overlay(
             cy = H * 0.5 + H * st.get("offset_y", 0)
     if ov.role == "subtitle" and ov.y is None and st["position"] == "center":
         cy = H * 0.5 + H * 0.075
+
+    box = None
+    if st["box"]:
+        block = TextBlock(line_widths, line_heights, block_w, block_h)
+        box = shape.draw(block, align, st["box_radius"] * s, padding)
+    return TextLayout(
+        st,
+        ref,
+        size,
+        spacing,
+        lines,
+        line_widths,
+        line_heights,
+        block_w,
+        block_h,
+        secondary,
+        secondary_size,
+        wrap_width,
+        padding,
+        align,
+        cx,
+        cy,
+        box,
+    )
+
+
+def add_text_overlay(
+    doc: AssDoc, canvas: Canvas, ov: TextOverlay, index: int, tone: str | None = None
+) -> None:
+    """`tone` = "light"/"dark" quando o texto fica sobre fundo gerado pelo tema; None sobre vídeo/foto."""
+    start = ov.start
+    end = ov.end if ov.end is not None else canvas.total
+    end = min(end, canvas.total)
+    if end <= start:
+        return
+    dur = end - start
+
+    layout = layout_text_overlay(canvas, ov, tone)
+    theme = canvas.theme
+    st, s = layout.style, canvas.scale
+    ref, size, spacing, lines = layout.ref, layout.size, layout.spacing, layout.lines
+    cx, cy, align = layout.anchor_x, layout.anchor_y, layout.align
 
     animation = st["animation"]
     an = _anchor(align)
@@ -392,10 +473,8 @@ def add_text_overlay(
     )
 
     layer = 10 + index * 3
-    if st["box"]:
-        pad = st["box_padding"] * s
-        block = TextBlock(line_widths, line_heights, block_w, block_h)
-        box = shape.draw(block, align, st["box_radius"] * s, pad)
+    if layout.box is not None:
+        pad, box = layout.padding, layout.box
         bh = box.height
         alpha = int(round(255 * (1 - st["box_alpha"])))
         # a caixa usa a mesma âncora do texto, deslocada pelo padding quando alinhada à esquerda
@@ -434,12 +513,13 @@ def add_text_overlay(
     body = escape_text("\n".join(lines))
     if animation == "typewriter":
         body = _typewriter(body, dur)
-    if ov.secondary:
-        sec_text = ov.secondary.upper() if st["uppercase"] else ov.secondary
+    if layout.secondary:
         muted = theme.colors.get("mint" if ov.role != "lower-third" else "muted", "#CBD5E1")
         if ov.role == "lower-third":
             muted = theme.colors.get("accent", muted)
-        body += f"\\N{{\\fs{secondary_size:.0f}\\b0\\1c{ass_color(muted)}}}{escape_text(sec_text)}"
+        body += (
+            f"\\N{{\\fs{layout.secondary_size:.0f}\\b0\\1c{ass_color(muted)}}}{escape_text(layout.secondary)}"
+        )
     doc.add(Event(start, end, style_name, f"{{\\an{an}{pos_tag}{anim_tags}}}{body}", layer=layer + 2))
 
 
