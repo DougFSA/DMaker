@@ -1286,11 +1286,18 @@ def clean(
     ] = False,
 ) -> None:
     """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
-    onda (cache/waveform) e o áudio da prévia da linha do tempo (cache/preview-audio)."""
+    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor
+    pede ao pipeline (cache/frames)."""
     import shutil
 
     n = 0
-    for d in (config.MEZ_DIR, config.PROXY_DIR, config.WAVEFORM_DIR, config.PREVIEW_AUDIO_DIR):
+    for d in (
+        config.MEZ_DIR,
+        config.PROXY_DIR,
+        config.WAVEFORM_DIR,
+        config.PREVIEW_AUDIO_DIR,
+        config.FRAMES_DIR,
+    ):
         if d.exists():
             n += sum(1 for _ in d.iterdir())
             shutil.rmtree(d)

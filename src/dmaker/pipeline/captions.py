@@ -63,6 +63,11 @@ class CaptionPipeline:
             "auto": self._from_transcription,
             "narration": self._from_narration,
         }
+        # o que já existe sem gerar nada (o quadro de um instante não chama o Whisper nem sintetiza voz)
+        self.cached_producers: dict[str, CueProducer] = {
+            "auto": self._from_cached_transcription,
+            "narration": lambda inputs: (None, None),
+        }
 
     def produce(
         self,
@@ -73,6 +78,25 @@ class CaptionPipeline:
         voiceovers: Sequence[PreparedVoiceover] = (),
         voice_files: Sequence[PreparedVoiceFile] = (),
     ) -> CaptionResult | None:
+        return self._produce(self.producers, ctx, sources, prepared, transitions, voiceovers, voice_files)
+
+    def produce_cached(
+        self, ctx: RenderContext, sources: list[Source], voice_files: Sequence[PreparedVoiceFile] = ()
+    ) -> CaptionResult | None:
+        """As legendas que já existem, sem gerar nenhuma: o arquivo de legendas ou a transcrição automática em cache
+        (None se ela ainda não existe ou se a fonte é a narração, que só existe depois de sintetizada)."""
+        return self._produce(self.cached_producers, ctx, sources, [], [], (), voice_files)
+
+    def _produce(
+        self,
+        producers: dict[str, CueProducer],
+        ctx: RenderContext,
+        sources: list[Source],
+        prepared: list[PreparedSegment],
+        transitions: list[Transition | None],
+        voiceovers: Sequence[PreparedVoiceover],
+        voice_files: Sequence[PreparedVoiceFile],
+    ) -> CaptionResult | None:
         project, options = ctx.project, ctx.options
         captions = project.captions
         if not captions or not captions.enabled or options.no_captions or options.dry_run:
@@ -80,7 +104,7 @@ class CaptionPipeline:
         vocabulary = list(ctx.theme.captions.get("vocabulary", [])) + list(captions.vocabulary)
         replacements = {**ctx.theme.captions.get("replacements", {}), **captions.replacements}
 
-        producer = self.producers.get(captions.source)
+        producer = producers.get(captions.source)
         if producer is None:
             store = project.resolve(captions.source)
             if not store.exists():
@@ -127,6 +151,16 @@ class CaptionPipeline:
             inputs.vocabulary,
             inputs.voice_files,
         )
+
+    def _from_cached_transcription(self, inputs: CaptionInputs) -> tuple[list[Cue] | None, Path | None]:
+        """A transcrição que o render anterior deixou em `captions.auto.json`, se ela ainda vale para o projeto."""
+        ctx = inputs.ctx
+        if ctx.project.audio.mute_clips and not inputs.voice_files:
+            return None, None
+        key = self._audio_key(ctx, inputs.sources, inputs.vocabulary, inputs.voice_files)
+        store = (ctx.project.base_dir or ctx.job_dir) / "captions.auto.json"
+        cached = self._load_cached(store, key)
+        return (cached, store) if cached is not None else (None, None)
 
     def _audio_key(
         self,
