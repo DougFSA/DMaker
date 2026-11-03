@@ -119,10 +119,7 @@ def audio_graph(
         mus = music_stream(lines, inputs, music, music_path, total, music_duration)
         if music.ducking and (spoken or not audio.mute_clips):
             lines.append(f"{a}asplit=2[voice][sc]")
-            lines.append(
-                f"{mus}[sc]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
-                f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
-            )
+            sidechain_compress(lines, mus, "[sc]", music)
             lines.append("[voice][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         else:
             lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
@@ -152,6 +149,25 @@ def audio_graph(
         a = "[a_norm]"
     lines.append(f"{a}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]")
     return "[aout]"
+
+
+def sidechain_compress(lines: list[str], music_bus: str, sidechain: str, music: Music) -> None:
+    """Abaixa `music_bus` sob `sidechain` (a voz) e deixa a música abaixada em `[musd]`.
+
+    O `sidechaincompress` do ffmpeg guarda cada entrada numa fila própria e, quando uma delas acaba, encerra
+    a saída na hora e descarta o que ainda esperava na outra fila. Quanto sobra lá depende de qual das duas
+    entradas entregou o último quadro primeiro (uma corrida entre as threads), então o fim da mistura saía
+    diferente a cada render do mesmo projeto: medido, o PCM variava em até 7 quadros de 1024 amostras (0,15 s)
+    e 52 níveis de 16 bits nos últimos 0,15 s, em 8 s de teste. Igualar as durações não resolve (o fim das
+    duas continua simultâneo). O que resolve é o compressor nunca ver o fim: o `apad` sem argumento enche
+    as duas entradas com silêncio sem fim, e quem encerra a mistura é a voz, no `amix` (`duration=first`),
+    como sempre foi. O silêncio vem depois do programa, então o que se ouve não muda."""
+    lines.append(f"{sidechain}apad[scp]")
+    lines.append(f"{music_bus}apad[musp]")
+    lines.append(
+        f"[musp][scp]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
+        f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
+    )
 
 
 def _tap(lines: list[str], taps: AudioTaps | None, name: str, a: str) -> str:
