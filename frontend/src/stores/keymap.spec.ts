@@ -9,9 +9,9 @@ beforeEach(() => {
 })
 
 describe('a tabela em uso', () => {
-  it('sem trocas salvas, é o padrão de 34 atalhos', () => {
+  it('sem trocas salvas, é o padrão de 37 atalhos', () => {
     const keymap = useKeymapStore()
-    expect(keymap.entries).toHaveLength(34)
+    expect(keymap.entries).toHaveLength(37)
     expect(keymap.customCount).toBe(0)
     expect(keymap.labelFor('split')).toBe('S')
     expect(keymap.labelFor('remove_ripple')).toBe('X ou Del')

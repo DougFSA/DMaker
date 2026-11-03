@@ -14,6 +14,7 @@
 - [Escolher a transição entre os trechos](transicoes.md): Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola).
 - [Dar um acabamento de cinema ao vídeo](looks.md): Aplica um acabamento visual pronto, por nome (cinema, quente, frio, preto e branco, vintage), com vinheta, grão, brilho e vazamento de luz.
 - [Pôr efeitos sonoros num instante do vídeo](efeitos-sonoros.md): Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição.
+- [Marcar instantes e trechos com marcadores](marcadores.md): Põe marcadores com nome na linha do tempo (um instante ou uma região, com cor e grupo), importa e exporta o `.txt` de marcadores do Audacity, gera marcadores regulares e corta no instante de um marcador.
 - [Trocar o fundo atrás da pessoa](trocar-fundo.md): Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural.
 - [Pôr o texto atrás da pessoa](texto-atras.md): Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece.
 - [Pôr uma animação em HTML sobre o vídeo](animacao-html.md): Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS e JavaScript, com três dimensões e Lottie): um título grande, um número que conta, um objeto em 3D girando, um mapa com fotos entrando.

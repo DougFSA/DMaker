@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 34 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 35 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -40,6 +40,7 @@ São 34 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Escolher a transição entre os trechos](#escolher-a-transição-entre-os-trechos) | Muda como um trecho entra a partir do anterior (corte seco, fade, deslize, zoom de passagem, chicote) e o ritmo dessa troca (linear, suave ou mola). | sim |
 | [Dar um acabamento de cinema ao vídeo](#dar-um-acabamento-de-cinema-ao-vídeo) | Aplica um acabamento visual pronto, por nome (cinema, quente, frio, preto e branco, vintage), com vinheta, grão, brilho e vazamento de luz. | sim |
 | [Pôr efeitos sonoros num instante do vídeo](#pôr-efeitos-sonoros-num-instante-do-vídeo) | Põe sons curtos (whoosh, pop, clique, riser, impacto) num instante marcado, ou na entrada de um texto, uma imagem ou uma transição. | sim |
+| [Marcar instantes e trechos com marcadores](#marcar-instantes-e-trechos-com-marcadores) | Põe marcadores com nome na linha do tempo (um instante ou uma região, com cor e grupo), importa e exporta o `.txt` de marcadores do Audacity, gera marcadores regulares e corta no instante de um marcador. | ainda não: `markers_regular`, `markers_import`, `markers_export` |
 | [Trocar o fundo atrás da pessoa](#trocar-o-fundo-atrás-da-pessoa) | Troca o fundo atrás de quem fala por uma cor lisa (branca ou da marca), sem tela verde, recortando a pessoa com uma rede neural. | sim |
 | [Pôr o texto atrás da pessoa](#pôr-o-texto-atrás-da-pessoa) | Faz o título grande passar atrás de quem fala e na frente da parede, o efeito de profundidade dos Reels, recortando a pessoa só enquanto o texto aparece. | sim |
 | [Pôr uma animação em HTML sobre o vídeo](#pôr-uma-animação-em-html-sobre-o-vídeo) | Põe por cima do vídeo uma animação que a IA escreve como código (HTML, CSS e JavaScript, com três dimensões e Lottie): um título grande, um número que conta, um objeto em 3D girando, um mapa com fotos entrando. | sim |
@@ -250,6 +251,10 @@ A `timeline` é a lista, em ordem, do que aparece no vídeo. São três tipos:
 - **`card`**: um cartão gerado no visual da marca (título, subtítulo, variante clara ou escura), ou um layout fixo da marca, ou um fundo liso (`flat`).
 
 Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do anterior; veja a tarefa "Escolher a transição entre os trechos"), um `look` (acabamento visual pronto; veja "Dar um acabamento de cinema ao vídeo") e ajustes de cor.
+
+### Marcadores (markers)
+
+A lista `markers` da spec nomeia pontos e trechos do **vídeo final**: cada marcador é um instante (`at`) ou uma região (`start` e `end`), com `text`, `color` (`#RRGGBB`) e `group`. Cada grupo é uma trilha de marcadores, como as trilhas de rótulos do Audacity. Os marcadores não mudam a imagem nem o som, e acompanham os cortes e aparas da linha do tempo. Veja a tarefa "Marcar instantes e trechos com marcadores".
 
 ### Sobreposições (overlays)
 
@@ -498,7 +503,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Projetos**: a lista dos seus projetos (cartões ou tabela, com busca). **Novo projeto** cria a partir de um modelo pronto ou do zero, escolhendo os arquivos. **Cortar gravação** corta pausas e vícios de uma gravação falada. Abrir um projeto leva à tela dele.
 - **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Abrir no editor** (abre o projeto no editor) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. Um projeto com spec inválida mostra o motivo e o botão **Abrir no editor para corrigir**. O andamento do render aparece ao vivo: as etapas (**Fontes e sincronização**, **Trechos**, **Legendas**, **Camada de texto**, **Loudness**, **Montagem final** e **Miniatura**, a atual em destaque com o trecho ou a porcentagem), a barra, o tempo decorrido e as últimas linhas do log.
 - **Editor**: o projeto aberto para edição, com a barra de ações (**Salvar**, **Desfazer**, **Refazer**, **Validar**, **Prévia**, **Render final**, **Exportar**), o seletor **Tela** (o layout dos painéis) e abas embaixo. **Propriedades** é o formulário da spec em blocos recolhíveis (**Saída**, **Fontes sincronizadas**, **Trechos**, **Sobreposições**, **Legendas** e **Áudio**). **JSON** mostra a spec inteira como texto, a saída para tudo que não tem formulário (look, efeitos sonoros, recorte de pessoa, composições). **Legendas** (aparece quando o projeto tem legendas automáticas) edita o texto de cada frase. **Preview** mostra o vídeo já renderizado, o relatório de QA, a grade de quadros e um quadro num instante. **Salvar** (ou `Ctrl+S`) grava; o selo **Não salvo** avisa quando há mudança, e sair da tela pergunta se descarta. **Validar** e os renders salvam antes. O **Player** (no alto) mostra o quadro na proporção do formato, com o trecho, as imagens e a barra de progresso, o picture-in-picture e o texto, e tem início, quadro anterior e seguinte, **Tocar**, fim, **J**, **K** e **L** (voltar, parar e avançar; repetir o J ou o L dobra a velocidade até 8x), o timecode `HH:MM:SS:QQ` e o volume. O som é o do render: uma mixagem só, feita no servidor com o mesmo grafo de áudio (cortes, partes das fontes, sincronia, volumes, música com trechos e fades, narração já falada, mudos e `mute_clips`), tocada num `<audio>` só enquanto todos os vídeos ficam mudos. Mude o volume de uma faixa ou o mudo de uma trilha e o próximo play já soa diferente, sem recarregar a página. Ao abrir o projeto e depois de cada edição a mixagem leva alguns segundos para ficar pronta, e nesse intervalo o som sai ao vivo, só do que cobre o instante, com o selo **Áudio aproximado**. Vídeo que o navegador não abre ganha um proxy leve (**Gerar proxies**, ou sozinho quando o vídeo falha), e um arquivo que sumiu do disco abre marcado **Fonte não encontrada**, sem derrubar o editor. O player, a linha do tempo e os painéis **Filtros** e **Mídia** formam a bancada do editor, que se organiza pelo **layout de tela** (veja "Editor, layout de tela"); a linha do tempo e os painéis são descritos nos itens seguintes.
-- **Editor, linha do tempo**: fica abaixo do player, entre os painéis Filtros e Mídia (com os dois ocultos, ocupa a largura toda da janela). As trilhas, de cima para baixo: **V2** em diante (vídeo sobreposto, o picture-in-picture), **TX** (textos), **GR** (imagens, composições em HTML e barra de progresso), **V1** (os trechos), **A1** (o som de cada clipe), **A2** em diante (faixas de áudio externas, já fatiadas pelos cortes), **NAR** (as narrações, com borda tracejada enquanto a duração ainda é estimada), **MUS** (a música) e **CC** (as legendas automáticas); as de áudio mostram a forma de onda. O balão de um item mostra o nome (na narração, a fala inteira e se a duração é real ou estimada), e um item cujo arquivo sumiu aparece listrado de vermelho. A régua marca o tempo: clique ou arraste nela, ou numa faixa vazia, para levar o cursor, que encaixa nas bordas dos itens (botão **Snap**). **Ctrl** com a roda do mouse faz zoom, **Ajustar** faz o vídeo inteiro caber, e a área rola uma página sozinha quando o cursor sai da tela tocando. Clique num item para selecioná-lo (**Ctrl** soma, **Ctrl+A** seleciona os trechos da V1), arraste para mudar de lugar (na V1 muda a ordem; texto, imagem e picture-in-picture deslizam no tempo; a fala da narração muda o início) e puxe a borda para aparar. No cabeçalho de cada trilha, **M** silencia, **H** oculta e **L** bloqueia (item de trilha bloqueada avisa e não deixa mexer). A barra de ferramentas tem **Cortar**, **Remover**, **Lift**, **Duplicar**, **Aparar entrada**, **Aparar saída**, **Snap**, **Ripple: V1**, os botões de zoom, **F** e **M** (escondem e mostram os painéis Filtros e Mídia; a escolha fica guardada no layout de tela) e **?**. Cada edição passa pelo servidor e entra no **Desfazer** (`Ctrl+Z` e `Ctrl+Y`); remover ou duplicar vários itens de uma vez vale um passo só. A tecla **?** abre a lista dos atalhos por categoria: clique numa tecla e aperte a nova para trocá-la (um aviso diz se outra ação já usa essa tecla), e **Restaurar padrões** volta ao original; as trocas ficam guardadas no navegador. Os principais: Espaço toca e pausa, **J**, **K** e **L**, as setas (um quadro), **Home** e **End**, **S** corta no cursor, **X** ou **Delete** remove, **Z** faz o lift, **I** e **O** aparam até o cursor, **Ctrl+D** duplica, **Ctrl+S** salva, **=**, **-** e **0** dão zoom. Os atalhos não agem enquanto você digita num campo (só o **Ctrl+S** vale ali) nem dentro de janelas.
+- **Editor, linha do tempo**: fica abaixo do player, entre os painéis Filtros e Mídia (com os dois ocultos, ocupa a largura toda da janela). As trilhas, de cima para baixo: **V2** em diante (vídeo sobreposto, o picture-in-picture), **TX** (textos), **GR** (imagens, composições em HTML e barra de progresso), **V1** (os trechos), **A1** (o som de cada clipe), **A2** em diante (faixas de áudio externas, já fatiadas pelos cortes), **NAR** (as narrações, com borda tracejada enquanto a duração ainda é estimada), **MUS** (a música), **CC** (as legendas automáticas) e **MK** (os marcadores, uma trilha por grupo); as de áudio mostram a forma de onda. O balão de um item mostra o nome (na narração, a fala inteira e se a duração é real ou estimada), e um item cujo arquivo sumiu aparece listrado de vermelho. A régua marca o tempo: clique ou arraste nela, ou numa faixa vazia, para levar o cursor, que encaixa nas bordas dos itens (botão **Snap**). **Ctrl** com a roda do mouse faz zoom, **Ajustar** faz o vídeo inteiro caber, e a área rola uma página sozinha quando o cursor sai da tela tocando. Clique num item para selecioná-lo (**Ctrl** soma, **Ctrl+A** seleciona os trechos da V1), arraste para mudar de lugar (na V1 muda a ordem; texto, imagem e picture-in-picture deslizam no tempo; a fala da narração muda o início) e puxe a borda para aparar. No cabeçalho de cada trilha, **M** silencia, **H** oculta e **L** bloqueia (item de trilha bloqueada avisa e não deixa mexer). Os marcadores da trilha **MK** se criam com **M** (ou o botão **Marcador**) no cursor, se arrastam, se renomeiam com o duplo clique e se pulam com **vírgula** e **ponto** (veja "Marcar instantes e trechos com marcadores"). A barra de ferramentas tem **Cortar**, **Remover**, **Lift**, **Duplicar**, **Aparar entrada**, **Aparar saída**, **Marcador**, **Snap**, **Ripple: V1**, os botões de zoom, **F** e **M** (escondem e mostram os painéis Filtros e Mídia; a escolha fica guardada no layout de tela) e **?**. Cada edição passa pelo servidor e entra no **Desfazer** (`Ctrl+Z` e `Ctrl+Y`); remover ou duplicar vários itens de uma vez vale um passo só. A tecla **?** abre a lista dos atalhos por categoria: clique numa tecla e aperte a nova para trocá-la (um aviso diz se outra ação já usa essa tecla), e **Restaurar padrões** volta ao original; as trocas ficam guardadas no navegador. Os principais: Espaço toca e pausa, **J**, **K** e **L**, as setas (um quadro), **Home** e **End**, **S** corta no cursor, **X** ou **Delete** remove, **Z** faz o lift, **I** e **O** aparam até o cursor, **M** marca o cursor, **,** e **.** pulam entre os marcadores, **Ctrl+D** duplica, **Ctrl+S** salva, **=**, **-** e **0** dão zoom. Os atalhos não agem enquanto você digita num campo (só o **Ctrl+S** vale ali) nem dentro de janelas.
 - **Editor, filtros e mídia**: o painel **Filtros** mostra os grupos de campos do item selecionado na linha do tempo, e os do projeto (**Saída** e **Áudio geral**) quando nada está selecionado. Cada tipo de item tem os seus grupos (o clipe: **Reenquadrar**, **Cor**, **Velocidade**, **Áudio**, **Fade**, **Transição de entrada** e **Rótulo**; a imagem e o cartão, o movimento, a duração e o estilo; o picture-in-picture: tempo, posição, tamanho, forma, opacidade, animação e áudio; o texto, a imagem sobreposta, a barra de progresso, a faixa de áudio, a música e as legendas, cada um com o seu), e o painel só mostra os que já saem do padrão. O botão **+ Filtro** lista os que faltam, e o **×** de um grupo devolve os campos dele ao padrão (um passo só do **Desfazer**); o grupo sem o qual o item não vale (o texto de uma sobreposição de texto, o arquivo da música) não tem o **×**. Selecionar um item da faixa **A1** edita o clipe correspondente da V1. As opções e os limites de cada campo vêm do esquema da spec; texto e número gravam 0,3 segundo depois da última tecla, e a lista e a caixa de marcar gravam na hora. O painel **Mídia** lista as fontes sincronizadas e os arquivos que o projeto usa, com miniatura e duração, e um arquivo ausente do disco aparece marcado. Arraste um item para a linha do tempo: na **V1** ele entra no ponto onde foi solto; em qualquer outra trilha vira um picture-in-picture (vídeo) ou uma imagem sobreposta. Clique num item para selecioná-lo e use **A** (acrescenta ao fim da V1) ou **V** (insere na posição do cursor); o duplo clique e o **Enter** também acrescentam. Os botões **+ Arquivo** (vídeo e imagem entram no fim da V1; áudio vira a música), **Texto** e **Logo** (no cursor), **Cartão** (no fim da V1) e **Música** (escolhe o arquivo da música; se já há música, troca só o arquivo e mantém o volume e os ajustes) criam cada um com um passo do **Desfazer**. Arquivo de áudio não entra na V1 nem como sobreposição.
 - **Editor, layout de tela**: o botão **Tela**, na barra do editor, escolhe como os painéis ficam: **Edição** (o padrão: o player em cima; filtros, linha do tempo e mídia embaixo), **Efeitos** (filtros mais largos, sem a mídia), **Áudio** (player pequeno e linha do tempo grande), **Player** (player grande), **Revisão** e **Voz** (abre o estúdio de voz), mais os layouts que você salvar. Arraste a barra de título de um painel e solte sobre outro para trocar os dois de lugar (pelo teclado, foque o ícone de mover do painel e use as setas); arraste os divisores, entre o player e a faixa de baixo, entre as colunas e ao lado da barra lateral, para redimensionar (as setas também movem o divisor que está em foco); o **×** do título e as caixas de **Painéis na tela** escondem e mostram cada painel. **Salvar layout como...** guarda o arranjo de agora com um nome, **Excluir layout atual** apaga o layout salvo que está em uso e **Restaurar padrão** volta ao **Edição**. O layout em uso fica guardado no navegador e os salvos ficam no servidor, então valem também na interface clássica.
 - **Editor, caixas no palco**: texto, imagem, picture-in-picture e composição em HTML aparecem no palco do player na **caixa que o servidor calculou**, pela mesma conta do render e do conferir qualidade: o texto onde o render o põe (com `x`, `y`, região e alinhamento à esquerda ou à direita), a imagem e o picture-in-picture pelo centro `x` e `y` quando os dois existem. A composição em HTML aparece só como uma caixa, porque o palco não a desenha. Por cima do palco, cada sobreposição que está na tela no instante do cursor ganha uma caixa com contorno e um rótulo curto (**Texto 1**, **Imagem 2**, **PiP 3**, **HTML 4**; o número é o do cartão em **Sobreposições**). Clicar numa caixa escolhe a sobreposição: o inspetor vai para **Propriedades**, e o cartão dela abre e ganha destaque; clicar num cartão (ou num campo dele) destaca a caixa no palco. O botão **Zona segura**, no fim da barra do player, liga e desliga as margens que o app da rede social cobre, desenhadas pelas medidas do formato do projeto (no Reels, por exemplo, 11,5% em cima e 21,9% embaixo); a caixa que invade a zona segura ganha a cor de aviso, e o nome dela diz de que lado saiu. A barra de progresso e o audiograma ganham caixa, mas não se movem, e a composição em HTML presa a uma palavra da legenda não tem caixa, porque o lugar só se sabe no render. A prévia continua aproximada (o texto sai com a fonte do navegador), e o render é o que vale.
@@ -1218,6 +1223,70 @@ O efeito entra com atraso exato (12,40 s toca em 12,40 s) e fica 6 dB abaixo do 
 - **"som desconhecido"**: o nome não é da biblioteca nem um arquivo existente; confira com `dmaker sfx list`.
 - **Aviso de efeito depois do fim**: o `at` passa da duração do vídeo.
 - **Muito baixo ou alto**: ajuste `volume` (0 a 1,5; o padrão 1 é a referência).
+
+### Marcar instantes e trechos com marcadores
+<!-- tarefa: marcadores -->
+Põe marcadores com nome na linha do tempo (um instante ou uma região, com cor e grupo), importa e exporta o `.txt` de marcadores do Audacity, gera marcadores regulares e corta no instante de um marcador.
+
+#### Quando usar
+
+Você quer nomear um ponto ("aqui entra a música", "trecho bom"), trazer as marcações do Audacity, dividir um áudio em partes iguais ou cortar exatamente num ponto marcado. Os marcadores ficam no tempo do **vídeo final** e acompanham os cortes: cortar 3 s antes de um marcador o puxa 3 s para trás, e o que estava no trecho cortado some, com aviso. Não mudam a imagem nem o som.
+
+**Pedidos que levam a esta tarefa:**
+- "Marca o refrão aos 42 segundos"
+- "Importa as marcações que eu fiz no Audacity"
+- "Divide o episódio em partes de 15 segundos, numeradas"
+- "Corta o vídeo no marcador do refrão"
+
+#### Antes de começar
+
+- Para importar, o `.txt` exportado do Audacity (**Arquivo, Exportar, Exportar rótulos**); para exportar, o caminho do `.txt` que o Audacity vai abrir (**Arquivo, Importar, Rótulos**).
+- Cada grupo é uma trilha de marcadores: o grupo vazio é a trilha **MK**, e o grupo `análise` vira **MK análise**.
+
+#### Pela IA
+
+Diga: "Marca o refrão aos 42 segundos no `meu-podcast`" (`edit_project` com `marker_add`), "Divide em partes de 15 segundos" (`markers_regular`) ou "Corta no marcador refrão" (`"at": "marker:refrão"`). O `marker:` vale no `at` do `split` (sem `index`, corta o trecho que contém o marcador) e no `start` e `end` do `overlay_span`; nome repetido pede o grupo: `marker:grupo/texto`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "meu-podcast", "op": {"type": "marker_add", "at": 42.0, "text": "refrão", "color": "#e0a020"}}, "para": "marcar um instante com texto e cor"},
+  {"tool": "markers_regular", "arguments": {"name": "meu-podcast", "interval": 15, "prefix": "Parte ", "group": "partes"}, "para": "uma região a cada 15 segundos, numeradas"},
+  {"tool": "markers_import", "arguments": {"name": "meu-podcast", "file": "C:/audios/rotulos.txt", "group": "audacity"}, "para": "trazer as marcações do Audacity"},
+  {"tool": "edit_project", "arguments": {"name": "meu-podcast", "op": {"type": "split", "at": "marker:refrão"}}, "para": "cortar exatamente no marcador"},
+  {"tool": "timeline_view", "arguments": {"name": "meu-podcast"}, "para": "conferir as trilhas MK e os tempos"},
+  {"tool": "markers_export", "arguments": {"name": "meu-podcast", "out": "C:/audios/marcadores.txt", "group": "audacity"}, "para": "devolver as marcações ao Audacity"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, linha do tempo: a trilha **MK** (uma por grupo) fica embaixo. **M** ou o botão **Marcador** cria um marcador no cursor e abre o texto (**Enter** confirma, **Esc** desiste). Arraste para mover o instante ou a região e puxe as bordas de uma região; o duplo clique renomeia; **vírgula** e **ponto** pulam entre marcadores; **Delete** remove. Tudo entra no **Desfazer**. O bloco **Marcadores** da aba **Propriedades** corrige tempo, grupo e cor. Importar e exportar o `.txt` é pela CLI ou pela IA.
+
+#### Pela CLI
+
+```powershell
+dmaker markers add projects\meu-podcast\spec.json --at 42 --text refrão --color "#e0a020"
+dmaker markers regular projects\meu-podcast\spec.json --interval 15 --prefix "Parte " --digits 2
+dmaker markers import projects\meu-podcast\spec.json C:\audios\rotulos.txt --group audacity
+dmaker markers export projects\meu-podcast\spec.json --out C:\audios\marcadores.txt --group audacity
+dmaker markers list projects\meu-podcast\spec.json
+dmaker markers remove projects\meu-podcast\spec.json "marker:refrão"
+```
+
+Na spec: `"markers": [{"at": 42, "text": "refrão"}, {"start": 60, "end": 75, "text": "verso", "group": "meus"}]`. O arquivo do Audacity tem uma linha por marcador (início, fim e texto separados por tabulação, em segundos com seis casas; o instante repete o tempo): exportar e importar de volta devolve o mesmo arquivo, byte a byte. A quebra de linha é a do sistema, como no Audacity (`--newline lf` ou `crlf` fixa uma).
+
+#### Como conferir
+
+`dmaker markers list` mostra o que ficou. Num áudio de 60 s, `--interval 15` cria 4 regiões. Depois de um corte, o aviso `edit_warnings` do `edit_project` diz quais marcadores saíram; `validate_project` avisa de marcador depois do fim do vídeo e de texto repetido no grupo.
+
+#### Se der errado
+
+- **"há 2 marcadores chamados ..."**: use `marker:grupo/texto` ou renomeie um.
+- **"não existe o marcador ..."**: a busca ignora maiúscula, acento e espaço; `timeline_view` lista os marcadores.
+- **Linha ignorada ao importar**: o aviso cita a linha do `.txt`; o resto entra.
+- **O marcador sumiu depois de um corte**: estava no trecho removido; **Desfazer** (`Ctrl+Z`) o traz de volta.
 
 ### Trocar o fundo atrás da pessoa
 <!-- tarefa: trocar-fundo -->
@@ -2274,6 +2343,9 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Efeito > Invert (Inverter) | `{"type": "invert"}` troca o sinal de cada amostra; duas vezes devolve o som exato | "Aplicar efeitos de áudio em um item ou no master" |
 | Efeito > Reverse (Reverter) | `{"type": "reverse"}` toca o item (ou o intervalo) de trás para a frente | "Aplicar efeitos de áudio em um item ou no master" |
 | Efeito > Repeat (Repetir) | `{"type": "repeat", "times": 2}`. Aqui `times` conta quantas vezes o trecho toca no total (2 dobra); o campo do Audacity conta as repetições além da primeira, então o "1" de lá é o "2" daqui. Só vale em voz gravada e em música, porque aumenta a duração | "Aplicar efeitos de áudio em um item ou no master" |
+| Trilha de rótulos: um ponto ou uma região com nome | `markers` na spec, um instante (`at`) ou uma região (`start` e `end`) com `text`, `color` e `group`; cada grupo é uma trilha **MK** na linha do tempo, e os marcadores acompanham os cortes | "Marcar instantes e trechos com marcadores" |
+| Importar e exportar rótulos (arquivo `.txt`) | `markers_import` e `markers_export` (`dmaker markers import` e `dmaker markers export`): o `.txt` do Audacity entra e sai idêntico | "Marcar instantes e trechos com marcadores" |
+| Pôr um rótulo no ponto de reprodução e dividir em partes iguais | A tecla **M** no editor (ou `marker_add`) marca o cursor; `markers_regular` cria marcadores a cada N segundos ou em N partes | "Marcar instantes e trechos com marcadores" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -2685,6 +2757,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-47 | O ducking dá o mesmo resultado em todo render: o mesmo projeto com música e ducking, renderizado de novo, sai com o mesmo áudio do começo ao fim (antes os últimos 0,15 s variavam de um render para outro); um projeto já renderizado muda só nesse fim, e só onde o render antigo tinha perdido o final da música | "Pôr a narração dentro de um vídeo" |
 | DMK-48 | O DMaker e o servidor MCP funcionam com o clone em qualquer pasta e em qualquer máquina (o `.mcp.json` não cita mais caminho nenhum e usa o `.venv` da pasta aberta); `dmaker --version` mostra a versão (`dmaker 2.0.0`); os modelos `casamento-pascom`, `pessoal-vlog-reel` e `reel-medlycare-depoimento` passam a pedir o arquivo de música, que não tem mais padrão | "MCP em outras ferramentas" e "Criar um projeto a partir de um modelo pronto" |
 | DMK-51 | Edição de áudio: qualquer item de áudio (o som do clipe, a voz gravada, a narração, a música, uma faixa externa, o áudio de um PiP) ou o master recebe uma cadeia ordenada de efeitos (`effects`, `audio.master_effects`) com intervalo opcional e botão de ligar e desligar: Amplificar (com a opção de não clipar), Normalizar, Inverter, Reverter e Repetir; o catálogo `audio_effects`, a operação `audio_effect` do `edit_project`, `dmaker audio effects` e `dmaker audio effect`, o bloco **Efeitos de áudio** do painel Filtros e a trilha **VO** da linha do tempo | "Aplicar efeitos de áudio em um item ou no master" |
+| DMK-59 | Trilha de marcadores: `markers` na spec (instante ou região, com texto, cor e grupo), a trilha **MK** no editor (**M** cria no cursor, arrastar, duplo clique para renomear, vírgula e ponto para pular, tudo no **Desfazer**), importar e exportar o `.txt` de rótulos do Audacity (a ida e volta devolve o mesmo arquivo), marcadores regulares (a cada N segundos ou em N partes), `"at": "marker:texto"` no `edit_project` e marcadores que acompanham cortes e aparas (o que estava no trecho cortado some, com aviso); `dmaker markers`, `markers_import`, `markers_export` e `markers_regular` | "Marcar instantes e trechos com marcadores" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -2698,7 +2771,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 81 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 87 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -2979,6 +3052,39 @@ Manual: regenera as partes automáticas (referência, docs/ia) e exporta em PDF 
   - `--html`: Só o HTML de página única.
   - `--out` CAMINHO: Pasta de saída (padrão: output/manual).
 
+#### dmaker markers
+
+Marcadores da linha do tempo (trilha MK): ver, acrescentar, importar e exportar o .txt do Audacity e gerar regulares.
+
+- **`dmaker markers add SPEC`**: Acrescenta um marcador (um instante com --at, ou uma região com --start e --end).
+  - `--at` NÚMERO: Instante do marcador, em segundos do vídeo final.
+  - `--start` NÚMERO: Início de uma região (use com --end).
+  - `--end` NÚMERO: Fim de uma região (use com --start).
+  - `--text` TEXTO: Texto do marcador.
+  - `--color` TEXTO: Cor #RRGGBB.
+  - `--group` TEXTO: Trilha de marcadores (vazio = a padrão).
+- **`dmaker markers export SPEC`**: Exporta os marcadores no formato do Audacity (Arquivo > Importar > Rótulos), com seis casas decimais.
+  - `--out` CAMINHO: Arquivo .txt de saída (padrão: output/<projeto>-marcadores.txt).
+  - `--group` TEXTO: Só esta trilha (vazio = a padrão); sem a opção, todas.
+  - `--newline` TEXTO: Quebra de linha: auto (a do sistema, como o Audacity), lf ou crlf. (padrão auto)
+- **`dmaker markers import SPEC FILE`**: Importa o .txt de marcadores do Audacity (início, fim e texto separados por tabulação). Os tempos valem para o vídeo final; linha ilegível é pulada com aviso.
+  - `--group` TEXTO: Trilha de marcadores que recebe (vazio = a padrão).
+  - `--replace` / `--no-replace`: Troca o que a trilha já tinha em vez de acrescentar.
+- **`dmaker markers list SPEC`**: Lista os marcadores do projeto, por trilha (grupo), com o tempo, a cor e o texto.
+- **`dmaker markers regular SPEC`**: Gera marcadores regulares (a cada N segundos ou em N partes iguais), como o Regular Interval Labels do Audacity.
+  - `--interval` NÚMERO: Segundos entre os marcadores (ou use --parts).
+  - `--parts` NÚMERO: Quantas partes iguais (ou use --interval).
+  - `--start` NÚMERO: Onde começar, em segundos. (padrão 0.0)
+  - `--end` NÚMERO: Onde terminar (padrão: o fim do vídeo).
+  - `--prefix` TEXTO: Texto antes do número (ex.: 'Parte ').
+  - `--first-number` NÚMERO: Número do primeiro marcador. (padrão 1)
+  - `--digits` NÚMERO: Casas do número (2 dá 01, 02...). (padrão 1)
+  - `--group` TEXTO: Trilha de marcadores (vazio = a padrão).
+  - `--color` TEXTO: Cor #RRGGBB.
+  - `--kind` TEXTO: region (cobre o intervalo) ou instant (marca o começo). (padrão region)
+  - `--replace` / `--no-replace`: Troca o que a trilha já tinha.
+- **`dmaker markers remove SPEC REF`**: Remove um marcador pelo número ou pelo texto (`marker:refrão`, ou `marker:grupo/refrão`).
+
 #### dmaker models
 
 Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, apagar e limpar sobras.
@@ -3117,7 +3223,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 65 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 68 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -3141,12 +3247,18 @@ São 65 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto).
 - **`validate_project`**: Confere arquivos, calcula a duração final e lista avisos (limites da plataforma, marca).
   Parâmetros: `name_or_path`\* (texto).
-- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed") e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}).
+- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove (marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}).
   Parâmetros: `name`\* (texto), `op`\* (objeto).
 - **`audio_effects`**: O catálogo dos efeitos de áudio que qualquer item de áudio (clipe, voz gravada, narração, música, faixa externa, PiP) ou o master recebe em uma cadeia ordenada (`effects` na spec): para cada efeito, o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos.
   Parâmetros: `type` (texto).
-- **`timeline_view`**: Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, NAR narrações (duração real quando já sintetizadas, senão estimada), MUS música, CC legendas), com o intervalo de cada item já calculado.
+- **`timeline_view`**: Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, NAR narrações (duração real quando já sintetizadas, senão estimada), MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de cada item já calculado.
   Parâmetros: `name`\* (texto).
+- **`markers_import`**: Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK).
+  Parâmetros: `name`\* (texto), `file`\* (texto), `group` (texto, padrão ), `replace` (sim ou não, padrão não).
+- **`markers_export`**: Exporta os marcadores do projeto para o `.txt` do Audacity (início, fim e texto, com seis casas e ponto decimal; o instante repete o tempo nas duas colunas).
+  Parâmetros: `name`\* (texto), `out` (texto), `group` (texto), `newline` ("auto" ou "lf" ou "crlf", padrão auto).
+- **`markers_regular`**: Marcadores regulares (como o Regular Interval Labels do Audacity): a cada `interval` segundos OU em `parts` partes iguais, de `start` até `end` (padrão: o vídeo inteiro), numerados com `prefix`, a partir de `first_number` e com `digits` casas (prefixo 'Parte ' dá 'Parte 1', 'Parte 2').
+  Parâmetros: `name`\* (texto), `interval` (número), `parts` (inteiro), `start` (número, padrão 0.0), `end` (número), `prefix` (texto, padrão ), `first_number` (inteiro, padrão 1), `digits` (inteiro, padrão 1), `group` (texto, padrão ), `color` (texto), `kind` ("region" ou "instant", padrão region), `replace` (sim ou não, padrão não).
 - **`plan_multicam`**: Planeja o corte automático de um bloco `multicam` da spec: transcreve a câmera de áudio, reconhece as fases da cerimônia pela fala (termos ditos, ex.: consentimento, votos, alianças) e substitui o bloco pelos clipes concretos, alternando as câmeras pela cadência e atraindo os cortes para pausas da fala.
   Parâmetros: `name_or_path`\* (texto).
 - **`autocut`**: Corta as pausas, os vícios de fala e as frases repetidas de uma gravação falada (use no lugar de transcrever e cortar clipe a clipe à mão).
@@ -3256,7 +3368,7 @@ São 65 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 38 blocos e 352 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 39 blocos e 361 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -3279,6 +3391,7 @@ A raiz do `spec.json`.
 | `multicam` | `MulticamBlock` | nenhum | Bloco de corte automático de cerimônia, expandido por `dmaker plan`. |
 | `tracks` | mapa de `TrackState` | vazio | Mudo, oculto e bloqueio por trilha da interface, por id de trilha. |
 | `regions` | mapa de `Region` | vazio | Retângulos nomeados do quadro, em fração de 0 a 1. |
+| `markers` | lista de `Marker` | vazio | Marcadores da trilha MK: instantes e regiões do vídeo final, com texto, cor e grupo; acompanham os cortes. |
 | `base_dir` | texto | nenhum | Pasta de onde partem os caminhos relativos (preenchida ao carregar o projeto). |
 
 #### Amplify
@@ -3551,6 +3664,21 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `enabled` | sim ou não | sim |  |
 | `start` | número, mínimo 0 | nenhum |  |
 | `end` | número, mínimo 0 | nenhum |  |
+
+#### Marker
+
+Usado em `Project.markers`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `at` | número, mínimo 0 | nenhum | Instante do marcador, em segundos do vídeo final (use `start` e `end` para uma região). |
+| `start` | número, mínimo 0 | nenhum | Início de uma região, em segundos do vídeo final. |
+| `end` | número, mínimo 0 | nenhum | Fim de uma região, em segundos do vídeo final (maior que `start`). |
+| `text` | texto | texto vazio | O que o marcador diz; `marker:<texto>` o acha no edit_project. |
+| `color` | texto | nenhum | Cor #RRGGBB na linha do tempo; vazio usa a do tema. |
+| `group` | texto | texto vazio | Trilha de marcadores (vazio é a padrão, MK); sem `/`. |
+| `low_hz` | número, mínimo 0 | nenhum | Frequência de baixo de um marcador espectral do Audacity. |
+| `high_hz` | número, mínimo 0 | nenhum | Frequência de cima de um marcador espectral do Audacity. |
 
 #### Matte
 

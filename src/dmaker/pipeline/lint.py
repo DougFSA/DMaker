@@ -101,6 +101,7 @@ def lint(
     warnings += _audiogram_warnings(project, infos)
     warnings += _behind_person_warnings(project, total, durations)
     warnings += _sfx_warnings(project, total)
+    warnings += _marker_warnings(project, total)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:
@@ -183,6 +184,27 @@ def _sfx_warnings(project: Project, total: float) -> list[str]:
             warnings.append(f"audio.sfx[{i}]: toca em {cue.at:g}s, depois do fim do vídeo ({total:.1f}s).")
         elif cue.volume <= 0:
             warnings.append(f"audio.sfx[{i}]: volume 0, o efeito não toca.")
+    return warnings
+
+
+def _marker_warnings(project: Project, total: float) -> list[str]:
+    """Marcador depois do fim do vídeo e texto repetido no mesmo grupo (o `marker:<texto>` do edit_project fica ambíguo)."""
+    warnings = []
+    seen: dict[tuple[str, str], int] = {}
+    for i, marker in enumerate(project.markers):
+        if marker.begin >= total:
+            warnings.append(
+                f"markers[{i}]: começa em {marker.begin:g}s, depois do fim do vídeo ({total:.1f}s)."
+            )
+        if marker.text:
+            key = (marker.group, marker.text.strip())
+            if key in seen:
+                warnings.append(
+                    f"markers[{i}]: o texto {marker.text!r} já é de markers[{seen[key]}]; "
+                    "marker:<texto> não saberá qual escolher (use outro texto ou o grupo)."
+                )
+            else:
+                seen[key] = i
     return warnings
 
 

@@ -712,3 +712,155 @@ describe('a trilha VO (voz gravada)', () => {
     expect(panel.find('.row[data-track-id="VO"]').classes()).toContain('row--muted')
   })
 })
+
+describe('a trilha de marcadores (MK)', () => {
+  /** A vista completa mais as trilhas de marcadores: um instante e uma região na padrão, e um instante no grupo "meus". */
+  function markersView(locked = false): TimelineView {
+    const marker = (index: number, start: number, end: number, label: string, group = '') =>
+      timelineItem(index, {
+        id: `MK-${index}`,
+        kind: 'marker',
+        label,
+        start,
+        end,
+        in_point: 0,
+        out_point: null,
+        src: null,
+        extra: { color: index === 0 ? '#e0a020' : null, group, instant: start === end },
+      })
+    const view = fullView()
+    view.tracks.push(
+      timelineTrack('MK', [marker(0, 9.2, 9.2, 'refrão'), marker(1, 2.5, 4.5, 'verso')], { kind: 'markers', locked }),
+      timelineTrack('MK:meus', [marker(2, 7.3, 7.3, 'coda', 'meus')], { kind: 'markers', label: 'MK meus' }),
+    )
+    return view
+  }
+
+  it('desenha uma trilha por grupo: o instante como linha com o texto, a região com as duas alças', async () => {
+    await mountTimeline(markersView())
+    expect(rows().slice(-3)).toEqual(['CC', 'MK', 'MK:meus'])
+    expect(item('MK-0').classes()).toContain('marker--instant')
+    expect(item('MK-0').text()).toBe('refrão')
+    expect(item('MK-0').attributes('style')).toContain('--marker-color: #e0a020')
+    expect(item('MK-0').find('[data-handle]').exists()).toBe(false)
+    expect(item('MK-1').classes()).toContain('marker--region')
+    expect(item('MK-1').findAll('[data-handle]').map((handle) => handle.attributes('data-handle'))).toEqual(['in', 'out'])
+    expect(item('MK-1').attributes('title')).toBe('verso (2,5 a 4,5 s)')
+    expect(header('MK').attributes('title')).toBe('Marcadores (MK)')
+    expect(header('MK:meus').attributes('title')).toBe('Marcadores do grupo meus (MK:meus)')
+  })
+
+  it('o cabeçalho da trilha de marcadores só tem o cadeado', async () => {
+    await mountTimeline(markersView())
+    const buttons = (wrapper as VueWrapper).findAll('.row[data-track-id="MK"] [data-track-action]')
+    expect(buttons.map((button) => button.attributes('data-track-action'))).toEqual(['locked'])
+  })
+
+  it('clicar escolhe o marcador, e ele é um item como os outros para a seleção', async () => {
+    await mountTimeline(markersView())
+    await item('MK-2').trigger('mousedown', { button: 0, clientX: 100 })
+    mouse(document, 'mouseup', 100)
+    expect(opened.store.selection).toEqual(['MK-2'])
+    expect(item('MK-2').classes()).toContain('marker--selected')
+  })
+
+  it('arrastar um marcador pontual manda marker_set com o novo instante', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 + 30)
+    await flushPromises()
+    expect((wrapper as VueWrapper).find('[data-ghost]').exists()).toBe(true)
+    mouse(document, 'mouseup', 300 + 30)
+    await flushPromises()
+    expect(edits()).toHaveLength(1)
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 0, at: 9.7 } })
+  })
+
+  it('arrastar a região a desloca inteira; puxar uma borda muda só aquela ponta', async () => {
+    await mountTimeline(markersView())
+    await item('MK-1').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 - 30)
+    mouse(document, 'mouseup', 300 - 30)
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 1, start: 2, end: 4 } })
+
+    await item('MK-1').find('[data-handle="out"]').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 + 45)
+    mouse(document, 'mouseup', 300 + 45)
+    await flushPromises()
+    expect(edits()[1]?.body).toMatchObject({ op: { type: 'marker_set', index: 1, start: 2.5, end: 5.25 } })
+  })
+
+  it('o gesto grava o projeto ao soltar, como os outros', async () => {
+    const moved = { ...projectSpec(), markers: [{ at: 9.7, text: 'refrão' }] }
+    await mountTimeline(markersView(), { 'POST /api/projects/demo/edit': () => ({ spec: moved, timeline: currentView }) })
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 330)
+    mouse(document, 'mouseup', 330)
+    await flushPromises()
+    const saves = opened.fetch.to('PUT /api/projects/demo')
+    expect(saves).toHaveLength(1)
+    expect(saves[0]?.body).toMatchObject({ markers: [{ at: 9.7, text: 'refrão' }] })
+    expect(opened.store.dirty).toBe(false)
+  })
+
+  it('numa trilha de marcadores bloqueada, o marcador não se escolhe, não se arrasta e não abre a caixa', async () => {
+    await mountTimeline(markersView(true))
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 340)
+    mouse(document, 'mouseup', 340)
+    await item('MK-0').trigger('dblclick')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(opened.store.selection).toEqual([])
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+    expect(useToastsStore().items.map((toast) => toast.title)).toContain('A trilha MK está bloqueada (cadeado no cabeçalho).')
+  })
+
+  it('o duplo clique abre a caixa de texto com o texto de agora; Enter grava o texto novo', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    const input = (wrapper as VueWrapper).find<HTMLInputElement>('.marker__input')
+    expect(input.exists()).toBe(true)
+    expect(input.element.value).toBe('refrão')
+    await input.setValue('  coda final ')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+    expect(edits()).toHaveLength(1)
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 0, text: 'coda final' } })
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+  })
+
+  it('Esc desiste, e sair da caixa sem mudar o texto não grava nada', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    const input = (wrapper as VueWrapper).find('.marker__input')
+    await input.setValue('outro')
+    await input.trigger('keydown.esc')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+
+    await item('MK-1').trigger('dblclick')
+    await (wrapper as VueWrapper).find('.marker__input').trigger('blur')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+  })
+
+  it('clicar dentro da caixa de texto não começa um arrasto', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    await (wrapper as VueWrapper).find('.marker__input').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 400)
+    mouse(document, 'mouseup', 400)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect((wrapper as VueWrapper).find('[data-ghost]').exists()).toBe(false)
+  })
+
+  it('o duplo clique em outro tipo de item não abre caixa nenhuma', async () => {
+    await mountTimeline(markersView())
+    await item('TX-0').trigger('dblclick')
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+  })
+})

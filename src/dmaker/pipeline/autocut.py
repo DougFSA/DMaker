@@ -20,6 +20,7 @@ from .. import config
 from ..domain.edits import restore_gap
 from ..domain.presets import get_preset
 from ..domain.spec import Captions, ClipSegment, Output, Project
+from ..domain.time_map import shift_markers
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..media.wavio import read_wav
@@ -27,6 +28,9 @@ from ..text.captions import Cue, Word, flatten_words, from_json, remap_to_ranges
 from ..text.transcribe import Transcriber, WhisperTranscriber, extract_audio_wav
 from ..voice.cut_plan import REASON_LABELS, CutOptions, CutPlan, plan_cuts
 from .context import Prober
+from .edit_time import restored_gap_time_map
+from .layout import OriginAggregate, aggregate_by_origin, project_layout
+from .missing import MissingMedia
 from .projects import load_project, project_path, save_project
 
 REPORT_FILE = "autocut.json"
@@ -375,7 +379,7 @@ def default_autocut_service(log: Callable[[str], None] = lambda message: None) -
 # ---------- desfazer ----------
 
 
-def undo_cut(name_or_path: str | Path, cut_id: int) -> CutReport:
+def undo_cut(name_or_path: str | Path, cut_id: int, prober: Prober = probe) -> CutReport:
     """Devolve ao projeto o trecho removido pelo corte `cut_id` (juntando os clipes vizinhos) e refaz as
     legendas; levanta ValueError se o corte não existe, já foi desfeito ou a linha do tempo mudou."""
     project = load_project(name_or_path)
@@ -387,11 +391,25 @@ def undo_cut(name_or_path: str | Path, cut_id: int) -> CutReport:
     if record.undone:
         raise ValueError(f"o corte {cut_id} já foi desfeito")
     restored = restore_gap(project, record.start, record.end, origin=report.source)
+    restored = _carry_markers(project, restored, prober)
     record.undone = True
     save_project(restored, folder)
     save_cut_report(folder, report)
     _rebuild_captions(restored, folder, report)
     return report
+
+
+def _carry_markers(before: Project, restored: Project, prober: Prober) -> Project:
+    """O trecho que voltou empurra para a frente os marcadores que estavam depois dele (o tempo cresce)."""
+    if not before.markers:
+        return restored
+    before_layout = _layout_of(before, prober)
+    time_map = restored_gap_time_map(before, restored, before_layout, _layout_of(restored, prober))
+    return restored.model_copy(update={"markers": shift_markers(restored.markers, time_map).markers})
+
+
+def _layout_of(project: Project, prober: Prober) -> OriginAggregate:
+    return aggregate_by_origin(project, project_layout(project, prober, missing=MissingMedia.scan(project)))
 
 
 def _rebuild_captions(project: Project, folder: Path, report: CutReport) -> None:

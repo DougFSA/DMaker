@@ -446,6 +446,8 @@ export const useEditorStore = defineStore('editor', () => {
       validation.value = null
       applyView(result.timeline)
       void refreshBoxes()
+      // um corte apagou marcadores que estavam no trecho: um aviso por marcador, e o desfazer os traz de volta
+      for (const warning of result.edit_warnings ?? []) toasts.push({ tone: 'info', title: warning })
       return true
     } catch (error) {
       toasts.push({ tone: 'error', title: 'Não foi possível editar', description: errorMessage(error) })
@@ -482,8 +484,8 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Aplica uma das dez operações da linha do tempo (cortar, remover, mover, aparar, duplicar, inserir, ajustar uma
-   * sobreposição, mudar um campo) pelo servidor. As chamadas entram em fila: cada uma parte da spec que a anterior deixou.
+   * Aplica uma das treze operações da linha do tempo (cortar, remover, mover, aparar, duplicar, inserir, ajustar uma
+   * sobreposição, mudar um campo, acrescentar, mudar e remover marcador) pelo servidor. As chamadas entram em fila: cada uma parte da spec que a anterior deixou.
    */
   function applyOp(op: EditOperation): Promise<boolean> {
     return enqueue([op])

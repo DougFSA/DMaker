@@ -2,7 +2,16 @@
    vira em operações do servidor, dado o que está selecionado e onde o cursor está. Funções puras: devolvem as
    operações ou o aviso para a pessoa, e quem as executa é `useEditorActions`. */
 import type { EditOperation, TimelineItem, TimelineView } from '@/api'
-import { headerButtons, isOverlayTrack, itemCovering, MIN_ITEM_SECONDS, roundSeconds, type TrackToggle } from './timeline'
+import { markerGroup, markerTrackOf } from './markers'
+import {
+  headerButtons,
+  isMarkerTrack,
+  isOverlayTrack,
+  itemCovering,
+  MIN_ITEM_SECONDS,
+  roundSeconds,
+  type TrackToggle,
+} from './timeline'
 
 /** Um item selecionado, junto da trilha onde ele está. */
 export interface SelectedEntry {
@@ -22,12 +31,18 @@ export function lockedMessage(trackId: string): string {
 }
 
 /**
- * Da seleção, o que dá para editar (trecho da V1 ou sobreposição) e não está numa trilha bloqueada. Se a seleção
- * só tinha itens bloqueados, o aviso diz isso em vez de dizer que não há seleção.
+ * Da seleção, o que dá para editar (trecho da V1 ou sobreposição; com `markers`, também os marcadores) e não está numa
+ * trilha bloqueada. Se a seleção só tinha itens bloqueados, o aviso diz isso em vez de dizer que não há seleção.
  */
-function editableEntries(view: TimelineView, selected: readonly SelectedEntry[]): { entries: SelectedEntry[]; locked: string | null } {
+function editableEntries(
+  view: TimelineView,
+  selected: readonly SelectedEntry[],
+  options: { markers?: boolean } = {},
+): { entries: SelectedEntry[]; locked: string | null } {
   const lockedIds = new Set(view.tracks.filter((track) => track.locked).map((track) => track.id))
-  const candidates = selected.filter(({ trackId, item }) => trackId === 'V1' || isOverlayTrack(trackId, item))
+  const candidates = selected.filter(
+    ({ trackId, item }) => trackId === 'V1' || isOverlayTrack(trackId, item) || (options.markers === true && isMarkerTrack(trackId)),
+  )
   const entries = candidates.filter(({ trackId }) => !lockedIds.has(trackId))
   const firstLocked = candidates.find(({ trackId }) => lockedIds.has(trackId))
   return { entries, locked: entries.length === 0 && firstLocked ? firstLocked.trackId : null }
@@ -51,17 +66,37 @@ export function planSplit(view: TimelineView, selected: readonly SelectedEntry[]
   return { ok: true, ops: [{ type: 'split', index: chosen.index, at: roundSeconds(at) }] }
 }
 
-/** Remove os itens selecionados. Na V1 o servidor fecha a lacuna (ripple); `verb` é o que o aviso diz ("remover", "o lift"). */
+/**
+ * Remove os itens selecionados. Na V1 o servidor fecha a lacuna (ripple); `verb` é o que o aviso diz ("remover", "o
+ * lift"). Os marcadores saem primeiro: tirar um trecho da V1 pode apagar marcadores, e o índice de um marcador que
+ * ainda ia sair apontaria para outro.
+ */
 export function planRemove(view: TimelineView, selected: readonly SelectedEntry[], verb = 'remover'): Plan {
-  const { entries, locked } = editableEntries(view, selected)
+  const { entries, locked } = editableEntries(view, selected, { markers: true })
   if (locked) return fail(lockedMessage(locked))
-  if (entries.length === 0) return fail(`Selecione um trecho ou sobreposição para ${verb}.`)
+  if (entries.length === 0) return fail(`Selecione um trecho, sobreposição ou marcador para ${verb}.`)
+  const markers = descending(entries.filter(({ trackId }) => isMarkerTrack(trackId)))
+  const others = descending(entries.filter(({ trackId }) => !isMarkerTrack(trackId)))
   return {
     ok: true,
-    ops: descending(entries).map(({ trackId, item }) =>
-      trackId === 'V1' ? { type: 'remove', index: item.index } : { type: 'overlay_remove', index: item.index },
-    ),
+    ops: [
+      ...markers.map(({ item }): EditOperation => ({ type: 'marker_remove', index: item.index })),
+      ...others.map(({ trackId, item }): EditOperation =>
+        trackId === 'V1' ? { type: 'remove', index: item.index } : { type: 'overlay_remove', index: item.index },
+      ),
+    ],
   }
+}
+
+/**
+ * Cria um marcador no cursor. Vai para a trilha do marcador selecionado, se houver um, senão para a padrão; numa
+ * trilha de marcadores bloqueada, avisa.
+ */
+export function planAddMarker(view: TimelineView, selected: readonly SelectedEntry[], playhead: number): Plan {
+  const group = selected.find(({ trackId }) => isMarkerTrack(trackId))?.item
+  const name = group ? markerGroup(group) : ''
+  if (markerTrackOf(view, name)?.locked) return fail(lockedMessage(name ? `MK:${name}` : 'MK'))
+  return { ok: true, ops: [{ type: 'marker_add', at: roundSeconds(playhead), text: '', ...(name ? { group: name } : {}) }] }
 }
 
 /** Copia cada item selecionado para logo depois dele. */

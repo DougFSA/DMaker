@@ -7,6 +7,7 @@ seleção/arraste dos itens da trilha) e não muda nada aqui."""
 
 from __future__ import annotations
 
+from .markers import marker_groups, marker_track_id
 from .spec import HtmlOverlay, ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
 from .timeline import stack_lanes
 
@@ -37,6 +38,7 @@ def known_track_ids(project: Project) -> set[str]:
         ids.add("VO")
     lanes = video_overlay_lanes(project)
     ids.update(f"V{2 + lane}" for lane in set(lanes.values()))
+    ids.update(marker_track_id(group) for group in marker_groups(project.markers))
     return ids
 
 

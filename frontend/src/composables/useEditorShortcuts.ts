@@ -76,6 +76,9 @@ export function useEditorShortcuts(): void {
     track_mute: () => void actions.toggleTrack('muted'),
     track_hide: () => void actions.toggleTrack('hidden'),
     track_lock: () => void actions.toggleTrack('locked'),
+    add_marker: () => void actions.addMarker(),
+    prev_marker: () => actions.jumpMarker(-1),
+    next_marker: () => actions.jumpMarker(1),
   }
 
   function onKeydown(event: KeyboardEvent): void {

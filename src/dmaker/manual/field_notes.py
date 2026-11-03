@@ -24,7 +24,17 @@ FIELD_NOTES: dict[str, str] = {
     "Project.multicam": "Bloco de corte automático de cerimônia, expandido por `dmaker plan`.",
     "Project.tracks": "Mudo, oculto e bloqueio por trilha da interface, por id de trilha.",
     "Project.regions": "Retângulos nomeados do quadro, em fração de 0 a 1.",
+    "Project.markers": "Marcadores da trilha MK: instantes e regiões do vídeo final, com texto, cor e grupo; acompanham os cortes.",
     "Project.base_dir": "Pasta de onde partem os caminhos relativos (preenchida ao carregar o projeto).",
+    # marcadores
+    "Marker.at": "Instante do marcador, em segundos do vídeo final (use `start` e `end` para uma região).",
+    "Marker.start": "Início de uma região, em segundos do vídeo final.",
+    "Marker.end": "Fim de uma região, em segundos do vídeo final (maior que `start`).",
+    "Marker.text": "O que o marcador diz; `marker:<texto>` o acha no edit_project.",
+    "Marker.color": "Cor #RRGGBB na linha do tempo; vazio usa a do tema.",
+    "Marker.group": "Trilha de marcadores (vazio é a padrão, MK); sem `/`.",
+    "Marker.low_hz": "Frequência de baixo de um marcador espectral do Audacity.",
+    "Marker.high_hz": "Frequência de cima de um marcador espectral do Audacity.",
     # saída
     "Output.preset": "Plataforma e formato (`dmaker presets` lista todos).",
     "Output.path": "Arquivo de saída; vazio grava em output/ com o nome do projeto e do formato.",

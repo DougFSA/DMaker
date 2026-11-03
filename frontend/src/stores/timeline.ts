@@ -48,6 +48,8 @@ export const useTimelineStore = defineStore('timeline', () => {
   const viewportWidth = ref(0)
   const scrollRequest = ref<ScrollRequest | null>(null)
   const mediaDropHandler = ref<MediaDropHandler | null>(null)
+  /** O marcador (id do item da vista) cujo texto está sendo editado na própria trilha; nulo se nenhum. */
+  const editingMarkerId = ref<string | null>(null)
   let requestToken = 0
 
   const effectiveViewport = computed(() => (viewportWidth.value > 0 ? viewportWidth.value : FALLBACK_VIEWPORT_PX))
@@ -110,6 +112,15 @@ export const useTimelineStore = defineStore('timeline', () => {
     viewportWidth.value = width
   }
 
+  /** Abre a caixa de texto do marcador na trilha (duplo clique, ou logo depois de criar um). */
+  function editMarker(id: string): void {
+    editingMarkerId.value = id
+  }
+
+  function stopEditingMarker(): void {
+    editingMarkerId.value = null
+  }
+
   /** O painel Mídia registra aqui o que fazer ao receber um arquivo arrastado; devolve como desregistrar. */
   function onMediaDrop(handler: MediaDropHandler): () => void {
     mediaDropHandler.value = handler
@@ -126,6 +137,7 @@ export const useTimelineStore = defineStore('timeline', () => {
       scrollLeft.value = 0
       hoverTrackId.value = null
       scrollRequest.value = null
+      editingMarkerId.value = null
     },
   )
 
@@ -138,6 +150,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     viewportWidth,
     scrollRequest,
     mediaDropHandler,
+    editingMarkerId,
     effectiveViewport,
     snapTolerance,
     windowLeftPx,
@@ -151,5 +164,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     toggleRipple,
     setScroll,
     onMediaDrop,
+    editMarker,
+    stopEditingMarker,
   }
 })

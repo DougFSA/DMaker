@@ -187,7 +187,8 @@ class InstantFrameRenderer:
         theme = self._theme_signature(project)
         return cache_key(
             INSTANT_FRAME_VERSION,
-            project.model_dump(mode="json"),
+            # os marcadores não mudam a imagem: de fora do hash, marcar um instante não refaz o quadro
+            project.model_dump(mode="json", exclude={"markers"}),
             frame_index(t, self._fps(project)),
             stamps,
             theme,

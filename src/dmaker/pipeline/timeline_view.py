@@ -5,8 +5,9 @@ Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-pic
 faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem, barra de progresso
 e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
 clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
-(narrações por texto), "VO" (arquivos de voz gravada, com a duração depois dos efeitos), "MUS" (música) e
-"CC" (legendas)."""
+(narrações por texto), "VO" (arquivos de voz gravada, com a duração depois dos efeitos), "MUS" (música),
+"CC" (legendas) e, por último, uma trilha de marcadores por grupo ("MK" para o grupo padrão, "MK:<grupo>" para
+os nomeados)."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..domain.markers import marker_groups, marker_track_id
 from ..domain.spec import (
     ClipSegment,
     HtmlOverlay,
@@ -57,7 +59,7 @@ class TrackItem:
 @dataclass
 class Track:
     id: str
-    kind: Literal["video", "audio", "text", "graphics", "captions"]
+    kind: Literal["video", "audio", "text", "graphics", "captions", "markers"]
     label: str
     items: list[TrackItem] = field(default_factory=list)
     muted: bool = False
@@ -548,6 +550,46 @@ def _captions_track(project: Project, layout: ProjectLayout) -> Track | None:
     return Track(id="CC", kind="captions", label="CC", items=[item], hidden=hidden, locked=locked)
 
 
+def _marker_tracks(project: Project) -> list[Track]:
+    """Uma trilha por grupo de marcadores. Cada marcador é um item: o instante tem início e fim iguais, a região vai
+    de um a outro; `extra` leva o que a interface precisa para desenhar e editar (cor, grupo, frequência)."""
+    tracks = []
+    for group in marker_groups(project.markers):
+        track_id = marker_track_id(group)
+        members = [(i, marker) for i, marker in enumerate(project.markers) if marker.group == group]
+        items = [
+            TrackItem(
+                id=_item_id("MK", i),
+                kind="marker",
+                index=i,
+                label=marker.text,
+                start=marker.begin,
+                end=marker.finish,
+                in_point=0.0,
+                out_point=None,
+                src=None,
+                source=None,
+                transition=None,
+                muted=False,
+                extra={
+                    "color": marker.color,
+                    "group": marker.group,
+                    "instant": not marker.is_region,
+                    **(
+                        {"low_hz": marker.low_hz, "high_hz": marker.high_hz}
+                        if marker.low_hz is not None
+                        else {}
+                    ),
+                },
+            )
+            for i, marker in sorted(members, key=lambda pair: pair[1].begin)
+        ]
+        _, _, locked = _track_state(project, track_id)
+        label = f"MK {group}" if group else "MK"
+        tracks.append(Track(id=track_id, kind="markers", label=label, items=items, locked=locked))
+    return tracks
+
+
 def _flag_missing(tracks: list[Track], missing: MissingMedia) -> None:
     """Marca os itens cujo arquivo (ou algum dos arquivos das partes) está ausente do disco."""
     for track in tracks:
@@ -667,6 +709,8 @@ def build_timeline_view(
     captions_track = _captions_track(project, layout)
     if captions_track is not None:
         tracks.append(captions_track)
+
+    tracks.extend(_marker_tracks(project))
 
     missing = missing or MissingMedia()
     _flag_missing(tracks, missing)

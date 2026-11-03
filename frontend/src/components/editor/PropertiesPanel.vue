@@ -1,18 +1,19 @@
 <script setup lang="ts">
-/* A aba Propriedades: o formulário da spec, em blocos (saída, fontes, trechos, sobreposições, legendas e áudio).
+/* A aba Propriedades: o formulário da spec, em blocos (saída, fontes, trechos, sobreposições, legendas, áudio e marcadores).
    Quais blocos estão abertos fica guardado no navegador. Tudo que não tem formulário se edita na aba JSON. */
 import { reactive, watch } from 'vue'
 import { readStored, writeStored } from '@/lib/storage'
 import { useEditorStore } from '@/stores/editor'
 import AudioSection from './AudioSection.vue'
 import CaptionsSettingsSection from './CaptionsSettingsSection.vue'
+import MarkersSection from './MarkersSection.vue'
 import OutputSection from './OutputSection.vue'
 import OverlaysSection from './OverlaysSection.vue'
 import SegmentsSection from './SegmentsSection.vue'
 import SourcesSection from './SourcesSection.vue'
 
 const STORAGE_KEY = 'dmaker.editor.sections'
-const SECTIONS = ['output', 'sources', 'segments', 'overlays', 'captions', 'audio'] as const
+const SECTIONS = ['output', 'sources', 'segments', 'overlays', 'captions', 'audio', 'markers'] as const
 
 const editor = useEditorStore()
 
@@ -40,6 +41,7 @@ watch(open, (value) => writeStored(STORAGE_KEY, JSON.stringify(value)), { deep: 
     <OverlaysSection v-model:open="open.overlays" />
     <CaptionsSettingsSection v-model:open="open.captions" />
     <AudioSection v-model:open="open.audio" />
+    <MarkersSection v-model:open="open.markers" />
   </div>
 </template>
 

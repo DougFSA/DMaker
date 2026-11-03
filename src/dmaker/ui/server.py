@@ -716,16 +716,19 @@ def project_timeline(name: str, req: TimelineRequest, services: Services) -> dic
 @app.post("/api/projects/{name}/edit")
 def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
-    from ..pipeline.edits import apply_edit
+    from ..pipeline.edits import apply_edit_report
 
     project = _project_from_body(name, req.spec)
     try:
-        new_project = apply_edit(project, req.op)
+        report = apply_edit_report(project, req.op)
     except EditError as exc:
         raise _error(400, str(exc)) from exc
+    new_project = report.project
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
         "timeline": _timeline_view_dict(new_project, services),
+        # o que a edição apagou dos marcadores (estavam no trecho cortado), para a interface avisar
+        "edit_warnings": report.warnings,
     }
 
 

@@ -2823,6 +2823,180 @@ def sfx_build(
         console.print(f"[green]gravado[/green] {path}", highlight=False, soft_wrap=True)
 
 
+# ---------- marcadores ----------
+
+markers_app = typer.Typer(
+    help="Marcadores da linha do tempo (trilha MK): ver, acrescentar, importar e exportar o .txt do Audacity e gerar regulares.",
+    no_args_is_help=True,
+)
+app.add_typer(markers_app, name="markers")
+
+MARKERS_NEWLINES = ("auto", "lf", "crlf")
+
+
+@markers_app.command("list")
+def markers_list(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Lista os marcadores do projeto, por trilha (grupo), com o tempo, a cor e o texto."""
+    project = _load(spec)
+    if not project.markers:
+        console.print("O projeto não tem marcadores.")
+        return
+    table = Table("Nº", "Grupo", "Tempo", "Cor", "Texto")
+    for index, marker in enumerate(project.markers):
+        when = f"{marker.begin:g} s" if not marker.is_region else f"{marker.begin:g} a {marker.finish:g} s"
+        table.add_row(str(index), marker.group or "(padrão)", when, marker.color or "", escape(marker.text))
+    console.print(table)
+
+
+@markers_app.command("add")
+def markers_add(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    at: Annotated[
+        float | None, typer.Option(help="Instante do marcador, em segundos do vídeo final.")
+    ] = None,
+    start: Annotated[float | None, typer.Option(help="Início de uma região (use com --end).")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim de uma região (use com --start).")] = None,
+    text: Annotated[str, typer.Option(help="Texto do marcador.")] = "",
+    color: Annotated[str | None, typer.Option(help="Cor #RRGGBB.")] = None,
+    group: Annotated[str, typer.Option(help="Trilha de marcadores (vazio = a padrão).")] = "",
+) -> None:
+    """Acrescenta um marcador (um instante com --at, ou uma região com --start e --end)."""
+    from .pipeline.edits import apply_edit_report
+    from .pipeline.projects import save_project
+
+    operation = {"type": "marker_add", "text": text, "group": group}
+    for key, value in (("at", at), ("start", start), ("end", end), ("color", color)):
+        if value is not None:
+            operation[key] = value
+    project = _load(spec)
+    try:
+        report = apply_edit_report(project, operation)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    save_project(report.project, spec.parent)
+    console.print(f"[green]Marcador acrescentado.[/green] O projeto tem {len(report.project.markers)}.")
+
+
+@markers_app.command("remove")
+def markers_remove(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    ref: Annotated[str, typer.Argument(help="O número do marcador (dmaker markers list) ou marker:<texto>.")],
+) -> None:
+    """Remove um marcador pelo número ou pelo texto (`marker:refrão`, ou `marker:grupo/refrão`)."""
+    from .pipeline.edits import apply_edit_report
+    from .pipeline.projects import save_project
+
+    operation: dict[str, Any] = {"type": "marker_remove"}
+    operation["index" if ref.strip().isdigit() else "ref"] = int(ref) if ref.strip().isdigit() else ref
+    project = _load(spec)
+    try:
+        report = apply_edit_report(project, operation)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    save_project(report.project, spec.parent)
+    console.print(f"[green]Marcador removido.[/green] Sobram {len(report.project.markers)}.")
+
+
+@markers_app.command("import")
+def markers_import_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    file: Annotated[Path, typer.Argument(help="O .txt de marcadores exportado do Audacity.")],
+    group: Annotated[str, typer.Option(help="Trilha de marcadores que recebe (vazio = a padrão).")] = "",
+    replace: Annotated[
+        bool, typer.Option(help="Troca o que a trilha já tinha em vez de acrescentar.")
+    ] = False,
+) -> None:
+    """Importa o .txt de marcadores do Audacity (início, fim e texto separados por tabulação). Os tempos valem
+    para o vídeo final; linha ilegível é pulada com aviso."""
+    from .pipeline.markers import import_labels
+
+    try:
+        result = import_labels(spec, file, group, replace)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{result.added} marcador(es) importado(s).[/green] O projeto tem {len(result.project.markers)}."
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@markers_app.command("export")
+def markers_export_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Arquivo .txt de saída (padrão: output/<projeto>-marcadores.txt)."),
+    ] = None,
+    group: Annotated[
+        str | None, typer.Option(help="Só esta trilha (vazio = a padrão); sem a opção, todas.")
+    ] = None,
+    newline: Annotated[
+        str, typer.Option(help="Quebra de linha: auto (a do sistema, como o Audacity), lf ou crlf.")
+    ] = "auto",
+) -> None:
+    """Exporta os marcadores no formato do Audacity (Arquivo > Importar > Rótulos), com seis casas decimais."""
+    from .pipeline.markers import export_labels
+
+    if newline not in MARKERS_NEWLINES:
+        _fail(f"Quebra de linha {newline!r} não existe; use {', '.join(MARKERS_NEWLINES)}.")
+    try:
+        exported = export_labels(spec, out, group, newline)  # type: ignore[arg-type]
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{exported.count} marcador(es) exportado(s):[/green] {exported.path}",
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+@markers_app.command("regular")
+def markers_regular_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    interval: Annotated[
+        float | None, typer.Option(help="Segundos entre os marcadores (ou use --parts).")
+    ] = None,
+    parts: Annotated[int | None, typer.Option(help="Quantas partes iguais (ou use --interval).")] = None,
+    start: Annotated[float, typer.Option(help="Onde começar, em segundos.")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Onde terminar (padrão: o fim do vídeo).")] = None,
+    prefix: Annotated[str, typer.Option(help="Texto antes do número (ex.: 'Parte ').")] = "",
+    first_number: Annotated[int, typer.Option(help="Número do primeiro marcador.")] = 1,
+    digits: Annotated[int, typer.Option(help="Casas do número (2 dá 01, 02...).")] = 1,
+    group: Annotated[str, typer.Option(help="Trilha de marcadores (vazio = a padrão).")] = "",
+    color: Annotated[str | None, typer.Option(help="Cor #RRGGBB.")] = None,
+    kind: Annotated[
+        str, typer.Option(help="region (cobre o intervalo) ou instant (marca o começo).")
+    ] = "region",
+    replace: Annotated[bool, typer.Option(help="Troca o que a trilha já tinha.")] = False,
+) -> None:
+    """Gera marcadores regulares (a cada N segundos ou em N partes iguais), como o Regular Interval Labels do Audacity."""
+    from .pipeline.markers import add_regular_markers
+
+    if kind not in ("region", "instant"):
+        _fail(f"Tipo {kind!r} não existe; use region ou instant.")
+    try:
+        result = add_regular_markers(
+            spec,
+            interval,
+            parts,
+            start,
+            end,
+            prefix,
+            first_number,
+            digits,
+            group,
+            color,
+            kind,
+            replace,  # type: ignore[arg-type]
+        )
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{result.added} marcador(es) criado(s).[/green] O projeto tem {len(result.project.markers)}."
+    )
+
+
 # ---------- modelos ----------
 
 models_app = typer.Typer(

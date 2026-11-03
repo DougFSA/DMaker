@@ -9,10 +9,10 @@ afterEach(() => vi.unstubAllGlobals())
 const titles = (wrapper: Awaited<ReturnType<typeof mountEditorPart>>) => wrapper.findAll('h3.section__title').map((h) => h.text())
 
 describe('PropertiesPanel', () => {
-  it('mostra os seis blocos do formulário, na ordem', async () => {
+  it('mostra os sete blocos do formulário, na ordem', async () => {
     const opened = await openEditor()
     const wrapper = await mountEditorPart(PropertiesPanel, opened)
-    expect(titles(wrapper)).toEqual(['Saída', 'Fontes sincronizadas', 'Trechos', 'Sobreposições', 'Legendas', 'Áudio'])
+    expect(titles(wrapper)).toEqual(['Saída', 'Fontes sincronizadas', 'Trechos', 'Sobreposições', 'Legendas', 'Áudio', 'Marcadores'])
   })
 
   it('cada bloco mostra quantos itens tem', async () => {
