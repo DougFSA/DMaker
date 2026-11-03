@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain.presets import SafeZone
-from ..domain.spec import VideoOverlay
-from .common import AUDIO_FMT_MIX, Inputs
+from ..domain.spec import VideoOverlay, parse_aspect
+from .common import AUDIO_FMT_MIX, Inputs, even
 
 SLIDE_SECONDS = 0.45
+# `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
+FRAME_SLACK_PX = 1e-6
 
 
 @dataclass
@@ -33,21 +35,42 @@ class ResolvedVideoOverlay:
         return self.end - self.start
 
 
+def pip_size(ov: VideoOverlay, W: int, source_aspect: float | None) -> tuple[int, int]:
+    """Largura e altura (px, pares) do quadro do PiP. A proporção é a do círculo (1:1), a pedida em `aspect` ou a
+    da própria fonte (16:9 se ela não disser)."""
+    width = even(W * ov.width)
+    if ov.shape == "circle":
+        aspect = 1.0
+    elif ov.aspect:
+        aspect = parse_aspect(ov.aspect)
+    else:
+        aspect = source_aspect or 16 / 9
+    return width, even(width / aspect + FRAME_SLACK_PX)
+
+
 def pip_position(pip: ResolvedVideoOverlay, W: int, H: int, scale: float, safe: SafeZone) -> tuple[int, int]:
     """Canto superior esquerdo do PiP, respeitando a zona segura do preset."""
-    ov = pip.overlay
+    return pip_origin(pip.overlay, pip.width, pip.height, W, H, scale, safe)
+
+
+def pip_origin(
+    ov: VideoOverlay, width: int, height: int, W: int, H: int, scale: float, safe: SafeZone
+) -> tuple[int, int]:
+    """Canto superior esquerdo de um PiP de `width` x `height`: o centro em `x`/`y` quando a spec os dá, senão a
+    posição nomeada dentro da zona segura. Separada de `pip_position` para a caixa da interface e o QA calcularem
+    o lugar sem montar o PiP inteiro (arquivo, máscara, moldura)."""
     if ov.x is not None and ov.y is not None:
-        return int(round(ov.x * W - pip.width / 2)), int(round(ov.y * H - pip.height / 2))
+        return int(round(ov.x * W - width / 2)), int(round(ov.y * H - height / 2))
     m = ov.margin * scale
     xs = {
         "left": int(round(safe.left + m)),
-        "right": int(round(W - safe.right - m - pip.width)),
-        "center": (W - pip.width) // 2,
+        "right": int(round(W - safe.right - m - width)),
+        "center": (W - width) // 2,
     }
     ys = {
         "top": int(round(safe.top + m)),
-        "bottom": int(round(H - safe.bottom - m - pip.height)),
-        "center": (H - pip.height) // 2,
+        "bottom": int(round(H - safe.bottom - m - height)),
+        "center": (H - height) // 2,
     }
     vertical, _, horizontal = ov.position.partition("-")
     if ov.position == "center":

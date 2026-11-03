@@ -2,8 +2,8 @@
 Puro: só olha para o projeto e o layout, não toca disco nem executa nada.
 
 Ordem das trilhas, de cima para baixo: sobreposições de vídeo (picture-in-picture) em V2, V3... (uma
-faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem + barra de
-progresso), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
+faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (imagem, barra de progresso
+e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
 clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
 (narrações por texto), "MUS" (música) e "CC" (legendas)."""
 
@@ -15,6 +15,7 @@ from typing import Literal
 
 from ..domain.spec import (
     ClipSegment,
+    HtmlOverlay,
     ImageOverlay,
     Overlay,
     ProgressBar,
@@ -245,6 +246,25 @@ def _graphics_overlay_items(project: Project, overlays: list[Overlay], total: fl
                     transition=None,
                     muted=False,
                     extra={"position": ov.position},
+                )
+            )
+        elif isinstance(ov, HtmlOverlay):
+            items.append(
+                TrackItem(
+                    id=_item_id("GR", i),
+                    kind="html",
+                    index=i,
+                    label=ov.src or ov.infographic or "html",
+                    start=ov.start,
+                    end=_resolve_end(ov.end, total),
+                    in_point=0.0,
+                    out_point=None,
+                    src=ov.src,
+                    source=None,
+                    transition=None,
+                    muted=False,
+                    # presa a uma palavra, o tempo vem da legenda e o `start`/`end` da spec são só os limites da busca
+                    extra={"layer": ov.layer, "anchored": ov.anchor is not None},
                 )
             )
     return items

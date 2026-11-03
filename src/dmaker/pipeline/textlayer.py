@@ -17,13 +17,12 @@ from ..domain.spec import (
     Project,
     TextOverlay,
     VideoOverlay,
-    parse_aspect,
 )
 from ..domain.timeline import behind_person_intervals, tone_for
 from ..filtergraph.audiogram import ResolvedAudiogram
 from ..filtergraph.common import even
 from ..filtergraph.overlays import ResolvedImageOverlay
-from ..filtergraph.pip import ResolvedVideoOverlay
+from ..filtergraph.pip import ResolvedVideoOverlay, pip_size
 from ..text.ass import AssDoc
 from ..text.captions import Cue
 from ..text.overlays import Canvas, add_captions, add_guides, add_progress_bar, add_text_overlay
@@ -33,8 +32,6 @@ from .context import RenderContext
 from .html_layer import ResolvedHtmlOverlay, resolve_html_overlay, resolve_html_source
 from .infographic_anchor import anchor_html_overlay
 
-# `even` trunca: 480 / (480/226) pode dar 225.99999999999997 e virar 224, 2 px a menos que a região pedida
-FRAME_SLACK_PX = 1e-6
 PIP_SHORT_TOLERANCE = 0.5  # s: o vídeo do PiP pode terminar um pouco antes do pedido sem merecer aviso
 
 
@@ -106,14 +103,7 @@ def resolve_video_overlay(
             f"de entrada, menos que os {end - overlay.start:.1f}s pedidos: o quadro some antes do fim"
         )
 
-    width = even(ctx.width * overlay.width)
-    if overlay.shape == "circle":
-        aspect = 1.0
-    elif overlay.aspect:
-        aspect = parse_aspect(overlay.aspect)
-    else:
-        aspect = info.aspect or 16 / 9
-    height = even(width / aspect + FRAME_SLACK_PX)
+    width, height = pip_size(overlay, ctx.width, info.aspect)
     assets = render_pip_assets(
         width,
         height,

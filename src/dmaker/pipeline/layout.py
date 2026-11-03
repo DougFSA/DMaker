@@ -38,6 +38,9 @@ class ProjectLayout:
     origin: list[int] = field(default_factory=list)  # trecho físico -> índice na timeline original
     warnings: list[str] = field(default_factory=list)  # avisos da sincronização (ex.: cadeia por relógio)
     session: dict[str, Source] = field(default_factory=dict)  # fontes nomeadas (`nome#k` nas partes)
+    # a sonda com que o layout foi calculado: quem precisa olhar outra mídia do projeto (a proporção de uma
+    # imagem ou de um PiP, no QA) usa a mesma, e os testes que injetam uma falsa continuam valendo
+    prober: Prober = probe
 
 
 def project_layout(
@@ -75,6 +78,7 @@ def project_layout(
         origin,
         resolution.warnings,
         session,
+        prober,
     )
 
 

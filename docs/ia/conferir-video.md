@@ -39,9 +39,11 @@ dmaker frames output\meu-reel__instagram-reels__preview.mp4 2 8 15
 
 O relatório separa o que é do projeto (zona segura, ritmo, contraste, sobreposições, legendas) do que é do arquivo (duração, resolução, quadros pretos, silêncio, loudness perto de -14 LUFS). Cada achado diz onde está.
 
+A zona segura vale para o texto, para a imagem e o vídeo sobreposto postos por `x` e `y`, e para a composição em HTML, sempre pela área que o item de fato desenha: no texto, a caixa de fundo conta com a margem dela, e o texto alinhado à esquerda ou à direita é medido a partir da borda em que ele está (o `x` dele), não do centro. Por isso o `lower-third` padrão, que fica à esquerda dentro da margem, não acusa mais invasão à toa. A imagem ou o vídeo numa posição nomeada (`position`) já nascem dentro da zona, e a imagem com `safe_zone: false` pediu para ignorá-la; a composição que ocupa o quadro todo não é conferida, porque o que ela desenha dentro é decisão dela.
+
 ## Erros comuns
 
-- **Texto fora da zona segura**: mova o texto (`position` ou `region`) ou encurte-o.
+- **Texto, imagem, vídeo sobreposto ou composição em HTML fora da zona segura**: mova o item (`position`, `region` ou `x` e `y`), diminua-o (`width`, ou `style.max_width` no texto) ou encurte o texto.
 - **Loudness longe de -14**: confira `audio.normalize` (padrão `two-pass`).
 - **Quadros pretos**: um trecho com `fade_in`/`fade_out` longo, ou um clipe que acaba antes do previsto.
 
