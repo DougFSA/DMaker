@@ -5,6 +5,7 @@ import pytest
 
 from dmaker import config
 from dmaker.config import TEMPLATES_DIR
+from dmaker.domain.audio_presets import is_audio_preset
 from dmaker.domain.spec import Project
 from dmaker.domain.templates import (
     Template,
@@ -50,7 +51,8 @@ def test_template_renders_with_defaults_and_validates(template: Template, tmp_pa
     rendered = render_template(template, _params_with_fakes(template, tmp_path))
     assert "params" not in rendered and "description" not in rendered
     project = Project.model_validate(rendered)
-    assert project.timeline
+    # um modelo de saída só de áudio (audio/mp3...) não tem trechos de vídeo: a duração vem dos itens de `audio`
+    assert project.timeline or is_audio_preset(project.output.preset)
     if project.brand == "medlycare":
         for where, text in project.texts():
             assert "—" not in text and "–" not in text, where

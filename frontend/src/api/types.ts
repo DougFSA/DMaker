@@ -14,6 +14,32 @@ export interface PresetInfo {
   notes: string
 }
 
+/** Um formato de arquivo só de áudio (`audio/mp3`...), de GET /api/state e /api/audio/catalog. */
+export interface AudioPresetInfo {
+  id: string
+  name: string
+  extension: string
+  lossless: boolean
+  sample_rate: number
+  channels: number
+  /** Profundidades que o formato aceita (vazio nos formatos com perda). */
+  bit_depths: number[]
+  bit_depth: number | null
+  /** Modos de taxa de bits que o formato aceita (vazio nos formatos sem perda). */
+  bitrate_modes: Array<'cbr' | 'vbr' | 'abr'>
+  bitrate_mode: 'cbr' | 'vbr' | 'abr' | null
+  bitrate_k: number | null
+  quality: number | null
+  quality_range: [number, number]
+  /** Vazio = qualquer taxa; o Opus só aceita 8, 12, 16, 24 e 48 kHz. */
+  allowed_sample_rates: number[]
+  default_label: string
+  notes: string
+}
+
+/** Os alvos de loudness pelo nome (redes, podcast, broadcast), em LUFS. */
+export type LoudnessTargets = Record<string, number>
+
 export interface BrandInfo {
   key: string
   name: string
@@ -29,6 +55,9 @@ export interface AppState {
   projects_dir: string
   ffmpeg: string
   presets: PresetInfo[]
+  /** Os formatos de arquivo só de áudio; ausentes em um servidor antigo. */
+  audio_presets?: AudioPresetInfo[]
+  loudness_targets?: LoudnessTargets
   brands: BrandInfo[]
   projects: ProjectListItem[]
 }
@@ -212,6 +241,53 @@ export interface RenderResult {
 
 export interface JobStartResponse {
   job_id: string
+}
+
+export type AudioExportMode = 'mix' | 'regions' | 'stems' | 'selection'
+
+/** Corpo de POST /api/projects/{nome}/audio-export; o que não vale no modo escolhido fica de fora. */
+export interface AudioExportRequest {
+  preset?: string
+  mode: AudioExportMode
+  group?: string
+  pauses?: boolean
+  numbered?: boolean
+  start?: number | string
+  end?: number | string
+  tracks?: string[]
+  loudness?: string | number
+  sample_rate?: number
+  channels?: number
+  bit_depth?: number
+  bitrate_k?: number
+  bitrate_mode?: 'cbr' | 'vbr' | 'abr'
+  quality?: number
+  overwrite?: boolean
+}
+
+/** Um arquivo gravado pela exportação de áudio. */
+export interface AudioExportedFile {
+  path: string
+  name: string
+  kind: string
+  start_s: number
+  duration_s: number
+  track: string | null
+  size_mb: number
+}
+
+export interface AudioExportResult {
+  mode: AudioExportMode
+  preset: string
+  folder: string | null
+  files: AudioExportedFile[]
+  warnings: string[]
+}
+
+/** O 409 de POST .../audio-export: os arquivos que já existem e que só são trocados com `overwrite`. */
+export interface AudioExportConflict {
+  message: string
+  existing: string[]
 }
 
 export type JobStatus = 'running' | 'done' | 'error' | 'cancelled'

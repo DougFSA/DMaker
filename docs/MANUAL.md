@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 35 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 39 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -64,6 +64,10 @@ São 35 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Corrigir uma palavra errada sem regravar](#corrigir-uma-palavra-errada-sem-regravar) | Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada. | sim |
 | [Trocar a voz de uma gravação inteira](#trocar-a-voz-de-uma-gravação-inteira) | Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo. | sim |
 | [Verificar se um áudio foi gerado pelo DMaker](#verificar-se-um-áudio-foi-gerado-pelo-dmaker) | Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio. | sim |
+| [Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos](#exportar-o-áudio-de-um-projeto-em-wav-mp3-flac-e-outros-formatos) | Grava só o som do projeto, sem imagem nenhuma, em WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF, com as etiquetas do arquivo (artista, título, álbum...) e o volume de saída no alvo que você escolher (redes, podcast ou broadcast). | ainda não: `audio_presets`, `audio_export` |
+| [Dividir um áudio em vários arquivos](#dividir-um-áudio-em-vários-arquivos) | Exporta um áudio longo em vários arquivos, um por região de marcador, um por trilha de som (os stems) ou só um trecho, como o "Export Multiple" do Audacity. | ainda não: `markers_regular`, `audio_export` |
+| [Importar áudio bruto](#importar-áudio-bruto) | Converte um arquivo de áudio sem cabeçalho (PCM bruto, de um gravador ou de um programa) num WAV na pasta do projeto e o põe como voz gravada, como o "Importar dados brutos" do Audacity. | ainda não: `import_raw_audio` |
+| [Fazer um episódio de podcast](#fazer-um-episódio-de-podcast) | Monta um episódio só de áudio com a gravação entre uma música de abertura e uma de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio. | ainda não: `audio_export` |
 
 **Edição de áudio**
 
@@ -255,6 +259,10 @@ Cada trecho pode ter uma `transition` de entrada (como ele chega, vindo do anter
 ### Marcadores (markers)
 
 A lista `markers` da spec nomeia pontos e trechos do **vídeo final**: cada marcador é um instante (`at`) ou uma região (`start` e `end`), com `text`, `color` (`#RRGGBB`) e `group`. Cada grupo é uma trilha de marcadores, como as trilhas de rótulos do Audacity. Os marcadores não mudam a imagem nem o som, e acompanham os cortes e aparas da linha do tempo. Veja a tarefa "Marcar instantes e trechos com marcadores".
+
+### Saída só de áudio
+
+O `output.preset` de um projeto pode ser um **formato de áudio** (`audio/wav`, `audio/mp3`, `audio/flac`, `audio/ogg`, `audio/opus`, `audio/m4a` ou `audio/aiff`): a saída é só um arquivo de som, sem imagem, e a `timeline` pode ficar vazia (a duração vem da voz gravada, da narração e da música). `output.audio_format` ajusta o arquivo (taxa de amostragem, canais, profundidade de bits ou taxa de bits) e `output.metadata` põe as etiquetas (artista, título, álbum, faixa, ano, gênero, comentário); o `audio.target_lufs` continua sendo o volume de saída, com os alvos usuais redes (-14), podcast (-16) e broadcast (-23). Veja a tarefa "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos".
 
 ### Sobreposições (overlays)
 
@@ -503,7 +511,7 @@ A barra lateral tem: **Projetos**, **Lote**, **Editor**, **Voz**, **Dublagem**, 
 - **Projetos**: a lista dos seus projetos (cartões ou tabela, com busca). **Novo projeto** cria a partir de um modelo pronto ou do zero, escolhendo os arquivos. **Cortar gravação** corta pausas e vícios de uma gravação falada. Abrir um projeto leva à tela dele.
 - **Tela do projeto**: **Validar** (duração final e avisos), **Conferir qualidade** (o relatório de QA em texto), **Renderizar** (prévia, versão final ou só alguns trechos, em um ou mais formatos), **Abrir no editor** (abre o projeto no editor) e o cartão de **Cortes automáticos** com **Desfazer** em cada corte. Um projeto com spec inválida mostra o motivo e o botão **Abrir no editor para corrigir**. O andamento do render aparece ao vivo: as etapas (**Fontes e sincronização**, **Trechos**, **Legendas**, **Camada de texto**, **Loudness**, **Montagem final** e **Miniatura**, a atual em destaque com o trecho ou a porcentagem), a barra, o tempo decorrido e as últimas linhas do log.
 - **Editor**: o projeto aberto para edição, com a barra de ações (**Salvar**, **Desfazer**, **Refazer**, **Validar**, **Prévia**, **Render final**, **Exportar**), o seletor **Tela** (o layout dos painéis) e abas embaixo. **Propriedades** é o formulário da spec em blocos recolhíveis (**Saída**, **Fontes sincronizadas**, **Trechos**, **Sobreposições**, **Legendas** e **Áudio**). **JSON** mostra a spec inteira como texto, a saída para tudo que não tem formulário (look, efeitos sonoros, recorte de pessoa, composições). **Legendas** (aparece quando o projeto tem legendas automáticas) edita o texto de cada frase. **Preview** mostra o vídeo já renderizado, o relatório de QA, a grade de quadros e um quadro num instante. **Salvar** (ou `Ctrl+S`) grava; o selo **Não salvo** avisa quando há mudança, e sair da tela pergunta se descarta. **Validar** e os renders salvam antes. O **Player** (no alto) mostra o quadro na proporção do formato, com o trecho, as imagens e a barra de progresso, o picture-in-picture e o texto, e tem início, quadro anterior e seguinte, **Tocar**, fim, **J**, **K** e **L** (voltar, parar e avançar; repetir o J ou o L dobra a velocidade até 8x), o timecode `HH:MM:SS:QQ` e o volume. O som é o do render: uma mixagem só, feita no servidor com o mesmo grafo de áudio (cortes, partes das fontes, sincronia, volumes, música com trechos e fades, narração já falada, mudos e `mute_clips`), tocada num `<audio>` só enquanto todos os vídeos ficam mudos. Mude o volume de uma faixa ou o mudo de uma trilha e o próximo play já soa diferente, sem recarregar a página. Ao abrir o projeto e depois de cada edição a mixagem leva alguns segundos para ficar pronta, e nesse intervalo o som sai ao vivo, só do que cobre o instante, com o selo **Áudio aproximado**. Vídeo que o navegador não abre ganha um proxy leve (**Gerar proxies**, ou sozinho quando o vídeo falha), e um arquivo que sumiu do disco abre marcado **Fonte não encontrada**, sem derrubar o editor. O player, a linha do tempo e os painéis **Filtros** e **Mídia** formam a bancada do editor, que se organiza pelo **layout de tela** (veja "Editor, layout de tela"); a linha do tempo e os painéis são descritos nos itens seguintes.
-- **Editor, linha do tempo**: fica abaixo do player, entre os painéis Filtros e Mídia (com os dois ocultos, ocupa a largura toda da janela). As trilhas, de cima para baixo: **V2** em diante (vídeo sobreposto, o picture-in-picture), **TX** (textos), **GR** (imagens, composições em HTML e barra de progresso), **V1** (os trechos), **A1** (o som de cada clipe), **A2** em diante (faixas de áudio externas, já fatiadas pelos cortes), **NAR** (as narrações, com borda tracejada enquanto a duração ainda é estimada), **MUS** (a música), **CC** (as legendas automáticas) e **MK** (os marcadores, uma trilha por grupo); as de áudio mostram a forma de onda. O balão de um item mostra o nome (na narração, a fala inteira e se a duração é real ou estimada), e um item cujo arquivo sumiu aparece listrado de vermelho. A régua marca o tempo: clique ou arraste nela, ou numa faixa vazia, para levar o cursor, que encaixa nas bordas dos itens (botão **Snap**). **Ctrl** com a roda do mouse faz zoom, **Ajustar** faz o vídeo inteiro caber, e a área rola uma página sozinha quando o cursor sai da tela tocando. Clique num item para selecioná-lo (**Ctrl** soma, **Ctrl+A** seleciona os trechos da V1), arraste para mudar de lugar (na V1 muda a ordem; texto, imagem e picture-in-picture deslizam no tempo; a fala da narração muda o início) e puxe a borda para aparar. No cabeçalho de cada trilha, **M** silencia, **H** oculta e **L** bloqueia (item de trilha bloqueada avisa e não deixa mexer). Os marcadores da trilha **MK** se criam com **M** (ou o botão **Marcador**) no cursor, se arrastam, se renomeiam com o duplo clique e se pulam com **vírgula** e **ponto** (veja "Marcar instantes e trechos com marcadores"). A barra de ferramentas tem **Cortar**, **Remover**, **Lift**, **Duplicar**, **Aparar entrada**, **Aparar saída**, **Marcador**, **Snap**, **Ripple: V1**, os botões de zoom, **F** e **M** (escondem e mostram os painéis Filtros e Mídia; a escolha fica guardada no layout de tela) e **?**. Cada edição passa pelo servidor e entra no **Desfazer** (`Ctrl+Z` e `Ctrl+Y`); remover ou duplicar vários itens de uma vez vale um passo só. A tecla **?** abre a lista dos atalhos por categoria: clique numa tecla e aperte a nova para trocá-la (um aviso diz se outra ação já usa essa tecla), e **Restaurar padrões** volta ao original; as trocas ficam guardadas no navegador. Os principais: Espaço toca e pausa, **J**, **K** e **L**, as setas (um quadro), **Home** e **End**, **S** corta no cursor, **X** ou **Delete** remove, **Z** faz o lift, **I** e **O** aparam até o cursor, **M** marca o cursor, **,** e **.** pulam entre os marcadores, **Ctrl+D** duplica, **Ctrl+S** salva, **=**, **-** e **0** dão zoom. Os atalhos não agem enquanto você digita num campo (só o **Ctrl+S** vale ali) nem dentro de janelas.
+- **Editor, linha do tempo**: fica abaixo do player, entre os painéis Filtros e Mídia (com os dois ocultos, ocupa a largura toda da janela). As trilhas, de cima para baixo: **V2** em diante (vídeo sobreposto, o picture-in-picture), **TX** (textos), **GR** (imagens, composições em HTML e barra de progresso), **V1** (os trechos), **A1** (o som de cada clipe), **A2** em diante (faixas de áudio externas, já fatiadas pelos cortes), **NAR** (as narrações, com borda tracejada enquanto a duração ainda é estimada), **MUS** (a música), **CC** (as legendas automáticas) e **MK** (os marcadores, uma trilha por grupo); as de áudio mostram a forma de onda. Num projeto só de áudio (formato `audio/...`) não há trechos de vídeo: a linha do tempo mostra as trilhas de som, e o botão **Exportar áudio** da barra de ações grava o arquivo (veja "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos"). O balão de um item mostra o nome (na narração, a fala inteira e se a duração é real ou estimada), e um item cujo arquivo sumiu aparece listrado de vermelho. A régua marca o tempo: clique ou arraste nela, ou numa faixa vazia, para levar o cursor, que encaixa nas bordas dos itens (botão **Snap**). **Ctrl** com a roda do mouse faz zoom, **Ajustar** faz o vídeo inteiro caber, e a área rola uma página sozinha quando o cursor sai da tela tocando. Clique num item para selecioná-lo (**Ctrl** soma, **Ctrl+A** seleciona os trechos da V1), arraste para mudar de lugar (na V1 muda a ordem; texto, imagem e picture-in-picture deslizam no tempo; a fala da narração muda o início) e puxe a borda para aparar. No cabeçalho de cada trilha, **M** silencia, **H** oculta e **L** bloqueia (item de trilha bloqueada avisa e não deixa mexer). Os marcadores da trilha **MK** se criam com **M** (ou o botão **Marcador**) no cursor, se arrastam, se renomeiam com o duplo clique e se pulam com **vírgula** e **ponto** (veja "Marcar instantes e trechos com marcadores"). A barra de ferramentas tem **Cortar**, **Remover**, **Lift**, **Duplicar**, **Aparar entrada**, **Aparar saída**, **Marcador**, **Snap**, **Ripple: V1**, os botões de zoom, **F** e **M** (escondem e mostram os painéis Filtros e Mídia; a escolha fica guardada no layout de tela) e **?**. Cada edição passa pelo servidor e entra no **Desfazer** (`Ctrl+Z` e `Ctrl+Y`); remover ou duplicar vários itens de uma vez vale um passo só. A tecla **?** abre a lista dos atalhos por categoria: clique numa tecla e aperte a nova para trocá-la (um aviso diz se outra ação já usa essa tecla), e **Restaurar padrões** volta ao original; as trocas ficam guardadas no navegador. Os principais: Espaço toca e pausa, **J**, **K** e **L**, as setas (um quadro), **Home** e **End**, **S** corta no cursor, **X** ou **Delete** remove, **Z** faz o lift, **I** e **O** aparam até o cursor, **M** marca o cursor, **,** e **.** pulam entre os marcadores, **Ctrl+D** duplica, **Ctrl+S** salva, **=**, **-** e **0** dão zoom. Os atalhos não agem enquanto você digita num campo (só o **Ctrl+S** vale ali) nem dentro de janelas.
 - **Editor, filtros e mídia**: o painel **Filtros** mostra os grupos de campos do item selecionado na linha do tempo, e os do projeto (**Saída** e **Áudio geral**) quando nada está selecionado. Cada tipo de item tem os seus grupos (o clipe: **Reenquadrar**, **Cor**, **Velocidade**, **Áudio**, **Fade**, **Transição de entrada** e **Rótulo**; a imagem e o cartão, o movimento, a duração e o estilo; o picture-in-picture: tempo, posição, tamanho, forma, opacidade, animação e áudio; o texto, a imagem sobreposta, a barra de progresso, a faixa de áudio, a música e as legendas, cada um com o seu), e o painel só mostra os que já saem do padrão. O botão **+ Filtro** lista os que faltam, e o **×** de um grupo devolve os campos dele ao padrão (um passo só do **Desfazer**); o grupo sem o qual o item não vale (o texto de uma sobreposição de texto, o arquivo da música) não tem o **×**. Selecionar um item da faixa **A1** edita o clipe correspondente da V1. As opções e os limites de cada campo vêm do esquema da spec; texto e número gravam 0,3 segundo depois da última tecla, e a lista e a caixa de marcar gravam na hora. O painel **Mídia** lista as fontes sincronizadas e os arquivos que o projeto usa, com miniatura e duração, e um arquivo ausente do disco aparece marcado. Arraste um item para a linha do tempo: na **V1** ele entra no ponto onde foi solto; em qualquer outra trilha vira um picture-in-picture (vídeo) ou uma imagem sobreposta. Clique num item para selecioná-lo e use **A** (acrescenta ao fim da V1) ou **V** (insere na posição do cursor); o duplo clique e o **Enter** também acrescentam. Os botões **+ Arquivo** (vídeo e imagem entram no fim da V1; áudio vira a música), **Texto** e **Logo** (no cursor), **Cartão** (no fim da V1) e **Música** (escolhe o arquivo da música; se já há música, troca só o arquivo e mantém o volume e os ajustes) criam cada um com um passo do **Desfazer**. Arquivo de áudio não entra na V1 nem como sobreposição.
 - **Editor, layout de tela**: o botão **Tela**, na barra do editor, escolhe como os painéis ficam: **Edição** (o padrão: o player em cima; filtros, linha do tempo e mídia embaixo), **Efeitos** (filtros mais largos, sem a mídia), **Áudio** (player pequeno e linha do tempo grande), **Player** (player grande), **Revisão** e **Voz** (abre o estúdio de voz), mais os layouts que você salvar. Arraste a barra de título de um painel e solte sobre outro para trocar os dois de lugar (pelo teclado, foque o ícone de mover do painel e use as setas); arraste os divisores, entre o player e a faixa de baixo, entre as colunas e ao lado da barra lateral, para redimensionar (as setas também movem o divisor que está em foco); o **×** do título e as caixas de **Painéis na tela** escondem e mostram cada painel. **Salvar layout como...** guarda o arranjo de agora com um nome, **Excluir layout atual** apaga o layout salvo que está em uso e **Restaurar padrão** volta ao **Edição**. O layout em uso fica guardado no navegador e os salvos ficam no servidor, então valem também na interface clássica.
 - **Editor, caixas no palco**: texto, imagem, picture-in-picture e composição em HTML aparecem no palco do player na **caixa que o servidor calculou**, pela mesma conta do render e do conferir qualidade: o texto onde o render o põe (com `x`, `y`, região e alinhamento à esquerda ou à direita), a imagem e o picture-in-picture pelo centro `x` e `y` quando os dois existem. A composição em HTML aparece só como uma caixa, porque o palco não a desenha. Por cima do palco, cada sobreposição que está na tela no instante do cursor ganha uma caixa com contorno e um rótulo curto (**Texto 1**, **Imagem 2**, **PiP 3**, **HTML 4**; o número é o do cartão em **Sobreposições**). Clicar numa caixa escolhe a sobreposição: o inspetor vai para **Propriedades**, e o cartão dela abre e ganha destaque; clicar num cartão (ou num campo dele) destaca a caixa no palco. O botão **Zona segura**, no fim da barra do player, liga e desliga as margens que o app da rede social cobre, desenhadas pelas medidas do formato do projeto (no Reels, por exemplo, 11,5% em cima e 21,9% embaixo); a caixa que invade a zona segura ganha a cor de aviso, e o nome dela diz de que lado saiu. A barra de progresso e o audiograma ganham caixa, mas não se movem, e a composição em HTML presa a uma palavra da legenda não tem caixa, porque o lugar só se sabe no render. A prévia continua aproximada (o texto sai com a fonte do navegador), e o render é o que vale.
@@ -2324,6 +2332,234 @@ A resposta tem três níveis. **Encontrada**: o detector reagiu e a assinatura "
 
 ---
 
+### Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos
+<!-- tarefa: exportar-audio -->
+Grava só o som do projeto, sem imagem nenhuma, em WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF, com as etiquetas do arquivo (artista, título, álbum...) e o volume de saída no alvo que você escolher (redes, podcast ou broadcast).
+
+#### Quando usar
+
+Você tem uma narração, uma gravação de podcast ou uma trilha e quer o arquivo de áudio tratado. Um projeto de **saída de áudio** não precisa de trecho de vídeo: a duração vem da voz gravada, da narração e da música. Um projeto de vídeo também exporta só o áudio dele.
+
+**Pedidos que levam a esta tarefa:**
+- "Exporta a narração em MP3 de 192 kbps"
+- "Me dá o áudio desse projeto em WAV de 24 bits a -16 LUFS"
+- "Grava o episódio em MP3 com o artista e o título preenchidos"
+
+#### Antes de começar
+
+- O formato: `audio/wav`, `audio/mp3`, `audio/flac`, `audio/ogg`, `audio/opus`, `audio/m4a` ou `audio/aiff` (`dmaker audio presets` mostra as opções: 16, 24 ou 32 bits nos formatos sem perda; CBR, VBR ou ABR nos com perda).
+- O volume de saída (`--loudness`): `redes` (-14 LUFS), `podcast` (-16) ou `broadcast` (-23, o EBU R128), ou um número. Sem ele vale o `audio.target_lufs` do projeto.
+- Para o projeto ser só de áudio, o `output.preset` é um formato de áudio e a `timeline` fica vazia.
+
+#### Pela IA
+
+Diga: "Exporta o `meu-episodio` em MP3 de 192 kbps a -16 LUFS." A IA chama `audio_export` (ou `export_project` com um preset de áudio) e confere o resultado com o relatório de QA. O agente local pergunta antes de gravar por cima de um arquivo que já existe.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_presets", "arguments": {}, "para": "ver os formatos, os padrões de cada um e os alvos de loudness"},
+  {"tool": "audio_export", "arguments": {"name": "meu-episodio", "preset": "audio/mp3", "loudness": "podcast", "bitrate_k": 192}, "para": "o episódio inteiro em MP3 de 192 kbps a -16 LUFS"},
+  {"tool": "audio_export", "arguments": {"name": "meu-episodio", "preset": "audio/wav", "bit_depth": 24, "loudness": "redes"}, "para": "o mesmo em WAV de 24 bits a -14 LUFS"},
+  {"tool": "export_project", "arguments": {"name_or_path": "meu-episodio", "presets": ["audio/mp3", "audio/flac"]}, "para": "o projeto inteiro em dois formatos de uma vez"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "meu-episodio", "output": true}, "para": "conferir o loudness e o pico do arquivo gravado"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor** ou tela do projeto, botão **Exportar áudio**: escolha o formato, o **Volume de saída** e **O projeto inteiro**, ajuste a profundidade ou a taxa de bits e **Exportar**; se o arquivo já existe, a janela pergunta antes de substituir. Na aba **Propriedades**, o bloco **Saída** com um formato de áudio mostra esses ajustes e as **Etiquetas do arquivo**; a **Marca** pode trazer um modelo de etiquetas (`metadata` no `brand.json`) que a spec completa.
+
+#### Pela CLI
+
+```powershell
+dmaker audio presets
+dmaker audio export projects\meu-episodio\spec.json --preset audio/mp3 --bitrate 192 --loudness podcast
+dmaker audio export projects\meu-episodio\spec.json --preset audio/wav --bit-depth 24 --out C:\audios\episodio.wav
+```
+
+Na spec: `"output": {"preset": "audio/mp3", "audio_format": {"bitrate_k": 192}, "metadata": {"artist": "Programa", "title": "Episódio 12", "track": "12"}}`. As etiquetas saem em ID3v2.3 no MP3 e em comentários Vorbis no FLAC, OGG e Opus; o AIFF só guarda título, artista e comentário. O arquivo vai para `output\projeto__audio-mp3.mp3`, ou para o `--out`.
+
+#### Como conferir
+
+`dmaker validate` mostra o formato e a duração (e explica o que falta quando nada dá duração). O QA do arquivo (`dmaker qa projects\meu-episodio\spec.json --output output\meu-episodio__audio-mp3.mp3`) confere que não há faixa de imagem, a taxa e os canais, o loudness (alvo mais ou menos 1,5 LU) e o pico (até -1 dBTP). Num MP3 o volume medido pode ficar uns décimos de LU abaixo do alvo: é a codificação com perda.
+
+#### Se der errado
+
+- **"informe o formato do arquivo"**: o projeto é de vídeo; passe `--preset audio/mp3` (ou outro).
+- **"MP3 é um formato com perda e não tem profundidade de bits"**: o formato recusa a opção que não existe nele (24 bits no MP3, taxa de bits no WAV); tire a opção.
+- **O projeto não tem nada que dê duração**: ponha uma voz gravada (`audio.voiceover`), uma narração ou uma música.
+- **O arquivo já existe**: o agente e a interface perguntam; pela CLI e pelo MCP ele é trocado.
+
+### Dividir um áudio em vários arquivos
+<!-- tarefa: dividir-audio -->
+Exporta um áudio longo em vários arquivos, um por região de marcador, um por trilha de som (os stems) ou só um trecho, como o "Export Multiple" do Audacity.
+
+#### Quando usar
+
+Você tem um episódio com capítulos marcados e quer um arquivo por capítulo; ou precisa da voz, da música e dos efeitos separados para mixar em outro programa; ou quer só um pedaço do áudio.
+
+**Pedidos que levam a esta tarefa:**
+- "Divide o podcast num arquivo por capítulo, com o nome de cada um"
+- "Me dá a narração e a música separadas"
+- "Exporta só do marcador Entrevista até o marcador Fim"
+
+#### Antes de começar
+
+- **Por região**: o projeto precisa de marcadores que sejam regiões (início e fim); veja "Marcar instantes e trechos com marcadores". O nome do arquivo é o texto do marcador sem os caracteres que o Windows não aceita; região sem texto, ou com um texto que outra repete, ganha o número dela (`regiao-03`, `Entrevista-04`). Cada arquivo chega ao alvo de loudness sozinho e leva o título da região e o número da faixa.
+- **Pausas** (`--pauses`): o áudio entre as regiões (e antes da primeira) sai em arquivos `pausa-01`, `pausa-02`...
+- **Por trilha**: saem `A1` (o som dos trechos), `NAR` (narrações), `VO` (vozes gravadas), `MUS` (música, já abaixada pelo ducking que ela sofre na mixagem) e `SFX` (efeitos), só as que o projeto tem.
+- **Só um trecho**: `start` e `end` em segundos ou `marker:<texto>`; `marker:Introdução` nas duas pontas exporta exatamente aquela região.
+
+#### Pela IA
+
+Diga: "Divide o `meu-episodio` num MP3 por capítulo." A IA chama `audio_export` com `mode: "regions"`. As exportações em vários arquivos se pedem por `audio_export` ou pela CLI, que o agente local ainda não oferece.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "markers_regular", "arguments": {"name": "meu-episodio", "interval": 120, "prefix": "Parte ", "digits": 2}, "para": "criar uma região a cada 2 minutos, se ainda não há capítulos"},
+  {"tool": "audio_export", "arguments": {"name": "meu-episodio", "preset": "audio/mp3", "mode": "regions", "loudness": "podcast"}, "para": "um MP3 por região, com o texto do marcador no nome"},
+  {"tool": "audio_export", "arguments": {"name": "meu-episodio", "preset": "audio/wav", "mode": "stems"}, "para": "um arquivo por trilha, que somados reproduzem a mixagem"},
+  {"tool": "audio_export", "arguments": {"name": "meu-episodio", "preset": "audio/flac", "mode": "selection", "start": "marker:Entrevista", "end": 300}, "para": "só do marcador Entrevista até 5 minutos"}
+]
+```
+
+#### Pela interface
+
+Botão **Exportar áudio** (Editor ou tela do projeto), em **O que exportar**: **Uma região por arquivo** (com as caixas das pausas e do número na frente), **Uma trilha por arquivo** (marque as trilhas, ou nenhuma para todas) ou **Só um trecho** (início e fim em segundos ou `marker:`). Arquivos que já existem pedem confirmação.
+
+#### Pela CLI
+
+```powershell
+dmaker audio export projects\meu-episodio\spec.json --preset audio/mp3 --mode regions --loudness podcast --pauses
+dmaker audio export projects\meu-episodio\spec.json --preset audio/wav --mode stems --tracks NAR,MUS --out-dir C:\audios\trilhas
+dmaker audio export projects\meu-episodio\spec.json --preset audio/flac --mode selection --start marker:Entrevista --end 300
+```
+
+Os arquivos vão para uma pasta `output\projeto__audio-mp3__regioes` (ou `__trilhas`), ou para o `--out-dir`.
+
+#### Como conferir
+
+A duração de cada arquivo é a da região, com diferença de milissegundos (um áudio de 10 minutos com 5 regiões sai em 5 arquivos com os tempos certos). Nos stems, todas as trilhas levam o mesmo ganho linear da normalização da mixagem, sem normalização nem limitador próprios, e a soma delas reproduz a mixagem (diferença abaixo de -70 dB nos testes). Os efeitos do master (cadeia de efeitos) são aplicados depois da soma e não entram nas trilhas: elas saem antes deles. Se a normalização da mixagem não é linear (pico ou variação de volume acima do limite), um aviso diz que a soma pode diferir.
+
+#### Se der errado
+
+- **"o projeto não tem regiões"**: marque trechos com início e fim, por exemplo com `markers_regular`.
+- **"não existe o marcador ..." ou "há 2 marcadores chamados ..."**: use `marker:grupo/texto` ou renomeie um.
+- **"o projeto não tem a trilha ..."**: só as trilhas que têm som saem; a mensagem lista as que existem.
+- **Uma região começa depois do fim do áudio**: ela é pulada, com aviso; se passa do fim, é cortada no fim.
+
+### Importar áudio bruto
+<!-- tarefa: importar-bruto -->
+Converte um arquivo de áudio sem cabeçalho (PCM bruto, de um gravador ou de um programa) num WAV na pasta do projeto e o põe como voz gravada, como o "Importar dados brutos" do Audacity.
+
+#### Quando usar
+
+Você tem um arquivo `.raw`, `.pcm` ou `.sw` que nenhum programa abre sozinho, porque ele não diz como ler os bytes. Aqui você diz: a codificação, a ordem dos bytes, os canais e a taxa de amostragem.
+
+**Pedidos que levam a esta tarefa:**
+- "Importa esse PCM de 16 bits, 48 kHz, mono"
+- "Esse áudio bruto veio de um gravador; põe no projeto"
+
+#### Antes de começar
+
+- Como o arquivo foi gravado. A codificação: `s8`, `u8`, `s16`, `u16`, `s24`, `s32`, `f32`, `f64`, `ulaw` ou `alaw`; a ordem dos bytes: `little` (a mais comum no Windows) ou `big`; os canais (1 mono, 2 estéreo) e a taxa em Hz.
+- Se o arquivo tem um cabeçalho que você quer pular, quantos bytes (`--offset-bytes`), e se quer só uma parte dele (`--percent`).
+
+#### Pela IA
+
+Diga: "Importa o `gravacao.pcm`, 16 bits, 48 kHz, mono, no projeto `meu-episodio`." O arquivo original não muda: o WAV nasce na pasta do projeto e entra em `audio.voiceover`. Se o projeto não existe, nasce um projeto só de áudio.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "import_raw_audio", "arguments": {"name": "meu-episodio", "src": "C:/audios/gravacao.pcm", "encoding": "s16", "byte_order": "little", "channels": 1, "sample_rate": 48000, "start": 0}, "para": "converter o PCM bruto em WAV e pô-lo como voz gravada"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "meu-episodio"}, "para": "conferir a duração que o áudio importado deu"}
+]
+```
+
+#### Pela interface
+
+A importação de áudio bruto é pela CLI ou pela IA (ela pede o formato dos bytes, que não cabe adivinhar). Depois de importar, o **Editor** mostra o áudio na trilha **VO** e o botão **Exportar áudio** o grava no formato que você quiser.
+
+#### Pela CLI
+
+```powershell
+dmaker audio import-raw meu-episodio C:\audios\gravacao.pcm --encoding s16 --byte-order little --channels 1 --sample-rate 48000
+dmaker audio import-raw meu-episodio C:\audios\outro.raw --encoding f32 --sample-rate 44100 --start 12.5 --name outro
+```
+
+Um WAV que já existe só é trocado com `--overwrite`.
+
+#### Como conferir
+
+`dmaker validate meu-episodio` mostra a duração. Um PCM de 16 bits, 48 kHz, mono de 2 s vira um WAV de 2 s no mesmo tom (o teste importa um seno de 440 Hz e mede o pico da frequência).
+
+#### Se der errado
+
+- **Só ruído ou chiado**: a ordem dos bytes ou a codificação está errada; tente `--byte-order big` ou outro `--encoding`.
+- **Som lento ou rápido**: a taxa ou os canais estão errados (estéreo lido como mono dobra a velocidade aparente).
+- **"o arquivo ... já existe na pasta do projeto"**: escolha outro `--name` ou use `--overwrite`.
+- **"o arquivo não tem amostras depois do deslocamento inicial"**: o `--offset-bytes` passa do tamanho do arquivo.
+
+### Fazer um episódio de podcast
+<!-- tarefa: podcast -->
+Monta um episódio só de áudio com a gravação entre uma música de abertura e uma de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio.
+
+#### Quando usar
+
+Você gravou o episódio e quer o arquivo final para publicar, com a vinheta no começo e no fim e o volume no padrão de podcast. A limpeza da voz (ruído, respiração) é uma etapa que o editor de áudio ainda vai ganhar; este modelo usa o que existe hoje e passa a ligá-la quando ela chegar.
+
+**Pedidos que levam a esta tarefa:**
+- "Faz o episódio 12 do podcast com essa gravação e a vinheta"
+- "Monta o MP3 do episódio com abertura, voz e encerramento a -16 LUFS"
+
+#### Antes de começar
+
+- A gravação (`voz`) e o arquivo da música (`trilha`): os dois são obrigatórios, e o modelo não tem caminho padrão. A abertura toca o começo da música por `abertura` segundos (padrão 8) e o encerramento toca o final dela por `encerramento` segundos (padrão 10). A voz entra depois da abertura.
+- As etiquetas do episódio: `artista`, `titulo`, `album`, `faixa`, `ano`, `genero` (padrão Podcast) e `comentario`; o que ficar vazio vale o modelo da marca (`marca`), se ela tiver.
+
+#### Pela IA
+
+Diga: "Cria o episódio `ep12` do podcast com a gravação `C:/audios/ep12.wav` e a vinheta `C:/audios/tema.mp3`, título Episódio 12." A IA cria o projeto pelo modelo `podcast` e exporta o MP3.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "new_from_template", "arguments": {"template": "podcast", "name": "ep12", "params": {"voz": "C:/audios/ep12.wav", "trilha": "C:/audios/tema.mp3", "titulo": "Episódio 12", "artista": "Meu Programa", "faixa": "12"}}, "para": "criar o projeto do episódio"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "ep12"}, "para": "conferir a duração: abertura, voz e encerramento"},
+  {"tool": "audio_export", "arguments": {"name": "ep12"}, "para": "gravar o MP3 a -16 LUFS com as etiquetas"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Projetos**, **Novo projeto**, modelo **podcast**: escolha a gravação e a vinheta, preencha as etiquetas e crie. No **Editor**, a trilha **VO** mostra a voz, a **MUS** as duas músicas, e o botão **Exportar áudio** grava o arquivo.
+
+#### Pela CLI
+
+```powershell
+dmaker new-from-template podcast ep12 --param voz=C:\audios\ep12.wav --param trilha=C:\audios\tema.mp3 --param titulo="Episódio 12" --param artista="Meu Programa" --param faixa=12
+dmaker audio export ep12
+```
+
+Sem `--preset`, vale o formato do modelo (`audio/mp3`); `--param formato=audio/m4a` troca o formato e `--param loudness=-14` o alvo.
+
+#### Como conferir
+
+`dmaker validate ep12` mostra a duração (abertura + voz + encerramento). O arquivo sai em `output\ep12__audio-mp3.mp3` com as etiquetas no `ffprobe` e o volume em -16 LUFS (medido pelo relatório de QA).
+
+#### Se der errado
+
+- **Faltam parâmetros obrigatórios**: o modelo pede `voz` e `trilha`, os dois arquivos de áudio.
+- **A música cobre a voz no começo**: a música abaixa sob a voz (ducking); se ainda atrapalha, aumente a `abertura` para a voz entrar depois dela.
+- **O episódio ficou longo demais ou curto**: a duração é a da gravação mais a abertura e o encerramento; ajuste os dois.
+
 ## Edição de áudio
 
 O DMaker trata o som como o Audacity: qualquer item de áudio (o som de um clipe, uma voz gravada, uma narração, a música, uma faixa externa, o áudio de um picture-in-picture) ou a mistura inteira recebe uma **cadeia de efeitos**, em ordem, com os mesmos nomes e as mesmas faixas de valores que o Audacity usa. A diferença é que **nada sobrescreve o arquivo original**: a cadeia fica na spec, o render e a prévia da linha do tempo aplicam a mesma cadeia (o que você ouve no play é o que sai no vídeo), e cada item tratado fica em cache, então mudar um parâmetro refaz só aquele item.
@@ -2346,6 +2582,14 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Trilha de rótulos: um ponto ou uma região com nome | `markers` na spec, um instante (`at`) ou uma região (`start` e `end`) com `text`, `color` e `group`; cada grupo é uma trilha **MK** na linha do tempo, e os marcadores acompanham os cortes | "Marcar instantes e trechos com marcadores" |
 | Importar e exportar rótulos (arquivo `.txt`) | `markers_import` e `markers_export` (`dmaker markers import` e `dmaker markers export`): o `.txt` do Audacity entra e sai idêntico | "Marcar instantes e trechos com marcadores" |
 | Pôr um rótulo no ponto de reprodução e dividir em partes iguais | A tecla **M** no editor (ou `marker_add`) marca o cursor; `markers_regular` cria marcadores a cada N segundos ou em N partes | "Marcar instantes e trechos com marcadores" |
+| Exportar áudio (WAV, MP3, FLAC, OGG, Opus, M4A, AIFF) | `output.preset` de áudio (`audio/mp3`...) faz o projeto gravar só o som, sem imagem; `audio_export`, `dmaker audio export` e o botão **Exportar áudio** gravam o arquivo, e o `export_project` aceita os mesmos presets. `output.audio_format` dá a taxa de amostragem, os canais, a profundidade (16, 24, 32 float) e a taxa de bits (CBR, VBR, ABR) | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos" |
+| Edit Metadata Tags (etiquetas do arquivo) | `output.metadata` com artista, título, álbum, faixa, ano, gênero e comentário (ID3v2.3 no MP3, Vorbis no FLAC, OGG e Opus), com um modelo por marca no `metadata` do `brand.json` | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos" |
+| Normalizar a saída para -14, -16 ou -23 LUFS | `audio.target_lufs`, com os alvos pelo nome no `loudness` do `audio_export` e na interface: `redes` (-14), `podcast` (-16) e `broadcast` (-23, EBU R128) | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos" |
+| Export Multiple por rótulos (um arquivo por região, com pausas) | `audio_export` com `mode: "regions"` (`dmaker audio export --mode regions`): um arquivo por região de marcador, com o texto do marcador no nome; `pauses` exporta também o áudio entre as regiões | "Dividir um áudio em vários arquivos" |
+| Export Multiple por trilhas | `audio_export` com `mode: "stems"`: um arquivo por trilha de som (`NAR`, `VO`, `MUS`, `SFX`, `A1`), todos com o mesmo ganho linear da normalização do mix, de modo que a soma reproduz o mix; os efeitos do master ficam de fora | "Dividir um áudio em vários arquivos" |
+| Export Selected Audio (só a seleção) | `audio_export` com `mode: "selection"` e `start` e `end` em segundos ou `marker:<texto>` | "Dividir um áudio em vários arquivos" |
+| Importar dados brutos (Import Raw Data) | `import_raw_audio` (`dmaker audio import-raw`): codificação, ordem dos bytes, canais e taxa; o PCM vira um WAV na pasta do projeto e entra como voz gravada, sem mexer no arquivo original | "Importar áudio bruto" |
+| Modelo de projeto de podcast | O modelo `podcast` (`new_from_template`): música de abertura, voz gravada e música de encerramento, -16 LUFS, MP3 com etiquetas | "Fazer um episódio de podcast" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -2758,6 +3002,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-48 | O DMaker e o servidor MCP funcionam com o clone em qualquer pasta e em qualquer máquina (o `.mcp.json` não cita mais caminho nenhum e usa o `.venv` da pasta aberta); `dmaker --version` mostra a versão (`dmaker 2.0.0`); os modelos `casamento-pascom`, `pessoal-vlog-reel` e `reel-medlycare-depoimento` passam a pedir o arquivo de música, que não tem mais padrão | "MCP em outras ferramentas" e "Criar um projeto a partir de um modelo pronto" |
 | DMK-51 | Edição de áudio: qualquer item de áudio (o som do clipe, a voz gravada, a narração, a música, uma faixa externa, o áudio de um PiP) ou o master recebe uma cadeia ordenada de efeitos (`effects`, `audio.master_effects`) com intervalo opcional e botão de ligar e desligar: Amplificar (com a opção de não clipar), Normalizar, Inverter, Reverter e Repetir; o catálogo `audio_effects`, a operação `audio_effect` do `edit_project`, `dmaker audio effects` e `dmaker audio effect`, o bloco **Efeitos de áudio** do painel Filtros e a trilha **VO** da linha do tempo | "Aplicar efeitos de áudio em um item ou no master" |
 | DMK-59 | Trilha de marcadores: `markers` na spec (instante ou região, com texto, cor e grupo), a trilha **MK** no editor (**M** cria no cursor, arrastar, duplo clique para renomear, vírgula e ponto para pular, tudo no **Desfazer**), importar e exportar o `.txt` de rótulos do Audacity (a ida e volta devolve o mesmo arquivo), marcadores regulares (a cada N segundos ou em N partes), `"at": "marker:texto"` no `edit_project` e marcadores que acompanham cortes e aparas (o que estava no trecho cortado some, com aviso); `dmaker markers`, `markers_import`, `markers_export` e `markers_regular` | "Marcar instantes e trechos com marcadores" |
+| DMK-64 | Projeto só de áudio e exportação: o `output.preset` pode ser `audio/wav`, `audio/mp3`, `audio/flac`, `audio/ogg`, `audio/opus`, `audio/m4a` ou `audio/aiff` (a `timeline` pode ficar vazia e a duração vem da voz, da narração e da música), com taxa de amostragem, canais, profundidade e taxa de bits (CBR, VBR, ABR), etiquetas do arquivo (`output.metadata`, com modelo por marca) e os alvos de loudness redes (-14), podcast (-16) e broadcast (-23); exportação por região de marcador (com pausas), por trilha (os stems, que somados reproduzem a mixagem) ou só um trecho; importar áudio bruto; o modelo `podcast`; `dmaker audio export`, `dmaker audio import-raw`, `dmaker audio presets`, `audio_export`, `audio_presets` e `import_raw_audio`; botão **Exportar áudio** e a trilha **VO** na interface | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos", "Dividir um áudio em vários arquivos", "Importar áudio bruto" e "Fazer um episódio de podcast" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -2771,7 +3016,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 87 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 90 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -2898,10 +3143,39 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
 
 #### dmaker audio
 
-Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs, e a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, Repetir).
+Áudio: exportar o projeto como WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF (inteiro, por região, por trilha ou só um trecho), importar áudio bruto, isolar a voz (voz de um lado, música e ruído do outro) com o modelo local Demucs e a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, Repetir).
 
 - **`dmaker audio effects [EFFECT]`**: Lista os efeitos de áudio que a spec aceita em `effects` (e em `audio.master_effects`): o nome em português e no Audacity, o que faz e os parâmetros com unidade, faixa e padrão.
   - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio export SPEC`**: Exporta o áudio do projeto, sem imagem, como um arquivo (ou vários, por região ou por trilha).
+  - `--preset` TEXTO: Formato do arquivo: audio/mp3, audio/wav, audio/flac... (padrão: o do projeto).
+  - `--mode` TEXTO: mix (inteiro), regions (um por região), stems (um por trilha) ou selection. (padrão mix)
+  - `--out` CAMINHO: Arquivo de saída (mix e seleção).
+  - `--out-dir` CAMINHO: Pasta de saída (regiões e trilhas).
+  - `--group` TEXTO: Regiões: só deste grupo de marcadores.
+  - `--pauses`: Regiões: exporta também o áudio entre elas (pausa-01...).
+  - `--numbered`: Regiões: número na frente do nome.
+  - `--start` TEXTO: Seleção: início em segundos ou marker:<texto>.
+  - `--end` TEXTO: Seleção: fim em segundos ou marker:<texto> (padrão: o fim).
+  - `--tracks` TEXTO: Trilhas: quais, separadas por vírgula (NAR,VO,MUS,SFX,A1).
+  - `--loudness` TEXTO: Alvo de loudness: redes (-14), podcast (-16), broadcast (-23) ou um número em LUFS.
+  - `--sample-rate` NÚMERO: Taxa de amostragem em Hz.
+  - `--channels` NÚMERO: 1 (mono) ou 2 (estéreo).
+  - `--bit-depth` NÚMERO: 16, 24 ou 32 (ponto flutuante); WAV, FLAC e AIFF.
+  - `--bitrate` NÚMERO: Taxa de bits em kbps (MP3, OGG, Opus, M4A).
+  - `--bitrate-mode` TEXTO: cbr, vbr ou abr.
+  - `--quality` NÚMERO: Qualidade do modo VBR (MP3: 0 a 9; OGG: -1 a 10).
+- **`dmaker audio import-raw SPEC RAW`**: Importa áudio bruto como voz gravada do projeto: converte para um WAV na pasta dele (o arquivo original não muda).
+  - `--encoding` TEXTO: s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw. (padrão s16)
+  - `--byte-order` TEXTO: little ou big. (padrão little)
+  - `--channels` NÚMERO: Canais (1 mono, 2 estéreo). (padrão 1)
+  - `--sample-rate` NÚMERO: Taxa de amostragem em Hz. (padrão 44100)
+  - `--offset-bytes` NÚMERO: Bytes a pular no começo do arquivo. (padrão 0)
+  - `--percent` NÚMERO: Quanto do arquivo importar, em por cento. (padrão 100.0)
+  - `--start` NÚMERO: Instante do projeto em que o áudio entra, em segundos. (padrão 0.0)
+  - `--volume` NÚMERO: Volume do áudio importado. (padrão 1.0)
+  - `--name` TEXTO: Nome do WAV gerado (sem a extensão).
+  - `--overwrite`: Troca um WAV que já exista.
 - **`dmaker audio isolate FILE`**: Separa a voz do fundo e grava `<nome>_voz` e `<nome>_fundo`. Lento na CPU (veja o fator no fim) e guardado em cache: repetir o mesmo trecho é instantâneo.
   - `--start` NÚMERO: Início do trecho, em segundos no arquivo.
   - `--end` NÚMERO: Fim do trecho, em segundos no arquivo.
@@ -2909,6 +3183,7 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
   - `--format` TEXTO: wav (sem perdas) ou mp3. (padrão wav)
   - `--stream` NÚMERO: Faixa de áudio do arquivo (0 é a primeira). (padrão 0)
   - `--device` TEXTO: auto | cpu | cuda (padrão auto)
+- **`dmaker audio presets`**: Lista os formatos de arquivo de áudio com o padrão de cada um e os alvos de loudness.
 
 #### dmaker audio effect
 
@@ -3223,7 +3498,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 68 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 71 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -3283,6 +3558,12 @@ São 68 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto), `preview` (sim ou não, padrão não), `preset` (texto), `force` (sim ou não, padrão não), `guides` (sim ou não, padrão não), `no_captions` (sim ou não, padrão não), `segments` (texto), `wait_seconds` (número, padrão 600), `show_ui` (sim ou não, padrão sim).
 - **`export_project`**: Exporta o projeto para vários presets (ex.: instagram/reels, youtube/shorts).
   Parâmetros: `name_or_path`\* (texto), `presets`\* (lista de texto), `wait_seconds` (número, padrão 900), `show_ui` (sim ou não, padrão sim).
+- **`audio_presets`**: Formatos de arquivo de áudio (audio/wav, audio/mp3, audio/flac, audio/ogg, audio/opus, audio/m4a, audio/aiff) com o padrão de cada um (taxa, canais, profundidade ou taxa de bits) e os alvos de loudness (redes -14, podcast -16, broadcast -23 LUFS).
+  Sem parâmetros.
+- **`audio_export`**: Exporta o ÁUDIO do projeto para um arquivo, sem imagem: WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF.
+  Parâmetros: `name`\* (texto), `preset` (texto), `mode` ("mix" ou "regions" ou "stems" ou "selection", padrão mix), `out` (texto), `out_dir` (texto), `group` (texto), `pauses` (sim ou não, padrão não), `numbered` (sim ou não, padrão não), `start` (número ou texto), `end` (número ou texto), `tracks` (lista de texto), `loudness` (texto ou número), `sample_rate` (inteiro), `channels` (inteiro), `bit_depth` (inteiro), `bitrate_k` (inteiro), `bitrate_mode` ("cbr" ou "vbr" ou "abr"), `quality` (número), `wait_seconds` (número, padrão 600).
+- **`import_raw_audio`**: Importa áudio bruto (PCM sem cabeçalho, o 'Import Raw Data' do Audacity) para um projeto: converte `src` num WAV na pasta do projeto e o põe em audio.voiceover (voz gravada) em `start` segundos.
+  Parâmetros: `name`\* (texto), `src`\* (texto), `encoding` ("s8" ou "u8" ou "s16" ou "u16" ou "s24" ou "s32" ou "f32" ou "f64" ou "ulaw" ou "alaw", padrão s16), `byte_order` ("little" ou "big", padrão little), `channels` (inteiro, padrão 1), `sample_rate` (inteiro, padrão 44100), `offset_bytes` (inteiro, padrão 0), `percent` (número, padrão 100.0), `start` (número, padrão 0.0), `volume` (número, padrão 1.0), `wav_name` (texto), `overwrite` (sim ou não, padrão não).
 - **`job_status`**: Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto.
   Parâmetros: `job_id`\* (texto).
 - **`list_jobs`**: Jobs de render desta sessão e, se a interface estiver aberta, os dela também.
@@ -3368,7 +3649,7 @@ São 68 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 39 blocos e 361 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 41 blocos e 376 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -3383,7 +3664,7 @@ A raiz do `spec.json`.
 | `theme` | objeto | nenhum | Tema montado na hora, no lugar de uma marca instalada. |
 | `sources` | mapa de `SourceRef` | vazio | Fontes de uma sessão multicâmera, por nome. |
 | `master` | texto | nenhum | Fonte que é o relógio principal da sessão (a primeira, se vazio). |
-| `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` (pelo menos 1) | obrigatório | Os trechos do vídeo, em ordem (clipe, imagem ou cartão). |
+| `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` | vazio | Os trechos do vídeo, em ordem (clipe, imagem ou cartão); só um projeto com saída de áudio pode ficar sem nenhum. |
 | `look` | texto | nenhum | Acabamento visual pronto, por nome, para todos os trechos. |
 | `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` ou `HtmlOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture), barra de progresso, audiograma e animação em HTML por cima da linha do tempo. |
 | `captions` | `Captions` | nenhum | Legendas: automáticas, de um .srt ou da narração. |
@@ -3406,6 +3687,33 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `end` | número, mínimo 0 | nenhum |  |
 | `gain_db` | número, de -100 a 100 | 0.0 |  |
 | `prevent_clipping` | sim ou não | não |  |
+
+#### AudioFormat
+
+Usado em `Output.audio_format`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `sample_rate` | inteiro, de 8000 a 192000 | nenhum | Taxa de amostragem em Hz; vazio usa a do formato (48 kHz). |
+| `channels` | `"1"` ou `"2"` | nenhum | 1 (mono) ou 2 (estéreo); vazio usa a do formato. |
+| `bit_depth` | `"16"` ou `"24"` ou `"32"` | nenhum | 16, 24 ou 32 (ponto flutuante); só nos formatos sem perda (WAV, FLAC, AIFF). |
+| `bitrate_mode` | `"cbr"` ou `"vbr"` ou `"abr"` | nenhum | `cbr` (taxa constante), `vbr` (qualidade variável) ou `abr` (taxa média); só nos formatos com perda. |
+| `bitrate_k` | inteiro, de 8 a 512 | nenhum | Taxa de bits em kbps, no CBR e no ABR. |
+| `quality` | número, de -1 a 10 | nenhum | Qualidade do modo VBR (MP3: 0 a 9, 0 é a melhor; OGG: -1 a 10). |
+
+#### AudioMetadata
+
+Usado em `Output.metadata`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `artist` | texto | nenhum | Etiqueta artista. |
+| `title` | texto | nenhum | Etiqueta título. |
+| `album` | texto | nenhum | Etiqueta álbum. |
+| `track` | texto | nenhum | Etiqueta faixa (`12` ou `12/40`). |
+| `year` | texto | nenhum | Etiqueta ano. |
+| `genre` | texto | nenhum | Etiqueta gênero. |
+| `comment` | texto | nenhum | Etiqueta comentário; texto vazio apaga o que o modelo da marca define. |
 
 #### AudioSettings
 
@@ -3789,13 +4097,15 @@ Usado em `Project.output`.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
-| `preset` | texto | `instagram/reels` | Plataforma e formato (`dmaker presets` lista todos). |
+| `preset` | texto | `instagram/reels` | Plataforma e formato (`dmaker presets` lista todos); `audio/mp3`, `audio/wav`... gravam só o som, sem imagem. |
 | `path` | texto | nenhum | Arquivo de saída; vazio grava em output/ com o nome do projeto e do formato. |
 | `fps` | número, maior que 0, até 120 | nenhum | Quadros por segundo; vazio usa o do formato. |
 | `encoder` | `"x264"` ou `"auto"` ou `"nvenc"` ou `"amf"` ou `"qsv"` | `x264` | `x264` tem a melhor qualidade; `auto` usa a placa de vídeo quando o `dmaker doctor` achar uma. |
 | `quality` | `"max"` ou `"high"` ou `"medium"` ou `"draft"` | `high` | `draft` é o mais rápido; `high` é o padrão; `max` é o mais lento e dá arquivo menor. |
 | `thumbnail_at` | número, mínimo 0 | nenhum | Instante da capa, em segundos. |
 | `guides` | sim ou não | não | Desenha as zonas seguras do formato por cima do vídeo. |
+| `audio_format` | `AudioFormat` | nenhum | Só com um formato de áudio: taxa de amostragem, canais, profundidade ou taxa de bits do arquivo. |
+| `metadata` | `AudioMetadata` | nenhum | Etiquetas do arquivo de áudio (artista, título, álbum...); completam o modelo `metadata` da marca. |
 
 #### PhaseRuleSpec
 

@@ -35,6 +35,7 @@ from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
 from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
+from .output_kinds import register_output_kind
 from .person_layer import PersonLayerBuilder
 from .segments import MezzanineBuilder
 from .sfx import SfxTrack, leveled_effects, resolve_files
@@ -408,3 +409,7 @@ class RenderPipeline:
         args = ["-ss", f"{t:.3f}", "-i", str(out_path), "-frames:v", "1", "-q:v", "2", str(thumb)]
         ctx.runner.run(FFmpegCommand(args, label="thumbnail"))
         return thumb
+
+
+# o renderizador do tipo `video`: quem pede `create_renderer(...)` com um preset de plataforma chega aqui
+register_output_kind("video", RenderPipeline)

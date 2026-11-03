@@ -16,7 +16,9 @@ from typing import Any, Literal
 from mcp.server.mcpserver import Image, MCPServer
 
 from . import __version__, config
+from .domain.audio_presets import list_audio_presets
 from .domain.brand import available_brands, load_theme
+from .domain.outputs import output_extension, resolve_output
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
@@ -46,7 +48,7 @@ def _result_dict(result: Any) -> dict:
         "duration_s": round(result.duration, 2),
         "size_mb": round(result.size_bytes / 1e6, 2),
         "preset": result.preset.id,
-        "resolution": f"{result.preset.width}x{result.preset.height}",
+        "resolution": result.preset.resolution,
         "captions_file": str(result.captions_file) if result.captions_file else None,
         "warnings": result.warnings,
         "job_dir": str(result.job_dir) if result.job_dir else None,
@@ -62,7 +64,7 @@ def _summary_dict(summary: Any) -> dict:
     return {
         "name": summary.name,
         "preset": summary.preset.id,
-        "resolution": f"{summary.preset.width}x{summary.preset.height}",
+        "resolution": summary.preset.resolution,
         "theme": summary.theme.name,
         "total_s": round(summary.total, 2),
         "segments": [
@@ -742,7 +744,7 @@ def _render(
 ) -> dict:
     """Roda um render ligado ao job (progresso e etapas viram eventos)."""
     from .media.ffmpeg import SubprocessRunner
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
     from .pipeline.projects import load_project, parse_segments
 
     project = load_project(name_or_path)
@@ -755,7 +757,7 @@ def _render(
         quiet=True,
         segments=parse_segments(segments),
     )
-    pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
+    pipeline = create_renderer(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     result = pipeline.run()
     payload = preview_notice(_result_dict(result), preview and not segments)
     if not preview and not segments:
@@ -804,7 +806,7 @@ def render_project(
 ) -> dict:
     """`segments` = "12-20" renderiza só esses trechos (sem sobreposições/legendas), para revisar vídeos longos."""
     if preset:
-        get_preset(preset)
+        resolve_output(preset)
     if show_ui:
         via_ui = _render_via_ui(
             name_or_path,
@@ -838,7 +840,7 @@ def export_project(
     name_or_path: str, presets: list[str], wait_seconds: float = 900, show_ui: bool = True
 ) -> dict:
     for p in presets:
-        get_preset(p)
+        resolve_output(p)
     if show_ui:
         via_ui = _export_via_ui(name_or_path, presets, wait_seconds)
         if via_ui is not None:
@@ -850,6 +852,172 @@ def export_project(
     job = jobs.start(f"export {name_or_path} -> {', '.join(presets)}", work)
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Formatos de arquivo de áudio (audio/wav, audio/mp3, audio/flac, audio/ogg, audio/opus, audio/m4a, "
+        "audio/aiff) com o padrão de cada um (taxa, canais, profundidade ou taxa de bits) e os alvos de loudness "
+        "(redes -14, podcast -16, broadcast -23 LUFS). Um projeto cujo output.preset é um destes tem como saída "
+        "só o arquivo de som, sem imagem; a timeline pode ficar vazia."
+    )
+)
+def audio_presets() -> dict:
+    from .domain.loudness import LOUDNESS_TARGETS
+
+    return {
+        "formats": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "extension": a.extension,
+                "lossless": a.lossless,
+                "sample_rate": a.sample_rate,
+                "channels": a.channels,
+                "bit_depths": list(a.bit_depths),
+                "bit_depth": a.bit_depth,
+                "bitrate_modes": list(a.bitrate_modes),
+                "bitrate_mode": a.bitrate_mode,
+                "bitrate_k": a.bitrate_k,
+                "quality": a.quality,
+                "allowed_sample_rates": list(a.sample_rates),
+                "notes": a.notes,
+            }
+            for a in list_audio_presets()
+        ],
+        "loudness_targets": LOUDNESS_TARGETS,
+    }
+
+
+def _audio_tool_error(exc: Exception) -> Exception:
+    """Erro previsto do áudio (marcador inexistente, formato que não aceita a opção, arquivo ausente): a mensagem
+    chega ao cliente em português."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    return ToolError(str(exc))
+
+
+@server.tool(
+    description=(
+        "Exporta o ÁUDIO do projeto para um arquivo, sem imagem: WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF. "
+        "`preset` é o formato (audio/mp3...; omitido, vale o do projeto se for de áudio). `mode`: mix (o projeto "
+        "inteiro), regions (um arquivo por região de marcador, com o texto do marcador no nome; `group` filtra, "
+        "`pauses` exporta também os vazios entre as regiões, `numbered` põe o número na frente), stems (um "
+        "arquivo por trilha de som, NAR, VO, MUS, SFX e A1, que somados reproduzem o mix; `tracks` escolhe) ou "
+        "selection (só `start` a `end`, em segundos ou marker:<texto>). `loudness`: redes (-14), podcast (-16), "
+        "broadcast (-23) ou um número em LUFS; omitido, vale audio.target_lufs do projeto. `sample_rate`, "
+        "`channels`, `bit_depth` (WAV, FLAC, AIFF), `bitrate_k`, `bitrate_mode` (cbr, vbr, abr) e `quality` "
+        "ajustam o arquivo. `out` é o arquivo (mix e seleção), `out_dir` a pasta (regiões e trilhas); sem eles, "
+        "grava em output/. Grava por cima do que já existir. Espera até wait_seconds; se ainda estiver rodando "
+        "devolve job_id para job_status."
+    )
+)
+def audio_export(
+    name: str,
+    preset: str | None = None,
+    mode: Literal["mix", "regions", "stems", "selection"] = "mix",
+    out: str | None = None,
+    out_dir: str | None = None,
+    group: str | None = None,
+    pauses: bool = False,
+    numbered: bool = False,
+    start: float | str | None = None,
+    end: float | str | None = None,
+    tracks: list[str] | None = None,
+    loudness: str | float | None = None,
+    sample_rate: int | None = None,
+    channels: int | None = None,
+    bit_depth: int | None = None,
+    bitrate_k: int | None = None,
+    bitrate_mode: Literal["cbr", "vbr", "abr"] | None = None,
+    quality: float | None = None,
+    wait_seconds: float = 600,
+) -> dict:
+    from .domain.audio_presets import AudioFormatError, EncodingChoices
+    from .domain.markers import MarkerError
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.audio_service import export_audio_project, export_request, result_dict
+
+    try:
+        request = export_request(
+            mode, group=group, pauses=pauses, numbered=numbered, start=start, end=end, tracks=tracks
+        )
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+    choices = EncodingChoices(sample_rate, channels, bit_depth, bitrate_mode, bitrate_k, quality)
+
+    def work(job: Job) -> dict:
+        try:
+            result = export_audio_project(
+                name,
+                request,
+                preset=preset,
+                out=out,
+                out_dir=out_dir,
+                loudness=loudness,
+                choices=None if choices.empty else choices,
+                runner=SubprocessRunner(sink=job.sink()),
+                log=job.log,
+            )
+        except (AudioFormatError, MarkerError, FileNotFoundError, KeyError, ValueError) as exc:
+            raise _audio_tool_error(exc) from exc
+        return result_dict(result)
+
+    job = jobs.start(f"áudio {name} ({mode})", work)
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Importa áudio bruto (PCM sem cabeçalho, o 'Import Raw Data' do Audacity) para um projeto: converte `src` "
+        "num WAV na pasta do projeto e o põe em audio.voiceover (voz gravada) em `start` segundos. O arquivo "
+        "original não muda. `encoding`: s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw; `byte_order`: "
+        "little ou big; `channels`; `sample_rate` em Hz; `offset_bytes` pula o começo; `percent` importa só essa "
+        "parte do arquivo. Projeto que não existe nasce como projeto só de áudio. `wav_name` escolhe o nome do WAV "
+        "(sem a extensão); um WAV que já existe só é trocado com overwrite=true."
+    )
+)
+def import_raw_audio(
+    name: str,
+    src: str,
+    encoding: Literal["s8", "u8", "s16", "u16", "s24", "s32", "f32", "f64", "ulaw", "alaw"] = "s16",
+    byte_order: Literal["little", "big"] = "little",
+    channels: int = 1,
+    sample_rate: int = 44100,
+    offset_bytes: int = 0,
+    percent: float = 100.0,
+    start: float = 0.0,
+    volume: float = 1.0,
+    wav_name: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    from .pipeline.audio_import import RawImportError
+    from .pipeline.audio_import import import_raw_audio as run_import
+
+    try:
+        imported = run_import(
+            name,
+            Path(src),
+            encoding=encoding,
+            byte_order=byte_order,
+            channels=channels,
+            sample_rate=sample_rate,
+            offset_bytes=offset_bytes,
+            percent=percent,
+            start=start,
+            volume=volume,
+            name=wav_name,
+            overwrite=overwrite,
+        )
+    except (RawImportError, FileNotFoundError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return {
+        "wav": str(imported.wav),
+        "voiceover_src": imported.source,
+        "duration_s": round(imported.duration, 3),
+        "project_created": imported.created_project,
+    }
 
 
 @server.tool(
@@ -1118,9 +1286,9 @@ def _latest_final_output(project: Project) -> Path | None:
     """A última saída final (não preview) já renderizada para o preset da spec, se houver."""
     if not config.OUTPUT_DIR.exists():
         return None
-    preset_id = get_preset(project.output.preset).id.replace("/", "-")
+    preset = resolve_output(project.output.preset)
     files = sorted(
-        config.OUTPUT_DIR.glob(f"{project.name}__{preset_id}.mp4"),
+        config.OUTPUT_DIR.glob(f"{project.name}__{preset.id.replace('/', '-')}{output_extension(preset)}"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

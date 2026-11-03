@@ -36,6 +36,10 @@
 - [Corrigir uma palavra errada sem regravar](corrigir-fala.md): Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada.
 - [Trocar a voz de uma gravação inteira](trocar-voz.md): Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo.
 - [Verificar se um áudio foi gerado pelo DMaker](verificar-audio.md): Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio.
+- [Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos](exportar-audio.md): Grava só o som do projeto, sem imagem nenhuma, em WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF, com as etiquetas do arquivo (artista, título, álbum...) e o volume de saída no alvo que você escolher (redes, podcast ou broadcast).
+- [Dividir um áudio em vários arquivos](dividir-audio.md): Exporta um áudio longo em vários arquivos, um por região de marcador, um por trilha de som (os stems) ou só um trecho, como o "Export Multiple" do Audacity.
+- [Importar áudio bruto](importar-bruto.md): Converte um arquivo de áudio sem cabeçalho (PCM bruto, de um gravador ou de um programa) num WAV na pasta do projeto e o põe como voz gravada, como o "Importar dados brutos" do Audacity.
+- [Fazer um episódio de podcast](podcast.md): Monta um episódio só de áudio com a gravação entre uma música de abertura e uma de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio.
 
 ## Edição de áudio
 

@@ -273,6 +273,9 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "markers_import": "lê um arquivo do Audacity que a pessoa tem no disco; o agente marca instantes por edit_project",
     "markers_export": "grava um arquivo para o Audacity; é uma exportação que se pede por `dmaker markers export`",
     "markers_regular": "gera dezenas de marcadores de uma vez; o modelo pequeno marca um a um por edit_project",
+    "audio_presets": "lista os formatos de arquivo de áudio; serve a quem exporta áudio, que o agente pede por `dmaker audio export`",
+    "audio_export": "grava vários arquivos de áudio (regiões, trilhas); é uma exportação que se pede por `dmaker audio export`, e o `export_project` com um preset de áudio já exporta o projeto inteiro",
+    "import_raw_audio": "grava um WAV na pasta do projeto a partir de um arquivo bruto; se pede por `dmaker audio import-raw`",
 }
 
 # Só com configuração explícita (`DMAKER_AGENT_FREE_HTML`, medida na avaliação) o modelo ganha HTML livre; com

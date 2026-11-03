@@ -28,6 +28,13 @@ from pydantic import (
 from .. import config
 from .atomic_file import read_bytes_retrying, write_bytes_atomic
 from .audio_effects import AudioEffect
+from .audio_presets import (
+    AudioFormatError,
+    EncodingChoices,
+    get_audio_preset,
+    is_audio_preset,
+    resolve_encoding,
+)
 from .curves import Curve
 from .transitions import all_transition_names
 
@@ -818,7 +825,46 @@ class AudioSettings(EffectsOwner):
 # ---------- saída e projeto ----------
 
 
+class AudioFormat(Strict):
+    """Escolhas do arquivo de áudio por cima do padrão do preset (`audio/mp3`, `audio/wav`...): o que não vem aqui
+    fica como o preset define (`domain/audio_presets.py`). `bit_depth` vale nos formatos sem perda (32 é ponto
+    flutuante); `bitrate_mode`, `bitrate_k` e `quality` valem nos com perda (VBR usa a qualidade, CBR e ABR a
+    taxa de bits)."""
+
+    sample_rate: int | None = Field(None, ge=8000, le=192000)
+    channels: Literal[1, 2] | None = None
+    bit_depth: Literal[16, 24, 32] | None = None
+    bitrate_mode: Literal["cbr", "vbr", "abr"] | None = None
+    bitrate_k: int | None = Field(None, ge=8, le=512)  # kbps
+    quality: float | None = Field(None, ge=-1, le=10)
+
+    def choices(self) -> EncodingChoices:
+        return EncodingChoices(
+            self.sample_rate, self.channels, self.bit_depth, self.bitrate_mode, self.bitrate_k, self.quality
+        )
+
+
+class AudioMetadata(Strict):
+    """Etiquetas do arquivo de áudio, as da janela "Edit Metadata Tags" do Audacity. Cada formato as grava do seu
+    jeito (ID3v2.3 no MP3, comentários Vorbis no FLAC, OGG e Opus, atoms no M4A, INFO no WAV). O que a marca
+    define em `brand.json` (`metadata`) é o ponto de partida, e o que vem aqui vale por cima."""
+
+    artist: str | None = None
+    title: str | None = None
+    album: str | None = None
+    track: str | None = None  # "3" ou "3/12"
+    year: str | None = None
+    genre: str | None = None
+    comment: str | None = None
+
+    @field_validator("track", "year", mode="before")
+    @classmethod
+    def _number_as_text(cls, v: Any) -> Any:
+        return str(v) if isinstance(v, int) and not isinstance(v, bool) else v
+
+
 class Output(Strict):
+    # um preset de vídeo (`instagram/reels`) ou de áudio (`audio/mp3`): o de áudio tira a imagem do render
     preset: str = "instagram/reels"
     path: str | None = None
     fps: float | None = Field(None, gt=0, le=120)
@@ -826,6 +872,19 @@ class Output(Strict):
     quality: Literal["max", "high", "medium", "draft"] = "high"  # max = x264 slow (mais lento, arquivo menor)
     thumbnail_at: float | None = Field(None, ge=0)
     guides: bool = False  # desenha as zonas seguras (para conferência)
+    audio_format: AudioFormat | None = (
+        None  # só com preset de áudio: taxa, canais, profundidade, taxa de bits
+    )
+    metadata: AudioMetadata | None = None  # etiquetas do arquivo de áudio (artista, título, álbum...)
+
+    @model_validator(mode="after")
+    def _audio_format_fits_preset(self) -> Output:
+        if self.audio_format is not None and is_audio_preset(self.preset):
+            try:
+                resolve_encoding(get_audio_preset(self.preset), self.audio_format.choices())
+            except AudioFormatError as exc:
+                raise ValueError(f"output.audio_format: {exc}") from exc
+        return self
 
 
 class SourceRef(Strict):
@@ -965,7 +1024,9 @@ class Project(Strict):
     theme: dict | None = None  # sobrescreve cores/fontes do tema
     sources: dict[str, SourceRef] = {}  # fontes sincronizadas (multicâmera, gravadores)
     master: str | None = None  # fonte principal = relógio da sessão; padrão: a primeira de `sources`
-    timeline: list[Segment] = Field(min_length=1)
+    # os trechos de vídeo; só um projeto com saída de áudio (`audio/mp3`...) pode ficar sem nenhum, e então o som dos
+    # itens de `audio` (narração, voz gravada, música) é o que dá a duração
+    timeline: list[Segment] = []
     look: str | None = None  # acabamento visual de todos os trechos, por nome (ver `domain/looks.py`)
     overlays: list[Overlay] = []
     captions: Captions | None = None
@@ -980,6 +1041,15 @@ class Project(Strict):
     # nem o som), e `to_bytes` a omite quando vazia para o `spec.json` de um projeto antigo seguir idêntico
     markers: list[Marker] = []
     base_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def _timeline_needed(self) -> Project:
+        if not self.timeline and not is_audio_preset(self.output.preset):
+            raise ValueError(
+                "timeline precisa de pelo menos um trecho; só um projeto com saída de áudio "
+                "(output.preset: audio/mp3, audio/wav...) pode ficar sem trechos de vídeo"
+            )
+        return self
 
     @model_validator(mode="after")
     def _region_refs(self) -> Project:
