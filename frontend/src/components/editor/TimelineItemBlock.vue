@@ -142,6 +142,9 @@ const classes = computed(() => [
 .item--narration {
   background: var(--tl-narration);
 }
+.item--voiceover {
+  background: var(--tl-voiceover);
+}
 .item--captions {
   background: var(--tl-captions);
 }

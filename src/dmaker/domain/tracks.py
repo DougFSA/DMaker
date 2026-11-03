@@ -34,6 +34,8 @@ def known_track_ids(project: Project) -> set[str]:
     ids.update(f"A{2 + i}" for i in range(len(project.audio.tracks)))
     if project.audio.narration:
         ids.add("NAR")
+    if project.audio.voiceover:
+        ids.add("VO")
     lanes = video_overlay_lanes(project)
     ids.update(f"V{2 + lane}" for lane in set(lanes.values()))
     ids.update(marker_track_id(group) for group in marker_groups(project.markers))
@@ -48,6 +50,7 @@ def apply_track_state(project: Project) -> Project:
     - A<n> muda, n>=2 -> remove `audio.tracks[n-2]` (a faixa externa some da mixagem).
     - MUS muda -> `audio.music = None`.
     - NAR muda -> `audio.narration = []` (as narrações somem da mixagem e das legendas).
+    - VO muda -> `audio.voiceover = []` (os arquivos de voz gravada somem da mixagem).
     - CC oculta -> `captions.enabled = False`.
     - TX oculta -> remove as sobreposições de texto.
     - GR oculta -> remove as sobreposições de imagem e de composição HTML e a barra de progresso.
@@ -75,6 +78,9 @@ def apply_track_state(project: Project) -> Project:
 
     if _muted(tracks, "NAR") and audio.narration:
         audio = audio.model_copy(update={"narration": []})
+
+    if _muted(tracks, "VO") and audio.voiceover:
+        audio = audio.model_copy(update={"voiceover": []})
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:

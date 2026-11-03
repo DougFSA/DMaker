@@ -11,7 +11,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..domain.audio_effects import active_effects, chain_duration
 from ..domain.spec import Project, VoiceoverClip
+from .audio_effects import AudioItem, EffectProcessor
 from .context import Prober
 
 # o arquivo pode passar um pouco do fim do vídeo sem aviso: é o arredondamento de duração do contêiner
@@ -40,9 +42,13 @@ def play_length(clip: VoiceoverClip, file_duration: float) -> float:
     return max(last - clip.offset, 0.0)
 
 
-def prepare_voice_files(project: Project, prober: Prober) -> list[PreparedVoiceFile]:
+def prepare_voice_files(
+    project: Project, prober: Prober, processor: EffectProcessor | None = None
+) -> list[PreparedVoiceFile]:
     """Localiza e mede cada arquivo de `audio.voiceover`. Falha, dizendo o campo, se o arquivo não existe
-    ou não tem áudio."""
+    ou não tem áudio. Com `processor`, o trecho de um arquivo que tem efeito ligado já vem processado: o
+    arquivo é o processado, o ponto de entrada passa a ser 0 e a duração é a depois da cadeia (que o Repetir
+    aumenta)."""
     prepared = []
     for index, clip in enumerate(project.audio.voiceover):
         path = project.resolve(clip.src)
@@ -51,23 +57,32 @@ def prepare_voice_files(project: Project, prober: Prober) -> list[PreparedVoiceF
         info = prober(path)
         if not info.has_audio:
             raise ValueError(f"audio.voiceover[{index}].src: o arquivo {clip.src!r} não tem áudio")
-        prepared.append(
-            PreparedVoiceFile(
-                path, clip.start, clip.offset, play_length(clip, info.duration), clip.volume, clip.src
-            )
+        length = play_length(clip, info.duration)
+        done = (
+            processor.process(AudioItem(path, length, tuple(clip.effects), clip.offset))
+            if processor
+            else None
         )
+        if done is not None:
+            prepared.append(
+                PreparedVoiceFile(done.path, clip.start, 0.0, done.duration, clip.volume, clip.src)
+            )
+        else:
+            prepared.append(PreparedVoiceFile(path, clip.start, clip.offset, length, clip.volume, clip.src))
     return prepared
 
 
 def voice_file_playtimes(project: Project, prober: Prober) -> list[float | None]:
-    """Quanto toca de cada arquivo (None = ausente ou ilegível), para o lint, sem falhar por um arquivo ruim."""
+    """Quanto toca de cada arquivo (None = ausente ou ilegível), para o lint, sem falhar por um arquivo ruim.
+    É a duração depois dos efeitos do arquivo (o Repetir a aumenta), calculada sem processar nada."""
     playtimes: list[float | None] = []
     for clip in project.audio.voiceover:
         path = project.resolve(clip.src)
         try:
-            playtimes.append(play_length(clip, prober(path).duration) if path.exists() else None)
+            length = play_length(clip, prober(path).duration) if path.exists() else None
         except (OSError, ValueError, RuntimeError):
-            playtimes.append(None)
+            length = None
+        playtimes.append(None if length is None else chain_duration(clip.effects, length))
     return playtimes
 
 
@@ -87,6 +102,10 @@ def voice_file_warnings(project: Project, total: float, playtimes: Sequence[floa
         playtime = playtimes[index] if index < len(playtimes) else None
         if playtime is None:
             continue
+        if any(effect.changes_duration for _, effect in active_effects(clip.effects)):
+            warnings.append(
+                f"{where}: com os efeitos, o áudio toca por {playtime:.1f}s (o Repetir o alonga)."
+            )
         if playtime <= 0:
             warnings.append(
                 f"{where}: o offset ({clip.offset:g}s) passa do fim do arquivo, não há áudio para tocar."

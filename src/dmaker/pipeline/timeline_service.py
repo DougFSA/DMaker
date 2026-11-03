@@ -16,6 +16,7 @@ from .layout import project_layout
 from .missing import MissingMedia
 from .sync import OffsetFinder
 from .timeline_view import TimelineView, build_timeline_view
+from .voicefiles import voice_file_playtimes
 
 
 def project_timeline_view(
@@ -27,4 +28,10 @@ def project_timeline_view(
     """Vista multitrilha do projeto, com os itens de arquivo ausente marcados (`TrackItem.missing`)."""
     missing = MissingMedia.scan(project)
     layout = project_layout(project, prober, offset_finder, missing)
-    return build_timeline_view(project, layout, narration_durations=narration_durations, missing=missing)
+    return build_timeline_view(
+        project,
+        layout,
+        narration_durations=narration_durations,
+        missing=missing,
+        voiceover_durations=voice_file_playtimes(project, prober),  # já depois dos efeitos (o Repetir cresce)
+    )

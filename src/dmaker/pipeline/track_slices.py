@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..domain.spec import AudioTrack, ClipSegment
 from ..filtergraph.mezzanine import TrackSlice
@@ -20,20 +21,34 @@ def source_covers(source: Source, segment: ClipSegment) -> bool:
     return source.offset < end and source.offset + source.info.duration > segment.start
 
 
-def track_slice(track: AudioTrack, source: Source, segment: ClipSegment) -> TrackSlice | None:
+def track_slice(
+    track: AudioTrack, source: Source, segment: ClipSegment, processed: Path | None = None
+) -> TrackSlice | None:
     """Fatia da faixa alinhada ao início do trecho (tempo da sessão -> tempo no arquivo da faixa), ou
     None quando o arquivo não grava nenhum instante do trecho: um gravador em vários arquivos (câmera
-    que parte a gravação a cada 30 min) vira várias faixas, e só a que grava aquele momento entra."""
+    que parte a gravação a cada 30 min) vira várias faixas, e só a que grava aquele momento entra.
+    `processed` é o arquivo da faixa já com os efeitos dela (o mesmo tempo, na faixa 0): a fatia sai dele."""
     if not source_covers(source, segment):
         return None
+    if processed is not None:
+        return TrackSlice(processed, source.in_point(segment.start), track.volume, 0)
     return TrackSlice(source.path, source.in_point(segment.start), track.volume, source.audio_stream)
 
 
 def track_slices(
-    tracks: Sequence[AudioTrack], session: Mapping[str, Source], segment: ClipSegment
+    tracks: Sequence[AudioTrack],
+    session: Mapping[str, Source],
+    segment: ClipSegment,
+    processed: Sequence[Path | None] = (),
 ) -> tuple[TrackSlice, ...]:
-    """Fatias de todas as faixas externas que soam no trecho, na ordem das faixas da spec."""
-    found = (track_slice(track, session[track.source], segment) for track in tracks)
+    """Fatias de todas as faixas externas que soam no trecho, na ordem das faixas da spec. `processed` traz, por
+    faixa, o arquivo já com efeitos (ver `pipeline.audio_effects.track_audio_overrides`); vazio, tudo sai da fonte."""
+    found = (
+        track_slice(
+            track, session[track.source], segment, processed[index] if index < len(processed) else None
+        )
+        for index, track in enumerate(tracks)
+    )
     return tuple(piece for piece in found if piece is not None)
 
 

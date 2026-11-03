@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 34 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 35 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -64,6 +64,12 @@ São 34 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Corrigir uma palavra errada sem regravar](#corrigir-uma-palavra-errada-sem-regravar) | Troca uma palavra ou frase dita errado numa gravação pela versão certa, falada com a voz do próprio falante, sem regravar nada. | sim |
 | [Trocar a voz de uma gravação inteira](#trocar-a-voz-de-uma-gravação-inteira) | Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo. | sim |
 | [Verificar se um áudio foi gerado pelo DMaker](#verificar-se-um-áudio-foi-gerado-pelo-dmaker) | Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio. | sim |
+
+**Edição de áudio**
+
+| Quero | O que entrega | Agente local |
+| --- | --- | --- |
+| [Aplicar efeitos de áudio em um item ou no master](#aplicar-efeitos-de-áudio-em-um-item-ou-no-master) | Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original. | sim |
 
 **Tarefas de dublagem e modelos**
 
@@ -2318,6 +2324,95 @@ A resposta tem três níveis. **Encontrada**: o detector reagiu e a assinatura "
 
 ---
 
+## Edição de áudio
+
+O DMaker trata o som como o Audacity: qualquer item de áudio (o som de um clipe, uma voz gravada, uma narração, a música, uma faixa externa, o áudio de um picture-in-picture) ou a mistura inteira recebe uma **cadeia de efeitos**, em ordem, com os mesmos nomes e as mesmas faixas de valores que o Audacity usa. A diferença é que **nada sobrescreve o arquivo original**: a cadeia fica na spec, o render e a prévia da linha do tempo aplicam a mesma cadeia (o que você ouve no play é o que sai no vídeo), e cada item tratado fica em cache, então mudar um parâmetro refaz só aquele item.
+
+### Do Audacity para o DMaker
+
+Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os efeitos ficam sempre numa lista `effects` (ou em `audio.master_effects`, para a mistura inteira); cada efeito leva `enabled` (liga e desliga sem apagar, como o botão de bypass) e, se quiser, `start` e `end`. Cada chamado novo do épico de áudio acrescenta as suas linhas aqui.
+
+| Função do Audacity | Como fazer no DMaker | Tarefa |
+| --- | --- | --- |
+| Selecionar um trecho e aplicar um efeito só nele | Ponha `start` e `end` (segundos do item) no efeito. Fora do intervalo o som passa intacto, com uma emenda de 10 ms entre o seco e o tratado que evita o estalo | "Aplicar efeitos de áudio em um item ou no master" |
+| Pilha de efeitos, com o botão de ligar e desligar | A lista `effects`, na ordem em que o som passa; `enabled: false` desliga o efeito sem tirá-lo | "Aplicar efeitos de áudio em um item ou no master" |
+| Aplicar o efeito em uma trilha | `effects` do item: `timeline[N]` (o som do clipe), `overlays[N]` (o áudio de um PiP), `audio.voiceover[N]`, `audio.narration[N]`, `audio.music` ou `audio.tracks[N]` | "Aplicar efeitos de áudio em um item ou no master" |
+| Aplicar o efeito em todas as trilhas (a mistura) | `audio.master_effects`, depois da música, da voz e dos efeitos sonoros e antes da normalização final de loudness, que continua valendo por cima | "Aplicar efeitos de áudio em um item ou no master" |
+| Efeito > Amplify (Amplificar) | `{"type": "amplify", "gain_db": 6}`. `"prevent_clipping": true` faz o que desmarcar "Permitir clipping" faz: o ganho é limitado para o pico ficar em 0 dBFS no máximo | "Aplicar efeitos de áudio em um item ou no master" |
+| Efeito > Normalize (Normalizar) | `{"type": "normalize", "peak_db": -1}`, com `remove_dc` (padrão ligado) e `stereo_independent` (cada canal ao próprio pico) | "Aplicar efeitos de áudio em um item ou no master" |
+| Efeito > Invert (Inverter) | `{"type": "invert"}` troca o sinal de cada amostra; duas vezes devolve o som exato | "Aplicar efeitos de áudio em um item ou no master" |
+| Efeito > Reverse (Reverter) | `{"type": "reverse"}` toca o item (ou o intervalo) de trás para a frente | "Aplicar efeitos de áudio em um item ou no master" |
+| Efeito > Repeat (Repetir) | `{"type": "repeat", "times": 2}`. Aqui `times` conta quantas vezes o trecho toca no total (2 dobra); o campo do Audacity conta as repetições além da primeira, então o "1" de lá é o "2" daqui. Só vale em voz gravada e em música, porque aumenta a duração | "Aplicar efeitos de áudio em um item ou no master" |
+| Trilha de rótulos: um ponto ou uma região com nome | `markers` na spec, um instante (`at`) ou uma região (`start` e `end`) com `text`, `color` e `group`; cada grupo é uma trilha **MK** na linha do tempo, e os marcadores acompanham os cortes | "Marcar instantes e trechos com marcadores" |
+| Importar e exportar rótulos (arquivo `.txt`) | `markers_import` e `markers_export` (`dmaker markers import` e `dmaker markers export`): o `.txt` do Audacity entra e sai idêntico | "Marcar instantes e trechos com marcadores" |
+| Pôr um rótulo no ponto de reprodução e dividir em partes iguais | A tecla **M** no editor (ou `marker_add`) marca o cursor; `markers_regular` cria marcadores a cada N segundos ou em N partes | "Marcar instantes e trechos com marcadores" |
+
+### Aplicar efeitos de áudio em um item ou no master
+<!-- tarefa: efeitos-de-audio -->
+Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original.
+
+#### Quando usar
+
+O áudio de um clipe, uma narração, uma voz gravada, a música ou o vídeo todo precisa de um tratamento: subir ou descer o volume, deixar o pico num valor, tocar um trecho ao contrário, repetir uma vinheta.
+
+**Pedidos que levam a esta tarefa:**
+- "Sobe o volume da entrevista em 6 dB, sem deixar clipar"
+- "Normaliza a narração a -1 dB"
+- "Toca os 2 primeiros segundos da música de trás para a frente"
+- "Repete a vinheta duas vezes"
+- "Normaliza a mistura final a -3 dB"
+
+#### Antes de começar
+
+- O projeto (`name`) e o item: `timeline.N` (clipe), `overlays.N` (PiP), `audio.voiceover.N`, `audio.narration.N`, `audio.tracks.N`, `audio.music` ou `audio.master` (a mistura).
+- A **ordem conta**: normalizar depois de amplificar mede o som já amplificado.
+- O **Repetir** só vale em voz gravada e em música, onde o item pode crescer; nos outros a spec o recusa.
+- A normalização final de loudness continua valendo por cima do master.
+
+#### Pela IA
+
+Diga: "Sobe 6 dB a voz gravada da entrevista, sem clipar, e normaliza a mistura final a -3 dB." A IA consulta o catálogo (`audio_effects`), acrescenta os efeitos com `edit_project` (operação `audio_effect`: `add`, `remove`, `move`, `enable`, `disable` ou `set`) e confere com `validate_project`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_effects", "arguments": {}, "para": "ver os efeitos, os parâmetros e as faixas"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6, "prevent_clipping": true}}}, "para": "amplificar a voz gravada em 6 dB sem deixar clipar"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "audio_effect", "action": "add", "target": "audio.master", "effect": {"type": "normalize", "peak_db": -3}}}, "para": "normalizar a mistura inteira a -3 dBFS"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "entrevista"}, "para": "conferir a duração e os avisos"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, bloco **Efeitos de áudio**. Selecione o item na linha do tempo (clipe, faixa A2, narração **NAR**, voz gravada **VO**, música **MUS** ou PiP) e o bloco edita a cadeia dele; sem seleção, edita o **Master (mistura inteira)**. **+ Efeito** abre o catálogo; cada cartão tem o interruptor de ligar e desligar, os parâmetros, o **Intervalo** (início e fim em segundos) e o botão de remover. Arraste pela alça, ou use subir e descer, para mudar a ordem. Cada ação é um passo do **Desfazer**. A trilha **VO** mostra as vozes gravadas, com a duração nova do Repetir. A interface clássica não tem este bloco.
+
+#### Pela CLI
+
+```powershell
+dmaker audio effects
+dmaker audio effect add projects/entrevista/spec.json audio.voiceover.0 amplify --param gain_db=6 --param prevent_clipping=true
+dmaker audio effect add projects/entrevista/spec.json audio.master normalize --param peak_db=-3
+dmaker audio effect add projects/entrevista/spec.json audio.music reverse --start 0 --end 2
+dmaker audio effect disable projects/entrevista/spec.json audio.voiceover.0 0
+```
+
+`dmaker audio effects` lista o catálogo (`--json` para o formato das ferramentas). Além de `add` e `disable`, existem `enable`, `remove`, `move` e `set` (muda parâmetros); `add` aceita `--position`, `--start`, `--end` e `--disabled`.
+
+#### Como conferir
+
+Rode `dmaker validate` e olhe a duração: o Repetir numa voz gravada mostra o áudio com o tempo novo, e a trilha **VO** da linha do tempo (`timeline_view`) tem o item com o dobro do tamanho. Renderize com `dmaker render --preview` e `dmaker qa`, ou ouça a prévia da linha do tempo: ela usa a mesma cadeia do render. Para medir, amplificar 6 dB sobe o pico em 6,0 dB, e normalizar a -1 dBFS deixa o pico do item em -1,0 dBFS (com a tolerância de 0,1 dB).
+
+#### Se der errado
+
+- **"O efeito Repetir muda a duração do item e não vale aqui"**: o Repetir só vale em voz gravada (`audio.voiceover`) e em música (`audio.music`).
+- **Não ouvi diferença**: confira se o efeito está ligado (`enabled`), se o intervalo (`start`/`end`) cobre o trecho e se o item não está mudo.
+- **O Normalizar não fez nada**: o trecho é silêncio, ou o intervalo está fora do item.
+- **A primeira prévia ou o primeiro render demora**: o item é tratado uma vez e guardado em `cache/audio-fx` (uns 23 MB por minuto de estéreo); `dmaker clean` o apaga.
+
+---
+
 ## Tarefas de dublagem e modelos
 
 A dublagem troca a fala de um vídeo ou áudio por outro idioma, mantendo a música e o ruído de fundo. Ela junta várias peças que também existem sozinhas: separar a voz do fundo, transcrever, traduzir com o Ollama local, clonar a voz de quem fala e sintetizar. Precisa do extra `voice`, do Ollama no ar com o modelo de tradução (`gpt-oss:20b` por padrão; `DMAKER_TRANSLATE_MODEL` troca) e de bastante paciência na CPU: conte cerca de 20 s por segundo de fala sintetizada, mais a separação (3 a 6 vezes a duração, uma vez) e a tradução (minutos). Fora do escopo: sincronia labial.
@@ -2661,6 +2756,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-46 | Sons por assunto no vídeo explicativo: cada assunto aceita `sons` (uma lista de `{som, em, volume}` com os efeitos da biblioteca, `em` em segundos desde o começo do assunto), e o modelo os põe em `audio.sfx` no tempo do vídeo, com o som de entrada e um som no meio do assunto (o `ding` do contador); nome de som que não existe e `em` fora do assunto dão erro claro; `build_explainer_video` aceita o mesmo campo | "Fazer um vídeo explicativo" |
 | DMK-47 | O ducking dá o mesmo resultado em todo render: o mesmo projeto com música e ducking, renderizado de novo, sai com o mesmo áudio do começo ao fim (antes os últimos 0,15 s variavam de um render para outro); um projeto já renderizado muda só nesse fim, e só onde o render antigo tinha perdido o final da música | "Pôr a narração dentro de um vídeo" |
 | DMK-48 | O DMaker e o servidor MCP funcionam com o clone em qualquer pasta e em qualquer máquina (o `.mcp.json` não cita mais caminho nenhum e usa o `.venv` da pasta aberta); `dmaker --version` mostra a versão (`dmaker 2.0.0`); os modelos `casamento-pascom`, `pessoal-vlog-reel` e `reel-medlycare-depoimento` passam a pedir o arquivo de música, que não tem mais padrão | "MCP em outras ferramentas" e "Criar um projeto a partir de um modelo pronto" |
+| DMK-51 | Edição de áudio: qualquer item de áudio (o som do clipe, a voz gravada, a narração, a música, uma faixa externa, o áudio de um PiP) ou o master recebe uma cadeia ordenada de efeitos (`effects`, `audio.master_effects`) com intervalo opcional e botão de ligar e desligar: Amplificar (com a opção de não clipar), Normalizar, Inverter, Reverter e Repetir; o catálogo `audio_effects`, a operação `audio_effect` do `edit_project`, `dmaker audio effects` e `dmaker audio effect`, o bloco **Efeitos de áudio** do painel Filtros e a trilha **VO** da linha do tempo | "Aplicar efeitos de áudio em um item ou no master" |
 | DMK-59 | Trilha de marcadores: `markers` na spec (instante ou região, com texto, cor e grupo), a trilha **MK** no editor (**M** cria no cursor, arrastar, duplo clique para renomear, vírgula e ponto para pular, tudo no **Desfazer**), importar e exportar o `.txt` de rótulos do Audacity (a ida e volta devolve o mesmo arquivo), marcadores regulares (a cada N segundos ou em N partes), `"at": "marker:texto"` no `edit_project` e marcadores que acompanham cortes e aparas (o que estava no trecho cortado some, com aviso); `dmaker markers`, `markers_import`, `markers_export` e `markers_regular` | "Marcar instantes e trechos com marcadores" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
@@ -2675,7 +2771,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 80 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 87 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -2711,7 +2807,7 @@ São 80 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a ve
   - `--preset` TEXTO: (padrão instagram/reels)
   - `--variant` TEXTO: light | dark
   - `--out` CAMINHO
-- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor pede ao pipeline (cache/frames).
+- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com efeitos aplicados (cache/audio-fx) e os quadros que o editor pede ao pipeline (cache/frames).
   - `--jobs` / `--no-jobs`: Apaga também cache/jobs (grafos, ASS, áudio de transcrição).
 - **`dmaker cuts NAME`**: Lista o que o autocut removeu do projeto (tempo na gravação original e motivo).
 - **`dmaker doctor`**: Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet.
@@ -2802,8 +2898,10 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
 
 #### dmaker audio
 
-Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs.
+Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs, e a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, Repetir).
 
+- **`dmaker audio effects [EFFECT]`**: Lista os efeitos de áudio que a spec aceita em `effects` (e em `audio.master_effects`): o nome em português e no Audacity, o que faz e os parâmetros com unidade, faixa e padrão.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
 - **`dmaker audio isolate FILE`**: Separa a voz do fundo e grava `<nome>_voz` e `<nome>_fundo`. Lento na CPU (veja o fator no fim) e guardado em cache: repetir o mesmo trecho é instantâneo.
   - `--start` NÚMERO: Início do trecho, em segundos no arquivo.
   - `--end` NÚMERO: Fim do trecho, em segundos no arquivo.
@@ -2811,6 +2909,23 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
   - `--format` TEXTO: wav (sem perdas) ou mp3. (padrão wav)
   - `--stream` NÚMERO: Faixa de áudio do arquivo (0 é a primeira). (padrão 0)
   - `--device` TEXTO: auto | cpu | cuda (padrão auto)
+
+#### dmaker audio effect
+
+Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, desligar e ajustar.
+
+- **`dmaker audio effect add SPEC TARGET EFFECT`**: Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify -p gain_db=6).
+  - `--param` / `-p` TEXTO: Parâmetro do efeito, nome=valor (repetível). (pode repetir)
+  - `--start` NÚMERO: Início do intervalo, em segundos do item.
+  - `--end` NÚMERO: Fim do intervalo, em segundos do item.
+  - `--position` NÚMERO: Posição na cadeia (padrão: no fim).
+  - `--disabled` / `--no-disabled`: Adiciona já desligado.
+- **`dmaker audio effect disable SPEC TARGET INDEX`**: Desliga o efeito da posição `index` sem apagá-lo (o botão de bypass).
+- **`dmaker audio effect enable SPEC TARGET INDEX`**: Liga o efeito da posição `index`.
+- **`dmaker audio effect move SPEC TARGET INDEX TO`**: Muda a ordem da cadeia: o efeito de `index` vai para `to`.
+- **`dmaker audio effect remove SPEC TARGET INDEX`**: Tira o efeito da posição `index` da cadeia.
+- **`dmaker audio effect set SPEC TARGET INDEX`**: Muda os parâmetros do efeito da posição `index` (os que não forem citados ficam como estão).
+  - `--param` / `-p` TEXTO: Parâmetro a mudar, nome=valor (repetível). (pode repetir)
 
 #### dmaker batch
 
@@ -3108,7 +3223,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 67 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 68 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -3132,8 +3247,10 @@ São 67 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto).
 - **`validate_project`**: Confere arquivos, calcula a duração final e lista avisos (limites da plataforma, marca).
   Parâmetros: `name_or_path`\* (texto).
-- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed") e marker_add/marker_set/marker_remove (marcadores).
+- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove (marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}).
   Parâmetros: `name`\* (texto), `op`\* (objeto).
+- **`audio_effects`**: O catálogo dos efeitos de áudio que qualquer item de áudio (clipe, voz gravada, narração, música, faixa externa, PiP) ou o master recebe em uma cadeia ordenada (`effects` na spec): para cada efeito, o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos.
+  Parâmetros: `type` (texto).
 - **`timeline_view`**: Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, NAR narrações (duração real quando já sintetizadas, senão estimada), MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de cada item já calculado.
   Parâmetros: `name`\* (texto).
 - **`markers_import`**: Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK).
@@ -3251,7 +3368,7 @@ São 67 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 34 blocos e 328 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 39 blocos e 361 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -3277,6 +3394,19 @@ A raiz do `spec.json`.
 | `markers` | lista de `Marker` | vazio | Marcadores da trilha MK: instantes e regiões do vídeo final, com texto, cor e grupo; acompanham os cortes. |
 | `base_dir` | texto | nenhum | Pasta de onde partem os caminhos relativos (preenchida ao carregar o projeto). |
 
+#### Amplify
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"amplify"` | `amplify` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `gain_db` | número, de -100 a 100 | 0.0 |  |
+| `prevent_clipping` | sim ou não | não |  |
+
 #### AudioSettings
 
 Usado em `Project.audio`.
@@ -3292,6 +3422,7 @@ Usado em `Project.audio`.
 | `normalize` | `"two-pass"` ou `"fast"` ou `"off"` | `two-pass` | `two-pass` mede e ajusta em duas passadas (padrão das redes); `fast` numa só; `off` desliga. |
 | `target_lufs` | número, de -30 a -5 | -14 | Loudness alvo da normalização, em LUFS. |
 | `mute_clips` | sim ou não | não | Silencia o áudio dos clipes; a música e a narração ficam. |
+| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
 
 #### AudioTrack
 
@@ -3301,6 +3432,7 @@ Usado em `AudioSettings.tracks`.
 | --- | --- | --- | --- |
 | `source` | texto | obrigatório | Nome da fonte em `sources`. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume da faixa. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### AudiogramOverlay
 
@@ -3425,6 +3557,7 @@ Usado em `Project.timeline`.
 | `matte` | `Matte` | nenhum | Troca o fundo atrás da pessoa por uma cor lisa, sem chroma key. |
 | `audio_mode` | `"original"` ou `"voice"` ou `"background"` | `original` | `original`, `voice` (só a voz, limpa de música e ruído) ou `background` (só o fundo). |
 | `audio_fade` | número, de 0 a 0.5 | 0.0 | Fade de áudio nas duas pontas, sem escurecer a imagem; tira o estalo de um corte seco. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### ColorAdjust
 
@@ -3521,6 +3654,17 @@ Usado em `Project.timeline`.
 | `motion` | `"none"` ou `"zoom-in"` ou `"zoom-out"` ou `"pan-left"` ou `"pan-right"` | `zoom-in` | Movimento de câmera sobre a imagem (zoom ou deslocamento). |
 | `motion_amount` | número, de 0 a 0.6 | 0.12 | Intensidade do movimento (0,04 a 0,15 fica elegante). |
 
+#### Invert
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"invert"` | `invert` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+
 #### Marker
 
 Usado em `Project.markers`.
@@ -3592,6 +3736,7 @@ Usado em `AudioSettings.music`.
 | `duck_threshold` | número, maior que 0, até 1 | 0.02 | Nível da voz a partir do qual a música abaixa. |
 | `duck_ratio` | número, de 1 a 20 | 6 | Quanto a música abaixa quando há voz. |
 | `duck_release` | número, de 10 a 5000 | 350 | Tempo para a música voltar ao volume, em milissegundos. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### MusicSpan
 
@@ -3622,6 +3767,21 @@ Usado em `AudioSettings.narration`.
 | `speed` | número, de 0.5 a 2 | 1.0 | Velocidade da fala (1 normal). |
 | `language` | texto | `pt` | Idioma da fala. |
 | `seed` | inteiro | nenhum | Semente: a mesma semente repete a mesma fala. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+
+#### Normalize
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"normalize"` | `normalize` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `peak_db` | número, de -100 a 0 | -1.0 |  |
+| `remove_dc` | sim ou não | sim |  |
+| `stereo_independent` | sim ou não | não |  |
 
 #### Output
 
@@ -3686,6 +3846,29 @@ Usado em `Project.regions`.
 | `y` | número, entre 0 e 1, sem os extremos | obrigatório | Centro da região na vertical, de 0 a 1. |
 | `width` | número, maior que 0, até 1 | obrigatório | Largura, em fração do quadro. |
 | `height` | número, maior que 0, até 1 | obrigatório | Altura, em fração do quadro. |
+
+#### Repeat
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"repeat"` | `repeat` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `times` | inteiro, de 1 a 100 | 2 |  |
+
+#### Reverse
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"reverse"` | `reverse` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
 
 #### SfxCue
 
@@ -3803,6 +3986,7 @@ Usado em `Project.overlays`.
 | `opacity` | número, de 0 a 1 | 1.0 | Opacidade: 1 sólido. |
 | `margin` | número, mínimo 0 | 40 | Margem da borda, em px na base 1080. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio do vídeo (0 deixa mudo). |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `animation` | `"none"` ou `"fade"` ou `"slide"` | `fade` | Como entra: `fade`, `slide` ou `none`. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
@@ -3818,6 +4002,7 @@ Usado em `AudioSettings.voiceover`.
 | `offset` | número, mínimo 0 | 0.0 | Ponto de entrada no arquivo, em segundos. |
 | `end` | número, mínimo 0 | nenhum | Ponto de saída no arquivo, em segundos; vazio vai até o fim dele. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 <!-- dmaker:fim-gerado spec -->
 

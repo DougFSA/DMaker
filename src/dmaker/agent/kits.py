@@ -54,6 +54,7 @@ KITS: tuple[Kit, ...] = (
             "get_project",
             "validate_project",
             "edit_project",
+            "audio_effects",
             "timeline_view",
             "render_project",
             "export_project",
@@ -62,6 +63,9 @@ KITS: tuple[Kit, ...] = (
             "brands",
         ),
         keywords=(
+            "efeito de audio",
+            "amplific",
+            "normaliz",
             "reel",
             "short",
             "story",

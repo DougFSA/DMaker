@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* A linha do tempo multitrilha: régua, trilhas (V1, V2+, TX, GR, A1, A2+, NAR, MUS e CC) e o cursor. Mostra a vista
+/* A linha do tempo multitrilha: régua, trilhas (V1, V2+, TX, GR, A1, A2+, NAR, VO, MUS e CC) e o cursor. Mostra a vista
    do store do editor e devolve a intenção da pessoa: clicar seleciona, arrastar muda de ordem ou desloca, puxar a
    borda apara, clicar na régua leva o cursor. Toda mudança passa por `editor.applyOp`, e arrastar ou aparar grava o
    projeto ao soltar. O mouse é tratado por delegação (um só ouvinte para todos os itens) e só os itens da janela
@@ -422,6 +422,7 @@ onBeforeUnmount(() => {
   --tl-track: #24555a;
   --tl-music: #245a4e;
   --tl-narration: #6b3f73;
+  --tl-voiceover: #8a3f5a;
   --tl-captions: #555a5e;
   --tl-progress: #3a3f44;
   --tl-other: #1f5c63;

@@ -43,6 +43,9 @@ PROXY_DIR = CACHE_DIR / "proxy"
 PREVIEW_AUDIO_DIR = (
     CACHE_DIR / "preview-audio"
 )  # som da prévia da linha do tempo: pedaços por trecho e a mixagem
+AUDIO_FX_DIR = (
+    CACHE_DIR / "audio-fx"
+)  # itens de áudio já com a cadeia de efeitos aplicada (WAV float), compartilhados por render e prévia
 FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
@@ -77,6 +80,7 @@ def ensure_dirs() -> None:
         MEZ_DIR,
         PROXY_DIR,
         PREVIEW_AUDIO_DIR,
+        AUDIO_FX_DIR,
         FRAMES_DIR,
         WAVEFORM_DIR,
         JOBS_DIR,

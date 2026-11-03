@@ -37,6 +37,10 @@
 - [Trocar a voz de uma gravação inteira](trocar-voz.md): Troca o timbre de quem fala por uma voz da biblioteca, mantendo as palavras, o ritmo, as pausas, a entonação e o fundo.
 - [Verificar se um áudio foi gerado pelo DMaker](verificar-audio.md): Diz se um arquivo de áudio ou vídeo tem voz gerada por IA pelo DMaker, lendo a etiqueta de procedência e, sem ela, a marca d'água inaudível do áudio.
 
+## Edição de áudio
+
+- [Aplicar efeitos de áudio em um item ou no master](efeitos-de-audio.md): Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original.
+
 ## Tarefas de dublagem e modelos
 
 - [Dublar um vídeo para outro idioma](dublar.md): Traduz a fala de um vídeo ou áudio e a refaz, com a voz clonada de quem fala, no idioma escolhido, mantendo o fundo; você revisa a tradução antes de gerar.
