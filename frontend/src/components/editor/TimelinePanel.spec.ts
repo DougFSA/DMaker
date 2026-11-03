@@ -466,6 +466,106 @@ describe('arrastar e aparar', () => {
   })
 })
 
+describe('o gesto direto grava ao soltar', () => {
+  /** A resposta de `/edit` com o trecho do texto deslocado: a spec que o gesto deixa na tela. */
+  function movedSpec() {
+    const spec = projectSpec()
+    ;(spec.overlays as Array<Record<string, unknown>>)[0] = { type: 'text', text: 'Olá', role: 'title', start: 2, end: 5 }
+    return spec
+  }
+  const saves = () => opened.fetch.to('PUT /api/projects/demo')
+
+  async function dragOverlay(clientX = 300, moveTo = 420) {
+    await item('V2-0').trigger('mousedown', { button: 0, clientX })
+    mouse(document, 'mousemove', moveTo)
+    mouse(document, 'mouseup', moveTo)
+    await flushPromises()
+  }
+
+  it('arrastar um bloco aplica a operação e grava o projeto com a revisão lida, sem o aviso de "salvo"', async () => {
+    await mountTimeline(fullView(), { 'POST /api/projects/demo/edit': () => ({ spec: movedSpec(), timeline: currentView }) })
+    await dragOverlay()
+    expect(edits()).toHaveLength(1)
+    expect(saves()).toHaveLength(1)
+    expect(saves()[0]?.headers['If-Match']).toBe('rev-1')
+    expect(saves()[0]?.body).toMatchObject({ overlays: [{ type: 'text', start: 2, end: 5 }] })
+    expect(opened.store.dirty).toBe(false)
+    expect(useToastsStore().items).toEqual([])
+  })
+
+  it('puxar a borda de um bloco também grava', async () => {
+    await mountTimeline(fullView(), { 'POST /api/projects/demo/edit': () => ({ spec: movedSpec(), timeline: currentView }) })
+    await item('TX-0').find('[data-handle="in"]').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 360)
+    mouse(document, 'mouseup', 360)
+    await flushPromises()
+    expect(saves()).toHaveLength(1)
+  })
+
+  it('o bloco da HTML arrasta como os outros', async () => {
+    const view = fullView()
+    view.tracks = view.tracks.map((track) =>
+      track.id === 'GR'
+        ? { ...track, items: [...track.items, timelineItem(3, { id: 'GR-3', kind: 'html', start: 1, end: 5, label: 'card.html' })] }
+        : track,
+    )
+    await mountTimeline(view, { 'POST /api/projects/demo/edit': () => ({ spec: movedSpec(), timeline: currentView }) })
+    expect(item('GR-3').attributes('data-draggable')).toBe('1')
+    expect(item('GR-3').findAll('[data-handle]')).toHaveLength(2)
+    await item('GR-3').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 420)
+    mouse(document, 'mouseup', 420)
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'overlay_span', index: 3, start: 3, end: 7 } })
+    expect(saves()).toHaveLength(1)
+  })
+
+  it('um clique parado só seleciona: não edita, não grava e não cria passo no desfazer', async () => {
+    await mountTimeline()
+    await item('V2-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 301)
+    mouse(document, 'mouseup', 301)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(saves()).toHaveLength(0)
+    expect(opened.store.canUndo).toBe(false)
+    expect(opened.store.gesturing).toBe(false)
+  })
+
+  it('durante o arrasto o disco não é consultado, e ao soltar ele volta a ser', async () => {
+    await mountTimeline(fullView(), { 'POST /api/projects/demo/edit': () => ({ spec: movedSpec(), timeline: currentView }) })
+    await item('V2-0').trigger('mousedown', { button: 0, clientX: 300 })
+    expect(opened.store.gesturing).toBe(false)
+    mouse(document, 'mousemove', 420)
+    expect(opened.store.gesturing).toBe(true)
+    await opened.store.checkDisk()
+    expect(opened.fetch.to('GET /api/projects/demo/revision')).toHaveLength(0)
+    mouse(document, 'mouseup', 420)
+    await flushPromises()
+    expect(opened.store.gesturing).toBe(false)
+  })
+
+  it('se a gravação leva 409, a faixa de escolha abre e o gesto fica na tela como "não salvo"', async () => {
+    await mountTimeline(fullView(), {
+      'POST /api/projects/demo/edit': () => ({ spec: movedSpec(), timeline: currentView }),
+      'PUT /api/projects/demo': () => reply(409, { detail: 'O projeto mudou no disco.', revision: 'rev-2' }),
+    })
+    await dragOverlay()
+    expect(saves()).toHaveLength(1)
+    expect(opened.store.conflict).toEqual({ revision: 'rev-2' })
+    expect(opened.store.dirty).toBe(true)
+    // nenhum outro erro por cima da faixa
+    expect(useToastsStore().items).toEqual([])
+  })
+
+  it('a operação que falha não grava nada', async () => {
+    await mountTimeline(fullView(), { 'POST /api/projects/demo/edit': () => reply(422, { detail: 'índice inválido' }) })
+    await dragOverlay()
+    expect(saves()).toHaveLength(0)
+    expect(opened.store.gesturing).toBe(false)
+  })
+})
+
 describe('mudo, ocultar e bloqueio', () => {
   it('o botão M do cabeçalho manda mudar o campo da trilha', async () => {
     await mountTimeline()

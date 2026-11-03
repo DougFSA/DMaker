@@ -39,6 +39,16 @@ describe('cliente do editor: projeto, legendas e linha do tempo', () => {
     expect(fetch.last().body).toEqual({ spec: { name: 'a', overlays: [] } })
   })
 
+  it('pede o quadro real de um instante (da edição na tela ou do arquivo) e consulta a chave', async () => {
+    const fetch = stubFetch({ key: '0123456789abcdef', status: 'pending', t: 1.5, notes: [] })
+    await editorApi.frame.request('meu projeto', { name: 'meu projeto' }, 1.5)
+    expect(fetch.last()).toMatchObject({ url: '/api/projects/meu%20projeto/frame', method: 'POST', body: { spec: { name: 'meu projeto' }, t: 1.5 } })
+    await editorApi.frame.request('a', null, 0)
+    expect(fetch.last().body).toEqual({ spec: null, t: 0 })
+    await editorApi.frame.get('meu projeto', '0123456789abcdef')
+    expect(fetch.last()).toMatchObject({ url: '/api/projects/meu%20projeto/frame/0123456789abcdef', method: 'GET' })
+  })
+
   it('lê e grava as legendas', async () => {
     const fetch = stubFetch({})
     await editorApi.captions.get('a')

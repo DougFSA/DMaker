@@ -301,6 +301,46 @@ describe('transporte', () => {
     expect(panel.find('[data-layer="safe-zone"]').exists()).toBe(true)
   })
 
+  it('o botão "Ver o quadro real" pede o quadro do cursor, mostra que está apertado e volta à prévia ao ser apertado de novo', async () => {
+    const key = '0123456789abcdef'
+    const panel = await mountPlayer({
+      'POST /api/projects/demo/frame': { key, status: 'ready', t: 2.0333, notes: ['Sem legenda automática.'], url: '/api/file?path=q.png' },
+    })
+    opened.store.setPlayhead(2.03)
+    await flushPromises()
+    const button = () => panel.find('button[aria-pressed]:not([aria-label])')
+    expect(button().text()).toBe('Ver o quadro real')
+    expect(button().attributes('aria-pressed')).toBe('false')
+    await button().trigger('click')
+    await flushPromises()
+    expect(opened.fetch.to('POST /api/projects/demo/frame')[0]?.body).toMatchObject({ t: 2.03 })
+    expect(button().attributes('aria-pressed')).toBe('true')
+    expect(panel.find('[data-layer="real-frame"]').attributes('src')).toBe('/api/file?path=q.png')
+    expect(panel.text()).toContain('Quadro real em 00:00:02:01')
+    expect(panel.text()).toContain('Sem legenda automática.')
+    await button().trigger('click')
+    expect(button().attributes('aria-pressed')).toBe('false')
+    expect(panel.find('[data-layer="real-frame"]').exists()).toBe(false)
+  })
+
+  it('o quadro pendente deixa o botão ocupado, e mover o cursor volta à prévia aproximada', async () => {
+    const key = '0123456789abcdef'
+    const panel = await mountPlayer({
+      'POST /api/projects/demo/frame': { key, status: 'pending', t: 0, notes: [], label: 'Montando o trecho', percent: 20 },
+      [`GET /api/projects/demo/frame/${key}`]: { key, status: 'pending', t: 0, notes: [], label: 'Montando o trecho', percent: 60 },
+    })
+    const button = () => panel.find('button[aria-pressed]:not([aria-label])')
+    await button().trigger('click')
+    await flushPromises()
+    expect(button().attributes('aria-busy')).toBe('true')
+    expect(panel.text()).toContain('Gerando o quadro real: Montando o trecho (20%)')
+    opened.store.setPlayhead(1)
+    await flushPromises()
+    expect(button().attributes('aria-busy')).toBeUndefined()
+    expect(button().attributes('aria-pressed')).toBe('false')
+    expect(panel.text()).not.toContain('Gerando o quadro real')
+  })
+
   it('fechar o painel para o relógio e solta os áudios', async () => {
     await mountPlayer()
     usePlayerStore().play()

@@ -3,20 +3,26 @@
    barra de progresso, vídeos sobrepostos, texto). Todo `<video>` daqui é mudo: o som é de um `<audio>` só, preso ao
    mesmo relógio (ver `PlayerPanel`). Trecho ou sobreposição de arquivo ausente aparece marcado "fonte não encontrada".
    Texto, imagem e PiP ficam nas caixas que o servidor calcula; por cima vão a zona segura (se ligada) e uma caixa
-   clicável por sobreposição ativa, que a escolhe no inspetor. Os gestos de arrastar e redimensionar entram nesta
-   camada de caixas. */
+   por sobreposição ativa. Clicar na caixa a escolhe no inspetor; arrastar o corpo move, e as alças redimensionam
+   (`useStageGesture`). Quando o quadro real do cursor chega, ele cobre a composição aproximada. */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { BoxLayout } from '@/api'
+import { useStageGesture } from '@/composables/useStageGesture'
 import { boxRectStyle, safeZoneStyles, sidesText, stageBoxes, type StageBox } from '@/lib/overlayBoxes'
+import { handleFrame, handlesOf, type Handle } from '@/lib/overlayGesture'
+import { formatTimecode } from '@/lib/player'
 import { syncVideo } from '@/lib/playerEngine'
 import { stageLayers, type PipLayer, type StageLayers } from '@/lib/playerStage'
 import { baseName } from '@/lib/format'
 import { useEditorStore } from '@/stores/editor'
 import { usePlayerStore } from '@/stores/player'
 import { usePlayerMediaStore } from '@/stores/playerMedia'
+import { useRealFrameStore } from '@/stores/realFrame'
 
 const editor = useEditorStore()
 const player = usePlayerStore()
 const media = usePlayerMediaStore()
+const realFrame = useRealFrameStore()
 
 /** Do topo do quadro para baixo (fração), a caixa que começa antes disto leva o rótulo por dentro, senão ele sairia do palco. */
 const LABEL_OUTSIDE_MIN_TOP = 0.05
@@ -26,15 +32,25 @@ const videos = new Map<string, HTMLVideoElement>()
 // endereços que o navegador não conseguiu abrir (HEVC, por exemplo): enquanto o proxy não chega, não adianta tocar
 const failed = ref(new Set<string>())
 
+const gesture = useStageGesture(stage)
+
+/** As caixas do servidor com a do gesto no lugar onde o gesto a deixou: o contorno, o texto, a imagem e o PiP a seguem. */
+const liveLayout = computed<BoxLayout | null>(() => {
+  const layout = editor.boxes
+  const current = gesture.live.value
+  if (!layout || !current) return layout
+  return { ...layout, boxes: layout.boxes.map((box) => (box.index === current.index ? current.box : box)) }
+})
+
 const layers = computed<StageLayers | null>(() => {
   const view = editor.view
   const spec = editor.spec
   if (!view || !spec) return null
-  return stageLayers(editor.playhead, { view, spec, theme: media.theme, proxyUrls: media.proxyUrls, boxes: editor.boxes })
+  return stageLayers(editor.playhead, { view, spec, theme: media.theme, proxyUrls: media.proxyUrls, boxes: liveLayout.value })
 })
 
 /** As caixas das sobreposições que estão na tela neste instante. */
-const boxes = computed<StageBox[]>(() => stageBoxes(editor.playhead, editor.view, editor.boxes))
+const boxes = computed<StageBox[]>(() => stageBoxes(editor.playhead, editor.view, liveLayout.value))
 
 /** As margens da zona segura do formato, quando o botão do player a liga. */
 const safeZone = computed(() => (player.safeZoneShown && editor.boxes ? safeZoneStyles(editor.boxes.safe_zone) : null))
@@ -48,6 +64,7 @@ function boxClasses(entry: StageBox): Array<string | Record<string, boolean>> {
       'box--selected': editor.selectedOverlay === box.index,
       'box--warn': box.outside_safe_zone.length > 0,
       'box--locked': !box.movable,
+      'box--dragging': gesture.live.value?.index === box.index,
       // o rótulo fica acima da caixa para não cobrir o conteúdo; colada no topo do quadro, ele passa para dentro
       'box--label-in': box.top < LABEL_OUTSIDE_MIN_TOP,
     },
@@ -64,8 +81,50 @@ function boxName(entry: StageBox): string {
 }
 
 function chooseBox(entry: StageBox): void {
+  // o clique que fecha um arrasto não escolhe nada de novo: a caixa já está escolhida, e o inspetor não precisa pular
+  if (gesture.consumeClick()) return
   editor.selectOverlay(entry.box.index, { reveal: true })
 }
+
+/** Só o corpo da caixa solta aceita o mouse para mover; a presa fica quieta e mostra o motivo no `title`. */
+function startMove(event: MouseEvent, entry: StageBox): void {
+  gesture.begin(event, entry.box, null)
+}
+
+function startResize(event: MouseEvent, entry: StageBox, handle: Handle): void {
+  gesture.begin(event, entry.box, handle)
+}
+
+/** A caixa escolhida, as alças que ela tem e o retângulo onde elas ficam (no texto, a área da quebra). */
+const handled = computed(() => {
+  const index = editor.selectedOverlay
+  if (index === null) return null
+  const entry = boxes.value.find((candidate) => candidate.box.index === index)
+  const handles = entry ? handlesOf(entry.box) : []
+  return entry && handles.length > 0 ? { entry, handles, frame: handleFrame(entry.box) } : null
+})
+
+const HANDLE_TITLE: Record<string, string> = {
+  text: 'Arraste para mudar a largura do texto',
+  image: 'Arraste para mudar o tamanho',
+  video: 'Arraste para mudar o tamanho',
+  html: 'Arraste para mudar a área',
+}
+
+const guides = computed(() => gesture.live.value?.guides ?? { x: null, y: null })
+
+const pct = (fraction: number) => `${(fraction * 100).toFixed(4)}%`
+
+/** As linhas sob o palco: o andamento do quadro real e os avisos do último gesto. */
+const fps = computed(() => editor.view?.fps || 30)
+const frameStatus = computed(() => {
+  if (realFrame.state === 'pending') {
+    return `Gerando o quadro real: ${realFrame.label || 'preparando'}${realFrame.percent > 0 ? ` (${realFrame.percent}%)` : ''}`
+  }
+  if (realFrame.state === 'ready') return `Quadro real em ${formatTimecode(realFrame.at ?? editor.playhead, fps.value)}`
+  if (realFrame.state === 'error') return `Não foi possível gerar o quadro real: ${realFrame.error}`
+  return ''
+})
 
 const ratio = computed(() => {
   const view = editor.view
@@ -129,7 +188,11 @@ onMounted(() => {
     observer.observe(stage.value)
   }
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  // sem o palco ninguém lê o quadro real: as consultas pendentes param
+  realFrame.invalidate()
+})
 
 function pipKey(pip: PipLayer): string {
   return `pip:${pip.id}`
@@ -137,7 +200,8 @@ function pipKey(pip: PipLayer): string {
 </script>
 
 <template>
-  <div class="stage-wrap">
+  <div class="stage-area">
+    <div class="stage-wrap">
     <div
       ref="stage"
       class="stage"
@@ -203,6 +267,15 @@ function pipKey(pip: PipLayer): string {
           </div>
         </div>
 
+        <img
+          v-if="realFrame.state === 'ready'"
+          class="real-frame"
+          data-layer="real-frame"
+          :src="realFrame.url"
+          alt="Quadro real do render neste instante"
+          draggable="false"
+        />
+
         <div v-if="safeZone" class="layer layer--safe" data-layer="safe-zone" aria-hidden="true">
           <div class="safe safe--band" :style="safeZone.top" />
           <div class="safe safe--band" :style="safeZone.bottom" />
@@ -222,22 +295,99 @@ function pipKey(pip: PipLayer): string {
             :aria-label="boxName(entry)"
             :aria-pressed="editor.selectedOverlay === entry.box.index"
             :title="entry.box.locked_reason ?? boxName(entry)"
+            @mousedown="startMove($event, entry)"
             @click="chooseBox(entry)"
           >
             <span class="box__label">{{ entry.label }}</span>
           </button>
+
+          <div
+            v-if="handled"
+            :class="['frame', { 'frame--wrap': handled.entry.box.kind === 'text' }]"
+            :style="boxRectStyle(handled.frame)"
+            :data-handles-of="handled.entry.box.index"
+          >
+            <span
+              v-for="handle in handled.handles"
+              :key="handle"
+              :class="['handle', `handle--${handle}`]"
+              :data-handle="handle"
+              :title="HANDLE_TITLE[handled.entry.box.kind]"
+              @mousedown="startResize($event, handled.entry, handle)"
+            />
+          </div>
+
+          <div v-if="guides.x !== null" class="guide guide--x" data-guide="x" :style="{ left: pct(guides.x) }" />
+          <div v-if="guides.y !== null" class="guide guide--y" data-guide="y" :style="{ top: pct(guides.y) }" />
         </div>
       </template>
+    </div>
+    </div>
+
+    <div v-if="frameStatus || gesture.notices.value.length > 0" class="stage-status" role="status">
+      <p v-if="frameStatus" :class="['stage-status__line', { 'stage-status__line--error': realFrame.state === 'error' }]" data-status="real-frame">
+        <span>{{ frameStatus }}</span>
+        <button v-if="realFrame.state === 'ready'" type="button" class="stage-status__close" @click="realFrame.invalidate()">
+          Voltar à prévia aproximada
+        </button>
+      </p>
+      <template v-if="realFrame.state === 'ready'">
+        <p v-for="note in realFrame.notes" :key="note" class="stage-status__line stage-status__line--note" data-status="real-frame-note">{{ note }}</p>
+      </template>
+      <p v-for="notice in gesture.notices.value" :key="notice" class="stage-status__line stage-status__line--warn" data-status="notice">
+        {{ notice }}
+      </p>
     </div>
   </div>
 </template>
 
 <style scoped>
+.stage-area {
+  background: var(--color-bg-soft);
+}
+
 .stage-wrap {
   display: flex;
   justify-content: center;
   padding: var(--space-3);
-  background: var(--color-bg-soft);
+}
+
+/* o que está embaixo do palco: o andamento do quadro real e os avisos do último gesto */
+.stage-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.stage-status__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--color-text-soft);
+  overflow-wrap: anywhere;
+}
+
+.stage-status__line--note {
+  color: var(--color-text-muted);
+}
+
+.stage-status__line--warn,
+.stage-status__line--error {
+  color: var(--color-warning);
+}
+
+.stage-status__close {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .stage {
@@ -366,7 +516,7 @@ function pipKey(pip: PipLayer): string {
   background: transparent;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.5);
   color: #fff;
-  cursor: pointer;
+  cursor: move;
   pointer-events: auto;
 }
 
@@ -397,8 +547,117 @@ function pipKey(pip: PipLayer): string {
   border: 2px solid var(--color-accent);
 }
 
+/* a caixa em gesto fica por cima das outras e segura o cursor de arrasto */
+.box--dragging {
+  z-index: 3;
+  cursor: grabbing;
+}
+
 .box--selected.box--warn {
   border-color: #f2c14e;
+}
+
+/* o quadro que o pipeline de verdade renderizou cobre a composição aproximada; o mouse passa direto para as caixas */
+.real-frame {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* as alças da caixa escolhida: o retângulo delas só desenha o contorno, e cada alça aceita o mouse */
+.frame {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* no texto o retângulo é a área da quebra, que costuma ser mais larga que o bloco escrito */
+.frame--wrap {
+  border: 1px dotted rgb(255 255 255 / 0.8);
+}
+
+.handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(0 0 0 / 0.7);
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+.handle--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.handle--n {
+  top: 0;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.handle--ne {
+  top: 0;
+  left: 100%;
+  cursor: nesw-resize;
+}
+
+.handle--e {
+  top: 50%;
+  left: 100%;
+  cursor: ew-resize;
+}
+
+.handle--se {
+  top: 100%;
+  left: 100%;
+  cursor: nwse-resize;
+}
+
+.handle--s {
+  top: 100%;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.handle--sw {
+  top: 100%;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.handle--w {
+  top: 50%;
+  left: 0;
+  cursor: ew-resize;
+}
+
+/* a linha-guia do ímã: aparece enquanto a caixa está presa ao centro, a uma borda do quadro ou a uma margem da zona segura */
+.guide {
+  position: absolute;
+  z-index: 4;
+  background: #ff4fa3;
+  pointer-events: none;
+}
+
+.guide--x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.guide--y {
+  left: 0;
+  right: 0;
+  height: 1px;
 }
 
 .box__label {

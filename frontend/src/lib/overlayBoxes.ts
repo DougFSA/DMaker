@@ -66,8 +66,9 @@ export function boxActiveAt(box: OverlayBox, t: number, total: number): boolean 
   return t >= box.start && t < (box.end ?? total)
 }
 
-/** O tamanho e o lugar da caixa em % do palco, que tem a mesma proporção do quadro. */
-export function boxRectStyle(box: PlacedBox): CssStyle {
+/** O tamanho e o lugar de um retângulo (a caixa, ou a área da quebra do texto) em % do palco, que tem a mesma
+ * proporção do quadro. */
+export function boxRectStyle(box: Pick<PlacedBox, 'left' | 'top' | 'width' | 'height'>): CssStyle {
   return {
     left: `${(box.left * 100).toFixed(4)}%`,
     top: `${(box.top * 100).toFixed(4)}%`,

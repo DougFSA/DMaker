@@ -1,22 +1,26 @@
 <script setup lang="ts">
 /* O transporte do player: ir ao início e ao fim, andar quadro a quadro, tocar e pausar, voltar (J), parar (K) e
-   avançar (L) com velocidade que dobra, o timecode HH:MM:SS:QQ, o volume e o botão da zona segura. Só chama o store
-   do player; o relógio é dele. */
+   avançar (L) com velocidade que dobra, o timecode HH:MM:SS:QQ, o volume, o botão da zona segura e o do quadro real.
+   Só chama os stores do player e do quadro real; o relógio é do primeiro. */
 import { computed } from 'vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppSlider from '@/components/ui/AppSlider.vue'
 import { formatTimecode } from '@/lib/player'
 import { useEditorStore } from '@/stores/editor'
 import { usePlayerStore } from '@/stores/player'
+import { useRealFrameStore } from '@/stores/realFrame'
 import TransportIcon from './TransportIcon.vue'
 
 const editor = useEditorStore()
 const player = usePlayerStore()
+const realFrame = useRealFrameStore()
 
 const fps = computed(() => editor.view?.fps || 30)
 const timecode = computed(() => formatTimecode(editor.playhead, fps.value))
 const duration = computed(() => formatTimecode(editor.total, fps.value))
 const ready = computed(() => !!editor.view && editor.total > 0)
+/** O quadro real está na tela ou a caminho: o botão fica apertado. */
+const realFrameShown = computed(() => realFrame.state === 'ready' || realFrame.state === 'pending')
 
 const volume = computed({
   get: () => player.volume,
@@ -89,6 +93,18 @@ function volumeText(value: number): string {
       @click="player.setSafeZoneShown(!player.safeZoneShown)"
     >
       <TransportIcon name="safe-zone" />
+    </AppButton>
+
+    <AppButton
+      size="sm"
+      :variant="realFrameShown ? 'primary' : 'ghost'"
+      :loading="realFrame.state === 'pending'"
+      :disabled="!ready"
+      :aria-pressed="realFrameShown"
+      title="Mostra o quadro deste instante como o render vai desenhá-lo (leva alguns segundos)"
+      @click="realFrame.toggle()"
+    >
+      Ver o quadro real
     </AppButton>
   </div>
 </template>

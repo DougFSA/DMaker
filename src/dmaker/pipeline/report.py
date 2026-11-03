@@ -323,6 +323,16 @@ def check_text_pacing(project: Project, layout: ProjectLayout) -> list[Finding]:
     return findings
 
 
+def _text_place(ov: TextOverlay) -> tuple:
+    """Onde o texto cai, o bastante para saber se dois se sobrepõem: a região, ou o `x`/`y` explícitos (a 1% do
+    quadro), ou a posição nomeada (a do papel quando o texto não diz nenhuma). Comparar só a `position` dava aviso
+    falso para dois textos que o editor pôs em lugares diferentes por `x`/`y`, caso em que a `position` nem existe."""
+    if ov.region:
+        return ("region", ov.region)
+    vertical = round(ov.y, 2) if ov.y is not None else (ov.position or ROLE_DEFAULTS[ov.role]["position"])
+    return (round(ov.x, 2) if ov.x is not None else None, vertical)
+
+
 def check_overlap(project: Project, layout: ProjectLayout) -> list[Finding]:
     """sobreposições fora da duração final ou textos no mesmo lugar e no mesmo instante"""
     findings: list[Finding] = []
@@ -352,13 +362,13 @@ def check_overlap(project: Project, layout: ProjectLayout) -> list[Finding]:
     for a in range(len(texts)):
         i, ov1 = texts[a]
         end1 = min(ov1.end if ov1.end is not None else total, total)
-        pos1 = ov1.position or ROLE_DEFAULTS[ov1.role]["position"]
+        place1 = _text_place(ov1)
         for b in range(a + 1, len(texts)):
             j, ov2 = texts[b]
             end2 = min(ov2.end if ov2.end is not None else total, total)
-            pos2 = ov2.position or ROLE_DEFAULTS[ov2.role]["position"]
+            place2 = _text_place(ov2)
             overlap = min(end1, end2) - max(ov1.start, ov2.start)
-            if overlap > 0.05 and ov1.role == ov2.role and pos1 == pos2:
+            if overlap > 0.05 and ov1.role == ov2.role and place1 == place2:
                 findings.append(
                     Finding(
                         "aviso",

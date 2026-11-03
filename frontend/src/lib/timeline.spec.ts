@@ -141,6 +141,8 @@ describe('o que cada item permite', () => {
     expect(isDraggable('V12', { kind: 'video' })).toBe(true)
     expect(isDraggable('TX', { kind: 'text' })).toBe(true)
     expect(isDraggable('GR', { kind: 'image' })).toBe(true)
+    // a composição HTML arrasta como as outras sobreposições
+    expect(isDraggable('GR', { kind: 'html' })).toBe(true)
     expect(isDraggable('GR', { kind: 'progress-bar' })).toBe(false)
     expect(isDraggable('NAR', { kind: 'narration' })).toBe(true)
     for (const id of ['A1', 'A2', 'MUS', 'CC']) expect(isDraggable(id, { kind: 'x' }), id).toBe(false)
@@ -153,8 +155,10 @@ describe('o que cada item permite', () => {
     expect(hasTrimHandles('MUS', { kind: 'music' })).toBe(false)
   })
 
-  it('sobreposição é o que vive em overlays: texto, imagem do GR e as trilhas V2 em diante', () => {
+  it('sobreposição é o que vive em overlays: texto, imagem e HTML do GR e as trilhas V2 em diante', () => {
     expect(isOverlayTrack('TX', { kind: 'text' })).toBe(true)
+    expect(isOverlayTrack('GR', { kind: 'html' })).toBe(true)
+    expect(hasTrimHandles('GR', { kind: 'html' })).toBe(true)
     expect(isOverlayTrack('V3', { kind: 'video' })).toBe(true)
     expect(isOverlayTrack('V1', { kind: 'clip' })).toBe(false)
     expect(isOverlayTrack('GR', { kind: 'progress-bar' })).toBe(false)

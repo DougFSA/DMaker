@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /* A linha do tempo multitrilha: régua, trilhas (V1, V2+, TX, GR, A1, A2+, NAR, MUS e CC) e o cursor. Mostra a vista
    do store do editor e devolve a intenção da pessoa: clicar seleciona, arrastar muda de ordem ou desloca, puxar a
-   borda apara, clicar na régua leva o cursor. Toda mudança passa por `editor.applyOp`. O mouse é tratado por
-   delegação (um só ouvinte para todos os itens) e só os itens da janela visível existem no documento. */
+   borda apara, clicar na régua leva o cursor. Toda mudança passa por `editor.applyOp`, e arrastar ou aparar grava o
+   projeto ao soltar. O mouse é tratado por delegação (um só ouvinte para todos os itens) e só os itens da janela
+   visível existem no documento. */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import type { TimelineTrack } from '@/api'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -165,6 +166,7 @@ function onDragMove(event: MouseEvent): void {
   const drag = activeDrag
   if (!drag) return
   if (!drag.moved && Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD_PX) return
+  if (!drag.moved) editor.beginGesture()
   drag.moved = true
   const deltaSeconds = (event.clientX - drag.startX) / timeline.pxPerSec
   ghost.value = {
@@ -180,14 +182,22 @@ async function onDragEnd(): Promise<void> {
   const shown = ghost.value?.preview ?? null
   activeDrag = null
   ghost.value = null
-  if (!drag?.moved || !shown) return
-  const op = dragOperation(drag.start, drag.track, shown)
-  if (!op) return
-  const done = await editor.applyOp(op)
-  // mover um trecho muda o índice dele: a seleção segue o trecho para o lugar novo
-  if (done && op.type === 'move') {
-    const moved = editor.view?.tracks.find((track) => track.id === 'V1')?.items[op.to]
-    if (moved) editor.select([moved.id])
+  // um clique sem movimento é só seleção: não grava e não cria passo no desfazer
+  if (!drag?.moved) return
+  try {
+    const op = shown ? dragOperation(drag.start, drag.track, shown) : null
+    if (!op) return
+    const done = await editor.applyOp(op)
+    // mover um trecho muda o índice dele: a seleção segue o trecho para o lugar novo
+    if (done && op.type === 'move') {
+      const moved = editor.view?.tracks.find((track) => track.id === 'V1')?.items[op.to]
+      if (moved) editor.select([moved.id])
+    }
+    // o gesto direto grava ao soltar (o resto do editor continua pelo Salvar); um 409 já abriu a faixa de escolha
+    if (done && editor.dirty) await editor.save({ quiet: true })
+  } finally {
+    // o disco só volta a ser consultado depois da gravação: uma consulta no meio veria a edição ainda não salva
+    editor.endGesture()
   }
 }
 
@@ -319,6 +329,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
+  if (activeDrag?.moved) editor.endGesture()
 })
 </script>
 
