@@ -745,6 +745,8 @@ export const useEditorStore = defineStore('editor', () => {
     status,
     loadError,
     spec,
+    /** A spec em edição como texto: muda a cada mudança dela, para quem só quer saber se algo mudou. */
+    specJson: currentJson,
     specErrors,
     saving,
     saveError,

@@ -172,6 +172,28 @@ export interface BoxLayout {
   boxes: OverlayBox[]
 }
 
+/* ---------- o quadro real de um instante ---------- */
+
+/** Onde o quadro pedido está: pronto, sendo feito, com erro, ou superado por um pedido mais novo do mesmo projeto. */
+export type InstantFrameState = 'ready' | 'pending' | 'error' | 'superseded'
+
+/** POST /api/projects/{nome}/frame e GET .../frame/{chave}: um quadro renderizado pelo pipeline de verdade. */
+export interface InstantFrame {
+  key: string
+  status: InstantFrameState
+  /** O instante exato que o quadro mostra (já na grade de quadros do vídeo): é ele que a tela mostra, não o pedido. */
+  t: number | null
+  /** O que o quadro não mostra (uma legenda automática sem transcrição em cache, por exemplo). */
+  notes: string[]
+  /** Só em `ready`: o endereço da imagem. */
+  url?: string
+  /** Só em `error`: a mensagem em português. */
+  error?: string
+  /** Só em `pending`: a etapa em andamento e o percentual dela. */
+  label?: string
+  percent?: number
+}
+
 /** As dez operações de POST /api/projects/{nome}/edit. */
 export type EditOperation =
   | { type: 'split'; index: number; at: number }

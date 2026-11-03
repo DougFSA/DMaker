@@ -347,6 +347,46 @@ def test_check_overlap_flags_same_role_and_position(tmp_path):
     assert any("mesmo lugar" in f.message for f in findings)
 
 
+def _two_titles(tmp_path, first: dict, second: dict):
+    _touch(tmp_path, "take.mp4")
+    spec = {
+        "name": "p",
+        "output": {"preset": "instagram/reels"},
+        "regions": {
+            "topo": {"x": 0.5, "y": 0.2, "width": 0.8, "height": 0.1},
+            "base": {"x": 0.5, "y": 0.8, "width": 0.8, "height": 0.1},
+        },
+        "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4}],
+        "overlays": [
+            {"type": "text", "text": "Primeiro", "role": "title", "start": 0, "end": 3, **first},
+            {"type": "text", "text": "Segundo", "role": "title", "start": 1, "end": 2, **second},
+        ],
+        "audio": {"normalize": "off"},
+    }
+    project = _project(tmp_path, spec)
+    return check_overlap(project, _layout(project, make_prober({})))
+
+
+def test_check_overlap_clean_for_texts_placed_apart_by_x_and_y(tmp_path):
+    # um gesto no palco troca a `position` por `x`/`y`: dois textos do mesmo papel em lugares diferentes não se sobrepõem
+    findings = _two_titles(tmp_path, {"x": 0.5, "y": 0.35}, {"x": 0.5, "y": 0.67})
+    assert not any("mesmo lugar" in f.message for f in findings)
+
+
+def test_check_overlap_flags_texts_at_the_same_x_and_y(tmp_path):
+    findings = _two_titles(tmp_path, {"x": 0.5, "y": 0.4}, {"x": 0.5, "y": 0.4})
+    assert any("mesmo lugar" in f.message for f in findings)
+
+
+def test_check_overlap_compares_regions_by_name(tmp_path):
+    assert not any(
+        "mesmo lugar" in f.message for f in _two_titles(tmp_path, {"region": "topo"}, {"region": "base"})
+    )
+    assert any(
+        "mesmo lugar" in f.message for f in _two_titles(tmp_path, {"region": "topo"}, {"region": "topo"})
+    )
+
+
 def test_check_overlap_clean_when_sequential(tmp_path):
     _touch(tmp_path, "take.mp4")
     spec = {

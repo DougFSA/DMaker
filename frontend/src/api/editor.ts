@@ -10,6 +10,7 @@ import type {
   CardPreviewParams,
   EditOperation,
   EditResponse,
+  InstantFrame,
   PreviewAudioStatus,
   ProbeEntry,
   ProjectTheme,
@@ -53,6 +54,14 @@ export const editorApi = {
    * ainda não salva; sem ela, sobre o arquivo do projeto. */
   boxes: (name: string, spec?: SpecDocument | null) =>
     http.post<BoxLayout>(`${project(name)}/boxes`, { spec: spec ?? null }),
+  frame: {
+    /** Pede o quadro do projeto no instante `t`, renderizado pelo pipeline de verdade (resolução da prévia, sem áudio).
+     * Já no cache volta `ready` na hora; senão `pending`, com a chave que `get` acompanha. */
+    request: (name: string, spec: SpecDocument | null, t: number) =>
+      http.post<InstantFrame>(`${project(name)}/frame`, { spec, t }),
+    /** Como está o quadro de uma chave pedida antes (consulta rápida enquanto ele é feito). */
+    get: (name: string, key: string) => http.get<InstantFrame>(`${project(name)}/frame/${enc(key)}`),
+  },
   /** Aplica uma operação de edição à spec dada e devolve a nova spec com a vista dela. Não grava nada. */
   edit: (name: string, spec: SpecDocument, op: EditOperation) =>
     http.post<EditResponse>(`${project(name)}/edit`, { spec, op }),

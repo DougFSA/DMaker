@@ -124,10 +124,11 @@ export function snapBlock(start: number, end: number, sorted: readonly number[],
 
 /* ---------- o que cada item permite ---------- */
 
-/** A sobreposição vive em `overlays` (texto, imagem da camada GR e vídeo sobreposto das trilhas V2 em diante). */
+/** A sobreposição vive em `overlays` (texto, imagem e composição HTML da camada GR e vídeo sobreposto das trilhas V2
+ * em diante). A barra de progresso e o audiograma também moram lá, mas não têm intervalo próprio para arrastar. */
 export function isOverlayTrack(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
   if (trackId === 'TX') return true
-  if (trackId === 'GR') return item.kind === 'image'
+  if (trackId === 'GR') return item.kind === 'image' || item.kind === 'html'
   return /^V\d+$/.test(trackId) && trackId !== 'V1'
 }
 
