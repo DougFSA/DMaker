@@ -13,11 +13,11 @@ Dublar um vídeo para outro idioma, revisar as traduções e exportar as trilhas
 1. `dub_prepare`: separar, transcrever e traduzir; grava o projeto .dub.json
    Argumentos: `{"path": "C:/videos/gravacao.mp4", "target_language": "en", "source_language": "pt"}`
 2. `dub_get`: ler as falas e a tradução para revisar
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json"}`
+   Argumentos: `{"project": "C:/videos/dublagem/gravacao.en.dub.json"}`
 3. `dub_update_segment`: corrigir a tradução de uma fala e travá-la
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}`
+   Argumentos: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}`
 4. `dub_render`: gerar a dublagem em rascunho
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "draft": true}`
+   Argumentos: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "draft": true}`
 
 Pergunte antes, se faltar:
 - O arquivo, o idioma da fala (padrão `pt`) e o idioma alvo (`en`, `es`, `fr`, `de`, `it`...).
@@ -32,11 +32,11 @@ Pergunte antes, se faltar:
 1. `dub_prepare`: preparar separando as duas pessoas
    Argumentos: `{"path": "C:/videos/entrevista.mp4", "target_language": "en", "speaker_mode": "per_speaker", "num_speakers": 2}`
 2. `dub_get`: ver o falante de cada fala
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json"}`
+   Argumentos: `{"project": "C:/videos/dublagem/entrevista.en.dub.json"}`
 3. `dub_update_segment`: corrigir quem fala uma fala
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}`
+   Argumentos: `{"project": "C:/videos/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}`
 4. `dub_render`: gerar a dublagem
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "draft": true}`
+   Argumentos: `{"project": "C:/videos/dublagem/entrevista.en.dub.json", "draft": true}`
 
 Pergunte antes, se faltar:
 - Quantas pessoas falam, se você souber (`--speakers N` força o número; sem isso o áudio decide).
@@ -48,7 +48,7 @@ Pergunte antes, se faltar:
 1. `dub_prepare`: preparar já com o encaixe que estica o vídeo
    Argumentos: `{"path": "C:/videos/gravacao.mp4", "target_language": "en", "fit_mode": "video"}`
 2. `dub_render`: gerar escolhendo outro modo só desta geração
-   Argumentos: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}`
+   Argumentos: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}`
 
 Pergunte antes, se faltar:
 - Aceitar que o arquivo final fique **mais longo** que o original, e que a imagem seja recodificada (x264, CRF 18) nos trechos esticados.

@@ -59,7 +59,7 @@ rodar chamados ao mesmo tempo **quando são independentes e tocam coisas
 diferentes**. Cada worktree tem HEAD, index e pasta próprios, e o branch de um
 não mexe no do outro. A regra fica assim:
 
-- **Um executor fica na pasta principal `D:\DMaker`; cada outro vai com
+- **Um executor fica na pasta principal (a raiz do clone); cada outro vai com
   `isolation: "worktree"`.** O preparo do worktree (venv da pasta principal,
   `PYTHONPATH`, junções `mklink /J`, remoção com `rmdir`, porta da interface,
   `tests/test_mcp.py`) está em `_comum/git.md` → "Worktrees". Mande, no briefing de
@@ -95,7 +95,7 @@ Para o `dmaker-executor`, um card:
 ```
 CARD: DMK-XXX: <título>
 SKILL: <qual das skills está rodando> (leia .claude/skills/_comum/<as que valem>)
-LEIA ANTES: D:\DMaker\CLAUDE.md (arquitetura em pacotes e padrões obrigatórios)
+LEIA ANTES: o CLAUDE.md da raiz do clone (arquitetura em pacotes e padrões obrigatórios)
 
 O CHAMADO
 <o que o Douglas quer, em prosa, JÁ INTERPRETADO, incluindo a decisão que estava

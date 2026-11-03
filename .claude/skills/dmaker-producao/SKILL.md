@@ -37,7 +37,7 @@ outras para não depender dele.)
 | **Mergear na `main` e criar a tag**: nunca delegado, em hipótese nenhuma | - |
 | Ler o retorno do smoke e decidir se a versão está de pé | - |
 | - | Coletar as auditorias A, B, C e D (`dmaker-apurador`, em paralelo) |
-| - | Fechar o CHANGELOG e abrir o PR de release (`dmaker-executor`) |
+| - | Fechar o CHANGELOG, subir a versão do pacote e abrir o PR de release (`dmaker-executor`) |
 | - | Reinstalar o pacote e rodar o smoke, e resumir (`dmaker-apurador`) |
 
 O apurador traz **fatos**, não veredito: "DMK-12 está em Teste Manual" é fato; "o
@@ -190,7 +190,7 @@ subir** ou **bloqueada por N itens**, seguido das quatro auditorias, cada
 bloqueio com o que fazer para destravá-lo.
 
 Se estiver liberada, diga o que vai acontecer quando ele autorizar: o texto do
-bloco da versão no CHANGELOG, a tag `vX`, o que ele precisa instalar ou baixar
+bloco da versão no CHANGELOG, a versão do pacote (`X.0.0`), a tag `vX`, o que ele precisa instalar ou baixar
 (extras, modelos) e o que você vai conferir depois. Então **pare e espere**.
 
 ## 7. Com o aval: feche a versão e faça o release
@@ -199,10 +199,15 @@ Os passos 1 a 3 vão num `dmaker-executor` (o fechamento do CHANGELOG é a **ún
 exceção em que ele commita direto na `develop`, e o briefing precisa dizer isso).
 Os passos 4 e 5 são seus, sempre.
 
-1. **Feche a versão no CHANGELOG, na `develop`, ANTES do merge.** Troque
-   `## [Não lançado]` por `## vX — AAAA-MM-DD` com a data de hoje, e abra um novo
-   `## [Não lançado]` vazio acima dele. Fechar depois do merge faz a seção
-   **duplicar** (`_comum/qualidade.md`). Commit e push na `develop`.
+1. **Feche a versão no CHANGELOG e suba a versão do pacote, na `develop`, ANTES do
+   merge, no mesmo commit.** Troque `## [Não lançado]` por `## vX — AAAA-MM-DD` com a
+   data de hoje, e abra um novo `## [Não lançado]` vazio acima dele. No mesmo commit,
+   troque o `__version__` de `src/dmaker/__init__.py` para `X.0.0` (formato `X.Y.Z`,
+   `X` é o nome da versão no Jira, o mesmo da tag `vX`; o `pyproject.toml` lê dali, não
+   há segundo lugar para editar). Esquecer isso faz o `dmaker --version` da versão
+   lançada mentir, e o `tests/test_version.py` reprova um CHANGELOG fechado sem a versão
+   nova. Fechar depois do merge faz a seção **duplicar** (`_comum/qualidade.md`).
+   Commit e push na `develop`.
 2. **Abra o PR de release `develop` → `main`.** Nunca push direto: o PR dá
    trilha. Corpo do PR = o resumo da versão, com os pré-requisitos na máquina
    listados como já conferidos. **O texto do corpo é seu**: sai da auditoria que
@@ -240,8 +245,8 @@ da `main` e funciona. Vai para o `dmaker-apurador`, numerado:
    release **roda o build do front** antes do smoke: `cd frontend; npm ci; npm run build`.
    Sem o `dist`, `dmaker ui` continua servindo a interface clássica em `/`.
 2. Smoke: `dmaker --help`, `dmaker presets` e `dmaker doctor` (saída de exit
-   code 0, e `doctor` sem item vermelho novo). `dmaker --version` deve mostrar a
-   versão do pacote.
+   code 0, e `doctor` sem item vermelho novo). `dmaker --version` deve mostrar
+   `dmaker X.0.0`, a versão da tag.
 3. Se a versão trouxe comando ou ferramenta MCP nova, rodar o `--help` dela.
 4. **Erros** de inicialização, citados. Peça as linhas de erro, não o log.
 

@@ -19,7 +19,7 @@ O inglês (ou outro idioma) saiu mais comprido e a voz acelerada ficou corrida. 
 1. `dub_prepare`: preparar já com o encaixe que estica o vídeo
    Argumentos de exemplo: `{"path": "C:/videos/gravacao.mp4", "target_language": "en", "fit_mode": "video"}`
 2. `dub_render`: gerar escolhendo outro modo só desta geração
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}`
 
 ## Equivalente na CLI
 

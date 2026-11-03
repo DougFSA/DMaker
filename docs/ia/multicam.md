@@ -12,14 +12,14 @@ Você tem duas pastas de câmera (a do altar e a lateral) de um casamento, e que
 
 ## O que perguntar antes
 
-- As duas pastas (câmera do altar e câmera lateral), os nomes dos casais (um item por casal, no formato "Nome & Nome") e a data. O resto (celebrante, cidade, igreja, músicos, trilha) tem padrão.
+- As duas pastas (câmera do altar e câmera lateral), os nomes dos casais (um item por casal, no formato "Nome & Nome") e a data. A música (`trilha`, o arquivo da trilha da abertura e do encerramento) também é obrigatória e não tem padrão: pergunte qual usar. O resto (celebrante, cidade, igreja, músicos) tem padrão.
 - Se a cerimônia não começa no início da gravação: o segundo em que começa e termina (`inicio`, `fim`).
 - Pergunte; nunca invente o caminho de uma pasta nem os nomes.
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
 1. `new_from_template`: criar o projeto com as duas câmeras
-   Argumentos de exemplo: `{"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "D:/casamento/altar", "camera_lateral": "D:/casamento/lateral", "nomes": ["Ana & Carlos"], "data": "15.08.2026"}}`
+   Argumentos de exemplo: `{"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "D:/casamento/altar", "camera_lateral": "D:/casamento/lateral", "nomes": ["Ana & Carlos"], "data": "15.08.2026", "trilha": "D:/casamento/trilha.mp3"}}`
 2. `plan_multicam`: reconhecer as fases e montar os clipes
    Argumentos de exemplo: `{"name_or_path": "casamento-ana-carlos"}`
 3. `validate_project`: conferir duração e avisos
@@ -32,7 +32,7 @@ Você tem duas pastas de câmera (a do altar e a lateral) de um casamento, e que
 ## Equivalente na CLI
 
 ```powershell
-dmaker new-from-template casamento-pascom casamento-ana-carlos --param camera_altar=D:\casamento\altar --param camera_lateral=D:\casamento\lateral --param nomes="Ana & Carlos" --param data=15.08.2026
+dmaker new-from-template casamento-pascom casamento-ana-carlos --param camera_altar=D:\casamento\altar --param camera_lateral=D:\casamento\lateral --param nomes="Ana & Carlos" --param data=15.08.2026 --param trilha=D:\casamento\trilha.mp3
 dmaker plan casamento-ana-carlos
 dmaker validate projects\casamento-ana-carlos\spec.json
 dmaker render projects\casamento-ana-carlos\spec.json --preview

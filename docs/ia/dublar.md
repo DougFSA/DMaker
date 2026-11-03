@@ -25,11 +25,11 @@ Você tem um vídeo falado em português (ou outro idioma) e quer a versão em i
 1. `dub_prepare`: separar, transcrever e traduzir; grava o projeto .dub.json
    Argumentos de exemplo: `{"path": "C:/videos/gravacao.mp4", "target_language": "en", "source_language": "pt"}`
 2. `dub_get`: ler as falas e a tradução para revisar
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json"}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/gravacao.en.dub.json"}`
 3. `dub_update_segment`: corrigir a tradução de uma fala e travá-la
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}`
 4. `dub_render`: gerar a dublagem em rascunho
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "draft": true}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "draft": true}`
 
 ## Equivalente na CLI
 

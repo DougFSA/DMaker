@@ -52,9 +52,9 @@
       "type": "text"
     },
     "trilha": {
-      "description": "música da abertura e do encerramento",
-      "default": "C:\\Users\\Douglas Vasconcelos\\Videos\\4K Video Downloader+\\Can't Help Falling In Love.m4a",
-      "type": "path"
+      "description": "música da abertura e do encerramento: o arquivo de música (obrigatório, não há música padrão)",
+      "type": "path",
+      "required": true
     },
     "inicio": {
       "description": "relógio da sessão (segundos, no arquivo da câmera do altar) onde a cerimônia começa; null = cobertura inteira",

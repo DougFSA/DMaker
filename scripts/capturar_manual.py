@@ -7,7 +7,7 @@ Uso (de dentro da pasta do DMaker, com o extra `docs` e o Chromium instalados):
     $env:DMAKER_DATA_DIR = "C:\\dm\\cap"
     # 2. a interface nessa pasta, numa porta que não seja a 8765 (a do uso diário)
     python -m dmaker.cli ui --port 8769 --no-browser
-    # 3. em outra janela
+    # 3. em outra janela, sem o DMAKER_DATA_DIR do passo 1 (a captura dos modelos mostra a pasta de modelos do clone)
     python scripts/capturar_manual.py --base-url http://127.0.0.1:8769
 
 Os nomes dos projetos usados (`quick_gravacao`, `entrevista-corte`, o lote `semana`) vêm da tarefa "Fazer um Reel"
@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dmaker import config
 from dmaker.media.browser import PlaywrightBrowser
 
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "docs" / "img"
@@ -94,11 +95,12 @@ def _fill_narration(page: Any) -> None:
 
 
 def _show_models(page: Any) -> None:
-    """Põe no lugar do caminho da pasta temporária da captura o de uma instalação comum, que é o que o leitor vê."""
+    """Põe no lugar do caminho da pasta temporária da captura o da pasta de modelos do clone onde o script roda,
+    que é o que o leitor vê numa instalação comum. `config.MODELS_DIR` é lido aqui, na hora do uso."""
     _settle(page, 1500)
     page.evaluate(
         "(folder) => { document.querySelector('[data-testid=\"models-dir\"]').textContent = folder }",
-        "D:\\DMaker\\cache\\models",
+        str(config.MODELS_DIR),
     )
 
 

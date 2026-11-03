@@ -12,9 +12,9 @@
       "type": "text"
     },
     "musica": {
-      "description": "Trilha de fundo",
-      "default": "D:/musicas/trilha.mp3",
-      "type": "path"
+      "description": "Trilha de fundo: o arquivo de música (obrigatório, não há música padrão)",
+      "type": "path",
+      "required": true
     }
   },
   "name": "viagem-reel",

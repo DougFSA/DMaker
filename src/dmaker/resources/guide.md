@@ -469,8 +469,8 @@ Fluxo completo, do pedido ao render final:
 
 1. `new_from_template("casamento-pascom", nome, params)` com `camera_altar`/`camera_lateral` (as
    pastas das duas câmeras, tipo `dir`: viram sozinhas a lista dos arquivos, em ordem), `nomes` (lista
-   de casais, "Nome & Nome") e `data`; o resto tem padrão (marca `pascom-sjb`, celebrante, diácono,
-   cerimonial, músicos, trilha).
+   de casais, "Nome & Nome"), `data` e `trilha` (o arquivo da música; não há música padrão, pergunte qual usar);
+   o resto tem padrão (marca `pascom-sjb`, celebrante, diácono, cerimonial, músicos).
 2. `plan_multicam(nome)` (CLI: `dmaker plan <nome>`): transcreve a câmera de áudio do bloco `multicam`,
    reconhece as fases da cerimônia pela fala e substitui o bloco pelos clipes de verdade, alternando as
    câmeras. Devolve avisos e a lista de fases reconhecidas com o instante de cada uma.
@@ -1003,8 +1003,8 @@ ganha uma seção `card_layouts`:
 - Ritmo típico de reel de produto (15 a 30 s): cartão de abertura com a dor (3 s) -> 2 a 4 telas do
   produto em `brand` com legenda de seção (3 a 4 s cada) -> cartão escuro de CTA (4 s). Gancho nos 3
   primeiros segundos.
-- Prints reais do produto: `C:\Users\Douglas Vasconcelos\Desktop\MedlyCare\Marketing\Prints do Produto\`
-  (1000x620). Identidade visual: `...\Desktop\MedlyCare\Identidade Visual\`.
+- Prints reais do produto (1000x620) e identidade visual: as pastas que o usuário indicar. Pergunte o
+  caminho, não invente (as pastas dele variam de máquina para máquina).
 
 ## Vídeos pessoais (sem brand)
 

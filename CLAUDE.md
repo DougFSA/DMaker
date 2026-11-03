@@ -3,7 +3,7 @@
 Editor de vídeos curtos por comando. Python 3.11+ (venv em `.venv`), FFmpeg 9 em `bin/ffmpeg` (baixado por `dmaker setup`), Poppins em `assets/fonts`, marcas em `assets/brands/<nome>/brand.json`.
 
 - Como operar o editor a partir de um pedido: `.claude/skills/dmaker/SKILL.md` (fluxo e regras da marca, enxuta); a referência completa da spec, presets, multicâmera e picture-in-picture está no recurso MCP `dmaker://guide` (ferramenta `dmaker_guide`), lido só quando necessário.
-- Rodar comandos: `.venv\Scripts\dmaker.exe ...` (não use o Python global). Servidor MCP: `dmaker mcp` (config em `.mcp.json`). Interface: `dmaker ui`.
+- Rodar comandos: `.venv\Scripts\dmaker.exe ...` (não use o Python global). Servidor MCP: `dmaker mcp` (config em `.mcp.json`, que sobe o `.venv` da pasta onde a sessão abriu, pelo `CLAUDE_PROJECT_DIR`: o clone pode estar em qualquer pasta, então nenhum arquivo versionado cita caminho de unidade; o `tests/test_portable_paths.py` reprova). Interface: `dmaker ui`.
 - Desenvolvimento com economia de tokens: skill `dmaker-dev` (`.claude/skills/dmaker-dev/SKILL.md`): Opus planeja e revisa, agentes Sonnet implementam.
 - Testes: `.venv\Scripts\python -m pytest` (~2 min; a integração renderiza com ffmpeg e o MCP sobe por stdio). Lint/format: `.venv\Scripts\ruff check --fix src tests && .venv\Scripts\ruff format src tests`. Os dois precisam passar antes de dar algo por pronto.
 - Os testes nunca tocam nos dados reais: `tests/conftest.py` aponta `DMAKER_DATA_DIR` e todos os diretórios de dados do `config` para pastas temporárias, e `tests/guard.py` reprova a escrita em `cache/`, `output/`, `projects/`, `assets/voices/` e nos léxicos. Em código novo, leia `config.X_DIR` na hora do uso (nunca `from ..config import X_DIR` como default).

@@ -82,7 +82,7 @@ Procurando por uma palavra? Peça à IA que use a ferramenta `search_manual`, ou
 
 O DMaker corta, junta e acelera trechos; reenquadra qualquer vídeo ou imagem para o formato certo; gera cartões, textos, legendas e trilhas; narra roteiros com a sua voz, corrige uma palavra dita errado sem regravar e dubla um vídeo para outro idioma. Ele entrega vídeos prontos para o Instagram (Reels, Stories, Feed), Facebook, YouTube (Shorts e vídeo longo, 1080p ou 4K), TikTok, WhatsApp Status e LinkedIn.
 
-Por baixo, ele usa só ferramentas abertas e locais: o [FFmpeg](https://ffmpeg.org) corta, junta e codifica; o [libass](https://github.com/libass/libass) desenha texto e legendas animadas; o [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcreve a fala sem mandar nada para a internet; o Pillow gera cartões e fundos; o OmniVoice e o Kokoro falam; o Demucs separa voz e fundo; o Ollama traduz. Tudo fica dentro da pasta do projeto (por exemplo `D:\DMaker`): nada é instalado no sistema.
+Por baixo, ele usa só ferramentas abertas e locais: o [FFmpeg](https://ffmpeg.org) corta, junta e codifica; o [libass](https://github.com/libass/libass) desenha texto e legendas animadas; o [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcreve a fala sem mandar nada para a internet; o Pillow gera cartões e fundos; o OmniVoice e o Kokoro falam; o Demucs separa voz e fundo; o Ollama traduz. Tudo fica dentro da pasta do projeto, o clone: nada é instalado no sistema.
 
 ### Três formas de usar
 
@@ -110,15 +110,16 @@ O DMaker não decide sozinho os cortes finos, o ritmo (quando cada trecho troca)
 ### Baixar e instalar
 
 ```powershell
-# 1. baixe o projeto numa pasta, por exemplo D:\DMaker
-git clone https://github.com/DougFSA/DMaker.git D:\DMaker
-cd D:\DMaker
+# 1. baixe o projeto: o git cria a pasta DMaker dentro da pasta onde você está, que pode ser qualquer uma
+git clone https://github.com/DougFSA/DMaker.git
+cd DMaker
 
 # 2. rode o instalador: cria o ambiente Python, instala as dependências, baixa FFmpeg e fontes
 .\scripts\setup.ps1
 
 # 3. confira se está tudo certo
 .\.venv\Scripts\dmaker.exe doctor
+.\.venv\Scripts\dmaker.exe --version    # a versão instalada (a mesma da tag do release)
 ```
 
 O `scripts/setup.ps1` cria o `.venv`, instala o pacote com os extras `dev` e `captions` (`pip install -e ".[dev,captions]"`), roda `dmaker setup` (baixa FFmpeg e Poppins) e termina com `dmaker doctor`. Se o PowerShell recusar rodar o script (política de execução), rode antes, uma vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
@@ -170,7 +171,7 @@ Rodar `.\scripts\setup.ps1` de novo é seguro e atualiza as dependências. Para 
 ### Atualizar
 
 ```powershell
-cd D:\DMaker
+cd <pasta do DMaker>   # a pasta onde você baixou o projeto
 git pull
 .\scripts\setup.ps1
 ```
@@ -338,12 +339,33 @@ Depois de ver a prévia, o ajuste é outro pedido em português: "corta o trecho
 
 ### MCP em outras ferramentas
 
-O DMaker é um servidor MCP por stdio, então Claude Desktop, Cursor, Windsurf, o LM Studio ou outra sessão do Claude Code também o operam. Para subir à mão: `dmaker mcp`. O projeto já traz o `.mcp.json` para o Claude Code. Para o Claude Desktop, adicione em `claude_desktop_config.json`:
+O DMaker é um servidor MCP por stdio, então Claude Desktop, Cursor, Windsurf, o LM Studio ou outra sessão do Claude Code também o operam. Para subir à mão: `dmaker mcp`. O projeto já traz o `.mcp.json` para o Claude Code, sem nenhum caminho para editar, e ele funciona com o clone em qualquer pasta (até com espaço no caminho):
 
 ```json
 {
   "mcpServers": {
-    "dmaker": { "command": "D:\\DMaker\\.venv\\Scripts\\dmaker.exe", "args": ["mcp"] }
+    "dmaker": {
+      "command": "cmd",
+      "args": [
+        "/d",
+        "/v:on",
+        "/s",
+        "/c",
+        "cd /d !CLAUDE_PROJECT_DIR! 2>nul & if exist .venv\\Scripts\\dmaker.exe (.venv\\Scripts\\dmaker.exe mcp) else (>&2 echo DMaker MCP: .venv\\Scripts\\dmaker.exe nao existe em !cd!. Abra o Claude Code na raiz de um clone que tenha a pasta .venv; veja a instalacao no README. & exit /b 1)"
+      ]
+    }
+  }
+}
+```
+
+Por que é assim: o Claude Code só expande `${VAR}` no `.mcp.json` com o ambiente dele, e `CLAUDE_PROJECT_DIR` (a raiz do projeto) existe só no ambiente do servidor; também não há campo `cwd` nem regra para `command` relativo. Então quem lê a variável é o `cmd`, já dentro do servidor (a expansão `!...!` aguenta `&`, parênteses e acentos no caminho): ele entra na raiz e roda o `.venv\Scripts\dmaker.exe mcp` do próprio clone, nunca o Python global. Sem a variável, ele usa a pasta atual. Se não achar o `.venv`, o servidor não conecta e a mensagem diz em que pasta procurou (uma sessão aberta num worktree, que não tem `.venv`, cai nesse caso). Numa sessão nova, o Claude Code pede, uma vez, para você aprovar o servidor `dmaker`. Essa forma é para o Windows.
+
+Para o Claude Desktop e as outras ferramentas, que não têm essa variável, escreva o caminho do `dmaker.exe` do seu clone (aqui `<pasta do DMaker>` é a pasta onde você baixou o projeto) em `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "dmaker": { "command": "<pasta do DMaker>\\.venv\\Scripts\\dmaker.exe", "args": ["mcp"] }
   }
 }
 ```
@@ -455,7 +477,7 @@ Sem placa de vídeo, cada resposta do modelo leva de dezenas de segundos a minut
 Há duas interfaces. A **interface nova** (Vue) é a que abre em `/` e faz tudo o que o DMaker faz pela tela: projetos, lote, o editor com player, linha do tempo e layout de tela, a voz, a dublagem, a fila de narrações, os modelos de IA, as saídas, os catálogos e o agente. A **interface clássica** continua em `/classica`, com as mesmas funções, como caminho de reserva: o link **Interface clássica**, no rodapé da barra lateral, leva até ela.
 
 ```powershell
-cd D:\DMaker
+cd <pasta do DMaker>   # a pasta onde você baixou o projeto
 dmaker ui
 ```
 
@@ -603,7 +625,7 @@ Para os casos sem modelo pronto, escreva `projects/<nome>/spec.json`. Os campos 
 
 ## Tarefas de vídeo
 
-Os exemplos de CLI desta parte supõem que você está na pasta do DMaker (`cd D:\DMaker`, com o ambiente ativo) e que os arquivos de exemplo (`gravacao.mp4`, `prints\agenda.png`) estão ali ou que você troca pelo caminho completo.
+Os exemplos de CLI desta parte supõem que você está na pasta do DMaker (onde você baixou o projeto, com o ambiente ativo) e que os arquivos de exemplo (`gravacao.mp4`, `prints\agenda.png`) estão ali ou que você troca pelo caminho completo.
 
 ### Fazer um Reel a partir de uma gravação
 <!-- tarefa: reel -->
@@ -689,7 +711,7 @@ O vídeo que você quer já cabe num dos modelos de `templates/`: é o caminho m
 #### Antes de começar
 
 - Que tipo de vídeo é (produto, depoimento, story, vlog, tutorial, explicativo) para escolher o modelo.
-- Os arquivos que o modelo pede (prints, vídeos) com o caminho completo: são os parâmetros obrigatórios (`list_templates` marca quais). Pergunte só o que falta deles.
+- Os arquivos que o modelo pede (prints, vídeos, e a música dos modelos `pessoal-vlog-reel`, `reel-medlycare-depoimento` e `casamento-pascom`) com o caminho completo: são os parâmetros obrigatórios (`list_templates` marca quais). Não há música padrão: sem ela o projeto não é criado, e a mensagem diz qual parâmetro falta (`musica`, ou `trilha` no casamento). Pergunte só o que falta deles.
 - Os textos (título, gancho, CTA) têm padrão no modelo: se o usuário não deu um texto, use o padrão e siga em frente, sem perguntar.
 
 #### Pela IA
@@ -723,7 +745,7 @@ dmaker render projects\story-dica\spec.json --preview
 dmaker render projects\story-dica\spec.json
 ```
 
-`--param chave=valor` repete para cada parâmetro (listas separadas por vírgula); `--params-json '{"titulo": "..."}'` passa tudo de uma vez. Os modelos: `reel-medlycare-produto` (capturas de tela com movimento e CTA), `reel-medlycare-depoimento` (um corte com gancho e crédito), `stories-medlycare` (uma dica sobre um print), `pessoal-vlog-reel` (vídeos em sequência com título e trilha), `youtube-longo` (abertura, gravação, CTA), `tutorial-tela-webcam` (tela e webcam em picture-in-picture), `explicativo` (veja a tarefa própria), `audiograma` (um áudio com capa, onda e legenda; veja a tarefa própria), `casamento-multicam` e `casamento-pascom` (veja "Fazer o vídeo do casamento com duas câmeras"). `dmaker templates` mostra os parâmetros de cada um.
+`--param chave=valor` repete para cada parâmetro (listas separadas por vírgula); `--params-json '{"titulo": "..."}'` passa tudo de uma vez. Os modelos: `reel-medlycare-produto` (capturas de tela com movimento e CTA), `reel-medlycare-depoimento` (um corte com gancho e crédito), `stories-medlycare` (uma dica sobre um print), `pessoal-vlog-reel` (vídeos em sequência com título e a música que você escolher), `youtube-longo` (abertura, gravação, CTA), `tutorial-tela-webcam` (tela e webcam em picture-in-picture), `explicativo` (veja a tarefa própria), `audiograma` (um áudio com capa, onda e legenda; veja a tarefa própria), `casamento-multicam` e `casamento-pascom` (veja "Fazer o vídeo do casamento com duas câmeras"). `dmaker templates` mostra os parâmetros de cada um.
 
 #### Como conferir
 
@@ -1440,19 +1462,19 @@ Você tem duas pastas de câmera (a do altar e a lateral) de um casamento, e que
 
 #### Antes de começar
 
-- As duas pastas (câmera do altar e câmera lateral), os nomes dos casais (um item por casal, no formato "Nome & Nome") e a data. O resto (celebrante, cidade, igreja, músicos, trilha) tem padrão.
+- As duas pastas (câmera do altar e câmera lateral), os nomes dos casais (um item por casal, no formato "Nome & Nome") e a data. A música (`trilha`, o arquivo da trilha da abertura e do encerramento) também é obrigatória e não tem padrão: pergunte qual usar. O resto (celebrante, cidade, igreja, músicos) tem padrão.
 - Se a cerimônia não começa no início da gravação: o segundo em que começa e termina (`inicio`, `fim`).
 - Pergunte; nunca invente o caminho de uma pasta nem os nomes.
 
 #### Pela IA
 
-Diga: "Casamento: câmera do altar em `D:\casamento\altar`, lateral em `D:\casamento\lateral`, casal Ana & Carlos, 15.08.2026." A IA cria o projeto pelo modelo `casamento-pascom`, **planeja o corte** (transcreve a câmera do altar, reconhece as fases e monta os clipes), valida, gera a prévia e deixa o ajuste fino (qual câmera fica de frente para quem) para você. O agente local faz esta tarefa.
+Diga: "Casamento: câmera do altar em `D:\casamento\altar`, lateral em `D:\casamento\lateral`, casal Ana & Carlos, 15.08.2026, música em `D:\casamento\trilha.mp3`." A IA cria o projeto pelo modelo `casamento-pascom`, **planeja o corte** (transcreve a câmera do altar, reconhece as fases e monta os clipes), valida, gera a prévia e deixa o ajuste fino (qual câmera fica de frente para quem) para você. O agente local faz esta tarefa.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "new_from_template", "arguments": {"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "D:/casamento/altar", "camera_lateral": "D:/casamento/lateral", "nomes": ["Ana & Carlos"], "data": "15.08.2026"}}, "para": "criar o projeto com as duas câmeras"},
+  {"tool": "new_from_template", "arguments": {"template": "casamento-pascom", "name": "casamento-ana-carlos", "params": {"camera_altar": "D:/casamento/altar", "camera_lateral": "D:/casamento/lateral", "nomes": ["Ana & Carlos"], "data": "15.08.2026", "trilha": "D:/casamento/trilha.mp3"}}, "para": "criar o projeto com as duas câmeras"},
   {"tool": "plan_multicam", "arguments": {"name_or_path": "casamento-ana-carlos"}, "para": "reconhecer as fases e montar os clipes"},
   {"tool": "validate_project", "arguments": {"name_or_path": "casamento-ana-carlos"}, "para": "conferir duração e avisos"},
   {"tool": "render_project", "arguments": {"name_or_path": "casamento-ana-carlos", "preview": true}, "para": "gerar a prévia do corte"},
@@ -1462,12 +1484,12 @@ Diga: "Casamento: câmera do altar em `D:\casamento\altar`, lateral em `D:\casam
 
 #### Pela interface
 
-**Projetos**, **Novo projeto**, **Modelo** `casamento-pascom`: preencha as duas pastas, os nomes e a data. **Criar projeto**. O planejamento do corte (a etapa `plan_multicam`) não tem botão: rode `dmaker plan` ou peça à IA. Depois, **Validar** e **Renderizar** (**Prévia**). Para ajustar um corte, use a linha do tempo do **Editor**: selecione o trecho e puxe a borda, ou leve o cursor até o ponto e use **Cortar**.
+**Projetos**, **Novo projeto**, **Modelo** `casamento-pascom`: preencha as duas pastas, os nomes, a data e a música. **Criar projeto**. O planejamento do corte (a etapa `plan_multicam`) não tem botão: rode `dmaker plan` ou peça à IA. Depois, **Validar** e **Renderizar** (**Prévia**). Para ajustar um corte, use a linha do tempo do **Editor**: selecione o trecho e puxe a borda, ou leve o cursor até o ponto e use **Cortar**.
 
 #### Pela CLI
 
 ```powershell
-dmaker new-from-template casamento-pascom casamento-ana-carlos --param camera_altar=D:\casamento\altar --param camera_lateral=D:\casamento\lateral --param nomes="Ana & Carlos" --param data=15.08.2026
+dmaker new-from-template casamento-pascom casamento-ana-carlos --param camera_altar=D:\casamento\altar --param camera_lateral=D:\casamento\lateral --param nomes="Ana & Carlos" --param data=15.08.2026 --param trilha=D:\casamento\trilha.mp3
 dmaker plan casamento-ana-carlos
 dmaker validate projects\casamento-ana-carlos\spec.json
 dmaker render projects\casamento-ana-carlos\spec.json --preview
@@ -1635,7 +1657,7 @@ Diga: "Confere o `meu-reel`." A IA valida, gera a prévia, lê o relatório de Q
   {"tool": "validate_project", "arguments": {"name_or_path": "meu-reel"}, "para": "duração final e avisos de limite e de marca"},
   {"tool": "render_project", "arguments": {"name_or_path": "meu-reel", "preview": true}, "para": "gerar a prévia"},
   {"tool": "qa_report", "arguments": {"name_or_path": "meu-reel", "output": false}, "para": "conferir o projeto e o arquivo"},
-  {"tool": "contact_sheet", "arguments": {"video": "C:/dmaker/output/meu-reel__instagram-reels__preview.mp4"}, "para": "só se o QA apontar algo: grade de quadros"}
+  {"tool": "contact_sheet", "arguments": {"video": "C:/videos/meu-reel__instagram-reels__preview.mp4"}, "para": "só se o QA apontar algo: grade de quadros"}
 ]
 ```
 
@@ -2262,9 +2284,9 @@ Diga: "Dubla `gravacao.mp4` para inglês." A IA prepara (separa voz e fundo, tra
 ```json
 [
   {"tool": "dub_prepare", "arguments": {"path": "C:/videos/gravacao.mp4", "target_language": "en", "source_language": "pt"}, "para": "separar, transcrever e traduzir; grava o projeto .dub.json"},
-  {"tool": "dub_get", "arguments": {"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json"}, "para": "ler as falas e a tradução para revisar"},
-  {"tool": "dub_update_segment", "arguments": {"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}, "para": "corrigir a tradução de uma fala e travá-la"},
-  {"tool": "dub_render", "arguments": {"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "draft": true}, "para": "gerar a dublagem em rascunho"}
+  {"tool": "dub_get", "arguments": {"project": "C:/videos/dublagem/gravacao.en.dub.json"}, "para": "ler as falas e a tradução para revisar"},
+  {"tool": "dub_update_segment", "arguments": {"project": "C:/videos/dublagem/gravacao.en.dub.json", "segment_id": "s1", "text": "Hello, I am [[MedlyCare|Medly Care]].", "locked": true}, "para": "corrigir a tradução de uma fala e travá-la"},
+  {"tool": "dub_render", "arguments": {"project": "C:/videos/dublagem/gravacao.en.dub.json", "draft": true}, "para": "gerar a dublagem em rascunho"}
 ]
 ```
 
@@ -2327,9 +2349,9 @@ Diga: "Dubla `entrevista.mp4` para inglês; são duas pessoas." A IA prepara com
 ```json
 [
   {"tool": "dub_prepare", "arguments": {"path": "C:/videos/entrevista.mp4", "target_language": "en", "speaker_mode": "per_speaker", "num_speakers": 2}, "para": "preparar separando as duas pessoas"},
-  {"tool": "dub_get", "arguments": {"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json"}, "para": "ver o falante de cada fala"},
-  {"tool": "dub_update_segment", "arguments": {"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}, "para": "corrigir quem fala uma fala"},
-  {"tool": "dub_render", "arguments": {"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "draft": true}, "para": "gerar a dublagem"}
+  {"tool": "dub_get", "arguments": {"project": "C:/videos/dublagem/entrevista.en.dub.json"}, "para": "ver o falante de cada fala"},
+  {"tool": "dub_update_segment", "arguments": {"project": "C:/videos/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}, "para": "corrigir quem fala uma fala"},
+  {"tool": "dub_render", "arguments": {"project": "C:/videos/dublagem/entrevista.en.dub.json", "draft": true}, "para": "gerar a dublagem"}
 ]
 ```
 
@@ -2381,7 +2403,7 @@ Diga: "Dubla `gravacao.mp4` para inglês sem acelerar a voz, esticando o vídeo.
 ```json
 [
   {"tool": "dub_prepare", "arguments": {"path": "C:/videos/gravacao.mp4", "target_language": "en", "fit_mode": "video"}, "para": "preparar já com o encaixe que estica o vídeo"},
-  {"tool": "dub_render", "arguments": {"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}, "para": "gerar escolhendo outro modo só desta geração"}
+  {"tool": "dub_render", "arguments": {"project": "C:/videos/dublagem/gravacao.en.dub.json", "fit_mode": "misto", "draft": true}, "para": "gerar escolhendo outro modo só desta geração"}
 ]
 ```
 
@@ -2429,7 +2451,7 @@ Diga: "Exporta as trilhas separadas da dublagem de `gravacao.en.dub.json`, em um
 
 ```json
 [
-  {"tool": "dub_stems", "arguments": {"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "make_zip": true}, "para": "exportar voz dublada, fundo e voz original"}
+  {"tool": "dub_stems", "arguments": {"project": "C:/videos/dublagem/gravacao.en.dub.json", "make_zip": true}, "para": "exportar voz dublada, fundo e voz original"}
 ]
 ```
 
@@ -2569,6 +2591,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-45 | A caixa de fundo dos textos (`box`, o padrão do `cta` e do `lower-third`) abraça a linha com a margem configurada, igual dos dois lados, e a linha só quebra na largura permitida; um projeto já aprovado, renderizado de novo, sai com a caixa mais justa e a linha mais longa. A conferência (QA) do cartão passou a medir a largura que o cartão desenha | "Deixar a legenda em caixa arredondada" |
 | DMK-46 | Sons por assunto no vídeo explicativo: cada assunto aceita `sons` (uma lista de `{som, em, volume}` com os efeitos da biblioteca, `em` em segundos desde o começo do assunto), e o modelo os põe em `audio.sfx` no tempo do vídeo, com o som de entrada e um som no meio do assunto (o `ding` do contador); nome de som que não existe e `em` fora do assunto dão erro claro; `build_explainer_video` aceita o mesmo campo | "Fazer um vídeo explicativo" |
 | DMK-47 | O ducking dá o mesmo resultado em todo render: o mesmo projeto com música e ducking, renderizado de novo, sai com o mesmo áudio do começo ao fim (antes os últimos 0,15 s variavam de um render para outro); um projeto já renderizado muda só nesse fim, e só onde o render antigo tinha perdido o final da música | "Pôr a narração dentro de um vídeo" |
+| DMK-48 | O DMaker e o servidor MCP funcionam com o clone em qualquer pasta e em qualquer máquina (o `.mcp.json` não cita mais caminho nenhum e usa o `.venv` da pasta aberta); `dmaker --version` mostra a versão (`dmaker 2.0.0`); os modelos `casamento-pascom`, `pessoal-vlog-reel` e `reel-medlycare-depoimento` passam a pedir o arquivo de música, que não tem mais padrão | "MCP em outras ferramentas" e "Criar um projeto a partir de um modelo pronto" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -3825,6 +3848,7 @@ Tamanho natural da página: 900x500 px (base 1080); duração sugerida: 4 s.
 | A interface está com código antigo | Ela mesma detecta e reinicia no próximo render, desde que não haja job em andamento. Senão, feche a janela (`Ctrl+C`) e rode `dmaker ui` de novo. |
 | Job com erro | O painel de andamento ou `job_status` mostram a mensagem; erros do ffmpeg trazem as últimas linhas do `stderr` e o comando, para reproduzir com `--dry-run`. |
 | "Extra inputs are not permitted" | A spec tem um campo que o modelo não reconhece (nome errado ou a mais). Confira o nome na referência de campos da spec. |
+| O servidor MCP `dmaker` não conecta no Claude Code (`CONNECTION_CLOSED`, ou a mensagem "nao existe" com a pasta onde ele procurou o `.venv`) | O Claude Code tem que estar aberto na raiz do clone, que tem a pasta `.venv` (`dmaker setup` e a instalação a criam); uma sessão aberta num worktree não tem `.venv`. Numa sessão nova, aprove o servidor `dmaker` quando o Claude Code pedir. Veja "MCP em outras ferramentas". |
 | Porta 8765 ocupada | `dmaker ui --port 8770`, ou defina `DMAKER_UI_URL` para onde a interface já roda, para a CLI e o MCP a encontrarem. |
 | Cache grande, ou um trecho preso numa versão antiga | `dmaker clean` (mezaninos, proxies, formas de onda); `dmaker clean --jobs` limpa também o histórico; `dmaker render --force` ignora o cache só naquele render. |
 | Disco cheio por causa dos modelos de IA | Veja "Ver, baixar e apagar os modelos de IA". |

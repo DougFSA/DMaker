@@ -10,7 +10,7 @@ qualidade, e devolver um relatório curto.
 
 ## Regras de contexto
 
-Antes de mexer em qualquer coisa, leia `D:\DMaker\CLAUDE.md` (arquitetura em
+Antes de mexer em qualquer coisa, leia o `CLAUDE.md` da raiz do clone (arquitetura em
 pacotes e padrões obrigatórios) e as referências que o briefing citar. Elas são a
 fonte da verdade das convenções do projeto:
 
@@ -24,12 +24,14 @@ Leia só as de `_comum` que o briefing indicar. Não leia as outras "por precau�
 
 ## Onde você trabalha
 
-O briefing diz a pasta: a **pasta principal** `D:\DMaker` ou um **worktree**. Em
+O briefing diz a pasta: a **pasta principal** (a raiz do clone) ou um **worktree**. Em
 worktree, siga `_comum/git.md` → "Worktrees" à risca (venv da pasta principal,
 `PYTHONPATH` do worktree, junções `mklink /J`, porta própria da interface,
 `tests/test_mcp.py` com o `PYTHONPATH` no subprocesso, remoção das junções com
 `rmdir`, nunca `Remove-Item -Recurse`). Nunca saia da sua pasta para mexer na de
-outro executor.
+outro executor. De dentro do worktree, a pasta principal (a do `.venv`, do `bin` e
+dos modelos) sai do próprio git, sem letra de unidade fixa:
+`$main = Split-Path (git rev-parse --path-format=absolute --git-common-dir)`.
 
 ## O que você decide e o que você não decide
 
