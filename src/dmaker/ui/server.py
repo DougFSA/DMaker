@@ -171,6 +171,22 @@ class PreviewAudioRequest(BaseModel):
     spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
 
 
+class NoiseProfileRequest(BaseModel):
+    spec: dict  # a spec da tela (ainda não salva): o perfil que se mede mora nela
+    profile: str
+
+
+class EffectCompareRequest(BaseModel):
+    """Um trecho de um item de áudio para ouvir com um efeito da cadeia desligado e ligado."""
+
+    spec: dict
+    target: str  # o item, como em `edit_project` (audio.voiceover.0, timeline.2...)
+    index: int = Field(ge=0)  # a posição do efeito na cadeia do item
+    start: float = Field(0.0, ge=0, allow_inf_nan=False)  # segundos do item
+    at: float | None = Field(None, ge=0, allow_inf_nan=False)  # segundos da linha do tempo (o cursor); vale no lugar de start
+    duration: float = Field(6.0, gt=0, le=30, allow_inf_nan=False)
+
+
 class LayoutModel(BaseModel):
     """Layout salvo da interface: onde cada painel fica, o tamanho dos divisores e o que está oculto."""
 
@@ -739,6 +755,7 @@ def project_edit(name: str, req: EditRequest, services: Services) -> dict:
         "timeline": _timeline_view_dict(new_project, services),
         # o que a edição apagou dos marcadores (estavam no trecho cortado), para a interface avisar
         "edit_warnings": report.warnings,
+        "edit_notes": report.notes,
     }
 
 
@@ -806,6 +823,51 @@ def request_preview_audio(name: str, req: PreviewAudioRequest, services: Service
     except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
         raise _error(422, str(exc)) from exc
     return _preview_audio_dict(status)
+
+
+@app.post("/api/projects/{name}/noise-profile")
+def measure_noise_profile(name: str, req: NoiseProfileRequest, services: Services) -> dict:
+    """O nível do ruído por banda do perfil `profile` da spec da tela (o gráfico que a interface mostra ao pegar o perfil)."""
+    from ..domain.edits import EditError
+    from ..media.ffmpeg import FFmpegError
+    from ..media.probe import probe
+    from ..pipeline.noise_profiles import measure_saved_profile
+
+    project = _project_from_body(name, req.spec)
+    try:
+        return measure_saved_profile(project, req.profile, services.prober or probe)
+    except (EditError, ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+
+
+@app.post("/api/projects/{name}/effect-compare")
+def effect_compare(name: str, req: EffectCompareRequest, services: Services) -> dict:
+    """Um trecho do item com o efeito desligado (`before_url`) e ligado (`after_url`), para ouvir a diferença sem gravar
+    nada na spec. Os dois passam pelo processador do render."""
+    from ..domain.edits import EditError
+    from ..media.ffmpeg import FFmpegError, SubprocessRunner
+    from ..media.probe import probe
+    from ..pipeline.effect_compare import compare_effect
+
+    project = _project_from_body(name, req.spec)
+    try:
+        compared = compare_effect(
+            project,
+            req.target,
+            req.index,
+            req.start,
+            req.duration,
+            services.runner or SubprocessRunner(quiet=True),
+            services.prober or probe,
+            at=req.at,
+        )
+    except (EditError, ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+    return {
+        "before_url": _file_url(compared.before),
+        "after_url": _file_url(compared.after),
+        "duration_s": round(compared.duration, 3),
+    }
 
 
 @app.get("/api/projects/{name}/preview-audio")

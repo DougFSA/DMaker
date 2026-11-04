@@ -6,34 +6,51 @@ Normalizar fatia por fatia daria som errado (cada pedaço invertido sozinho, cad
 item inteiro processado antes de fatiar, o render e a prévia usam exatamente o mesmo resultado, e quem só
 precisa de uma fatia lê o arquivo pronto. O grafo de cada cadeia é puro (`filtergraph.audio_effects`); aqui só
 se decide o que processar, se mede o que precisa de medida e se executa pelo `FFmpegRunner` injetado.
+
+Um efeito pode ser um filtro do ffmpeg ou uma função sobre as amostras (`register_sample_builder`). Quando a cadeia
+mistura os dois, ela é partida em trechos: os filtros seguidos formam um comando do ffmpeg, cada efeito de amostras
+é um estágio em numpy, e o sinal passa de um para o outro por um arquivo PCM temporário. Só o arquivo final fica no
+cache; uma cadeia só de filtros continua sendo um comando só, o mesmo de sempre.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import numpy as np
+
 from .. import config
 from ..domain.audio_effects import EffectBase, active_effects, chain_duration, chain_signature
+from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
 from ..domain.spec import ClipSegment
 from ..filtergraph.audio_effects import (
+    SAMPLE_RATE,
     Measure,
-    chain_lines,
+    SampleRequest,
+    Stage,
+    apply_sample_effect,
     ingress_line,
     measure_lines,
     parse_astats,
     span_samples,
+    split_stages,
+    stage_lines,
 )
 from ..filtergraph.common import Inputs
 from ..filtergraph.mezzanine import uses_camera_audio
 from ..filtergraph.pip import ResolvedVideoOverlay, pip_audio_window
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner
+from ..media.spectral import NoiseSpectrum, noise_spectrum, quiet_pause_window
 from .cache_key import cache_key
 from .context import RenderContext
+from .noise_profiles import AUTO_PROFILE_SECONDS, ProfileLocator, measure_profile
+from .sample_reader import FFmpegSampleReader, SampleReader
 from .sources import Source
 from .voiceover import PreparedVoiceover
 
@@ -42,6 +59,10 @@ EFFECTS_VERSION = "fx1"  # muda quando a receita do arquivo processado muda (inv
 # O arquivo processado é WAV de ponto flutuante de 32 bits: um ganho que passa de 0 dBFS no meio da cadeia não
 # corta, e inverter duas vezes devolve a amostra exata. É o dobro do tamanho do 16 bits, em troca de não perder nada.
 PROCESSED_CODEC = ["-c:a", "pcm_f32le"]
+# O sinal que passa de um trecho da cadeia para o seguinte: PCM de ponto flutuante cru, estéreo, na taxa da mistura.
+# Sem cabeçalho nem perda: o numpy lê e grava direto, e o ffmpeg o recebe com `-f f32le`.
+STAGE_CODEC = ["-f", "f32le", "-ac", "2", "-ar", str(SAMPLE_RATE)]
+STAGE_CHANNELS = 2
 
 
 @dataclass(frozen=True)
@@ -84,11 +105,23 @@ class EffectProcessor:
     """Processa um item com a cadeia de efeitos, guardando o resultado em cache pelo que decide o som.
 
     O ffmpeg entra por injeção (`runner`), como no resto do pipeline: com o `RecordingRunner` nada é executado e
-    os comandos só ficam registrados (a simulação do render)."""
+    os comandos só ficam registrados (a simulação do render). `profiles` resolve os perfis de ruído do projeto (sem
+    ele, só o perfil `auto` funciona) e `reader` lê as amostras que a medida do perfil precisa."""
 
-    def __init__(self, runner: FFmpegRunner, cache_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        runner: FFmpegRunner,
+        cache_dir: Path | None = None,
+        profiles: ProfileLocator | None = None,
+        reader: SampleReader | None = None,
+    ) -> None:
         self.runner = runner
         self._cache_dir = cache_dir
+        self.profiles = profiles
+        self.reader: SampleReader = reader or FFmpegSampleReader(runner)
+        self._spectra: dict[
+            str, NoiseSpectrum
+        ] = {}  # o espectro de cada perfil já medido, pela assinatura dele
 
     @property
     def cache_dir(self) -> Path:
@@ -107,6 +140,7 @@ class EffectProcessor:
             *(
                 [round(item.lead, 3)] if item.lead else []
             ),  # fora da chave sem deslocamento: cache antigo vale
+            *self.profile_parts(item.effects),  # idem: sem perfil nomeado a chave é a de sempre
         )
 
     def process(self, item: AudioItem) -> ProcessedAudio | None:
@@ -118,6 +152,45 @@ class EffectProcessor:
             self._render(item, out)
         return ProcessedAudio(out, chain_duration(item.effects, item.duration))
 
+    # ---------- perfis de ruído ----------
+
+    def _named_profiles(self, effects: Sequence[EffectBase]) -> list[str]:
+        """Os perfis nomeados que a cadeia usa (o `auto` não é nomeado: ele sai do próprio item)."""
+        names = {
+            reference
+            for _, effect in active_effects(effects)
+            if (reference := effect.noise_profile()) not in (None, AUTO_PROFILE)
+        }
+        return sorted(names)  # type: ignore[type-var]
+
+    def profile_parts(self, effects: Sequence[EffectBase]) -> list:
+        """O que o espectro dos perfis nomeados decide, para a chave de cache: a definição de cada um e o arquivo."""
+        return [
+            self.profiles.signature(name) if self.profiles else name for name in self._named_profiles(effects)
+        ]
+
+    def _spectrum(self, effect: EffectBase, entering: np.ndarray) -> NoiseSpectrum | None:
+        """O espectro do ruído para o efeito: o do perfil nomeado, medido no arquivo dele, ou o da janela mais quieta do
+        sinal que entra (`auto`). None quando o perfil automático não cabe: o item é curto demais para uma média ou não tem
+        uma pausa só de ruído (nada é tirado, em vez de tratar fala ou um tom contínuo como chiado)."""
+        reference = effect.noise_profile()
+        if reference == AUTO_PROFILE:
+            found = quiet_pause_window(entering, SAMPLE_RATE, AUTO_PROFILE_SECONDS)
+            if found is None:  # sem uma pausa só de ruído não há perfil: o efeito não tira nada
+                return None
+            window = entering[round(found[0] * SAMPLE_RATE) : round(found[1] * SAMPLE_RATE)]
+            try:
+                return noise_spectrum(window, SAMPLE_RATE)
+            except ValueError:
+                return None
+        if self.profiles is None:
+            raise ValueError(f"o perfil de ruído {reference!r} não está disponível neste contexto")
+        assert reference is not None
+        signature = repr(self.profiles.signature(reference))
+        if signature not in self._spectra:
+            self._spectra[signature] = measure_profile(self.reader, self.profiles.slice(reference))
+        return self._spectra[signature]
+
     # ---------- execução ----------
 
     def _inputs(self, item: AudioItem) -> Inputs:
@@ -126,44 +199,104 @@ class EffectProcessor:
         return inputs
 
     def _render(self, item: AudioItem, out: Path) -> None:
-        measures = self._measures(item)
-        inputs = self._inputs(item)
-        lines = [ingress_line(0, item.stream, "[fx_in]", item.lead)]
-        lines += chain_lines("[fx_in]", "[fx_out]", item.effects, item.duration, measures)
         out.parent.mkdir(parents=True, exist_ok=True)
-        staging = out.with_name(f"{out.stem}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}{out.suffix}")
-        args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_out]", *PROCESSED_CODEC]
-        args.append(str(staging))
-        total = chain_duration(item.effects, item.duration)
+        token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        staging = out.with_name(f"{out.stem}.tmp-{token}{out.suffix}")
+        scratch = out.with_name(f"{out.stem}.stages-{token}")
         try:
-            self.runner.run(FFmpegCommand(args, label="efeitos de áudio", total=total))
+            self._run_stages(item, staging, scratch)
             if staging.exists():  # na simulação (RecordingRunner) nada é gravado
                 staging.replace(out)
         finally:
             staging.unlink(missing_ok=True)
+            shutil.rmtree(scratch, ignore_errors=True)
 
-    def _measures(self, item: AudioItem) -> dict[int, Measure]:
-        """A medida do sinal que entra em cada efeito que a pede: uma passada de análise até aquele ponto da
-        cadeia. Os efeitos anteriores já entram com as próprias medidas, na ordem."""
+    def _run_stages(self, item: AudioItem, destination: Path, scratch: Path) -> None:
+        """Percorre os trechos da cadeia: cada um lê o sinal do anterior (o item, no primeiro) e grava o seguinte. O
+        primeiro e o último trecho são sempre de ffmpeg: o que lê o item e o que grava o WAV final, mesmo que o
+        efeito de amostras esteja numa ponta da cadeia."""
+        stages = split_stages(item.effects)
+        if stages[0].samples:
+            stages.insert(0, Stage(()))
+        if stages[-1].samples:
+            stages.append(Stage(()))
+        entering: Path | None = None  # None: o sinal é o próprio item
+        duration = item.duration
+        total = chain_duration(item.effects, item.duration)
+        for position, stage in enumerate(stages):
+            final = position == len(stages) - 1
+            target = destination if final else scratch / f"estagio{position}.f32"
+            if stage.samples:
+                self._sample_pass(stage, entering, target)
+            else:
+                self._filter_pass(item, stage, entering, duration, target, final, total)
+            entering = target
+            for _, effect in stage.effects:
+                duration = effect.output_duration(duration)
+
+    def _filter_pass(
+        self,
+        item: AudioItem,
+        stage: Stage,
+        entering: Path | None,
+        duration: float,
+        target: Path,
+        final: bool,
+        total: float,
+    ) -> None:
+        """Um comando do ffmpeg: os efeitos de filtro do trecho, do sinal que entra até `target`."""
+        if entering is None:
+            inputs = self._inputs(item)
+            ingress = ingress_line(0, item.stream, "[fx_in]", item.lead)
+        else:
+            inputs = Inputs()
+            inputs.add(entering, *STAGE_CODEC)
+            ingress = "[0:a]anull[fx_in]"
+        measures = self._measures(inputs, ingress, stage, duration)
+        lines = [ingress, *stage_lines("[fx_in]", "[fx_out]", stage.effects, duration, measures)]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_out]"]
+        args += PROCESSED_CODEC if final else STAGE_CODEC
+        args.append(str(target))
+        self.runner.run(FFmpegCommand(args, label="efeitos de áudio", total=total))
+
+    def _sample_pass(self, stage: Stage, entering: Path | None, target: Path) -> None:
+        """O estágio de amostras: lê o sinal do trecho anterior, aplica o efeito em numpy e grava o seguinte. O arquivo
+        de entrada é mapeado em disco (só o que o efeito toca vai à memória)."""
+        ((_, effect),) = stage.effects
+        if (
+            entering is None or not entering.exists()
+        ):  # na simulação (RecordingRunner) não há sinal para processar
+            return
+        if entering.stat().st_size == 0:  # nada a processar (o arquivo vazio nem pode ser mapeado)
+            shutil.copyfile(entering, target)
+            return
+        entering_samples = np.memmap(entering, dtype="<f4", mode="r").reshape(-1, STAGE_CHANNELS)
+        measure = None
+        if effect.noise_profile() is not None:
+            spectrum = self._spectrum(effect, entering_samples)
+            if spectrum is None:  # item curto demais para medir o ruído: o efeito não tem o que tirar
+                shutil.copyfile(entering, target)
+                return
+            measure = Measure(noise=spectrum)
+        result = apply_sample_effect(SampleRequest(effect, entering_samples, SAMPLE_RATE, measure))
+        np.asarray(result, dtype="<f4").tofile(target)
+
+    def _measures(self, inputs: Inputs, ingress: str, stage: Stage, duration: float) -> dict[int, Measure]:
+        """A medida do sinal que entra em cada efeito do trecho que a pede: uma passada de análise até aquele ponto do
+        trecho. Os efeitos anteriores já entram com as próprias medidas, na ordem."""
         measures: dict[int, Measure] = {}
-        for index, effect in active_effects(item.effects):
+        for index, effect in stage.effects:
             if not effect.needs_measure():
                 continue
-            before = item.effects[:index]
-            reaching = chain_duration(before, item.duration)
-            lines = [ingress_line(0, item.stream, "[fx_in]", item.lead)]
-            lines += chain_lines("[fx_in]", "[fx_pre]", before, item.duration, measures)
+            before = [(i, e) for i, e in stage.effects if i < index]
+            reaching = duration
+            for _, earlier in before:
+                reaching = earlier.output_duration(reaching)
+            lines = [ingress]
+            lines += stage_lines("[fx_in]", "[fx_pre]", before, duration, measures)
             lines += measure_lines("[fx_pre]", "[fx_meas]", span_samples(effect, reaching))
-            args = [
-                *self._inputs(item).args,
-                "-filter_complex",
-                ";".join(lines),
-                "-map",
-                "[fx_meas]",
-                "-f",
-                "null",
-                "-",
-            ]
+            args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_meas]", "-f", "null", "-"]
             measure = parse_astats(self.runner.capture(args, label="medida do efeito de áudio"))
             if measure is not None:
                 measures[index] = measure
@@ -176,8 +309,16 @@ class EffectProcessor:
 def effect_processor(ctx: RenderContext) -> EffectProcessor:
     """O processador do render em curso, criado na primeira vez que algum item tem efeito."""
     if ctx.audio_fx is None:
-        ctx.audio_fx = EffectProcessor(ctx.runner)
+        ctx.audio_fx = EffectProcessor(ctx.runner, profiles=ProfileLocator(ctx.project, ctx.session))
     return ctx.audio_fx
+
+
+def noise_profile_parts(ctx: RenderContext, effects: Sequence[EffectBase]) -> list:
+    """A parte da chave de cache de um item (o mezanino do clipe, o pedaço da prévia) que muda quando um perfil de ruído
+    nomeado que a cadeia usa muda. Vazia sem perfil nomeado: a chave de um projeto antigo é a de sempre."""
+    if not any(effect.noise_profile() not in (None, AUTO_PROFILE) for _, effect in active_effects(effects)):
+        return []  # a maioria dos itens: nem cria o processador
+    return effect_processor(ctx).profile_parts(effects)
 
 
 def clip_camera_audio(

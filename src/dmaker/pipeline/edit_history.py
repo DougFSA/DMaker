@@ -21,8 +21,10 @@ from ..domain.atomic_file import content_revision, read_bytes_retrying, write_by
 from ..domain.spec import Project
 from ..media.probe import probe
 from .context import Prober
-from .edits import EditReport, apply_edit_report
+from .edit_outcome import EditReport
+from .edits import apply_edit_report
 from .projects import load_project, project_path, save_project
+from .sample_reader import SampleReader
 from .sync import OffsetFinder
 
 HISTORY_DIR = "history"
@@ -64,8 +66,24 @@ OPERATION_LABELS = {
     "audio_shift": "Deslocar som",
     "audio_split_stereo": "Dividir estéreo",
     "track_set": "Estado da trilha",
+    "noise_profile_set": "Perfil de ruído",
+    "noise_profile_remove": "Apagar perfil de ruído",
+    "audio_truncate_silence": "Truncar silêncio",
 }
-_DETAIL_KEYS = ("target", "track", "index", "action", "start", "end", "region", "at", "delta", "to", "mode")
+_DETAIL_KEYS = (
+    "name",
+    "target",
+    "track",
+    "index",
+    "action",
+    "start",
+    "end",
+    "region",
+    "at",
+    "delta",
+    "to",
+    "mode",
+)
 
 
 def edit_label(op: Mapping) -> str:
@@ -279,13 +297,17 @@ def _history_for(project: Project, name_or_path: str | Path) -> EditHistory:
 
 
 def edit_and_record(
-    name_or_path: str | Path, op: dict, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+    name_or_path: str | Path,
+    op: dict,
+    prober: Prober = probe,
+    offset_finder: OffsetFinder | None = None,
+    sample_reader: SampleReader | None = None,
 ) -> tuple[EditReport, Path]:
     """Aplica a operação à spec do projeto, guarda o estado de antes no histórico e grava a spec nova. Só a edição que
     deu certo entra no histórico, e ele é gravado antes da spec, para uma falha no meio nunca deixar a spec nova sem o
     passo que a desfaz."""
     project = load_project(name_or_path)
-    report = apply_edit_report(project, op, prober, offset_finder)
+    report = apply_edit_report(project, op, prober, offset_finder, sample_reader)
     _history_for(project, name_or_path).record(project, report.project, edit_label(op))
     path = save_project(report.project, project.base_dir)
     return report, path

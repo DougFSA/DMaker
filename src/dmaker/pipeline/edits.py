@@ -9,7 +9,6 @@ Uma operação que tira ou põe tempo na linha do tempo também faz os marcadore
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
 
 from ..domain.edits import (
     EditError,
@@ -28,34 +27,20 @@ from ..domain.effect_edits import apply_effect_op
 from ..domain.marker_edits import add_marker, marker_index, remove_marker, set_marker
 from ..domain.markers import MarkerError, is_marker_ref, resolve_instant
 from ..domain.spec import ClipSegment, Project
-from ..domain.time_map import TimeMap, shift_markers
-from ..media.ffmpeg import FFmpegError
+from ..domain.time_map import shift_markers
+from ..media.ffmpeg import FFmpegError, SubprocessRunner
 from ..media.probe import probe
 from .audio_edit_ops import AUDIO_OPERATIONS
 from .context import Prober
+from .edit_outcome import EditOutcome, EditReport
 from .edit_time import EDIT_TIME_MAPS, EditChange, owned_intervals
 from .layout import OriginAggregate, aggregate_by_origin, project_layout
 from .missing import MissingMedia
+from .restoration_ops import RESTORATION_OPERATIONS
+from .sample_reader import FFmpegSampleReader, SampleReader
 from .sync import OffsetFinder
 
-
-@dataclass(frozen=True)
-class EditOutcome:
-    """O que uma operação devolve quando sabe o tempo que mexeu: o projeto novo e o mapa de tempo dos intervalos
-    removidos e inseridos (em tempo ANTIGO). Devolver só o `Project` quer dizer "não declaro nada"."""
-
-    project: Project
-    time_map: TimeMap | None = None
-
-
-@dataclass(frozen=True)
-class EditReport:
-    """A edição aplicada: o projeto novo (com os marcadores já no lugar), os avisos para a pessoa (marcador apagado
-    por estar num trecho cortado) e o mapa de tempo que foi usado."""
-
-    project: Project
-    warnings: list[str] = field(default_factory=list)
-    time_map: TimeMap = field(default_factory=TimeMap.identity)
+__all__ = ["EDIT_OPERATIONS", "EditOutcome", "EditReport", "apply_edit", "apply_edit_report"]
 
 
 Operation = Callable[[Project, dict, OriginAggregate], Project | EditOutcome]
@@ -175,15 +160,23 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     # edição de onda (silenciar, cortar, envelope, canais, colar, dividir, juntar, aparar, deslocar, trilha): não
     # mexem na imagem nem na duração do vídeo, então não declaram tempo e os marcadores ficam onde estão
     **AUDIO_OPERATIONS,
+    # limpeza e reparo (perfil de ruído, Truncar Silêncio): leem o som, então usam o leitor de amostras da edição; o
+    # Truncar Silêncio no clipe corta a imagem junto e declara o tempo que tirou
+    **RESTORATION_OPERATIONS,
 }
 
 
 def apply_edit_report(
-    project: Project, op: dict, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+    project: Project,
+    op: dict,
+    prober: Prober = probe,
+    offset_finder: OffsetFinder | None = None,
+    sample_reader: SampleReader | None = None,
 ) -> EditReport:
     """Calcula o layout atual do projeto e aplica a operação `op["type"]` sobre a spec, devolvendo o projeto novo
     com os marcadores já acompanhando a edição, mais os avisos (um marcador que estava num trecho cortado some).
-    Parâmetro ausente ou do tipo errado em `op` vira EditError."""
+    Parâmetro ausente ou do tipo errado em `op` vira EditError. As operações que leem o som (perfil de ruído, Truncar
+    Silêncio) usam `sample_reader`; sem ele, decodificam com o ffmpeg."""
     op_type = op.get("type")
     handler = EDIT_OPERATIONS.get(op_type)
     if handler is None:
@@ -194,6 +187,7 @@ def apply_edit_report(
     layout = aggregate_by_origin(
         project, project_layout(project, prober, offset_finder, MissingMedia.scan(project))
     )
+    layout.reader = sample_reader or FFmpegSampleReader(SubprocessRunner(quiet=True))
     try:
         result = handler(project, op, layout)
     except EditError:
@@ -222,13 +216,14 @@ def _follow_markers(
     """Desloca os marcadores pelo tempo que a edição mexeu. Sem marcador não há conta nenhuma (nem a segunda leitura
     das fontes); uma edição que não declara tempo deixa os marcadores onde estão."""
     after = outcome.project
+    notes = outcome.notes
     if not after.markers:
-        return EditReport(after)
+        return EditReport(after, notes=notes)
     time_map = outcome.time_map
     if time_map is None:
         builder = EDIT_TIME_MAPS.get(op["type"])
         if builder is None:
-            return EditReport(after)
+            return EditReport(after, notes=notes)
 
         def calculate_after() -> OriginAggregate:
             layout = project_layout(after, prober, offset_finder, MissingMedia.scan(after))
@@ -242,6 +237,9 @@ def _follow_markers(
             return EditReport(
                 after,
                 ["Os marcadores não acompanharam esta mudança na linha do tempo: confira a posição deles."],
+                notes=notes,
             )
     shifted = shift_markers(after.markers, time_map)
-    return EditReport(after.model_copy(update={"markers": shifted.markers}), shifted.warnings, time_map)
+    return EditReport(
+        after.model_copy(update={"markers": shifted.markers}), shifted.warnings, time_map, notes
+    )

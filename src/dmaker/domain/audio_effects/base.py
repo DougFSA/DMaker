@@ -17,16 +17,21 @@ EFFECT_CLASSES: dict[str, type[EffectBase]] = {}
 # Abaixo disto (1 microssegundo) um intervalo é arredondamento, não um trecho de som
 EPSILON = 1e-6
 
+# A taxa a que o som de um item é levado antes dos efeitos (o formato da mixagem): as contas em amostras, como o limite
+# de 128 amostras do Reparar, valem nela
+EFFECT_SAMPLE_RATE = 48000
 
-def param(default: Any, *, label: str, unit: str = "", hint: str = "", **constraints: Any) -> Any:
+
+def param(
+    default: Any, *, label: str, unit: str = "", hint: str = "", kind: str = "", **constraints: Any
+) -> Any:
     """Campo de parâmetro de efeito: além da faixa (`ge`, `le`...), leva o rótulo em português e a unidade que o
-    catálogo mostra na interface, no MCP e na CLI. O padrão é o do Audacity quando ele tem um."""
-    return Field(
-        default,
-        description=hint or label,
-        json_schema_extra={"label": label, "unit": unit},
-        **constraints,
-    )
+    catálogo mostra na interface, no MCP e na CLI. O padrão é o do Audacity quando ele tem um. `kind` força o tipo que
+    o catálogo anuncia quando o tipo do Python não diz tudo (`profile`: o nome de um perfil de ruído do projeto)."""
+    extra = {"label": label, "unit": unit}
+    if kind:
+        extra["kind"] = kind
+    return Field(default, description=hint or label, json_schema_extra=extra, **constraints)
 
 
 class EffectBase(BaseModel):
@@ -61,6 +66,9 @@ class EffectBase(BaseModel):
     # True quando o efeito troca o tempo do som de lugar (Repetir, Reverter, Cortar): depois dele o instante do item
     # já não é o instante do arquivo, e dividir, juntar, aparar e copiar um trecho do arquivo não têm resposta certa
     reorders_time: ClassVar[bool] = False
+    # True quando o efeito trabalha sobre as amostras em numpy (`register_sample_builder`), e não como filtro do ffmpeg:
+    # ele precisa do sinal inteiro na memória, então não roda dentro do grafo ao vivo da mistura (o áudio mestre o recusa)
+    sample_stage: ClassVar[bool] = False
 
     @model_validator(mode="after")
     def _interval(self) -> EffectBase:
@@ -73,6 +81,11 @@ class EffectBase(BaseModel):
     def needs_measure(self) -> bool:
         """Se o efeito precisa do pico (e do nível médio) do sinal que entra nele antes de montar o filtro."""
         return False
+
+    def noise_profile(self) -> str | None:
+        """A referência de perfil de ruído que o efeito pede (`auto` ou o nome de um perfil do projeto), ou None quando
+        ele não usa perfil. O processador mede o espectro dela antes de aplicar o efeito."""
+        return None
 
     def alters_duration(self) -> bool:
         """Se ESTA instância muda a duração do item. É `changes_duration` para quase todos; o Cortar decide pelo

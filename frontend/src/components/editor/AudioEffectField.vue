@@ -7,7 +7,7 @@ import type { AudioEffectParam, AudioEffectSettings } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
-import { clampParam, effectPath, paramValue, setEffectFieldIn } from '@/lib/audioEffects'
+import { AUTO_PROFILE, clampParam, effectPath, paramValue, profileNames, setEffectFieldIn } from '@/lib/audioEffects'
 import { useEditorStore } from '@/stores/editor'
 
 /** A espera do número digitado: cada tecla reinicia, e a spec só muda quando a pessoa para (a mesma do painel Filtros). */
@@ -91,6 +91,18 @@ function onDiscrete(value: boolean | string): void {
   editor.mutate((draft) => setEffectFieldIn(draft, listPath, index, props.param.name, value))
 }
 
+/** As opções do perfil de ruído: o automático e os que o projeto guarda; o que a spec cita sem existir fica marcado. */
+const profileOptions = computed(() => {
+  const names = profileNames(editor.spec)
+  const options = [
+    { value: AUTO_PROFILE, label: 'Automático (o trecho mais quieto do item)' },
+    ...names.map((profile) => ({ value: profile, label: profile })),
+  ]
+  const current = typeof stored.value === 'string' ? stored.value : AUTO_PROFILE
+  if (!options.some((option) => option.value === current)) options.push({ value: current, label: `${current} (não existe)` })
+  return options
+})
+
 // outro caminho (o efeito subiu ou desceu e o cartão foi reaproveitado): o que esperava vai para o caminho de antes
 watch(path, commit, { flush: 'sync' })
 
@@ -121,6 +133,17 @@ onBeforeUnmount(() => {
     :label="param.label"
     :model-value="typeof stored === 'string' ? stored : ''"
     :options="param.options.map((option) => ({ value: option, label: option }))"
+    :hint="param.hint || undefined"
+    :data-effect-param="param.name"
+    @update:model-value="onDiscrete"
+  />
+  <!-- o perfil de ruído: o automático ou um dos que o projeto guarda; um nome que a spec cita e não existe aparece marcado -->
+  <AppSelect
+    v-else-if="param.kind === 'profile'"
+    class="profile-cell"
+    :label="param.label"
+    :model-value="typeof stored === 'string' ? stored : AUTO_PROFILE"
+    :options="profileOptions"
     :hint="param.hint || undefined"
     :data-effect-param="param.name"
     @update:model-value="onDiscrete"

@@ -67,6 +67,10 @@ def test_the_basic_and_the_wave_editing_effects_are_registered():
         "cut",
         "envelope",
         "channels",
+        "noise_reduction",
+        "click_removal",
+        "clip_fix",
+        "repair",
     ]
     assert [info.type for info in catalog()] == list(EFFECT_CLASSES)
 

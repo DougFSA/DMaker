@@ -7,12 +7,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import numpy as np
+
 from ...domain.audio_effects import EffectBase
+from ...domain.audio_effects.base import EFFECT_SAMPLE_RATE
 from .measure import Measure
 
 # O áudio de um item é levado a esta taxa e a estéreo antes dos efeitos, que é o formato do resto da mixagem;
 # as contas em amostras (emenda do intervalo, repetição) usam esta taxa.
-SAMPLE_RATE = 48000
+SAMPLE_RATE = EFFECT_SAMPLE_RATE
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,7 @@ def register_builder(*names: str) -> Callable[[EffectBuilder], EffectBuilder]:
 
     def decorator(builder: EffectBuilder) -> EffectBuilder:
         for name in names:
-            if name in _BUILDERS:
+            if name in _BUILDERS or name in _SAMPLE_BUILDERS:
                 raise ValueError(f"Construtor de efeito já registrado: {name}")
             _BUILDERS[name] = builder
         return builder
@@ -80,4 +83,68 @@ def build_effect(request: EffectRequest) -> list[str]:
         builder = _BUILDERS[name]
     except KeyError:
         raise ValueError(f"Efeito de áudio sem construtor registrado: {name}") from None
+    return builder(request)
+
+
+# ---------- o estágio de amostras ----------
+#
+# Nem todo efeito cabe num filtro do ffmpeg (a subtração espectral do ruído, a interpolação do Reparar). Esses são uma
+# função pura sobre as amostras em numpy, registrada aqui do mesmo jeito que um construtor de filtro: a classe do efeito
+# marca `sample_stage = True` e o construtor entra com `@register_sample_builder("<type>")`. O processador parte a
+# cadeia em trechos de ffmpeg e estágios de amostras (decodifica, aplica, grava e segue), e o resultado fica no mesmo
+# cache por hash.
+
+
+@dataclass(frozen=True)
+class SampleRequest:
+    """O que um construtor de amostras recebe: o efeito, o sinal que entra nele e a medida desse sinal.
+
+    `samples` tem a forma `(amostras, canais)`, em ponto flutuante, a `sample_rate`; quando o efeito tem intervalo
+    (e não é dono dele), já vem recortado e com o tempo zerado, como no construtor de filtro. `measure` traz o que a
+    passada de medida leu (o espectro do perfil de ruído, em `measure.noise`)."""
+
+    effect: EffectBase
+    samples: np.ndarray
+    sample_rate: int = SAMPLE_RATE
+    measure: Measure | None = None
+
+
+class SampleBuilder(Protocol):
+    """Devolve o sinal depois do efeito, com a mesma forma do que entrou (ou outro comprimento, se o efeito muda a
+    duração). Função pura: não toca disco nem executa nada."""
+
+    def __call__(self, request: SampleRequest) -> np.ndarray: ...
+
+
+_SAMPLE_BUILDERS: dict[str, SampleBuilder] = {}
+
+
+def register_sample_builder(*names: str) -> Callable[[SampleBuilder], SampleBuilder]:
+    """Registra o construtor de amostras sob o `type` de um ou mais efeitos."""
+
+    def decorator(builder: SampleBuilder) -> SampleBuilder:
+        for name in names:
+            if name in _BUILDERS or name in _SAMPLE_BUILDERS:
+                raise ValueError(f"Construtor de efeito já registrado: {name}")
+            _SAMPLE_BUILDERS[name] = builder
+        return builder
+
+    return decorator
+
+
+def sample_builder_types() -> set[str]:
+    return set(_SAMPLE_BUILDERS)
+
+
+def is_sample_effect(effect: EffectBase) -> bool:
+    """Se o efeito roda sobre as amostras (e não como filtro do ffmpeg)."""
+    return effect.type in _SAMPLE_BUILDERS
+
+
+def build_samples(request: SampleRequest) -> np.ndarray:
+    name = request.effect.type
+    try:
+        builder = _SAMPLE_BUILDERS[name]
+    except KeyError:
+        raise ValueError(f"Efeito de áudio sem construtor de amostras registrado: {name}") from None
     return builder(request)

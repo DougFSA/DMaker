@@ -4,11 +4,13 @@ import { audioEffectCatalog } from '@/test/audioEffectsFixtures'
 import { timelineItem, timelineTrack } from '@/test/editorFixtures'
 import {
   addEffectIn,
+  AUTO_PROFILE,
   chainOf,
   clampParam,
   effectContextFor,
   effectPath,
   effectsFor,
+  freeProfileName,
   intervalProblem,
   isEnabled,
   MASTER_LIST_PATH,
@@ -16,10 +18,12 @@ import {
   moveEffectIn,
   newEffect,
   paramValue,
+  profileNames,
   removeEffectIn,
   setEffectFieldIn,
   setEnabledIn,
   targetMayGrow,
+  targetOfList,
 } from './audioEffects'
 
 const catalog = audioEffectCatalog()
@@ -161,6 +165,41 @@ describe('onde o Repetir vale', () => {
   it('o menu não oferece o efeito que só existe com uma seleção ou uma curva (Cortar, Envelope)', () => {
     const cut = { ...info('invert'), type: 'cut', needs_selection: true }
     expect(effectsFor([...catalog.effects, cut], true).map((effect) => effect.type)).not.toContain('cut')
+  })
+})
+
+describe('perfis de ruído e efeitos de amostras', () => {
+  it('o master não oferece o efeito que trabalha sobre as amostras do item', () => {
+    const effects = [...catalog.effects, { ...info('invert'), type: 'noise_reduction', sample_stage: true }]
+    expect(effectsFor(effects, false).map((effect) => effect.type)).toContain('noise_reduction')
+    expect(effectsFor(effects, false, false).map((effect) => effect.type)).not.toContain('noise_reduction')
+    expect(effectsFor(effects, false, false).map((effect) => effect.type)).toContain('invert')
+  })
+
+  it('lê os nomes dos perfis da spec, e nenhum quando ela não tem', () => {
+    expect(profileNames({ audio: { noise_profiles: { sala: {}, rua: {} } } })).toEqual(['sala', 'rua'])
+    expect(profileNames({ audio: {} })).toEqual([])
+    expect(profileNames(null)).toEqual([])
+  })
+
+  it('escreve o alvo da edição a partir de onde a cadeia mora', () => {
+    expect(targetOfList('timeline.2.effects')).toBe('timeline.2')
+    expect(targetOfList('audio.voiceover.0.effects')).toBe('audio.voiceover.0')
+    expect(targetOfList('audio.music.effects')).toBe('audio.music')
+    expect(targetOfList(MASTER_LIST_PATH)).toBe('audio.master')
+  })
+
+  it('dá um nome livre para o perfil novo', () => {
+    expect(freeProfileName([])).toBe('perfil-1')
+    expect(freeProfileName(['perfil-1'])).toBe('perfil-2')
+    expect(freeProfileName(['sala', 'perfil-2'])).toBe('perfil-3')
+  })
+
+  it('o valor do perfil no formulário é o da spec, ou o padrão `auto`', () => {
+    const param = { name: 'profile', kind: 'profile' as const, default: 'auto' }
+    expect(paramValue({ type: 'noise_reduction', profile: 'sala' }, param)).toBe('sala')
+    expect(paramValue({ type: 'noise_reduction' }, param)).toBe('auto')
+    expect(AUTO_PROFILE).toBe('auto')
   })
 })
 

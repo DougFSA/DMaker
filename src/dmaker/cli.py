@@ -2890,8 +2890,116 @@ def _run_wave_edit(spec: Path, op: dict, done: str) -> None:
     except RENDER_ERRORS as exc:
         _fail(str(exc))
     console.print(f"[green]{done}[/green] (desfaça com `dmaker undo`)", highlight=False)
+    for note in report.notes:
+        console.print(escape(note), highlight=False)
     for warning in report.warnings:
         console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("truncate-silence")
+def audio_truncate_silence_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    threshold_db: Annotated[
+        float, typer.Option("--threshold-db", help="Abaixo deste nível (dBFS, de -80 a -20) é silêncio.")
+    ] = -20.0,
+    min_duration: Annotated[
+        float, typer.Option("--min-duration", help="Só pausas de pelo menos isto (segundos) são encurtadas.")
+    ] = 0.5,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help="truncate: cada pausa vira --truncate-to segundos; compress: o que passa da duração mínima "
+            "encolhe para --compress-percent %.",
+        ),
+    ] = "truncate",
+    truncate_to: Annotated[
+        float, typer.Option("--truncate-to", help="No modo truncate, a duração que a pausa passa a ter (s).")
+    ] = 0.5,
+    compress_percent: Annotated[
+        float, typer.Option("--compress-percent", help="No modo compress, quanto do excesso fica (0 a 100).")
+    ] = 50.0,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Encurta as pausas de um clipe (imagem e som juntos) ou de uma voz gravada, sem cortar fala (o Truncate Silence
+    do Audacity). A boca continua sincronizada e os marcadores acompanham."""
+    op = _wave_op(
+        "audio_truncate_silence",
+        target,
+        threshold_db=threshold_db,
+        min_duration=min_duration,
+        mode=mode,
+        truncate_to=truncate_to,
+        compress_percent=compress_percent,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+    )
+    _run_wave_edit(spec, op, "Silêncios truncados.")
+
+
+noise_profile_app = typer.Typer(
+    help="Perfis de ruído do projeto, o primeiro passo da Redução de ruído (efeito noise_reduction).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(noise_profile_app, name="noise-profile")
+
+
+@noise_profile_app.command("add")
+def noise_profile_add(
+    spec: _WAVE_SPEC,
+    name: Annotated[str, typer.Argument(help="O nome do perfil (a Redução de ruído o cita em `profile`).")],
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Guarda o trecho que só tem chiado como perfil e mostra o nível do ruído por banda. Sem --start e --end, o perfil
+    é o trecho mais quieto do item. Desfaça com `dmaker undo`."""
+    from .domain.edits import EditError
+    from .pipeline.noise_profiles import capture_noise_profile
+
+    try:
+        report = capture_noise_profile(spec, name, target, _instant_arg(start), _instant_arg(end))
+    except (EditError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"[green]Perfil {escape(name)} guardado[/green]: {escape(report['target'])} de {report['start']:.3f} a "
+        f"{report['end']:.3f} s, nível {report['level_db']:.1f} dBFS (desfaça com `dmaker undo`)",
+        highlight=False,
+    )
+    table = Table("Banda (Hz)", "Nível (dBFS)")
+    for band in report["bands"]:
+        table.add_row(f"{band['hz']:g}", f"{band['db']:.1f}")
+    console.print(table)
+
+
+@noise_profile_app.command("list")
+def noise_profile_list(spec: _WAVE_SPEC) -> None:
+    """Lista os perfis de ruído do projeto."""
+    project = _load(spec)
+    profiles = project.audio.noise_profiles
+    if not profiles:
+        console.print("O projeto não tem perfis de ruído (crie com `dmaker audio noise-profile add`).")
+        return
+    table = Table("Perfil", "Item", "Início (s)", "Fim (s)")
+    for key, profile in profiles.items():
+        table.add_row(key, profile.target, f"{profile.start:.3f}", f"{profile.end:.3f}")
+    console.print(table)
+
+
+@noise_profile_app.command("remove")
+def noise_profile_remove(
+    spec: _WAVE_SPEC, name: Annotated[str, typer.Argument(help="O nome do perfil.")]
+) -> None:
+    """Apaga um perfil de ruído (recusa se algum efeito ainda o usa)."""
+    _run_wave_edit(spec, {"type": "noise_profile_remove", "name": name}, f"Perfil {name} apagado.")
 
 
 @audio_app.command("silence")
