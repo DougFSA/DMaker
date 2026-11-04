@@ -35,6 +35,7 @@ from .audio_presets import (
     is_audio_preset,
     resolve_encoding,
 )
+from .auto_duck import AutoDuck
 from .curves import Curve
 from .transitions import all_transition_names
 
@@ -874,10 +875,18 @@ class AudioSettings(EffectsOwner):
     # perfis de ruído com nome (ver `NoiseProfile`): a Redução de ruído aponta um deles por `profile`. Vazio fica fora do
     # dump, então um projeto sem perfil gera os mesmos bytes e o mesmo hash de antes de o campo existir
     noise_profiles: dict[str, NoiseProfile] = {}
+    # regras do Auto Duck (ver `AutoDuck`): uma trilha abaixa enquanto OUTRA soa. A regra da música (`background: "MUS"`)
+    # substitui o `music.ducking` antigo. Vazio fica fora do dump, pelo mesmo motivo dos perfis de ruído
+    ducks: list[AutoDuck] = []
 
     effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
     effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
-    omitted_at_default: ClassVar[dict[str, Any]] = {"sfx_gain_db": 0.0, "sfx_pan": 0.0, "noise_profiles": {}}
+    omitted_at_default: ClassVar[dict[str, Any]] = {
+        "sfx_gain_db": 0.0,
+        "sfx_pan": 0.0,
+        "noise_profiles": {},
+        "ducks": [],
+    }
 
     @model_validator(mode="after")
     def _master_runs_live(self) -> AudioSettings:

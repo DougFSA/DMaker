@@ -17,6 +17,7 @@ from ..media.probe import MediaInfo
 if TYPE_CHECKING:  # pragma: no cover
     from ..filtergraph.audio_effects import Measure
     from .audio_effects import EffectProcessor
+    from .auto_duck import DuckPlan
     from .isolation import IsolationService
     from .narration import NarrationService
 
@@ -77,6 +78,8 @@ class RenderContext:
     audio_fx: EffectProcessor | None = None
     track_audio: tuple[Path | None, ...] | None = None
     master_measures: dict[int, Measure] = field(default_factory=dict)
+    # o plano do Auto Duck (ver `pipeline/auto_duck.py`); None quando o projeto não tem regra
+    duck_plan: DuckPlan | None = None
 
     @property
     def width(self) -> int:

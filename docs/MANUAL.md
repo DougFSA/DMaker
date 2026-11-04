@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 48 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 50 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -76,6 +76,8 @@ São 48 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Aplicar efeitos de áudio em um item ou no master](#aplicar-efeitos-de-áudio-em-um-item-ou-no-master) | Põe uma cadeia de efeitos (Amplificar, Normalizar, Inverter, Reverter e Repetir) no som de qualquer item ou da mistura inteira, sem mexer no arquivo original. | sim |
 | [Tirar o chiado de uma gravação (Redução de ruído)](#tirar-o-chiado-de-uma-gravação-redução-de-ruído) | Tira o chiado de fundo de um item a partir de um perfil de ruído, como o Audacity, sem mexer no arquivo original. | ainda não: `noise_profile` |
 | [Consertar cliques, voz estourada e pausas longas](#consertar-cliques-voz-estourada-e-pausas-longas) | Tira estalos, reconstrói a voz que estourou, refaz um estalo curtíssimo e encurta as pausas, sem mexer no arquivo original. | sim |
+| [Controlar o volume: compressor, limitador, noise gate e loudness](#controlar-o-volume-compressor-limitador-noise-gate-e-loudness) | Aperta a diferença entre o som forte e o fraco, segura os picos num teto, fecha o chiado entre as frases e iguala o volume de duas falas, sem mexer no arquivo original. | ainda não: `audio_effect_action` |
+| [Abaixar uma trilha enquanto outra fala (Auto Duck)](#abaixar-uma-trilha-enquanto-outra-fala-auto-duck) | Abaixa o volume de uma trilha (a música, o DJ) enquanto outra (a voz, o celebrante) soa, como o Auto Duck do Audacity, sem mexer no arquivo original. | sim |
 | [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](#reparar-o-som-de-um-item-silenciar-cortar-envelope-canais-e-deslocar) | Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo. | sim |
 | [Copiar, colar, dividir e juntar trechos de áudio](#copiar-colar-dividir-e-juntar-trechos-de-áudio) | Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo. | sim |
 | [Desfazer e refazer uma edição](#desfazer-e-refazer-uma-edição) | Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto. | ainda não: `edit_history` |
@@ -2643,6 +2645,13 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Spectral Edit Shelves (Prateleiras Espectrais) | Efeito `spectral_shelves`: `gain_db` acima da borda de baixo, abaixo da de cima, ou entre as duas | "Apagar um som pela frequência: espectrograma e edição espectral" |
 | Marcador espectral (rótulo com faixa de frequência) | **Marcador** (Ctrl+B) numa seleção com frequência guarda `low_hz` e `high_hz`; o arquivo de rótulos do Audacity os leva e traz | "Apagar um som pela frequência: espectrograma e edição espectral" |
 | Cortar o vídeo no ritmo da música (rótulos de batida) | `cut_on_beat` (`dmaker audio analyze cut-on-beat`): para cada fronteira entre clipes, a batida mais perto dentro de `tolerance`; só propõe a lista, e com `apply` os cortes andam por aparas, sem mudar a duração, com os marcadores acompanhando | "Cortar os clipes no ritmo da música" |
+| Efeito > Compressor | `{"type": "compressor", "threshold_db": -20, "ratio": 4, "knee_db": 6, "attack_ms": 10, "release_ms": 100, "makeup_db": 0, "lookahead_ms": 1}`, com os parâmetros do compressor do Audacity 3.6. A razão vai até 20:1 e o joelho até 18 dB (os limites do filtro do ffmpeg); **acima de 20:1, use o Limitador**. O lookahead é um atraso compensado: o detector enxerga o pico antes e o som não anda | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Efeito > Limiter (Limitador) | `{"type": "limiter", "limit_type": "hard", "ceiling_db": -1, "input_gain_db": 0, "lookahead_ms": 5, "release_ms": 50}`. O teto é em **dBTP** (pico verdadeiro): o limitador roda com sobreamostragem de 4x e o teto interno fica 0,5 dB abaixo do pedido, margem medida em seis sinais. `limit_type` é `hard` (rígido) ou `soft` (suave, que começa a abaixar uns 4 dB antes do teto) | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Efeito > Noise Gate | `{"type": "noise_gate", "threshold_db": -40, "reduction_db": 24, "attack_ms": 10, "hold_ms": 50, "release_ms": 100, "stereo_link": true}`. O ataque abre o gate ANTES de o som passar do limiar, então o começo da palavra passa inteiro; o limiar é de **pico**. **Analisar ruído** (`audio_effect_action`, `dmaker audio effect action`, o botão no cartão) sugere o limiar a partir de um trecho sem fala. Não tem o "Gate frequencies above" do Audacity | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Efeito > Loudness Normalization (Normalização de Loudness) | `{"type": "loudness_normalize", "mode": "lufs", "target_db": -16, "dual_mono": true}` ou `"mode": "rms"`. Um ganho único por item (sem limitar o pico: ponha o Limitador depois), só no intervalo. `dual_mono` ligado (padrão do Audacity) mede o arquivo mono como a mistura o toca, nos dois lados; desligado, o mono mede 3 LU abaixo e o ganho sobe 3 dB | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Efeito > Auto Duck | `audio.ducks`: `{"background": "A2", "key": "A3", "amount_db": -12, "threshold_db": -30, "max_pause": 1, "outer_fade_down": 0.5, "inner_fade_down": 0, "inner_fade_up": 0, "outer_fade_up": 0.5}` (`auto_duck_add` no `edit_project`, `dmaker audio duck add`). Os ids são os da linha do tempo: `A1`, `A2...`, `MUS`, `NAR`, `VO`, `SFX`. **Limite:** uma faixa externa (A2, A3...) só abaixa sob outra faixa externa, e o `A1`, que já contém as faixas externas, não abaixa sob elas; as demais combinações valem. O ducking antigo da música (`music.ducking`) é o caso da música das regras: uma regra com `"background": "MUS"` o substitui | "Abaixar uma trilha enquanto outra fala (Auto Duck)" |
+| Predefinições de efeitos | `audio_effect` com `"action": "preset"` (`dmaker audio effect preset`, o grupo **Predefinições** do menu **+ Efeito**): `podcast_voice` (gate leve, compressor 3:1 a -18 dB, -16 LUFS e limitador a -1 dBTP), `reels_voice` (compressor 4:1 a -20 dB, -14 LUFS e limitador a -1 dBTP) e `hold_peaks` (limitador suave a -1 dBTP). Cada efeito entra separado e editável. No `audio.master` a predefinição com gate é recusada | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Analyze > Measure RMS, com o LUFS | O bloco **Nível do item** do painel Filtros mede, sob demanda (**Medir**), o RMS, o pico e o LUFS integrado do item como ele soa | "Controlar o volume: compressor, limitador, noise gate e loudness" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -2833,6 +2842,127 @@ Renderize e rode `dmaker qa`. Medido em sinal de teste: cliques de 1 a 5 amostra
 - **Os estalos ficaram**: suba `max_spike_width`; o que sobrar, o Reparar refaz. Se a fala perdeu consoantes, suba `threshold` e baixe a largura.
 - **"o Reparar conserta no máximo 128 amostras"**: selecione só o estalo.
 - **A voz ainda estoura**: o `threshold_percent` está acima do nível do corte.
+
+### Controlar o volume: compressor, limitador, noise gate e loudness
+<!-- tarefa: volume-e-dinamica -->
+Aperta a diferença entre o som forte e o fraco, segura os picos num teto, fecha o chiado entre as frases e iguala o volume de duas falas, sem mexer no arquivo original.
+
+#### Quando usar
+
+A narração varia de volume, duas gravações têm volumes muito diferentes, ou o som estoura no vídeo final.
+
+**Pedidos que levam a esta tarefa:**
+- "Deixa a voz do podcast mais uniforme e com volume de podcast"
+- "Iguala o volume das duas narrações em -16 LUFS"
+- "Segura os picos para nada passar de -1 dB"
+
+#### Antes de começar
+
+- O projeto (`name`) e o item (`target`): `timeline.N`, `overlays.N`, `audio.voiceover.N`, `audio.narration.N`, `audio.music`, `audio.tracks.N` ou `audio.master`. O **Noise Gate** trabalha sobre as amostras do item e não vale no `audio.master`.
+- Os parâmetros são os do Audacity 3.6. Onde a faixa dele passa da do filtro do ffmpeg, vale a do filtro: razão de 1 a 20:1 (acima disso use o Limitador), joelho de 0 a 18 dB, compensação de 0 a 36 dB.
+- O **Limitador** garante o teto em **dBTP** (pico verdadeiro). O **Compressor** e a **Normalização de loudness** não limitam: se o ganho subir, ponha o Limitador por último.
+- As predefinições `podcast_voice`, `reels_voice` e `hold_peaks` põem uma cadeia pronta, cada efeito separado e editável.
+- Compressor, gate e limitador mudam a voz sintetizada e podem apagar a marca d'água inaudível dela, como a Redução de ruído. É uma decisão registrada; a etiqueta de procedência continua.
+
+#### Pela IA
+
+Diga: "Põe a voz de podcast na narração" ou "Iguala as duas falas em -16 LUFS". A IA usa `edit_project` com `audio_effect` (`add` ou `preset`) e confere com `qa_report`. Para achar o limiar do gate, `audio_effect_action`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "episodio", "op": {"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "podcast_voice"}}, "para": "gate leve, compressor 3:1, -16 LUFS e limitador a -1 dBTP"},
+  {"tool": "audio_effect_action", "arguments": {"name": "episodio", "effect": "noise_gate", "action": "analyze_noise", "target": "audio.voiceover.0"}, "para": "sugerir o limiar do gate pelo trecho mais quieto"},
+  {"tool": "edit_project", "arguments": {"name": "episodio", "op": {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "compressor", "threshold_db": -20, "ratio": 4}}}, "para": "comprimir 4:1 a partir de -20 dB"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "episodio"}, "para": "conferir a saída"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**:
+
+- **Efeitos de áudio**: selecione o item, **+ Efeito**, e escolha **Compressor**, **Limitador**, **Noise Gate** ou **Normalização de loudness**. O grupo **Predefinições** do mesmo menu põe uma cadeia pronta. No Noise Gate, o botão **Analisar ruído** preenche o limiar.
+- **Nível do item**: **Medir** mostra o RMS, o pico e o LUFS integrado do item como ele soa, só quando você pede.
+
+#### Pela CLI
+
+```powershell
+dmaker audio effect preset projects/episodio/spec.json audio.voiceover.0 podcast_voice
+dmaker audio effect action projects/episodio/spec.json noise_gate analyze_noise --target audio.voiceover.0
+dmaker audio effect add projects/episodio/spec.json audio.voiceover.0 compressor --param threshold_db=-20 --param ratio=4
+```
+
+Tudo entra no histórico (`dmaker undo`).
+
+#### Como conferir
+
+Renderize e rode `dmaker qa`, ou use **Medir** no item. Medido em sinal de teste: o compressor 4:1 a -20 dB baixou a LRA de uma fala de 15,3 para 9,8 LU; o limitador com teto de -1 dBTP não deixou nenhum dos seis sinais de teste passar do teto; o gate fechou o chiado em 12,0 e 24,0 dB (a redução pedida) e os 20 ms iniciais de cada palavra ficaram iguais; duas falas de -11,0 e -29,3 LUFS normalizadas a -16 mediram -16,0.
+
+#### Se der errado
+
+- **O gate corta o fim das palavras**: suba `hold_ms` e `release_ms`, ou baixe o limiar. **Analisar ruído** dá um ponto de partida (o limiar do gate é de pico, uns 11 dB acima do RMS do chiado).
+- **O som ficou baixo depois do compressor**: suba `makeup_db`, ou normalize o loudness no fim.
+- **O gate não aparece no master**: ele trabalha sobre as amostras do item; ponha-o na voz.
+
+### Abaixar uma trilha enquanto outra fala (Auto Duck)
+<!-- tarefa: auto-duck -->
+Abaixa o volume de uma trilha (a música, o DJ) enquanto outra (a voz, o celebrante) soa, como o Auto Duck do Audacity, sem mexer no arquivo original.
+
+#### Quando usar
+
+A música cobre a narração, ou a faixa do DJ cobre a fala do celebrante.
+
+**Pedidos que levam a esta tarefa:**
+- "Abaixa a música 15 dB quando a voz falar"
+- "Abaixa a faixa do DJ enquanto o celebrante fala"
+
+#### Antes de começar
+
+- Cada regra (`audio.ducks`) diz qual trilha abaixa (`background`) e qual a comanda (`key`), pelos ids da linha do tempo: `A1`, `A2...`, `MUS`, `NAR`, `VO`, `SFX`. Os padrões são os do Audacity: `amount_db` -12, `threshold_db` -30, `max_pause` 1 s, rampas de 0,5 s.
+- **Limite:** uma faixa externa (A2, A3...) só abaixa sob **outra faixa externa**, porque ela é misturada dentro do clipe, antes da música e das vozes existirem. E o `A1`, que já contém as faixas externas, **não abaixa sob elas**. Qualquer outra combinação vale (a música sob a voz, a narração sob a voz gravada, o DJ sob o celebrante). O programa recusa a combinação com a explicação.
+- O ducking antigo da música (`music.ducking`, ligado por padrão) continua igual enquanto não há regra para a música. Uma regra com `background: "MUS"` o **substitui**: os dois não rodam juntos, e a música passa a abaixar pela curva da regra.
+- A chave é medida como se ouve (com os efeitos e o volume dela), em janelas de 20 ms, e a medida fica em cache.
+
+#### Pela IA
+
+Diga: "Abaixa a música 15 dB sob a voz gravada." A IA usa `edit_project` com `auto_duck_add` e confere com `qa_report`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "casamento", "op": {"type": "auto_duck_add", "background": "A2", "key": "A3", "amount_db": -12}}, "para": "a faixa do DJ abaixa 12 dB enquanto a do celebrante fala"},
+  {"tool": "edit_project", "arguments": {"name": "casamento", "op": {"type": "auto_duck_set", "index": 0, "max_pause": 2}}, "para": "só voltar o fundo depois de 2 s de pausa"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "casamento"}, "para": "conferir a saída"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, bloco **Abaixar sob outra trilha (Auto Duck)**: aparece quando o item selecionado é de uma trilha que pode ser o fundo. **Regra** acrescenta uma, **Abaixa sob** oferece só as trilhas que o programa aceita, e os campos são os do Audacity (quanto abaixa, limiar, pausa máxima e as quatro rampas).
+
+#### Pela CLI
+
+```powershell
+dmaker audio duck add projects/casamento/spec.json A2 A3 --param amount_db=-12
+dmaker audio duck list projects/casamento/spec.json
+dmaker audio duck set projects/casamento/spec.json 0 --param max_pause=2
+dmaker audio duck remove projects/casamento/spec.json 0
+```
+
+Tudo entra no histórico (`dmaker undo`).
+
+#### Como conferir
+
+Renderize e ouça, ou meça. Medido em duas faixas externas de teste: o fundo caiu 12,00 dB só enquanto a outra falava (3 a 5 s e 7 a 8 s), e ficou a 0,00 dB fora das regiões e das rampas; a faixa que comanda não mudou. Um projeto antigo com `music.ducking` gera o mesmo grafo de antes.
+
+#### Se der errado
+
+- **"a faixa externa A2 só abaixa sob outra faixa externa"**: a combinação não vale; escolha outra faixa externa como chave, ou abaixe a música (`MUS`).
+- **A música não abaixa**: veja com `dmaker audio duck list` se a regra existe e se as duas trilhas existem no projeto (a regra de uma trilha ausente não faz nada e avisa).
+- **O fundo sobe entre duas frases**: suba `max_pause`.
 
 ### Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar
 <!-- tarefa: reparar-o-som -->
@@ -3636,6 +3766,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-60 | Analisadores de áudio: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras (`audio_analyzers`, `audio_analyze`, `dmaker audio analyze`), que medem o som de um item como ele soa, da saída final ou de um arquivo; os que marcam escrevem num grupo de marcadores próprio; duas conferências novas no `qa_report` (som estourado, com o instante, e contraste entre a fala e a música, com o critério de 20 dB); `cut_on_beat` para cortar os clipes nas batidas da música; e o gráfico do espectro no painel Filtros, com o cursor de frequência, nota e dB | "Analisar o áudio: estouro, nível, contraste, espectro e sons"; "Cortar os clipes no ritmo da música" |
 | DMK-63 | Espectrograma e edição espectral: o painel **Áudio** ganha as vistas **Espectrograma** e **Onda e espectro** (escala linear, logarítmica, Mel, Bark ou ERB, cores, faixa de frequência, janela, ganho e alcance; a imagem vem do servidor por zoom e fica em cache, e uma hora de áudio abre sem ler a hora), a ferramenta **Espectral** (um retângulo de tempo e frequência) e os quatro efeitos espectrais (`spectral_delete`, `spectral_multi_tool`, `spectral_eq` e `spectral_shelves`), também por `region: "marker:<texto>"` com marcador espectral na spec, no MCP e em `dmaker audio effect add --region` | "Apagar um som pela frequência: espectrograma e edição espectral" |
 | DMK-55 | Limpeza e reparo do áudio: os efeitos Redução de ruído (por perfil, com redução, sensibilidade e suavização do Audacity, e o modo automático pelo trecho mais quieto), Remover cliques, Corrigir clipping e Reparar (até 128 amostras), o perfil de ruído guardado com nome em `audio.noise_profiles` (`noise_profile`, `dmaker audio noise-profile`, o botão **Pegar perfil de ruído** e o **Comparar antes e depois** no cartão do efeito) e a operação Truncar silêncio (`audio_truncate_silence`), que no clipe encurta a imagem junto; o modelo `podcast` liga uma limpeza moderada da voz (`limpeza`) | "Tirar o chiado de uma gravação (Redução de ruído)"; "Consertar cliques, voz estourada e pausas longas"; "Fazer um episódio de podcast" |
+| DMK-52 | Volume e dinâmica: os efeitos Compressor (com lookahead compensado), Limitador (teto em dBTP, rígido ou suave), Noise Gate (em amostras, abre antes da palavra, com **Analisar ruído**) e Normalização de loudness (LUFS ou RMS, dual-mono); o Auto Duck entre duas trilhas quaisquer, com as regras de `audio.ducks` (a faixa externa só abaixa sob outra faixa externa) e o ducking antigo da música como o caso da música; as predefinições Voz de podcast, Voz de reels e Segurar picos; `audio_effect_action`, `dmaker audio duck`, `dmaker audio effect preset` e `action`, e o **Nível do item** (RMS, pico e LUFS) no painel Filtros | "Controlar o volume: compressor, limitador, noise gate e loudness"; "Abaixar uma trilha enquanto outra fala (Auto Duck)" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -3649,7 +3780,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 112 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 118 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -3892,10 +4023,27 @@ Analisar o áudio sem mudar o som: Contraste, Achar Clipping, Medir RMS, Espectr
   - `--out` CAMINHO: Exporta o resultado: .csv ou .txt (tabela), .png (espectro) ou .json.
   - `--json`: Resultado completo em JSON, como a ferramenta MCP.
 
+#### dmaker audio duck
+
+Auto Duck: abaixa uma trilha enquanto outra fala (a música sob a voz, o DJ sob o celebrante).
+
+- **`dmaker audio duck add SPEC BACKGROUND KEY`**: Acrescenta uma regra (por exemplo: audio duck add spec.json MUS VO -p amount_db=-15). Uma regra para a música substitui o ducking antigo dela; a faixa externa só abaixa sob outra faixa externa.
+  - `--param` / `-p` TEXTO: Ajuste da regra, nome=valor (amount_db, threshold_db, max_pause...). (pode repetir)
+- **`dmaker audio duck list SPEC`**: Lista as regras de Auto Duck do projeto.
+- **`dmaker audio duck remove SPEC INDEX`**: Tira uma regra de Auto Duck.
+- **`dmaker audio duck set SPEC INDEX`**: Muda campos de uma regra (os que não forem citados ficam como estão).
+  - `--param` / `-p` TEXTO: Ajuste da regra, nome=valor. (pode repetir)
+
 #### dmaker audio effect
 
 Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, desligar e ajustar.
 
+- **`dmaker audio effect action SPEC EFFECT ACTION`**: Roda uma ação de um efeito e mostra o que ela sugere para os campos (o Analisar ruído do Noise Gate mede um trecho sem fala e sugere o limiar). Só lê: para gravar o valor, use `dmaker audio effect set`.
+  - `--target` TEXTO: O item de onde sai o trecho (por exemplo audio.voiceover.0).
+  - `--profile` TEXTO: Um perfil de ruído do projeto, ou auto (o trecho mais quieto do item).
+  - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
+  - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
+  - `--json`: Saída em JSON, como a ferramenta MCP.
 - **`dmaker audio effect add SPEC TARGET EFFECT`**: Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim").
   - `--param` / `-p` TEXTO: Parâmetro do efeito, nome=valor (repetível). (pode repetir)
   - `--start` NÚMERO: Início do intervalo, em segundos do item.
@@ -3906,6 +4054,8 @@ Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, deslig
 - **`dmaker audio effect disable SPEC TARGET INDEX`**: Desliga o efeito da posição `index` sem apagá-lo (o botão de bypass).
 - **`dmaker audio effect enable SPEC TARGET INDEX`**: Liga o efeito da posição `index`.
 - **`dmaker audio effect move SPEC TARGET INDEX TO`**: Muda a ordem da cadeia: o efeito de `index` vai para `to`.
+- **`dmaker audio effect preset SPEC TARGET PRESET`**: Põe no item uma cadeia pronta (por exemplo: audio effect preset spec.json audio.narration.0 podcast_voice). Cada efeito entra separado, e a pessoa ajusta ou tira depois.
+  - `--position` NÚMERO: Posição na cadeia (padrão: no fim).
 - **`dmaker audio effect remove SPEC TARGET INDEX`**: Tira o efeito da posição `index` da cadeia.
 - **`dmaker audio effect set SPEC TARGET INDEX`**: Muda os parâmetros do efeito da posição `index` (os que não forem citados ficam como estão).
   - `--param` / `-p` TEXTO: Parâmetro a mudar, nome=valor (repetível). (pode repetir)
@@ -4217,7 +4367,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 78 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 79 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -4241,7 +4391,7 @@ São 78 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto).
 - **`validate_project`**: Confere arquivos, calcula a duração final e lista avisos (limites da plataforma, marca).
   Parâmetros: `name_or_path`\* (texto).
-- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove (marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}).
+- **`edit_project`**: Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove (marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, enable, disable, set ou preset (uma cadeia pronta do catálogo: `preset` é o id, ex. podcast_voice); ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}).
   Parâmetros: `name`\* (texto), `op`\* (objeto).
 - **`undo_edit`**: Desfaz a última edição gravada no projeto (de `edit_project`, das ferramentas de marcadores e de `undo_cut`): a spec volta exatamente a como estava antes.
   Parâmetros: `name`\* (texto).
@@ -4253,6 +4403,8 @@ São 78 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `type` (texto).
 - **`noise_profile`**: Pega o perfil de ruído de um trecho de um item de áudio, o primeiro passo da Redução de ruído (efeito `noise_reduction`, ver `audio_effects`).
   Parâmetros: `name`\* (texto), `profile` (texto), `target` (texto), `start` (número ou texto), `end` (número ou texto).
+- **`audio_effect_action`**: Executa uma ação de um efeito de áudio (as que o catálogo `audio_effects` lista em `actions`): hoje `noise_gate` + `analyze_noise`, que mede o ruído de um trecho em que ninguém fala e sugere o limiar do gate (o nível do ruído mais 6 dB).
+  Parâmetros: `name`\* (texto), `effect`\* (texto), `action`\* (texto), `target` (texto), `profile` (texto), `start` (número ou texto), `end` (número ou texto).
 - **`timeline_view`**: Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, NAR narrações (duração real quando já sintetizadas, senão estimada), MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de cada item já calculado.
   Parâmetros: `name`\* (texto).
 - **`markers_import`**: Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK).
@@ -4382,7 +4534,7 @@ São 78 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 56 blocos e 470 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 61 blocos e 517 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -4463,10 +4615,11 @@ Usado em `Project.audio`.
 | `normalize` | `"two-pass"` ou `"fast"` ou `"off"` | `two-pass` | `two-pass` mede e ajusta em duas passadas (padrão das redes); `fast` numa só; `off` desliga. |
 | `target_lufs` | número, de -30 a -5 | -14 | Loudness alvo da normalização, em LUFS. |
 | `mute_clips` | sim ou não | não | Silencia o áudio dos clipes; a música e a narração ficam. |
-| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
+| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
 | `sfx_gain_db` | número, de -120 a 24 | 0.0 | Ganho em dB do barramento dos efeitos sonoros (a trilha SFX); fica no padrão na spec e é o que `tracks.SFX` vira no render. |
 | `sfx_pan` | número, de -1 a 1 | 0.0 | Equilíbrio do barramento dos efeitos sonoros, de -1 a 1. |
 | `noise_profiles` | mapa de `NoiseProfile` | vazio |  |
+| `ducks` | lista de `AutoDuck` | vazio |  |
 
 #### AudioTrack
 
@@ -4478,7 +4631,7 @@ Usado em `AudioSettings.tracks`.
 | `volume` | número, de 0 a 4 | 1.0 | Volume da faixa. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca a faixa externa em relação à sessão, em segundos da gravação: positivo atrasa o som da faixa (corrige um gravador que começou adiantado). |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### AudiogramOverlay
 
@@ -4501,6 +4654,22 @@ Usado em `Project.overlays`.
 | `safe_zone` | sim ou não | sim | Respeita a área que a interface do app cobre. |
 | `start` | número, mínimo 0 | 0.0 | Quando o desenho aparece, em segundos. |
 | `end` | número, mínimo 0 | nenhum | Quando some; vazio vai até o fim do vídeo. |
+
+#### AutoDuck
+
+Usado em `AudioSettings.ducks`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `background` | texto | obrigatório |  |
+| `key` | texto | obrigatório |  |
+| `amount_db` | número, de -100 a 0 | -12.0 |  |
+| `threshold_db` | número, de -100 a 0 | -30.0 |  |
+| `max_pause` | número, de 0 a 60 | 1.0 |  |
+| `outer_fade_down` | número, de 0 a 10 | 0.5 |  |
+| `inner_fade_down` | número, de 0 a 10 | 0.0 |  |
+| `inner_fade_up` | número, de 0 a 10 | 0.0 |  |
+| `outer_fade_up` | número, de 0 a 10 | 0.5 |  |
 
 #### CaptionAnchor
 
@@ -4643,7 +4812,7 @@ Usado em `Project.timeline`.
 | `audio_fade` | número, de 0 a 0.5 | 0.0 | Fade de áudio nas duas pontas, sem escurecer a imagem; tira o estalo de um corte seco. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do trecho em relação à imagem, em segundos da linha do tempo: positivo atrasa o som, negativo adianta. O som pode vir de fora de `start` e `end` na fonte; onde a fonte não tem som, sai silêncio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### ColorAdjust
 
@@ -4664,6 +4833,24 @@ Usado em `CardSegment.color`, `ClipSegment.color`, `ImageSegment.color`.
 | `aberration` | número, de 0 a 1 | 0.0 | Separa o vermelho e o azul nas bordas, como numa lente antiga. |
 | `light_leak` | número, de 0 a 1 | 0.0 | Faixa de luz quente que cruza o quadro. |
 | `grain` | número, de 0 a 1 | 0.0 | Granulação de filme; aumenta o tamanho do arquivo. |
+
+#### Compressor
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"compressor"` | `compressor` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `threshold_db` | número, de -60 a 0 | -10.0 |  |
+| `ratio` | número, de 1 a 20 | 10.0 |  |
+| `knee_db` | número, de 0 a 18 | 5.0 |  |
+| `attack_ms` | número, de 0.1 a 2000 | 30.0 |  |
+| `release_ms` | número, de 1 a 9000 | 150.0 |  |
+| `makeup_db` | número, de 0 a 36 | 0.0 |  |
+| `lookahead_ms` | número, de 0 a 200 | 1.0 |  |
 
 #### Cut
 
@@ -4797,6 +4984,36 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `start` | número, mínimo 0 | nenhum |  |
 | `end` | número, mínimo 0 | nenhum |  |
 
+#### Limiter
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"limiter"` | `limiter` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `limit_type` | `"hard"` ou `"soft"` | `hard` |  |
+| `ceiling_db` | número, de -24 a 0 | -1.0 |  |
+| `input_gain_db` | número, de 0 a 36 | 0.0 |  |
+| `lookahead_ms` | número, de 0.1 a 80 | 5.0 |  |
+| `release_ms` | número, de 1 a 8000 | 50.0 |  |
+
+#### LoudnessNormalize
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"loudness_normalize"` | `loudness_normalize` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `mode` | `"lufs"` ou `"rms"` | `lufs` |  |
+| `target_db` | número, de -70 a 0 | -23.0 |  |
+| `dual_mono` | sim ou não | sim |  |
+
 #### Marker
 
 Usado em `Project.markers`.
@@ -4869,7 +5086,7 @@ Usado em `AudioSettings.music`.
 | `duck_ratio` | número, de 1 a 20 | 6 | Quanto a música abaixa quando há voz. |
 | `duck_release` | número, de 10 a 5000 | 350 | Tempo para a música voltar ao volume, em milissegundos. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### MusicSpan
 
@@ -4901,7 +5118,24 @@ Usado em `AudioSettings.narration`.
 | `language` | texto | `pt` | Idioma da fala. |
 | `seed` | inteiro | nenhum | Semente: a mesma semente repete a mesma fala. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+
+#### NoiseGate
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"noise_gate"` | `noise_gate` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `threshold_db` | número, de -96 a -6 | -40.0 |  |
+| `reduction_db` | número, de 0 a 100 | 24.0 |  |
+| `attack_ms` | número, de 1 a 1000 | 10.0 |  |
+| `hold_ms` | número, de 0 a 5000 | 50.0 |  |
+| `release_ms` | número, de 10 a 4000 | 100.0 |  |
+| `stereo_link` | sim ou não | sim |  |
 
 #### NoiseProfile
 
@@ -5227,7 +5461,7 @@ Usado em `Project.overlays`.
 | `margin` | número, mínimo 0 | 40 | Margem da borda, em px na base 1080. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio do vídeo (0 deixa mudo). |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do picture-in-picture em relação à imagem dele, em segundos: positivo atrasa o som. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `animation` | `"none"` ou `"fade"` ou `"slide"` | `fade` | Como entra: `fade`, `slide` ou `none`. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
@@ -5244,7 +5478,7 @@ Usado em `AudioSettings.voiceover`.
 | `end` | número, mínimo 0 | nenhum | Ponto de saída no arquivo, em segundos; vazio vai até o fim dele. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 <!-- dmaker:fim-gerado spec -->
 

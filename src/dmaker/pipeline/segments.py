@@ -34,6 +34,7 @@ from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
 from .audio_effects import clip_camera_audio, noise_profile_parts, track_audio_overrides
+from .auto_duck import duck_key_part, spill_long_graph, track_duck_lookup
 from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
@@ -97,10 +98,16 @@ def _default_variant(ctx: RenderContext) -> str:
     return ctx.theme.style.get("card_variant", "light")
 
 
-def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice, ...]:
+def _track_slices(ctx: RenderContext, segment: ClipSegment, index: int = -1) -> tuple[TrackSlice, ...]:
     """Fatias das faixas externas que soam no trecho, pela mesma conta da vista de linha do tempo
     (`pipeline.track_slices`). A faixa que tem efeitos é fatiada do arquivo já processado, inteiro."""
-    return track_slices(ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx))
+    return track_slices(
+        ctx.project.audio.tracks,
+        ctx.session,
+        segment,
+        track_audio_overrides(ctx),
+        track_duck_lookup(ctx, index),
+    )
 
 
 @dataclass(frozen=True)
@@ -221,7 +228,7 @@ class ClipPreparer:
         mode = resolve_reframe_mode(segment.reframe.mode, info.width, info.height, W, H, ctx.has_brand)
         theme_part = _theme_signature(ctx) if mode == "brand" else None
         in_point = source.in_point(segment.start) if segment.source else segment.start
-        tracks = _track_slices(ctx, segment) if segment.source else ()
+        tracks = _track_slices(ctx, segment, index) if segment.source else ()
         duration = segment_duration(segment, info, source.offset)
         matted = (
             matte_source(index, segment, source, in_point, duration, ctx)
@@ -242,7 +249,17 @@ class ClipPreparer:
             mode,
             theme_part,
             in_point,
-            [(str(t.path), t.in_point, t.volume, t.audio_stream, *pan_key_part(t.pan)) for t in tracks],
+            [
+                (
+                    str(t.path),
+                    t.in_point,
+                    t.volume,
+                    t.audio_stream,
+                    *pan_key_part(t.pan),
+                    *duck_key_part(t.duck),
+                )
+                for t in tracks
+            ],
             matted.path.name if matted else None,  # o nome carrega a chave do recorte
             camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
             # o perfil de ruído nomeado que a Redução de ruído do clipe usa: mudar o trecho dele muda o som (vazio, e
@@ -296,6 +313,10 @@ class ClipPreparer:
             look=look,
             label=_label(index, ctx),
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"mezanino_{index}.txt")
         return PreparedSegment(
             index,
             segment,

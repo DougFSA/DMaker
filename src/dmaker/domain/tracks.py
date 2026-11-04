@@ -70,6 +70,27 @@ def silenced_audio_tracks(project: Project) -> set[str]:
     return {track_id for track_id in ids if _muted(tracks, track_id) or (soloed and track_id not in soloed)}
 
 
+def _ducks_after_state(project: Project, audio, silenced: set[str]):
+    """As regras do Auto Duck depois do mudo e do solo: uma regra cuja trilha (a que abaixa ou a que comanda) não soa
+    deixa de valer, e os ids das faixas externas acompanham a lista que sobrou (tirar a A2 faz a A3 virar a A2, como
+    `audio.tracks` acima)."""
+    if not project.audio.ducks:
+        return audio
+    kept = [i for i in range(len(project.audio.tracks)) if f"A{2 + i}" not in silenced]
+    renamed = {f"A{2 + old}": f"A{2 + new}" for new, old in enumerate(kept)}
+    rules = []
+    for rule in project.audio.ducks:
+        if rule.background in silenced or rule.key in silenced:
+            continue
+        background, key = renamed.get(rule.background, rule.background), renamed.get(rule.key, rule.key)
+        rules.append(
+            rule
+            if (background, key) == (rule.background, rule.key)
+            else rule.model_copy(update={"background": background, "key": key})
+        )
+    return audio if rules == audio.ducks else audio.model_copy(update={"ducks": rules})
+
+
 def apply_track_state(project: Project) -> Project:
     """Spec equivalente com o mudo/solo/ganho/pan/oculto de `project.tracks` já embutido nos campos que o render
     realmente olha, para o resto do pipeline não precisar saber que trilhas da interface existem:
@@ -136,6 +157,8 @@ def apply_track_state(project: Project) -> Project:
         pan = _summed_pan(audio.sfx_pan, sfx.pan if sfx else 0.0)
         if (gain, pan) != (audio.sfx_gain_db, audio.sfx_pan):
             audio = audio.model_copy(update={"sfx_gain_db": gain, "sfx_pan": pan})
+
+    audio = _ducks_after_state(project, audio, silenced)
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:

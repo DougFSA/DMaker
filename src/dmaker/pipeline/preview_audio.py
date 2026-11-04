@@ -47,6 +47,14 @@ from .audio_effects import (
     processed_voiceovers,
     track_audio_overrides,
 )
+from .auto_duck import (
+    begin_ducks,
+    duck_key_part,
+    finish_ducks,
+    project_track_origin,
+    spill_long_graph,
+    track_duck_lookup,
+)
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
@@ -252,6 +260,7 @@ class PreviewAudioBuilder:
         self._drop_old_pieces(pieces_dir)
 
         ctx = self._context(layout, job_dir, pieces_dir)
+        begin_ducks(ctx, layout.spans, project_track_origin(project))
         prepared = self.pieces(ctx, layout, missing)
         transitions = transitions_of(layout.project.timeline)
         total = layout.total
@@ -263,6 +272,7 @@ class PreviewAudioBuilder:
         music_path = processed_music(ctx, ctx.project.resolve(music.src) if music else None)
         sfx = self._effects(ctx, prepared, transitions, layout, total, voiceovers, pips, voice_files)
 
+        finish_ducks(ctx, prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files)
         plan_master_effects(
             ctx,
             MasterEffectMeter(),
@@ -372,7 +382,11 @@ class PreviewAudioBuilder:
             tracks = tuple(
                 piece
                 for piece in track_slices(
-                    ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx)
+                    ctx.project.audio.tracks,
+                    ctx.session,
+                    segment,
+                    track_audio_overrides(ctx),
+                    track_duck_lookup(ctx, index),
                 )
                 if not missing.covers(piece.path)
             )
@@ -386,7 +400,15 @@ class PreviewAudioBuilder:
             in_point,
             f"{duration:.3f}",
             [
-                (str(t.path), t.in_point, t.volume, t.audio_stream, file_stamp(t.path), *pan_key_part(t.pan))
+                (
+                    str(t.path),
+                    t.in_point,
+                    t.volume,
+                    t.audio_stream,
+                    file_stamp(t.path),
+                    *pan_key_part(t.pan),
+                    *duck_key_part(t.duck),
+                )
                 for t in tracks
             ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
@@ -418,6 +440,10 @@ class PreviewAudioBuilder:
             camera_audio=camera_path,
             camera_lead=camera_lead,
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"pedaco_{index}.txt")
         return out, command
 
     # ---------- voz, PiP e efeitos ----------
