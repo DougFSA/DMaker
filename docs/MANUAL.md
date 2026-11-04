@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 42 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 44 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -77,6 +77,8 @@ São 42 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](#reparar-o-som-de-um-item-silenciar-cortar-envelope-canais-e-deslocar) | Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo. | sim |
 | [Copiar, colar, dividir e juntar trechos de áudio](#copiar-colar-dividir-e-juntar-trechos-de-áudio) | Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo. | sim |
 | [Desfazer e refazer uma edição](#desfazer-e-refazer-uma-edição) | Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto. | ainda não: `edit_history` |
+| [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
+| [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
 
 **Tarefas de dublagem e modelos**
 
@@ -1765,7 +1767,7 @@ dmaker frames output\meu-reel__instagram-reels__preview.mp4 2 8 15
 
 #### Como conferir
 
-O relatório separa o que é do projeto (zona segura, ritmo, contraste, sobreposições, legendas) do que é do arquivo (duração, resolução, quadros pretos, silêncio, loudness perto de -14 LUFS). Cada achado diz onde está.
+O relatório separa o que é do projeto (zona segura, ritmo, contraste, sobreposições, legendas) do que é do arquivo (duração, resolução, quadros pretos, silêncio, loudness perto de -14 LUFS). Cada achado diz onde está. Com o vídeo renderizado, o relatório também confere o áudio: **som estourado** (clipping) na saída final, como erro, e em cada item, como aviso, sempre com o instante; e, havendo música, o **contraste entre a fala e a música** (aviso abaixo de 20 dB, com o valor e o instante do pior trecho). Veja "Analisar o áudio: estouro, nível, contraste, espectro e sons".
 
 A zona segura vale para o texto, para a imagem e o vídeo sobreposto postos por `x` e `y`, e para a composição em HTML, sempre pela área que o item de fato desenha: no texto, a caixa de fundo conta com a margem dela, e o texto alinhado à esquerda ou à direita é medido a partir da borda em que ele está (o `x` dele), não do centro. Por isso o `lower-third` padrão, que fica à esquerda dentro da margem, não acusa mais invasão à toa. A imagem ou o vídeo numa posição nomeada (`position`) já nascem dentro da zona, e a imagem com `safe_zone: false` pediu para ignorá-la; a composição que ocupa o quadro todo não é conferida, porque o que ela desenha dentro é decisão dela.
 
@@ -2608,6 +2610,14 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Export Selected Audio (só a seleção) | `audio_export` com `mode: "selection"` e `start` e `end` em segundos ou `marker:<texto>` | "Dividir um áudio em vários arquivos" |
 | Importar dados brutos (Import Raw Data) | `import_raw_audio` (`dmaker audio import-raw`): codificação, ordem dos bytes, canais e taxa; o PCM vira um WAV na pasta do projeto e entra como voz gravada, sem mexer no arquivo original | "Importar áudio bruto" |
 | Modelo de projeto de podcast | O modelo `podcast` (`new_from_template`): música de abertura, voz gravada e música de encerramento, -16 LUFS, MP3 com etiquetas | "Fazer um episódio de podcast" |
+| Analyze > Contrast (Contraste) | `audio_analyze` com `"analyzer": "contrast"` (`dmaker audio analyze run ... contrast`): dois trechos do mesmo som, a fala e o fundo (`foreground_start`, `foreground_end`, `background_start`, `background_end`); devolve a diferença em dB e se chega aos 20 dB da WCAG 1.4.7. O `qa_report` faz a mesma conta sobre a voz e a música da mistura, nos trechos com fala, e avisa abaixo de 20 dB com o instante do pior trecho | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Analyze > Find Clipping (Achar Clipping) | `"analyzer": "clipping"`, com `start_threshold` e `stop_threshold` (3 e 3, como no Audacity): cada trecho com amostras seguidas no teto, por canal, com início e fim; `--mark` põe um marcador em cada um, no grupo `clipping`. O `qa_report` aponta o estouro na saída final (erro) e em cada item (aviso), com o instante | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Analyze > Measure RMS (Medir RMS) | `"analyzer": "rms"`: RMS, pico e deslocamento DC de cada canal, em dBFS; com `window` (segundos) devolve também o RMS de cada janela, e `--out` grava essa tabela em CSV | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Analyze > Plot Spectrum (Espectro de Frequência) e o botão Export | `"analyzer": "spectrum"`, com `algorithm` (`spectrum`, `autocorrelation`, `enhanced_autocorrelation` ou `cepstrum`), `window` (Hann, Hamming, Blackman, Blackman-Harris, Welch, Bartlett, retangular, gaussianas), `size` (128 a 65536) e `axis` (`log` ou `linear`). `--out` grava o CSV (uma frequência e um dB por linha, como o Export) ou o gráfico em PNG; na interface, **Ver espectro** no painel Filtros, com o cursor de frequência, nota e dB | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Analyze > Label Sounds (Marcar Sons) | `"analyzer": "sounds"`, com `mode` (`sounds` ou `silences`), `threshold_db`, `min_silence`, `min_sound` e `position` (`region`, `start` ou `end`: cobrindo o trecho, antes ou depois): grava os marcadores no grupo `sons`, e rodar de novo troca só esse grupo | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Analyze > Beat Finder (Achar Batidas) | `"analyzer": "beats"`, com `threshold_percent` (65, como no Audacity), `min_distance` e `smoothing`: marca as batidas no grupo `batidas` e devolve o andamento estimado em BPM | "Cortar os clipes no ritmo da música" |
+| Tools > Sample Data Export (Exportar Amostras) | `"analyzer": "samples"`, com `limit` (100, como no Audacity) e `unit` (`linear` ou `db`): o número, o instante e o valor de cada amostra por canal; `--out` grava em `.csv` ou `.txt` (com tabulação) | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Cortar o vídeo no ritmo da música (rótulos de batida) | `cut_on_beat` (`dmaker audio analyze cut-on-beat`): para cada fronteira entre clipes, a batida mais perto dentro de `tolerance`; só propõe a lista, e com `apply` os cortes andam por aparas, sem mudar a duração, com os marcadores acompanhando | "Cortar os clipes no ritmo da música" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -2863,6 +2873,125 @@ Depois do `undo`, o `spec.json` é byte a byte o de antes da edição; o `redo` 
 
 - **"não há o que desfazer"**: o projeto não tem edição gravada pelo histórico (edições antigas ou feitas na interface não entram).
 - **"o projeto tinha mudado fora do histórico"**: alguém mexeu na spec pela interface ou à mão; o desfazer trocou pelo estado guardado e o estado de agora ficou no `redo_edit`.
+
+### Analisar o áudio: estouro, nível, contraste, espectro e sons
+<!-- tarefa: analisar-audio -->
+Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
+
+#### Quando usar
+
+Você quer saber se a voz gravada chega estourada, quanto a fala está acima da música (o critério de acessibilidade pede 20 dB), em que frequência está um zumbido ou onde ficam os silêncios de uma gravação. São as funções do menu **Analisar** do Audacity e **não mudam o som**. O Marcar Sons escreve num **grupo de marcadores com nome próprio** (`sons`); rodar de novo troca só esse grupo, e os marcadores que você criou ficam como estão.
+
+**Pedidos que levam a esta tarefa:**
+- "A voz gravada está estourando? Mostra onde"
+- "A fala está pelo menos 20 dB acima da música?"
+- "Qual é a frequência desse zumbido?"
+- "Marca os silêncios da entrevista"
+
+#### Antes de começar
+
+- O projeto e **de onde vem o som**: um item como ele soa, com os efeitos e o ganho dele (`timeline.N`, `overlays.N`, `audio.voiceover.N`, `audio.narration.N`, `audio.music`, `audio.tracks.N`), a **saída final** já renderizada (`output`, o padrão) ou um arquivo solto (`file`). A narração precisa estar sintetizada.
+- Os analisadores (`audio_analyzers` lista os parâmetros): `contrast`, `clipping`, `rms`, `spectrum`, `sounds`, `beats` e `samples`. `start` e `end` recortam o item, em segundos ou `marker:<texto>`.
+- O limite é de uns 10 minutos de estéreo; acima disso, escolha um trecho.
+
+#### Pela IA
+
+Diga: "Confere se a voz gravada está estourando." A IA roda `audio_analyze` com `clipping` no item. O `qa_report` tem duas conferências próprias: **som estourado** (erro na saída final e aviso em cada item, com o instante) e **contraste entre a fala e a música** (aviso abaixo de 20 dB, com o valor e o instante do pior trecho; sem música não confere).
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_analyzers", "arguments": {}, "para": "ver os analisadores, os parâmetros e as faixas"},
+  {"tool": "audio_analyze", "arguments": {"name": "entrevista", "analyzer": "clipping", "target": "audio.voiceover.0"}, "para": "achar os trechos estourados, com início e fim"},
+  {"tool": "audio_analyze", "arguments": {"name": "entrevista", "analyzer": "sounds", "target": "audio.voiceover.0", "params": {"mode": "silences", "threshold_db": -35}, "group": "pausas"}, "para": "marcar os silêncios no grupo pausas"},
+  {"tool": "audio_analyze", "arguments": {"name": "entrevista", "analyzer": "spectrum", "target": "audio.voiceover.0", "params": {"size": 4096}, "out": "C:/audios/espectro.csv"}, "para": "o espectro, com frequência e dB por linha"},
+  {"tool": "qa_report", "arguments": {"name_or_path": "entrevista"}, "para": "conferir o clipping e o contraste entre a fala e a música"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, bloco **Espectro de frequência**. Selecione o item na linha do tempo (sem seleção vale a saída final já renderizada) e clique em **Ver espectro**. O **cursor** acompanha o mouse e diz a frequência, a **nota musical** mais próxima (lá 4 = 440 Hz) e o nível em dB. As setas movem o cursor e **P** volta ao pico. Dá para trocar o algoritmo, a janela, o tamanho da FFT e o eixo.
+
+#### Pela CLI
+
+```powershell
+dmaker audio analyze catalog
+dmaker audio analyze run projects\entrevista\spec.json clipping --target audio.voiceover.0
+dmaker audio analyze run projects\entrevista\spec.json rms --target audio.voiceover.0 --param window=1 --out C:\audios\rms.csv
+dmaker audio analyze run projects\entrevista\spec.json spectrum --target audio.voiceover.0 --out C:\audios\espectro.png
+dmaker audio analyze run projects\entrevista\spec.json sounds --target audio.voiceover.0 --param mode=silences --group pausas
+```
+
+`--target` aceita os itens acima ou `output` (ou `--file`, um arquivo solto). `--mark` e `--no-mark` ligam a gravação dos marcadores, `--group` dá o nome do grupo e `--out` exporta em `.csv`, `.txt`, `.png` (o gráfico do espectro) ou `.json`.
+
+#### Como conferir
+
+Um tom de 1 kHz tem o pico do espectro na divisão de 1 kHz. Três estouros inseridos num áudio de teste saem com início e fim certos (±1 ms). Fala a -20 dBFS sobre fundo a -45 dBFS dá 25 dB de contraste e passa; com o fundo a -30 dBFS dá 10 dB e reprova com o aviso. No `qa_report` de um vídeo com a voz estourada, o achado cita o instante em que o estouro começa.
+
+#### Se der errado
+
+- **"não tem saída final renderizada"**: renderize antes, ou escolha um item (`--target`) ou um arquivo (`--file`).
+- **"ainda não foi sintetizada"**: a narração precisa estar pronta; renderize o projeto antes.
+- **"informe o nome do grupo"**: o grupo vazio é a trilha da pessoa e nunca é trocado; dê um nome com `group`.
+- **Nenhum marcador saiu**: o limiar não pegou nada; mude-o (por exemplo, -40 dB).
+
+### Cortar os clipes no ritmo da música
+<!-- tarefa: cortar-no-ritmo -->
+Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
+
+#### Quando usar
+
+Você quer que as trocas de imagem caiam nos tempos da música. O Achar Batidas marca as batidas (limiar sobre a energia, com distância mínima entre elas) e diz o andamento em BPM; o **cortar no ritmo** propõe, para cada fronteira entre clipes, a batida mais perto dentro de uma tolerância.
+
+**Pedidos que levam a esta tarefa:**
+- "Acha as batidas da música"
+- "Corta os clipes no ritmo da música"
+- "Qual é o andamento dessa música?"
+
+#### Antes de começar
+
+- Música no projeto (`audio.music`). A análise vale para o trecho que toca no vídeo.
+- Só andam as fronteiras entre dois **clipes de vídeo** e sem transição; as outras ficam como estão, com o motivo na lista.
+
+#### Pela IA
+
+Diga: "Corta os clipes no ritmo da música." A IA roda `cut_on_beat`, que por padrão **só propõe** a lista (nada é gravado), e mostra quanto cada corte andaria. Com o seu sim, chama de novo com `apply: true`: a saída de um clipe e a entrada do outro andam o mesmo tanto, por aparas, e os marcadores acompanham.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_analyze", "arguments": {"name": "clipe-musical", "analyzer": "beats", "target": "audio.music"}, "para": "marcar as batidas no grupo batidas e ver o andamento"},
+  {"tool": "cut_on_beat", "arguments": {"name": "clipe-musical", "tolerance": 0.2}, "para": "propor o corte de cada fronteira na batida mais perto"},
+  {"tool": "cut_on_beat", "arguments": {"name": "clipe-musical", "tolerance": 0.2, "apply": true}, "para": "andar os cortes"}
+]
+```
+
+#### Pela interface
+
+Não existe tela para isso. As batidas marcadas aparecem na trilha **MK** `batidas` da linha do tempo, e os cortes são pela IA ou pela CLI.
+
+#### Pela CLI
+
+```powershell
+dmaker audio analyze run projects\clipe-musical\spec.json beats --target audio.music
+dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --tolerance 0.2
+dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --apply
+```
+
+`--group` usa as batidas de um grupo de marcadores que já existe, no lugar da análise.
+
+#### Como conferir
+
+Numa faixa de 120 BPM há uma batida a cada 0,5 s (±20 ms). Depois de `--apply`, `dmaker validate` mostra a mesma duração e a lista diz quanto cada corte andou; um clipe cujo arquivo acaba antes da batida avisa que o corte parou.
+
+#### Se der errado
+
+- **"nenhuma batida a menos de ... s"**: aumente a `tolerance` ou baixe o limiar do Achar Batidas (`threshold_percent`).
+- **"há uma transição entre os trechos"**: troque a transição por corte seco para essa fronteira andar.
+- **"um trecho só"**: o cortar no ritmo precisa de pelo menos dois clipes.
 
 ---
 
@@ -3212,6 +3341,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-51 | Edição de áudio: qualquer item de áudio (o som do clipe, a voz gravada, a narração, a música, uma faixa externa, o áudio de um PiP) ou o master recebe uma cadeia ordenada de efeitos (`effects`, `audio.master_effects`) com intervalo opcional e botão de ligar e desligar: Amplificar (com a opção de não clipar), Normalizar, Inverter, Reverter e Repetir; o catálogo `audio_effects`, a operação `audio_effect` do `edit_project`, `dmaker audio effects` e `dmaker audio effect`, o bloco **Efeitos de áudio** do painel Filtros e a trilha **VO** da linha do tempo | "Aplicar efeitos de áudio em um item ou no master" |
 | DMK-59 | Trilha de marcadores: `markers` na spec (instante ou região, com texto, cor e grupo), a trilha **MK** no editor (**M** cria no cursor, arrastar, duplo clique para renomear, vírgula e ponto para pular, tudo no **Desfazer**), importar e exportar o `.txt` de rótulos do Audacity (a ida e volta devolve o mesmo arquivo), marcadores regulares (a cada N segundos ou em N partes), `"at": "marker:texto"` no `edit_project` e marcadores que acompanham cortes e aparas (o que estava no trecho cortado some, com aviso); `dmaker markers`, `markers_import`, `markers_export` e `markers_regular` | "Marcar instantes e trechos com marcadores" |
 | DMK-64 | Projeto só de áudio e exportação: o `output.preset` pode ser `audio/wav`, `audio/mp3`, `audio/flac`, `audio/ogg`, `audio/opus`, `audio/m4a` ou `audio/aiff` (a `timeline` pode ficar vazia e a duração vem da voz, da narração e da música), com taxa de amostragem, canais, profundidade e taxa de bits (CBR, VBR, ABR), etiquetas do arquivo (`output.metadata`, com modelo por marca) e os alvos de loudness redes (-14), podcast (-16) e broadcast (-23); exportação por região de marcador (com pausas), por trilha (os stems, que somados reproduzem a mixagem) ou só um trecho; importar áudio bruto; o modelo `podcast`; `dmaker audio export`, `dmaker audio import-raw`, `dmaker audio presets`, `audio_export`, `audio_presets` e `import_raw_audio`; botão **Exportar áudio** e a trilha **VO** na interface | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos", "Dividir um áudio em vários arquivos", "Importar áudio bruto" e "Fazer um episódio de podcast" |
+| DMK-60 | Analisadores de áudio: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras (`audio_analyzers`, `audio_analyze`, `dmaker audio analyze`), que medem o som de um item como ele soa, da saída final ou de um arquivo; os que marcam escrevem num grupo de marcadores próprio; duas conferências novas no `qa_report` (som estourado, com o instante, e contraste entre a fala e a música, com o critério de 20 dB); `cut_on_beat` para cortar os clipes nas batidas da música; e o gráfico do espectro no painel Filtros, com o cursor de frequência, nota e dB | "Analisar o áudio: estouro, nível, contraste, espectro e sons"; "Cortar os clipes no ritmo da música" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -3225,7 +3355,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 105 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 108 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -3435,6 +3565,29 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
   - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
   - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
   - `--region` TEXTO: Uma região de marcador (marker:<texto>), no lugar de --start e --end.
+
+#### dmaker audio analyze
+
+Analisar o áudio sem mudar o som: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), Marcar Sons, Achar Batidas, Exportar Amostras e cortar no ritmo.
+
+- **`dmaker audio analyze catalog [ANALYZER]`**: Lista os analisadores de áudio: o nome em português e no Audacity, o que fazem e os parâmetros.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio analyze cut-on-beat SPEC`**: Propõe (ou, com --apply, aplica) o corte de cada fronteira entre clipes na batida da música mais perto.
+  - `--source` TEXTO: De onde vêm as batidas (padrão: a música). (padrão audio.music)
+  - `--tolerance` NÚMERO: Quanto, em segundos, um corte pode andar para cair numa batida. (padrão 0.2)
+  - `--apply`: Anda os cortes (por padrão só propõe e mostra a lista).
+  - `--group` TEXTO: Usa as batidas de um grupo de marcadores que já existe, no lugar da análise.
+  - `--json`: Resultado completo em JSON.
+- **`dmaker audio analyze run SPEC ANALYZER`**: Roda um analisador sobre o áudio do projeto (por exemplo: audio analyze run spec.json clipping --target audio.voiceover.0).
+  - `--target` TEXTO: De onde vem o som: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.music, audio.tracks.N ou output (a saída final já renderizada, o padrão).
+  - `--file` CAMINHO: Um arquivo de áudio ou vídeo solto, no lugar do alvo.
+  - `--start` TEXTO: Início do trecho, em segundos do item ou marker:<texto>.
+  - `--end` TEXTO: Fim do trecho, em segundos do item ou marker:<texto>.
+  - `--param` / `-p` TEXTO: Parâmetro do analisador, nome=valor (repetível). (pode repetir)
+  - `--mark` / `--no-mark`: Grava os marcadores da análise (padrão: sim para Marcar Sons e Achar Batidas, não nos outros).
+  - `--group` TEXTO: Grupo de marcadores onde gravar (padrão: o do analisador).
+  - `--out` CAMINHO: Exporta o resultado: .csv ou .txt (tabela), .png (espectro) ou .json.
+  - `--json`: Resultado completo em JSON, como a ferramenta MCP.
 
 #### dmaker audio effect
 
@@ -3749,7 +3902,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 74 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 77 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -3821,6 +3974,12 @@ São 74 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name`\* (texto), `preset` (texto), `mode` ("mix" ou "regions" ou "stems" ou "selection", padrão mix), `out` (texto), `out_dir` (texto), `group` (texto), `pauses` (sim ou não, padrão não), `numbered` (sim ou não, padrão não), `start` (número ou texto), `end` (número ou texto), `tracks` (lista de texto), `loudness` (texto ou número), `sample_rate` (inteiro), `channels` (inteiro), `bit_depth` (inteiro), `bitrate_k` (inteiro), `bitrate_mode` ("cbr" ou "vbr" ou "abr"), `quality` (número), `wait_seconds` (número, padrão 600).
 - **`import_raw_audio`**: Importa áudio bruto (PCM sem cabeçalho, o 'Import Raw Data' do Audacity) para um projeto: converte `src` num WAV na pasta do projeto e o põe em audio.voiceover (voz gravada) em `start` segundos.
   Parâmetros: `name`\* (texto), `src`\* (texto), `encoding` ("s8" ou "u8" ou "s16" ou "u16" ou "s24" ou "s32" ou "f32" ou "f64" ou "ulaw" ou "alaw", padrão s16), `byte_order` ("little" ou "big", padrão little), `channels` (inteiro, padrão 1), `sample_rate` (inteiro, padrão 44100), `offset_bytes` (inteiro, padrão 0), `percent` (número, padrão 100.0), `start` (número, padrão 0.0), `volume` (número, padrão 1.0), `wav_name` (texto), `overwrite` (sim ou não, padrão não).
+- **`audio_analyzers`**: O catálogo dos analisadores de áudio (as funções Analyze do Audacity): Contraste (fala contra fundo, critério de 20 dB), Achar Clipping, Medir RMS, Espectro de Frequência (espectro, autocorrelação, cepstro; CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras.
+  Parâmetros: `type` (texto).
+- **`audio_analyze`**: Analisa o áudio de um projeto sem mudar o som e devolve o resultado estruturado.
+  Parâmetros: `name`\* (texto), `analyzer`\* (texto), `target` (texto), `file` (texto), `start` (número ou texto), `end` (número ou texto), `params` (objeto), `mark` (sim ou não), `group` (texto), `out` (texto).
+- **`cut_on_beat`**: Cortar no ritmo: para cada fronteira entre dois clipes, acha a batida da música mais perto (dentro de `tolerance` segundos) e diz quanto o corte andaria.
+  Parâmetros: `name`\* (texto), `source` (texto, padrão audio.music), `tolerance` (número, padrão 0.2), `apply` (sim ou não, padrão não), `group` (texto), `params` (objeto).
 - **`job_status`**: Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto.
   Parâmetros: `job_id`\* (texto).
 - **`list_jobs`**: Jobs de render desta sessão e, se a interface estiver aberta, os dela também.
@@ -3837,7 +3996,7 @@ São 74 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name_or_path`\* (texto), `replacements`\* (objeto).
 - **`contact_sheet`**: Grade de quadros do vídeo inteiro numa única imagem, para revisar composição e texto.
   Parâmetros: `video`\* (texto), `cols` (inteiro, padrão 3), `rows` (inteiro, padrão 3), `width` (inteiro, padrão 320).
-- **`qa_report`**: Relatório de QA em texto: checagens automáticas que não precisam de olho humano (zona segura, ritmo de leitura, sobreposições, contraste, legendas e, com output=true, a saída renderizada: duração, resolução, quadros pretos, silêncio, loudness).
+- **`qa_report`**: Relatório de QA em texto: checagens automáticas que não precisam de olho humano (zona segura, ritmo de leitura, sobreposições, contraste, legendas e, com output=true, a saída renderizada: duração, resolução, quadros pretos, silêncio, loudness, som estourado (clipping, com o instante) e, havendo música, o contraste entre a fala e a música).
   Parâmetros: `name_or_path`\* (texto), `output` (sim ou não, padrão sim).
 - **`frames`**: Quadros em instantes específicos do vídeo (segundos), devolvidos como imagens.
   Parâmetros: `video`\* (texto), `times`\* (lista de número), `width` (inteiro, padrão 540).

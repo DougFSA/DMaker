@@ -18,7 +18,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from . import __version__, config
 from .domain.audio_presets import list_audio_presets
 from .domain.brand import available_brands, load_theme
-from .domain.outputs import output_extension, resolve_output
+from .domain.outputs import resolve_output
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
@@ -1132,6 +1132,104 @@ def import_raw_audio(
 
 
 @server.tool(
+    description=(
+        "O catálogo dos analisadores de áudio (as funções Analyze do Audacity): Contraste (fala contra fundo, "
+        "critério de 20 dB), Achar Clipping, Medir RMS, Espectro de Frequência (espectro, autocorrelação, "
+        "cepstro; CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras. Para cada um, o tipo, o nome em "
+        "português e no Audacity, o que faz, se marca, o que exporta e os parâmetros (tipo, unidade, padrão e "
+        "faixa); também de onde o som pode vir. `type` restringe a um analisador. Rode um com `audio_analyze`."
+    )
+)
+def audio_analyzers(type: str | None = None) -> dict:
+    from .analysis import analyzer_catalog
+
+    try:
+        return analyzer_catalog(type)
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "Analisa o áudio de um projeto sem mudar o som e devolve o resultado estruturado. `analyzer`: contrast, "
+        "clipping, rms, spectrum, sounds, beats ou samples (veja `audio_analyzers`). O som vem de `target`: um item "
+        "como ele soa, com os efeitos e o ganho (timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, "
+        "audio.music, audio.tracks.N), `output` (a saída final já renderizada, o padrão) ou de `file`, um arquivo "
+        "solto. `start` e `end` recortam o item (segundos do áudio dele ou marker:<texto>); `params` são os "
+        'parâmetros do analisador (ex.: {"start_threshold": 3}). Marcar Sons e Achar Batidas gravam marcadores no '
+        "grupo `group` (sons e batidas por padrão; rodar de novo troca só aquele grupo, e os marcadores da pessoa "
+        "ficam como estão); `mark` liga ou desliga isso (o Achar Clipping marca com mark=true). `out` exporta o "
+        "resultado: .csv ou .txt (tabela), .png (gráfico do espectro) ou .json. Grava por cima do que já existir."
+    )
+)
+def audio_analyze(
+    name: str,
+    analyzer: str,
+    target: str | None = None,
+    file: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+    params: dict | None = None,
+    mark: bool | None = None,
+    group: str | None = None,
+    out: str | None = None,
+) -> dict:
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AnalysisRequest, AudioAnalysisService, analyze_project
+
+    request = AnalysisRequest(
+        analyzer, params or {}, target=target, file=file, start=start, end=end, mark=mark, group=group
+    )
+    try:
+        outcome = analyze_project(name, request, out=out, service=AudioAnalysisService(_analysis_runner()))
+    except (ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return outcome.to_dict()
+
+
+def _analysis_runner() -> Any:
+    from .media.ffmpeg import SubprocessRunner
+
+    return SubprocessRunner(quiet=True)
+
+
+@server.tool(
+    description=(
+        "Cortar no ritmo: para cada fronteira entre dois clipes, acha a batida da música mais perto (dentro de "
+        "`tolerance` segundos) e diz quanto o corte andaria. Por padrão só PROPÕE e devolve a lista (nada é "
+        "gravado); com apply=true, cada fronteira anda por duas aparas (a saída de um clipe e a entrada do "
+        "outro, o mesmo tanto, sem mudar a duração) e os marcadores acompanham. As batidas vêm do Achar Batidas "
+        "sobre `source` (a música, por padrão) com `params`, ou de um grupo de marcadores `group` que já existe."
+    )
+)
+def cut_on_beat(
+    name: str,
+    source: str = "audio.music",
+    tolerance: float = 0.2,
+    apply: bool = False,
+    group: str | None = None,
+    params: dict | None = None,
+) -> dict:
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AudioAnalysisService
+    from .pipeline.beat_cut import cut_on_beat as run_cut_on_beat
+
+    try:
+        outcome = run_cut_on_beat(
+            name,
+            source=source,
+            tolerance=tolerance,
+            apply=apply,
+            group=group,
+            params=params,
+            service=AudioAnalysisService(_analysis_runner()),
+        )
+    except (ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return outcome.to_dict()
+
+
+@server.tool(
     description="Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto."
 )
 def job_status(job_id: str) -> dict:
@@ -1377,7 +1475,8 @@ def contact_sheet(video: str, cols: int = 3, rows: int = 3, width: int = 320) ->
     description=(
         "Relatório de QA em texto: checagens automáticas que não precisam de olho humano (zona segura, "
         "ritmo de leitura, sobreposições, contraste, legendas e, com output=true, a saída renderizada: "
-        "duração, resolução, quadros pretos, silêncio, loudness). Rode antes de contact_sheet/frames; "
+        "duração, resolução, quadros pretos, silêncio, loudness, som estourado (clipping, com o instante) e, "
+        "havendo música, o contraste entre a fala e a música). Rode antes de contact_sheet/frames; "
         "essas duas só quando o relatório apontar algo ou o usuário pedir para olhar."
     )
 )
@@ -1395,15 +1494,9 @@ def qa_report(name_or_path: str, output: bool = True) -> dict:
 
 def _latest_final_output(project: Project) -> Path | None:
     """A última saída final (não preview) já renderizada para o preset da spec, se houver."""
-    if not config.OUTPUT_DIR.exists():
-        return None
-    preset = resolve_output(project.output.preset)
-    files = sorted(
-        config.OUTPUT_DIR.glob(f"{project.name}__{preset.id.replace('/', '-')}{output_extension(preset)}"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    return files[0] if files else None
+    from .pipeline.final_output import latest_final_output
+
+    return latest_final_output(project)
 
 
 @server.tool(

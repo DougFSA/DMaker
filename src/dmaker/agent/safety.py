@@ -56,6 +56,7 @@ PATH_ARGUMENTS = frozenset(
         "others",
         "reference_audio",
         "file_path",
+        "file",
         "music",
         "sheet",
     }
@@ -429,6 +430,7 @@ OVERWRITES_EXISTING_OUTPUT = (
     "dub_stems",
     "markers_export",
     "audio_export",
+    "audio_analyze",
 )
 # Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, com a flag de sobrescrita ligada, o substituem
 # inteiro, com as traduções que a pessoa revisou. Sem a flag o próprio servidor recusa o projeto que já existe
@@ -607,6 +609,12 @@ def _import_raw_outputs(arguments: Mapping[str, Any]) -> list[str]:
         return []
 
 
+def _analysis_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """A análise de áudio só devolve dados: sem `out` ela não grava arquivo nenhum (os marcadores vão para a spec, num
+    passo do histórico que o `undo_edit` desfaz), então não há destino padrão a conferir."""
+    return []
+
+
 # Ferramentas cuja função de destino já considera o `out` e o `out_dir` da chamada: o gate usa só ela (o padrão
 # geral trataria a pasta `out_dir` como o destino e perguntaria mesmo sem nenhum arquivo igual dentro dela).
 EXACT_OUTPUTS = frozenset({"audio_export"})
@@ -626,6 +634,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "isolate_vocals": _isolation_outputs,
     "markers_export": _markers_export_outputs,
     "audio_export": _audio_export_outputs,
+    "audio_analyze": _analysis_outputs,
 }
 # O mesmo, para as ferramentas cujo destino padrão sai do projeto de dublagem (o argumento `project`).
 DUB_PROJECT_OUTPUTS: dict[str, Callable[[DubProject], list[str]]] = {

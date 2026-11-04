@@ -43,5 +43,3 @@ Depois do `undo`, o `spec.json` é byte a byte o de antes da edição; o `redo` 
 
 - **"não há o que desfazer"**: o projeto não tem edição gravada pelo histórico (edições antigas ou feitas na interface não entram).
 - **"o projeto tinha mudado fora do histórico"**: alguém mexeu na spec pela interface ou à mão; o desfazer trocou pelo estado guardado e o estado de agora ficou no `redo_edit`.
-
----

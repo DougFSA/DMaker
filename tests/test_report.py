@@ -691,8 +691,12 @@ def test_build_report_with_output_adds_output_checks(tmp_path):
     )
     runner = RecordingRunner(capture_stderr="")
     report = build_report(project, prober=prober, output=video, runner=runner)
-    assert len(report.checks) == len(STATIC_CHECKS) + 1
+    # a saída renderizada e as duas conferências de áudio que vêm com ela (clipping na saída e em cada item; o contraste
+    # entre a voz e a música só roda havendo música)
+    assert len(report.checks) == len(STATIC_CHECKS) + 3
     assert any("saída renderizada" in c for c in report.checks)
+    assert any("clipping na saída" in c for c in report.checks)
+    assert not any("contraste entre voz e música" in c for c in report.checks)
 
 
 # ---------- zona segura pela caixa das sobreposições (DMK-31) ----------

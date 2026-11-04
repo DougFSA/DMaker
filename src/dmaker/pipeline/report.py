@@ -684,4 +684,11 @@ def build_report(
         inspector = OutputInspector(runner or SubprocessRunner(quiet=True), prober)
         findings.extend(inspector.inspect(output, layout.total, layout.preset, project.audio.target_lufs))
         checks.append("saída renderizada (duração, resolução, quadros pretos, silêncio, loudness)")
+        from .audio_checks import (
+            audio_findings,  # aqui porque as conferências de áudio usam o `Finding` deste módulo
+        )
+
+        found, done = audio_findings(project, output, inspector.runner, prober, offset_finder)
+        findings.extend(found)
+        checks.extend(done)
     return QAReport(project.name, layout.total, findings, checks, preset=layout.preset.id)

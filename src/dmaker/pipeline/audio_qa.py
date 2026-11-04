@@ -145,4 +145,13 @@ def build_audio_report(
             )
         )
         checks.append("saída gravada (sem imagem, duração, taxa e canais, silêncio, loudness e pico)")
+        from .audio_checks import (
+            audio_findings,  # aqui porque as conferências de áudio usam o `Finding` do relatório
+        )
+
+        found, done = audio_findings(
+            project, output, runner or SubprocessRunner(quiet=True), prober, offset_finder
+        )
+        findings.extend(found)
+        checks.extend(done)
     return QAReport(project.name, layout.total, findings, checks, preset=preset.id)
