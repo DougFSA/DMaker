@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +42,7 @@ from ..domain.auto_duck import (
 from ..domain.spec import ClipSegment, Project
 from ..filtergraph.audio import StemTaps
 from ..filtergraph.duck import DuckCurve
+from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args
 from .audio_effects import track_audio_overrides
 from .cache_key import cache_key
 from .context import RenderContext
@@ -65,7 +66,9 @@ def level_filters(source: str, out: str) -> str:
     """Uma linha de grafo que lê o nível RMS de `source` em janelas de `LEVEL_SAMPLES` amostras e o imprime no log: o
     `astats` com `reset=1` mede cada quadro sozinho, e o `ametadata` escreve o número dele."""
     return (
-        f"{source}asetnsamples=n={LEVEL_SAMPLES}:p=0,astats=metadata=1:reset=1,"
+        f"{source}asetnsamples=n={LEVEL_SAMPLES}:p=0,"
+        # só o RMS do conjunto dos canais: o `astats` completo (entropia, cruzamentos por zero...) custa 20x mais
+        "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level,"
         f"ametadata=mode=print:key=lavfi.astats.Overall.RMS_level{out}"
     )
 
@@ -140,6 +143,26 @@ class DuckPlan:
     speeds: dict[int, float] = field(
         default_factory=dict
     )  # a velocidade de cada clipe (segundos de fonte por segundo)
+
+
+def spill_long_graph(command: FFmpegCommand, directory: Path, name: str) -> FFmpegCommand:
+    """O mesmo comando com o grafo lido de um arquivo quando passa do limite da linha de comando do Windows. A curva do Auto
+    Duck de um clipe longo pode ter centenas de pontos (uns 50 caracteres cada), e o mezanino e o pedaço da prévia levam o
+    grafo na linha de comando. Um grafo curto, ou um comando sem grafo, volta como estava."""
+    from .assembly import INLINE_GRAPH_LIMIT
+
+    args = list(command.args)
+    if "-filter_complex" not in args:
+        return command
+    position = args.index("-filter_complex")
+    graph = args[position + 1]
+    if len(graph) < INLINE_GRAPH_LIMIT:
+        return command
+    directory.mkdir(parents=True, exist_ok=True)
+    script = directory / name
+    script.write_text(graph, encoding="utf-8")
+    args[position : position + 2] = filter_complex_file_args(str(script))
+    return replace(command, args=args)
 
 
 def duck_key_part(curves: Sequence[Sequence[Point]]) -> list:

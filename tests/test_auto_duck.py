@@ -263,3 +263,17 @@ def test_edits_add_set_and_remove_rules_and_refuse_a_bad_pair():
         add_duck(start, {"background": "MUS"})
     with pytest.raises(EditError, match="fora do intervalo"):
         remove_duck(start, 0)
+
+
+def test_a_long_clip_graph_goes_to_a_file_and_a_short_one_stays_on_the_command_line(tmp_path):
+    from dmaker.media.ffmpeg import FFmpegCommand
+    from dmaker.pipeline.auto_duck import spill_long_graph
+
+    short = FFmpegCommand(["-i", "a.wav", "-filter_complex", "[0:a]anull[o]", "-map", "[o]", "o.wav"])
+    assert spill_long_graph(short, tmp_path, "g.txt") is short
+    curve = duck_points([(2.0 * k, 2.0 * k + 0.5) for k in range(200)], rule())
+    graph = "[0:a]" + ",".join(duck_filters(curve)) + "[o]"
+    long = FFmpegCommand(["-i", "a.wav", "-filter_complex", graph, "-map", "[o]", "o.wav"])
+    spilled = spill_long_graph(long, tmp_path, "g.txt")
+    assert graph not in spilled.args and (tmp_path / "g.txt").read_text(encoding="utf-8") == graph
+    assert spilled.args[-3:] == ["-map", "[o]", "o.wav"]

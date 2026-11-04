@@ -47,7 +47,14 @@ from .audio_effects import (
     processed_voiceovers,
     track_audio_overrides,
 )
-from .auto_duck import begin_ducks, duck_key_part, finish_ducks, project_track_origin, track_duck_lookup
+from .auto_duck import (
+    begin_ducks,
+    duck_key_part,
+    finish_ducks,
+    project_track_origin,
+    spill_long_graph,
+    track_duck_lookup,
+)
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
@@ -433,6 +440,10 @@ class PreviewAudioBuilder:
             camera_audio=camera_path,
             camera_lead=camera_lead,
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"pedaco_{index}.txt")
         return out, command
 
     # ---------- voz, PiP e efeitos ----------

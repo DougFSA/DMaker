@@ -34,7 +34,7 @@ from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
 from .audio_effects import clip_camera_audio, noise_profile_parts, track_audio_overrides
-from .auto_duck import duck_key_part, track_duck_lookup
+from .auto_duck import duck_key_part, spill_long_graph, track_duck_lookup
 from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
@@ -313,6 +313,10 @@ class ClipPreparer:
             look=look,
             label=_label(index, ctx),
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"mezanino_{index}.txt")
         return PreparedSegment(
             index,
             segment,
