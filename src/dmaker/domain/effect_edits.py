@@ -13,11 +13,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .audio_effects import parse_effect
+from .audio_effects import check_preset_fits, get_effect_preset, parse_effect
 from .edits import EditError, _check_index, _clone
 from .spec import Project
 
-ACTIONS = ("add", "remove", "move", "enable", "disable", "set")
+ACTIONS = ("add", "remove", "move", "enable", "disable", "set", "preset")
 
 # alvos que são uma lista de itens (precisam de um número) e alvos que são um item só
 _LISTS = {"audio.voiceover": "voz gravada", "audio.narration": "narração", "audio.tracks": "faixa externa"}
@@ -82,6 +82,9 @@ def apply_effect_op(project: Project, op: dict[str, Any]) -> Project:
 
     def mutate(data: dict) -> None:
         chain = _effect_list(data, target)
+        if action == "preset":
+            _add_preset(chain, op, target)
+            return
         if action == "add":
             effect = _parsed(op.get("effect"))
             position = op.get("index", len(chain))
@@ -113,6 +116,24 @@ def apply_effect_op(project: Project, op: dict[str, Any]) -> Project:
         return _clone(project, mutate)
     except EditError as exc:
         raise EditError(_readable(str(exc))) from exc
+
+
+def _add_preset(chain: list[dict], op: dict[str, Any], target: str) -> None:
+    """Acrescenta à cadeia, um a um, os efeitos da predefinição `op["preset"]` (ver `domain.audio_effects.presets`): cada
+    um é um efeito comum, que a pessoa liga, desliga, ajusta ou tira depois. Entram no fim da cadeia, ou em `index`. No áudio
+    mestre, a predefinição que tem um efeito de amostras (o Noise Gate) é recusada com o motivo."""
+    try:
+        preset = get_effect_preset(str(op.get("preset") or ""))
+        check_preset_fits(
+            preset, target not in _SINGLE or target == "audio.music", _SINGLE.get(target, target)
+        )
+    except ValueError as exc:
+        raise EditError(str(exc)) from exc
+    position = op.get("index", len(chain))
+    if not isinstance(position, int) or not 0 <= position <= len(chain):
+        raise EditError(f"posição fora da cadeia: {position!r} (0 a {len(chain)})")
+    for offset, effect in enumerate(preset.effects):
+        chain.insert(position + offset, _parsed(dict(effect)))
 
 
 _VALUE_ERROR = re.compile(r"Value error, (.*?) \[type=value_error", re.DOTALL)

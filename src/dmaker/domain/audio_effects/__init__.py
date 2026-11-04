@@ -15,11 +15,12 @@ from typing import Annotated, Any, Union
 
 from pydantic import Field, TypeAdapter
 
-from .base import EFFECT_CLASSES, EffectBase, effect_type, param, register_effect
+from .base import EFFECT_CLASSES, EffectAction, EffectBase, effect_type, param, register_effect
 
-# os módulos de família (basic, depois os dos outros cards) se registram ao serem importados
+# os módulos de família (basic, depois os dos outros cards) se registram ao serem importados; as predefinições citam
+# efeitos pelo tipo, então só entram depois de todas as famílias
 for _module in pkgutil.iter_modules(__path__):
-    if _module.name not in {"base", "catalog"}:
+    if _module.name not in {"base", "catalog", "presets"}:
         importlib.import_module(f"{__name__}.{_module.name}")
 
 # a união discriminada pelo `type`, montada do registro: é o tipo dos campos `effects` da spec
@@ -35,6 +36,14 @@ from .catalog import (  # noqa: E402
     catalog_payload,
     common_parameters,
     effect_info,
+)
+from .presets import (  # noqa: E402
+    EFFECT_PRESETS,
+    EffectPreset,
+    check_preset_fits,
+    get_effect_preset,
+    preset_catalog,
+    register_effect_preset,
 )
 
 
@@ -90,22 +99,29 @@ def chain_signature(effects: Sequence[EffectBase]) -> list[dict]:
 
 __all__ = [
     "EFFECT_CLASSES",
+    "EFFECT_PRESETS",
     "EFFECT_TARGETS",
     "AudioEffect",
+    "EffectAction",
     "EffectBase",
     "EffectInfo",
+    "EffectPreset",
     "ParamInfo",
     "active_effects",
     "catalog",
     "catalog_payload",
     "chain_duration",
     "chain_signature",
+    "check_preset_fits",
     "common_parameters",
     "effect_info",
     "effect_type",
+    "get_effect_preset",
     "param",
     "parse_effect",
+    "preset_catalog",
     "rebase_effect_dicts",
     "rebase_effects",
     "register_effect",
+    "register_effect_preset",
 ]

@@ -13,10 +13,11 @@ from ..config import FONTS_DIR
 from ..domain.audio_effects import active_effects
 from ..domain.spec import Transition
 from ..filtergraph.audio import AudioTaps, StemTaps, audio_graph, loudnorm_measure_graph, silent_base
-from ..filtergraph.audio_effects import Measure, measure_lines, parse_astats, span_samples
+from ..filtergraph.audio_effects import Measure, level_measure_lines, parse_level_measure, span_samples
 from ..filtergraph.audiogram import audiogram_graph, normalization_gain_db
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
+from ..filtergraph.duck import DuckCurve
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.html_layer import HtmlBehindLayer, ResolvedHtmlLayer, html_overlay_graph
 from ..filtergraph.overlays import image_overlay_graph
@@ -59,6 +60,12 @@ def _music_duration(ctx: RenderContext, music_path: Path | None) -> float | None
     return ctx.prober(music_path).duration
 
 
+def plan_curves(ctx: RenderContext) -> list[DuckCurve]:
+    """As curvas do Auto Duck que a mixagem aplica (vazio sem regra)."""
+    plan = ctx.duck_plan
+    return plan.curves() if plan else []
+
+
 def graph_args(ctx: RenderContext, inputs: Inputs, lines: list[str], name: str) -> list[str]:
     """Entradas e grafo como argumentos do ffmpeg. Um projeto com centenas de trechos passa do limite da linha
     de comando, então o grafo grande vai para um arquivo da pasta do trabalho (`name`)."""
@@ -87,6 +94,7 @@ def audio_only_graph(
     include_master: bool = True,
     master_upto: int | None = None,
     stems: StemTaps | None = None,
+    ducks: Sequence[DuckCurve] | None = None,
 ) -> tuple[Inputs, list[str], str]:
     """Entradas e linhas do grafo só de áudio, com a mesma mixagem da montagem final. Sem `include_norm` é a
     mistura antes da normalização (a que se mede); com ele, já normalizada, como sai do render (`measured` é a
@@ -94,7 +102,8 @@ def audio_only_graph(
     (projeto só de áudio), a base é um silêncio da duração do projeto no lugar do som dos clipes. A cadeia do master
     (`audio.master_effects`) vem com as medidas de `ctx.master_measures`; `include_master` e `master_upto` a
     desligam ou a cortam (ver `filtergraph.audio.audio_graph`). `stems` pede uma cópia de cada trilha, tirada antes
-    do master (ver `StemTaps`)."""
+    do master (ver `StemTaps`). `ducks` são as curvas do Auto Duck; None usa as do plano do render (`ctx.duck_plan`) e uma
+    lista (vazia, na medida da chave) as dispensa."""
     inputs = Inputs()
     for item in prepared:
         inputs.add(item.mezzanine)
@@ -128,6 +137,7 @@ def audio_only_graph(
         master_upto=master_upto,
         include_master=include_master,
         stems=stems,
+        duck_curves=plan_curves(ctx) if ducks is None else ducks,
     )
     return inputs, lines, aout
 
@@ -254,9 +264,11 @@ class MasterEffectMeter:
             voice_files=voice_files,
             master_upto=index,
         )
-        lines += measure_lines(aout, "[mmeas]", span_samples(ctx.project.audio.master_effects[index], total))
+        effect = ctx.project.audio.master_effects[index]
+        kind = effect.measure_kind()
+        lines += level_measure_lines(kind, aout, "[mmeas]", span_samples(effect, total))
         args = [*graph_args(ctx, inputs, lines, "master_effect.txt"), "-map", "[mmeas]", "-f", "null", "-"]
-        return parse_astats(ctx.runner.capture(args, label="medida do efeito do master"))
+        return parse_level_measure(kind, ctx.runner.capture(args, label="medida do efeito do master"))
 
 
 def plan_master_effects(
@@ -457,6 +469,7 @@ def build_assembly(
         voice_files=voice_files,
         taps=taps if layer.audiograms else None,
         master_measures=ctx.master_measures,
+        duck_curves=plan_curves(ctx),
     )
     if layer.audiograms:
         cur_v = audiogram_graph(

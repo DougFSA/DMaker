@@ -17,6 +17,7 @@ from ..domain.spec import ClipSegment, ColorAdjust, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
 from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, fade_chains
+from .duck import duck_filters
 from .encode import mezzanine_output_args
 from .finish import post_video_lines
 from .mix import pan_filter
@@ -51,10 +52,18 @@ class TrackSlice:
     volume: float = 1.0
     audio_stream: int = 0
     pan: float = 0.0
+    # curvas do Auto Duck que abaixam esta faixa neste clipe: pontos (segundos de fonte desde o início do trecho, dB); vazio
+    # sem regra, e então o ramo de áudio é o de sempre
+    duck: tuple[tuple[tuple[float, float], ...], ...] = ()
 
 
 def _audio_source_chain(
-    in_point: float, volume: float, length: float, pan: float = 0.0, pad: bool = False
+    in_point: float,
+    volume: float,
+    length: float,
+    pan: float = 0.0,
+    pad: bool = False,
+    duck: tuple[tuple[tuple[float, float], ...], ...] = (),
 ) -> list[str]:
     """Alinha uma fonte de áudio ao início do trecho: atraso quando ela começa depois, ganho, equilíbrio e formato.
     `pad` completa com silêncio o que a fonte não tem até `length`: um som deslocado pode acabar antes da imagem, e
@@ -67,6 +76,8 @@ def _audio_source_chain(
     balance = pan_filter(pan)
     if balance:
         chain.append(balance)
+    for curve in duck:  # depois do atraso: `t` é o instante do trecho, em segundos de fonte
+        chain += duck_filters(curve)
     if pad:
         chain.append("apad")
     chain.append(f"atrim=0:{length:.3f}")
@@ -124,7 +135,9 @@ def clip_audio_lines(
         voices.append("[mz_cam]")
     for k, track in enumerate(tracks):
         idx = inputs.add(track.path, "-ss", f"{max(track.in_point, 0):.3f}", "-t", f"{length:.3f}")
-        chain = _audio_source_chain(min(track.in_point, 0.0), track.volume, length, track.pan)
+        chain = _audio_source_chain(
+            min(track.in_point, 0.0), track.volume, length, track.pan, duck=track.duck
+        )
         lines.append(f"[{idx}:a:{track.audio_stream}]" + ",".join(chain) + f"[mz_trk{k}]")
         voices.append(f"[mz_trk{k}]")
 

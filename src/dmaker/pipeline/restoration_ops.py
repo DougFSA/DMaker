@@ -30,7 +30,7 @@ from ..voice.silence import MODES, find_silences, plan_truncation, removed_secon
 from .audio_edit_ops import _interval, _required, _target
 from .edit_outcome import EditOutcome
 from .layout import OriginAggregate
-from .noise_profiles import locate_target_audio, quietest_item_window
+from .noise_profiles import TargetAudio, locate_target_audio, quietest_item_window
 from .sample_reader import SampleReader
 
 # O som é lido em mono a 16 kHz para achar silêncio: a energia de um quadro de 10 ms não pede mais, e a decodificação de
@@ -55,8 +55,12 @@ def _reader(layout: OriginAggregate) -> SampleReader:
 # ---------- perfil de ruído ----------
 
 
-def _op_noise_profile_set(project: Project, op: dict, layout: OriginAggregate) -> Project:
-    name = check_profile_name(op.get("name"))
+def noise_window(
+    project: Project, op: dict, layout: OriginAggregate
+) -> tuple[AudioTarget, TargetAudio, float, float]:
+    """O trecho só de ruído que `op` pede, em tempo do item: o item (`target`), o arquivo dele e o início e o fim. Com
+    `start`/`end` (ou `region`) é o que foi marcado; sem eles, o trecho mais quieto do item. É o que o perfil de ruído e o
+    Analisar ruído do Noise Gate têm em comum."""
     target = _target(project, op, layout)
     session = layout.physical.session if layout.physical else {}
     source = locate_target_audio(project, session, target.path)
@@ -70,6 +74,12 @@ def _op_noise_profile_set(project: Project, op: dict, layout: OriginAggregate) -
             f"o trecho de ruído tem {last - first:.3f} s; use pelo menos {MIN_PROFILE_SECONDS:.1f} s só de ruído "
             "(sem fala) para o perfil ter o que medir"
         )
+    return target, source, first, last
+
+
+def _op_noise_profile_set(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    name = check_profile_name(op.get("name"))
+    target, _, first, last = noise_window(project, op, layout)
     return set_noise_profile(project, name, target.path, first, last)
 
 

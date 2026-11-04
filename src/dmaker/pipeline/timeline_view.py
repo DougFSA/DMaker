@@ -568,6 +568,7 @@ def _music_track(
         (0.0, None, music.start_at)
     ]
     path = str(project.resolve(music.src))
+    ducked_by = [rule.key for rule in project.audio.ducks if rule.is_music_rule]
     items = [
         TrackItem(
             id=_item_id("MUS", i),
@@ -582,7 +583,13 @@ def _music_track(
             source=None,
             transition=None,
             muted=music.volume <= 0 or muted,
-            extra={"loop": music.loop, "volume": music.volume, **_mix_extra(0.0, music.pan, music.effects)},
+            extra={
+                "loop": music.loop,
+                "volume": music.volume,
+                **_mix_extra(0.0, music.pan, music.effects),
+                # com regra do Auto Duck para a música, ela substitui o `music.ducking` antigo: a vista diz quem a abaixa
+                **({"ducked_by": ducked_by} if ducked_by else {}),
+            },
             path=path,
         )
         for i, (start, end, start_at) in enumerate(windows)

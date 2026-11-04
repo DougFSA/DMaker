@@ -8,6 +8,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { intervalProblem, isEnabled } from '@/lib/audioEffects'
 import { formatSeconds } from '@/lib/speech'
+import AudioEffectActions from './AudioEffectActions.vue'
 import AudioEffectField from './AudioEffectField.vue'
 import NoiseProfileTools from './NoiseProfileTools.vue'
 
@@ -159,6 +160,13 @@ function onDragStart(event: DragEvent): void {
         />
       </div>
       <p v-else class="effect__plain">Este efeito não tem parâmetros.</p>
+
+      <AudioEffectActions
+        :info="info"
+        :list-path="listPath"
+        :index="index"
+        :profile="typeof effect.profile === 'string' ? effect.profile : undefined"
+      />
 
       <NoiseProfileTools
         v-if="effect.type === 'noise_reduction'"

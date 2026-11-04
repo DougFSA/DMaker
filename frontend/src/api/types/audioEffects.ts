@@ -38,6 +38,47 @@ export interface AudioEffectInfo {
   needs_selection?: boolean
   /** Trabalha sobre as amostras do item (Redução de ruído, Reparar): não vale no master, que roda num grafo ao vivo. */
   sample_stage?: boolean
+  /** O que o efeito sabe fazer além de ser aplicado (o Noise Gate sugere o limiar a partir do ruído): um botão cada. */
+  actions?: AudioEffectAction[]
+}
+
+/** Uma ação de um efeito: lê o som do item e devolve valores para os campos de `fills` (POST .../audio-effect-action). */
+export interface AudioEffectAction {
+  id: string
+  label: string
+  hint: string
+  /** Os campos do efeito (nomes na spec) que a resposta preenche. */
+  fills: string[]
+  /** Mede um trecho do item (início e fim) ou o item todo. */
+  needs_range: boolean
+}
+
+/** Uma cadeia pronta que o menu "+ Efeito" põe no item de uma vez, cada efeito separado e editável depois. */
+export interface AudioEffectPreset {
+  id: string
+  label: string
+  summary: string
+  /** Os efeitos como a spec os escreve (só o que difere do padrão). */
+  effects: Array<{ type: string; [parameter: string]: unknown }>
+}
+
+/** A resposta de uma ação de efeito. */
+export interface AudioEffectActionResponse {
+  effect: string
+  action: string
+  /** Campo da spec -> valor sugerido. */
+  fills: Record<string, number>
+  message?: string
+  [detail: string]: unknown
+}
+
+/** O nível de um item como ele soa (POST .../audio-level): RMS e pico em dBFS e o LUFS integrado (nulo num trecho mudo). */
+export interface AudioItemLevel {
+  target: string
+  rms_db: number
+  peak_db: number
+  lufs: number | null
+  interval_s: [number, number]
 }
 
 /** Onde uma cadeia de efeitos pode ficar, escrito como o caminho dela na spec (`audio.voiceover.N`). */
@@ -53,6 +94,8 @@ export interface AudioEffectCatalog {
   /** Os campos comuns a todo efeito: `enabled`, `start` e `end`. */
   common: AudioEffectParam[]
   targets: AudioEffectTarget[]
+  /** As predefinições (cadeias prontas). */
+  presets?: AudioEffectPreset[]
 }
 
 /** Um efeito como mora na spec: o `type`, o bypass, o intervalo e os parâmetros do tipo (que o catálogo descreve). */

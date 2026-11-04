@@ -245,7 +245,7 @@ def validate_project(name_or_path: str) -> dict:
         "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, "
         'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove '
         "(marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, "
-        'enable, disable ou set; ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
+        'enable, disable, set ou preset (uma cadeia pronta do catálogo: `preset` é o id, ex. podcast_voice); ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
         '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). Edição de onda, sobre o som de um '
         "item (`target`: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.tracks.N, audio.music "
         "ou audio.master; `start`/`end` em segundos da linha do tempo): audio_silence, audio_cut, audio_envelope "
@@ -255,6 +255,9 @@ def validate_project(name_or_path: str) -> dict:
         "A1, A2..., MUS, NAR, VO, SFX; `gain_db`, `pan`, `muted`, `solo`); nada disso mexe na imagem. Limpeza do "
         "som: noise_profile_set (`name`, `target`, `start`/`end` do trecho só de ruído; sem eles, o trecho mais quieto "
         "do item) e noise_profile_remove (`name`), que cuidam dos perfis da Redução de ruído (ver `noise_profile`), "
+        "auto_duck_add/auto_duck_set/auto_duck_remove (Auto Duck: `background` é a trilha que abaixa e `key` a que comanda, "
+        "ids A1, A2..., MUS, NAR, VO, SFX; `amount_db` -12, `threshold_db` -30, `max_pause` 1, `outer_fade_down`/`outer_fade_up` "
+        "0.5, `inner_fade_down`/`inner_fade_up` 0; set e remove usam `index`; faixa externa só abaixa sob outra faixa externa), "
         "e audio_truncate_silence (`target`: um clipe, que perde a imagem junto, ou uma voz gravada; `threshold_db` "
         "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
@@ -406,6 +409,40 @@ def noise_profile(
         )
     try:
         return capture_noise_profile(name, profile, target, start, end)
+    except (EditError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Executa uma ação de um efeito de áudio (as que o catálogo `audio_effects` lista em `actions`): hoje "
+        "`noise_gate` + `analyze_noise`, que mede o ruído de um trecho em que ninguém fala e sugere o limiar do gate "
+        "(o nível do ruído mais 6 dB). `target` é o item (timeline.N, overlays.N, audio.voiceover.N, audio.tracks.N ou "
+        "audio.music); `profile` é um perfil de ruído do projeto (ver `noise_profile`) ou `auto`, o trecho mais quieto do "
+        "item; `start` e `end` marcam o trecho à mão (segundos da linha do tempo ou marker:<texto>). A resposta traz "
+        "`fills` com os valores sugeridos (ex.: threshold_db); a ação só lê, quem grava é `edit_project`."
+    )
+)
+def audio_effect_action(
+    name: str,
+    effect: str,
+    action: str,
+    target: str | None = None,
+    profile: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.effect_actions import run_effect_action
+    from .pipeline.projects import load_project
+
+    params = {"target": target, "profile": profile, "start": start, "end": end}
+    try:
+        return run_effect_action(
+            load_project(name), effect, action, {k: v for k, v in params.items() if v is not None}
+        )
     except (EditError, ValueError) as exc:
         raise ToolError(str(exc)) from exc
 

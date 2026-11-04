@@ -4,7 +4,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { errorMessage } from '@/api'
 import { fetchAudioEffects } from '@/api/audioEffects'
-import type { AudioEffectCatalog, AudioEffectInfo, AudioEffectParam, AudioEffectTarget } from '@/api'
+import type { AudioEffectCatalog, AudioEffectInfo, AudioEffectParam, AudioEffectPreset, AudioEffectTarget } from '@/api'
 
 export const useAudioEffectsStore = defineStore('audioEffects', () => {
   const catalog = ref<AudioEffectCatalog | null>(null)
@@ -14,6 +14,7 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
   const effects = computed<AudioEffectInfo[]>(() => catalog.value?.effects ?? [])
   const common = computed<AudioEffectParam[]>(() => catalog.value?.common ?? [])
   const targets = computed<AudioEffectTarget[]>(() => catalog.value?.targets ?? [])
+  const presets = computed<AudioEffectPreset[]>(() => catalog.value?.presets ?? [])
   const loaded = computed(() => catalog.value !== null)
 
   /** Os campos comuns a todo efeito (`start`, `end`) pelo nome; é daí que vêm a unidade e o limite do intervalo. */
@@ -44,5 +45,5 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
     await loading
   }
 
-  return { catalog, error, effects, common, targets, loaded, commonParam, infoOf, load }
+  return { catalog, error, effects, common, targets, presets, loaded, commonParam, infoOf, load }
 })

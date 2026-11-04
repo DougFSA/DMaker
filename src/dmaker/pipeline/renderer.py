@@ -29,6 +29,7 @@ from .assembly import (
     plan_master_effects,
 )
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
+from .auto_duck import begin_ducks, finish_ducks, project_track_origin
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
@@ -150,6 +151,7 @@ class RenderPipeline:
         resolution = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
         ctx.warnings.extend(resolution.warnings)
         ctx.session = resolve_session(p, ctx.prober, resolution.offsets, resolution.parts)
+        track_origin = project_track_origin(p)  # antes de as fontes com `parts` virarem várias faixas
         p, _origin = expand_parts(p, ctx.session, resolution.parts, ctx.log)
         ctx.project = p
         sources = resolve_sources(p, ctx.prober, ctx.session)
@@ -177,6 +179,8 @@ class RenderPipeline:
         resolve_files(p, plan_sfx(p, timeline_spans(durations, transitions)))
         self._check_html(ctx)
 
+        # o Auto Duck: as regras de chave externa já se planejam, porque a faixa de fundo abaixa dentro do mezanino
+        begin_ducks(ctx, timeline_spans(durations, transitions), track_origin)
         prepared = self.mezzanines.prepare(ctx, sources)
         pending = sum(1 for item in prepared if item.command is not None)
         ctx.log(f"trechos: {len(prepared)} ({pending} a gerar, {len(prepared) - pending} em cache)")
@@ -374,6 +378,9 @@ class RenderPipeline:
     ) -> tuple[dict | None, bool, float]:
         """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`). Antes dela, mede a
         mistura que cada efeito do master pede, para a medição do loudness já enxergar o master pronto."""
+        finish_ducks(
+            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
+        )
         plan_master_effects(
             ctx,
             self.master_meter,
