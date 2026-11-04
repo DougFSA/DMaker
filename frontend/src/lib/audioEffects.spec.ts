@@ -13,6 +13,7 @@ import {
   freeProfileName,
   intervalProblem,
   isEnabled,
+  isParamShown,
   MASTER_LIST_PATH,
   MASTER_TITLE,
   moveEffectIn,
@@ -278,6 +279,33 @@ describe('limites do catálogo', () => {
     expect(intervalProblem(5, 2)).toBe('O fim precisa ser maior que o início.')
     expect(intervalProblem(null, 2)).toBeNull()
     expect(intervalProblem(3, undefined)).toBeNull()
+  })
+})
+
+describe('os campos de cada unidade (shown_when)', () => {
+  const semitones = { shown_when: { mode: 'semitones' } }
+  const mode = { name: 'mode', label: 'Unidade', kind: 'choice' as const, unit: '', default: 'semitones', minimum: null, maximum: null, hint: '', options: [] }
+
+  it('sem condição o campo aparece sempre', () => {
+    expect(isParamShown({}, {})).toBe(true)
+    expect(isParamShown({ shown_when: null }, { mode: 'percent' })).toBe(true)
+  })
+
+  it('o campo só aparece quando o campo citado vale o pedido', () => {
+    expect(isParamShown(semitones, { mode: 'semitones' })).toBe(true)
+    expect(isParamShown(semitones, { mode: 'percent' })).toBe(false)
+  })
+
+  it('o campo que a spec não guarda vale o padrão do catálogo', () => {
+    expect(isParamShown(semitones, {}, [mode])).toBe(true)
+    expect(isParamShown({ shown_when: { mode: 'notes' } }, {}, [mode])).toBe(false)
+    expect(isParamShown(semitones, {})).toBe(false) // sem o catálogo do efeito não há padrão a consultar
+  })
+
+  it('todas as condições precisam valer', () => {
+    const both = { shown_when: { mode: 'bpm', unit: 'x' } }
+    expect(isParamShown(both, { mode: 'bpm', unit: 'x' })).toBe(true)
+    expect(isParamShown(both, { mode: 'bpm', unit: 'y' })).toBe(false)
   })
 })
 

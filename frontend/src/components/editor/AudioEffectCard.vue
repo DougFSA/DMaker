@@ -157,6 +157,7 @@ function onDragStart(event: DragEvent): void {
           :effect="effect"
           :list-path="listPath"
           :index="index"
+          :siblings="info.parameters"
         />
       </div>
       <p v-else class="effect__plain">Este efeito não tem parâmetros.</p>

@@ -29,6 +29,8 @@ class ParamInfo:
     maximum: float | None
     hint: str
     options: tuple[str, ...] = ()
+    # a condição para a interface mostrar o campo, `{"mode": "semitones"}`: só aparece com esse valor em `mode`; vazio: sempre
+    shown_when: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,7 @@ def param_info(name: str, cls: type[BaseModel]) -> ParamInfo:
         maximum=high,
         hint=field.description or "",
         options=tuple(str(option) for option in get_args(annotation)) if is_literal(annotation) else (),
+        shown_when=extra.get("shown_when"),
     )
 
 

@@ -7,7 +7,15 @@ import type { AudioEffectParam, AudioEffectSettings } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
-import { AUTO_PROFILE, clampParam, effectPath, paramValue, profileNames, setEffectFieldIn } from '@/lib/audioEffects'
+import {
+  AUTO_PROFILE,
+  clampParam,
+  effectPath,
+  isParamShown,
+  paramValue,
+  profileNames,
+  setEffectFieldIn,
+} from '@/lib/audioEffects'
 import { useEditorStore } from '@/stores/editor'
 
 /** A espera do número digitado: cada tecla reinicia, e a spec só muda quando a pessoa para (a mesma do painel Filtros). */
@@ -23,9 +31,14 @@ const props = defineProps<{
   optional?: boolean
   /** Diz o que há de errado com o número antes de gravar (o fim antes do início); nulo quando está certo. */
   check?: (value: number | null) => string | null
+  /** Os parâmetros do mesmo efeito: o padrão de quem a condição `shown_when` cita e a spec não guarda. */
+  siblings?: readonly AudioEffectParam[]
 }>()
 
 const editor = useEditorStore()
+
+/** O campo de um modo de unidade só aparece no modo dele: sem `shown_when` aparece sempre. */
+const shown = computed(() => isParamShown(props.param, props.effect, props.siblings))
 
 const path = computed(() => effectPath(props.listPath, props.index, props.param.name))
 
@@ -114,8 +127,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- o campo de outro modo de unidade fica de fora da tela (a spec o guarda) -->
+  <template v-if="!shown" />
   <AppNumberInput
-    v-if="param.kind === 'number' || param.kind === 'integer'"
+    v-else-if="param.kind === 'number' || param.kind === 'integer'"
     :label="param.label"
     :model-value="numberValue"
     :min="limits.min"

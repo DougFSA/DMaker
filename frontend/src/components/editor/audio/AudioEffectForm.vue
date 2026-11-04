@@ -7,13 +7,18 @@ import type { AudioEffectInfo, AudioEffectParam, AudioEffectValue } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
-import { clampParam } from '@/lib/audioEffects'
+import { clampParam, isParamShown } from '@/lib/audioEffects'
 
 const props = defineProps<{ info: AudioEffectInfo }>()
 const values = defineModel<Record<string, AudioEffectValue>>({ required: true })
 
-/** Os parâmetros que o formulário mostra: a curva de pontos tem a ferramenta de envelope. */
-const fields = computed(() => props.info.parameters.filter((param) => param.kind !== 'points'))
+/** Os parâmetros que o formulário mostra: a curva de pontos tem a ferramenta de envelope, e o campo de um modo de unidade
+    só aparece no modo dele (`shown_when`). */
+const fields = computed(() =>
+  props.info.parameters.filter(
+    (param) => param.kind !== 'points' && isParamShown(param, values.value, props.info.parameters),
+  ),
+)
 
 function numberOf(param: AudioEffectParam): number | null {
   const value = values.value[param.name]

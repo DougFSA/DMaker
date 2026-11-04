@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.audio_effects import active_effects, chain_duration
+from ..domain.audio_effects import active_effects, chain_duration, chain_refusal
 from ..domain.spec import Project, VoiceoverClip
 from .audio_effects import AudioItem, EffectProcessor
 from .context import Prober
@@ -89,6 +89,54 @@ def voice_file_playtimes(project: Project, prober: Prober) -> list[float | None]
     return playtimes
 
 
+def music_file_playtime(project: Project, prober: Prober) -> float | None:
+    """Quanto dura o arquivo da música depois dos efeitos dela (o Mudar Andamento e o Paulstretch a alongam ou encurtam),
+    ou None sem música, sem arquivo ou ilegível. A música inteira é o item: as janelas e o loop recortam o resultado."""
+    music = project.audio.music
+    if music is None:
+        return None
+    length = _file_length(project.resolve(music.src), prober)
+    return None if length is None else chain_duration(music.effects, length)
+
+
+def _file_length(path: Path, prober: Prober) -> float | None:
+    """A duração do arquivo, ou None quando ele não existe ou não dá para ler (o aviso não falha por um arquivo ruim)."""
+    try:
+        return prober(path).duration if path.exists() else None
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def effect_refusal_warnings(project: Project, prober: Prober) -> list[str]:
+    """O que um efeito recusa neste item (o Paulstretch com saída acima do teto): o render pararia nele, então o
+    `validate` avisa antes. Cobre a voz gravada e a música, onde um efeito que muda a duração é aceito."""
+    warnings = []
+    for index, clip in enumerate(project.audio.voiceover):
+        length = _file_length(project.resolve(clip.src), prober) if active_effects(clip.effects) else None
+        reason = None if length is None else chain_refusal(clip.effects, play_length(clip, length))
+        if reason:
+            warnings.append(f"audio.voiceover[{index}]: {reason}")
+    music = project.audio.music
+    if music is not None and active_effects(music.effects):
+        length = _file_length(project.resolve(music.src), prober)
+        reason = None if length is None else chain_refusal(music.effects, length)
+        if reason:
+            warnings.append(f"audio.music: {reason}")
+    return warnings
+
+
+def music_playtime_warnings(project: Project, prober: Prober) -> list[str]:
+    """O aviso de que os efeitos mudaram quanto dura a música. Só olha o arquivo (e só o sonda) quando a música tem um
+    efeito que muda a duração; sem ele a música segue como sempre."""
+    music = project.audio.music
+    if music is None or not any(effect.alters_duration() for _, effect in active_effects(music.effects)):
+        return []
+    playtime = music_file_playtime(project, prober)
+    if playtime is None:
+        return []
+    return [f"audio.music: com os efeitos, o arquivo da música toca por {playtime:.1f}s."]
+
+
 def voice_file_warnings(project: Project, total: float, playtimes: Sequence[float | None]) -> list[str]:
     """Avisos de `audio.voiceover`: arquivo que não existe, que não tem o que tocar a partir do `offset` e o que
     passa do fim do vídeo (o áudio excedente é cortado). `playtimes` vem de `voice_file_playtimes`; sem ele só
@@ -107,7 +155,7 @@ def voice_file_warnings(project: Project, total: float, playtimes: Sequence[floa
             continue
         if any(effect.alters_duration() for _, effect in active_effects(clip.effects)):
             warnings.append(
-                f"{where}: com os efeitos, o áudio toca por {playtime:.1f}s (o Repetir o alonga)."
+                f"{where}: com os efeitos, o áudio toca por {playtime:.1f}s (um efeito de tempo muda a duração)."
             )
         if playtime <= 0:
             warnings.append(
