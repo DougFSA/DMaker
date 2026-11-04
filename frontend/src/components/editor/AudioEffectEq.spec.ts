@@ -12,7 +12,11 @@ import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useToastsStore } from '@/stores/toasts'
 import AudioEffectsSection from './AudioEffectsSection.vue'
 
+const mounted: VueWrapper[] = []
+
 afterEach(() => {
+  // os componentes de um teste não podem seguir vivos (e pedindo a curva) durante o seguinte
+  for (const wrapper of mounted.splice(0)) wrapper.unmount()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
@@ -56,6 +60,7 @@ async function mountEq(routes: Record<string, unknown> = {}): Promise<{ opened: 
     ...routes,
   })
   const wrapper = await mountEditorPart(AudioEffectsSection, opened, {}, true)
+  mounted.push(wrapper)
   opened.store.select(['VO-0'])
   await flushPromises()
   return { opened, wrapper }
@@ -166,7 +171,7 @@ describe('o EQ Gráfico', () => {
     expect((chain(opened)![0]!.gains_db as number[])[22]).toBe(0) // enquanto arrasta, a spec não muda
     await wait(300)
     // o gráfico foi pedido com o ganho novo, ainda antes de gravar
-    expect(responseCalls(opened).some((body) => ((body.effect as Record<string, unknown>).gains_db as number[])[22] === 6)).toBe(true)
+    expect(responseCalls(opened).some((body) => ((body.effect as Record<string, unknown>).gains_db as number[] | undefined)?.[22] === 6)).toBe(true)
     await slider.trigger('change')
     await flushPromises()
     const gains = chain(opened)![0]!.gains_db as number[]
