@@ -13,7 +13,8 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import { ComparePlayer, type CompareSide } from '@/lib/audioCompare'
 import { newAudioContext } from '@/lib/audioContext'
 import { effectsFor, newEffect, targetMayGrow } from '@/lib/audioEffects'
-import { PREVIEW_SECONDS } from '@/lib/audioPanelOps'
+import { PREVIEW_SECONDS, SPECTRAL_PREFIX } from '@/lib/audioPanelOps'
+import { formatHz } from '@/lib/spectrogram'
 import { formatSpan } from '@/lib/audioWave'
 import { pruneEmpty } from '@/lib/editorPaths'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
@@ -45,13 +46,20 @@ let ticket = 0
 
 /** O lugar da cadeia como o catálogo o escreve (`audio.voiceover.N`), para saber se o efeito pode crescer o item. */
 const genericTarget = computed(() => panel.target?.replace(/\.\d+$/, '.N') ?? '')
-const offered = computed<AudioEffectInfo[]>(() => effectsFor(catalog.effects, targetMayGrow(catalog.targets, genericTarget.value)))
+/** Só uma seleção com frequência (o retângulo do espectrograma) pede os efeitos espectrais: eles agem numa faixa. */
+const hasBand = computed(() => panel.selection?.low_hz !== undefined || panel.selection?.high_hz !== undefined)
+const offered = computed<AudioEffectInfo[]>(() => [
+  ...effectsFor(catalog.effects, targetMayGrow(catalog.targets, genericTarget.value)),
+  ...(hasBand.value ? catalog.effects.filter((info) => info.type.startsWith(SPECTRAL_PREFIX)) : []),
+])
 const info = computed(() => offered.value.find((candidate) => candidate.type === type.value) ?? null)
 const typeOptions = computed(() => offered.value.map((effect) => ({ value: effect.type, label: effect.label })))
 
 const selectionText = computed(() => {
   const selection = panel.selection
-  return selection ? `a seleção, de ${formatSpan(selection.start)} a ${formatSpan(selection.end)}` : 'o item inteiro (sem seleção)'
+  if (!selection) return 'o item inteiro (sem seleção)'
+  const band = selection.low_hz !== undefined && selection.high_hz !== undefined ? `, de ${formatHz(selection.low_hz)} a ${formatHz(selection.high_hz)}` : ''
+  return `a seleção, de ${formatSpan(selection.start)} a ${formatSpan(selection.end)}${band}`
 })
 
 /** A janela que a prévia toca: o começo da seleção ou, sem ela, do cursor. */
@@ -62,6 +70,12 @@ const previewRange = computed(() => {
   return { start, end: Math.min(start + PREVIEW_SECONDS, panel.duration) }
 })
 
+/** O efeito que a janela mostra ao abrir: com um retângulo de frequência, o Apagar espectral; senão o Normalizar. */
+function firstEffect(list: readonly AudioEffectInfo[]): string {
+  const wanted = hasBand.value ? 'spectral_delete' : 'normalize'
+  return (list.find((effect) => effect.type === wanted) ?? list[0])?.type ?? ''
+}
+
 function resetValues(): void {
   const chosen = info.value
   const draft: Record<string, AudioEffectValue> = {}
@@ -69,6 +83,12 @@ function resetValues(): void {
     for (const [key, value] of Object.entries(newEffect(chosen))) {
       if (key !== 'type' && (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string')) draft[key] = value
     }
+  }
+  // a faixa de frequência do retângulo preenche os campos dos efeitos espectrais; dá para ajustar à mão
+  const selection = panel.selection
+  if (chosen?.type.startsWith(SPECTRAL_PREFIX) && selection) {
+    if (selection.low_hz !== undefined) draft.low_hz = selection.low_hz
+    if (selection.high_hz !== undefined) draft.high_hz = selection.high_hz
   }
   values.value = draft
 }
@@ -82,16 +102,18 @@ watch(open, (isOpen) => {
   problem.value = ''
   note.value = ''
   previewed = false
-  if (!offered.value.some((effect) => effect.type === type.value)) {
-    type.value = (offered.value.find((effect) => effect.type === 'normalize') ?? offered.value[0])?.type ?? ''
+  if (hasBand.value && !type.value.startsWith(SPECTRAL_PREFIX)) {
+    type.value = 'spectral_delete'
+  } else if (!offered.value.some((effect) => effect.type === type.value)) {
+    type.value = firstEffect(offered.value)
   }
   resetValues()
 })
 watch(offered, (list) => {
-  if (open.value && !list.some((effect) => effect.type === type.value)) {
-    type.value = (list.find((effect) => effect.type === 'normalize') ?? list[0])?.type ?? ''
-    resetValues()
-  }
+  if (!open.value) return
+  // o catálogo pode chegar depois de a janela abrir (e o efeito escolhido só passa a existir então): os valores saem dele
+  if (!list.some((effect) => effect.type === type.value)) type.value = firstEffect(list)
+  resetValues()
 })
 watch(type, () => {
   resetValues()

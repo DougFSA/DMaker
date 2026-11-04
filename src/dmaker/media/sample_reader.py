@@ -19,7 +19,7 @@ import numpy as np
 from .decode import decode_to_wav
 from .ffmpeg import FFmpegRunner
 from .probe import MediaInfo
-from .wavio import _wav_layout, read_wav_float
+from .wavio import _decode_pcm, _wav_layout, read_wav_float
 
 # A onda mostra no máximo dois canais, um em cima do outro, como o Audacity. Um arquivo com mais canais mostra os dois primeiros.
 MAX_CHANNELS = 2
@@ -75,6 +75,28 @@ class WavReader:
             return np.zeros((0, self.channels), dtype=np.float32)
         samples, _ = read_wav_float(self.path, max(self.base + start, 0.0), duration)
         return _exact(samples, frames, self.channels)
+
+    def frames(self, starts: np.ndarray, size: int) -> np.ndarray:
+        """Os quadros de `size` amostras que começam em cada `starts` (amostras do áudio, a partir de `base`), com o arquivo
+        aberto uma vez só: milhares de quadros espalhados (o espectrograma de uma hora) gastam o tempo em abrir e
+        reinterpretar o cabeçalho, e não em ler. O que passa das pontas do arquivo completa com silêncio."""
+        result = np.zeros((len(starts), size, self.channels), dtype=np.float32)
+        with open(self.path, "rb") as handle:
+            tag, channels, rate, bits, position, byte_size = _wav_layout(handle)
+            block = channels * (bits // 8)
+            total = byte_size // block
+            shift = int(round(self.base * rate))
+            for index, start in enumerate(starts):
+                first = int(start) + shift
+                low, high = max(first, 0), min(first + size, total)
+                if high <= low:
+                    continue
+                handle.seek(position + low * block)
+                data = _decode_pcm(handle.read((high - low) * block), tag, bits, self.path).reshape(
+                    -1, channels
+                )
+                result[index, low - first : low - first + len(data)] = data[:, : self.channels]
+        return result
 
 
 @dataclass
@@ -149,6 +171,11 @@ class StereoReader:
         mono = self.inner.read(start, duration)
         return np.repeat(mono[:, :1], 2, axis=1) * np.float32(MONO_TO_STEREO_GAIN)
 
+    def frames(self, starts: np.ndarray, size: int) -> np.ndarray:
+        """Como `WavReader.frames`, com o mono nos dois canais a -3 dB."""
+        mono = self.inner.frames(starts, size)  # type: ignore[attr-defined]
+        return np.repeat(mono[:, :, :1], 2, axis=2) * np.float32(MONO_TO_STEREO_GAIN)
+
 
 def open_reader(
     runner: FFmpegRunner,
@@ -169,3 +196,11 @@ def open_reader(
         rate, channels = info.sample_rate or 48000, info.channels or 2
         reader = DecodingReader(runner, path, rate, max(1, min(channels, MAX_CHANNELS)), stream, base)
     return StereoReader(reader) if reader.channels == 1 else reader
+
+
+def random_access(reader: SampleReader) -> bool:
+    """Se ler uma janela pequena é barato (um WAV lido por posição). Um arquivo comprimido sobe um ffmpeg a cada leitura, e
+    aí vale ler pedaços grandes de uma vez."""
+    if isinstance(reader, StereoReader):
+        return random_access(reader.inner)
+    return isinstance(reader, WavReader)

@@ -111,12 +111,12 @@ describe('os pontos de extensão (espectrograma e gravação)', () => {
         return () => h('div', { 'data-fake-spectrogram': '' }, 'espectrograma')
       },
     })
-    AUDIO_VIEWS.push({ id: 'spectrogram', title: 'Espectrograma', component: Spectrogram })
+    AUDIO_VIEWS.push({ id: 'vista-falsa', title: 'Vista falsa', component: Spectrogram })
     try {
       const { panel } = await mountPanel()
       expect(wrapper?.find('[data-audio-views]').exists()).toBe(true)
       expect(wrapper?.find('[data-wave-area]').exists()).toBe(true)
-      panel.viewId = 'spectrogram'
+      panel.viewId = 'vista-falsa'
       await flushPromises()
       expect(wrapper?.find('[data-fake-spectrogram]').exists()).toBe(true)
       expect(wrapper?.find('[data-wave-area]').exists()).toBe(false)
@@ -137,7 +137,6 @@ describe('os pontos de extensão (espectrograma e gravação)', () => {
     try {
       await mountPanel()
       expect(wrapper?.find('[data-fake-record]').exists()).toBe(true)
-      expect(wrapper?.find('[data-audio-views]').exists()).toBe(false) // com uma vista só não há seletor
     } finally {
       AUDIO_TOOLBAR_EXTRAS.pop()
     }
@@ -233,6 +232,25 @@ describe('a janela do efeito', () => {
     })
   })
 
+  it('com uma seleção espectral oferece o Apagar espectral, com a faixa preenchida, e aplica com o retângulo', async () => {
+    const { panel } = await mountPanel()
+    panel.selectSpectral(2, 5, 2800, 3200)
+    await button('[data-audio-effect]')?.trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-effect-param="low_hz"]')).not.toBeNull())
+    const form = document.body.querySelector('[data-audio-effect-form]')
+    expect((form?.querySelector('[data-effect-param="low_hz"] input') as HTMLInputElement).value).toBe('2800')
+    expect((form?.querySelector('[data-effect-param="high_hz"] input') as HTMLInputElement).value).toBe('3200')
+    expect(document.body.querySelector('[data-effect-range]')?.textContent).toContain('2,8 kHz a 3,2 kHz')
+    ;(document.body.querySelector('[data-effect-apply]') as HTMLElement).click()
+    await flushPromises()
+    expect(edits().at(-1)).toEqual({
+      type: 'audio_effect',
+      action: 'add',
+      target: 'audio.voiceover.0',
+      effect: { type: 'spectral_delete', low_hz: 2800, high_hz: 3200, start: 2, end: 5 },
+    })
+  })
+
   it('avisa quando a prévia não é igual ao render', async () => {
     const { panel } = await mountPanel({
       [PREVIEW]: () =>
@@ -254,5 +272,47 @@ describe('a janela do efeito', () => {
     await vi.waitFor(() => expect(document.body.querySelector('[data-effect-param="peak_db"]')).not.toBeNull())
     ;(document.body.querySelector('[data-effect-preview]') as HTMLElement).click()
     await vi.waitFor(() => expect(document.body.querySelector('[data-effect-problem]')?.textContent).toContain('o efeito pede um intervalo'))
+  })
+})
+
+describe('o espectrograma no painel', () => {
+  const SPECTROGRAM = 'POST /api/projects/demo/audio-panel/spectrogram'
+  const png = () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'X-Spectrogram-Start': '0', 'X-Spectrogram-End': '12', 'X-Spectrogram-Columns': '64', 'X-Spectrogram-Rows': '64', 'X-Spectrogram-Min-Hz': '0', 'X-Spectrogram-Max-Hz': '24000' } })
+
+  it('oferece a onda, o espectrograma e a multivista, e a ferramenta acompanha a vista', async () => {
+    const { panel } = await mountPanel({ [SPECTROGRAM]: png })
+    expect(AUDIO_VIEWS.map((entry) => entry.id)).toEqual(['wave', 'spectrogram', 'both'])
+    expect(panel.tool).toBe('select')
+    panel.viewId = 'spectrogram'
+    await flushPromises()
+    expect(wrapper?.find('[data-audio-spectrogram]').exists()).toBe(true)
+    expect(wrapper?.find('[data-wave-area]').exists()).toBe(false)
+    expect(panel.tool).toBe('spectral')
+    panel.viewId = 'both'
+    await flushPromises()
+    expect(wrapper?.find('[data-wave-area]').exists()).toBe(true)
+    expect(wrapper?.find('[data-audio-spectrogram]').exists()).toBe(true)
+    panel.viewId = 'wave'
+    await flushPromises()
+    expect(panel.tool).toBe('select')
+  })
+
+  it('mostra a faixa de frequência e o centro da seleção espectral', async () => {
+    const { panel } = await mountPanel({ [SPECTROGRAM]: png })
+    panel.selectSpectral(2, 4, 2800, 3200)
+    await flushPromises()
+    const text = wrapper?.get('[data-audio-selection]').text() ?? ''
+    expect(text).toContain('2,8 kHz a 3,2 kHz')
+    expect(text).toContain('centro em 2,99 kHz')
+  })
+
+  it('o marcador de uma seleção espectral leva low_hz e high_hz, e o efeito espectral nasce da janela com a faixa preenchida', async () => {
+    const { panel } = await mountPanel({ [SPECTROGRAM]: png })
+    panel.selectSpectral(2, 4, 2800, 3200)
+    await panel.label()
+    await panel.applyEffect('spectral_delete', {})
+    const ops = edits()
+    expect(ops[0]).toMatchObject({ type: 'marker_add', start: 2.5, end: 4.5, low_hz: 2800, high_hz: 3200 })
+    expect(ops[1]).toMatchObject({ type: 'audio_effect', action: 'add', target: 'audio.voiceover.0', effect: { type: 'spectral_delete', start: 2, end: 4, low_hz: 2800, high_hz: 3200 } })
   })
 })

@@ -51,6 +51,19 @@ export function audioEffectCatalog(): AudioEffectCatalog {
         changes_duration: true,
         parameters: [param({ name: 'times', label: 'Vezes que toca', kind: 'integer', default: 2, minimum: 1, maximum: 100 })],
       },
+      {
+        type: 'spectral_delete',
+        label: 'Apagar espectral',
+        audacity_name: 'Spectral Delete',
+        summary: 'Apaga o som de uma faixa de frequência num trecho.',
+        changes_duration: false,
+        needs_selection: true,
+        sample_stage: true,
+        parameters: [
+          param({ name: 'low_hz', label: 'Frequência inferior', kind: 'number', unit: 'Hz', minimum: 0, maximum: 24000 }),
+          param({ name: 'high_hz', label: 'Frequência superior', kind: 'number', unit: 'Hz', minimum: 0, maximum: 24000 }),
+        ],
+      },
     ],
     common: [
       param({ name: 'enabled', label: 'Ligado', kind: 'boolean', default: true }),

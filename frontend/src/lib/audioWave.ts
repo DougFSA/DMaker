@@ -12,6 +12,9 @@ export interface AxisView {
 export interface AxisSelection {
   start: number
   end: number
+  /** A seleção espectral (o retângulo do espectrograma) também tem faixa de frequência, em Hz; vazios, é só de tempo. */
+  low_hz?: number
+  high_hz?: number
 }
 
 /** O relógio do item: o instante `t` do eixo é o instante `start + (t - origin) / speed` da linha do tempo. */

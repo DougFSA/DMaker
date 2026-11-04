@@ -28,6 +28,7 @@ from ..domain.audio_edits import (
     split_voiceover,
     trim_voiceover,
 )
+from ..domain.audio_effects import EFFECT_CLASSES
 from ..domain.audio_targets import AudioTarget
 from ..domain.edits import EditError
 from ..domain.markers import MarkerError, find_marker, is_marker_ref, resolve_instant
@@ -372,6 +373,29 @@ def _op_track_set(project: Project, op: dict, layout: OriginAggregate) -> Projec
     track = _required(op, "track")
     changes = {name: value for name, value in op.items() if name not in ("type", "track")}
     return set_track_state(project, str(track), changes, known_track_ids(project))
+
+
+def effect_op_with_region(project: Project, op: dict, layout: OriginAggregate) -> dict:
+    """O `audio_effect` com `region: "marker:<texto>"` resolvido: o intervalo do marcador (tempo da linha do tempo) vira o
+    `start`/`end` do efeito em tempo do item, e a faixa de frequência do marcador espectral (`low_hz`, `high_hz`) vira a do
+    efeito, quando ele tem esses campos e o pedido não os trouxe. Sem `region` o pedido passa como veio."""
+    if op.get("region") is None:
+        return op
+    if op.get("action") != "add":
+        raise EditError("`region` só vale ao acrescentar um efeito (action=add)")
+    effect = op.get("effect")
+    if not isinstance(effect, dict):
+        raise EditError('informe o `effect` (por exemplo {"type": "spectral_delete"})')
+    start, end = _interval(project, op)
+    first, last = _target(project, op, layout).single_interval(start, end)
+    marker = project.markers[find_marker(project.markers, op["region"])]
+    filled = {**effect, "start": round(first, 6), "end": round(last, 6)}
+    accepted = EFFECT_CLASSES.get(str(effect.get("type")))
+    for name in ("low_hz", "high_hz"):
+        value = getattr(marker, name)
+        if value is not None and effect.get(name) is None and accepted and name in accepted.model_fields:
+            filled[name] = value
+    return {**{key: value for key, value in op.items() if key != "region"}, "effect": filled}
 
 
 AUDIO_OPERATIONS: dict[str, AudioOperation] = {

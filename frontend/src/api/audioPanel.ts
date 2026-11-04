@@ -2,7 +2,7 @@
    prévia de um efeito ainda não gravado. Todas mandam a spec que o editor tem na tela, porque o que se vê e se ouve é o
    projeto em edição; nenhuma grava nada. */
 import { http } from './http'
-import type { AudioWave, AudioWaveRequest, AudioWindow } from './types/audioPanel'
+import type { AudioWave, AudioWaveRequest, AudioWindow, SpectrogramImage, SpectrogramRequest } from './types/audioPanel'
 import type { SpecDocument } from './types/editor'
 
 const base = (project: string) => `/api/projects/${encodeURIComponent(project)}/audio-panel`
@@ -49,4 +49,26 @@ export async function fetchEffectPreview(
   end: number,
 ): Promise<AudioWindow> {
   return windowOf(await http.postResponse(`${base(project)}/preview`, { spec, target, effect, start, end }))
+}
+
+/** O espectrograma de um trecho do item. Devolve `null` enquanto os efeitos do item ainda estão sendo aplicados (resposta
+ *  202): a tela pede de novo daqui a pouco. */
+export async function fetchSpectrogram(
+  project: string,
+  spec: SpecDocument,
+  request: SpectrogramRequest,
+): Promise<SpectrogramImage | null> {
+  const response = await http.postResponse(`${base(project)}/spectrogram`, { spec, ...request })
+  if (response.status === 202) return null
+  const header = (name: string) => Number(response.headers.get(`X-Spectrogram-${name}`) ?? 0)
+  return {
+    blob: await response.blob(),
+    start: header('Start'),
+    end: header('End'),
+    columns: header('Columns'),
+    rows: header('Rows'),
+    minHz: header('Min-Hz'),
+    maxHz: header('Max-Hz'),
+    cached: response.headers.get('X-Spectrogram-Cached') === '1',
+  }
 }

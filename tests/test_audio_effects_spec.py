@@ -72,6 +72,10 @@ def test_the_basic_and_the_wave_editing_effects_are_registered():
         "click_removal",
         "clip_fix",
         "repair",
+        "spectral_delete",
+        "spectral_multi_tool",
+        "spectral_eq",
+        "spectral_shelves",
     ]
     assert [info.type for info in catalog()] == list(EFFECT_CLASSES)
 
