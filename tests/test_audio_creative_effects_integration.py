@@ -69,6 +69,12 @@ def speech(tmp_path) -> Path:
     return write_speech_like(tmp_path / "fala.wav", 6.0)
 
 
+def peak_hz(segment: np.ndarray) -> float:
+    """A frequência mais forte de um trecho de um tom (janela de Hann)."""
+    spectrum = np.abs(np.fft.rfft(segment * np.hanning(len(segment))))
+    return float(np.fft.rfftfreq(len(segment), 1 / RATE)[int(np.argmax(spectrum))])
+
+
 def peaks_after(samples: np.ndarray, threshold: float = 1e-4) -> list[tuple[float, float]]:
     """Os instantes (ms depois do primeiro pico) e as amplitudes dos picos acima do limiar, num sinal feito de cliques."""
     found = np.nonzero(np.abs(samples[:, 0]) > threshold)[0]
@@ -161,12 +167,8 @@ def test_the_delay_can_raise_the_pitch_of_each_echo_with_the_rubberband(processo
     assert duration == pytest.approx(4.0) and len(samples) == 4 * RATE
     echo = samples[round(1.6 * RATE) : round(2.4 * RATE), 0]
     first = samples[round(0.1 * RATE) : round(0.9 * RATE), 0]
-    spectrum = lambda x: np.fft.rfftfreq(len(x), 1 / RATE)[
-        int(np.argmax(np.abs(np.fft.rfft(x * np.hanning(len(x))))))
-    ]  # noqa: E731
-    assert spectrum(first) == pytest.approx(440.0, abs=3.0) and spectrum(echo) == pytest.approx(
-        880.0, abs=4.0
-    )
+    assert peak_hz(first) == pytest.approx(440.0, abs=3.0)
+    assert peak_hz(echo) == pytest.approx(880.0, abs=4.0)  # uma oitava acima: 12 semitons
 
 
 # ---------- Reverb ----------
