@@ -5,7 +5,9 @@ import { audioWave, FakeWebAudio, voiceSpec, voiceView } from '@/test/audioPanel
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useKeymapStore } from '@/stores/keymap'
+import { defineComponent, h } from 'vue'
 import AudioPanel from './AudioPanel.vue'
+import { AUDIO_TOOLBAR_EXTRAS, AUDIO_VIEWS } from './audio/views'
 
 const WAVE = 'POST /api/projects/demo/audio-panel/wave'
 const WINDOW = 'POST /api/projects/demo/audio-panel/window'
@@ -95,6 +97,50 @@ describe('abrir e mostrar a onda', () => {
     const { panel } = await mountPanel()
     await button('[data-audio-back]')?.trigger('click')
     expect(panel.open).toBe(false)
+  })
+})
+
+describe('os pontos de extensão (espectrograma e gravação)', () => {
+  it('uma vista nova entra por AUDIO_VIEWS, ganha o seletor e recebe a mesma resposta da onda', async () => {
+    const received: unknown[] = []
+    const Spectrogram = defineComponent({
+      props: { data: { type: Object, default: null } },
+      emits: ['size', 'scrub', 'scrub-end'],
+      setup(props) {
+        received.push(props.data)
+        return () => h('div', { 'data-fake-spectrogram': '' }, 'espectrograma')
+      },
+    })
+    AUDIO_VIEWS.push({ id: 'spectrogram', title: 'Espectrograma', component: Spectrogram })
+    try {
+      const { panel } = await mountPanel()
+      expect(wrapper?.find('[data-audio-views]').exists()).toBe(true)
+      expect(wrapper?.find('[data-wave-area]').exists()).toBe(true)
+      panel.viewId = 'spectrogram'
+      await flushPromises()
+      expect(wrapper?.find('[data-fake-spectrogram]').exists()).toBe(true)
+      expect(wrapper?.find('[data-wave-area]').exists()).toBe(false)
+      // a vista nova recebe a resposta que a onda recebe, e o resto (janela, seleção) está no mesmo store
+      await vi.waitFor(() => expect(received.some((value) => (value as { target?: string } | null)?.target === 'audio.voiceover.0')).toBe(true))
+      // uma escolha que deixou de existir volta à onda
+      panel.viewId = 'nao-existe'
+      await flushPromises()
+      expect(wrapper?.find('[data-wave-area]').exists()).toBe(true)
+    } finally {
+      AUDIO_VIEWS.pop()
+    }
+  })
+
+  it('um comando novo entra por AUDIO_TOOLBAR_EXTRAS, no fim da barra de reprodução', async () => {
+    const Record = defineComponent({ setup: () => () => h('button', { 'data-fake-record': '' }, 'Gravar') })
+    AUDIO_TOOLBAR_EXTRAS.push({ id: 'record', component: Record })
+    try {
+      await mountPanel()
+      expect(wrapper?.find('[data-fake-record]').exists()).toBe(true)
+      expect(wrapper?.find('[data-audio-views]').exists()).toBe(false) // com uma vista só não há seletor
+    } finally {
+      AUDIO_TOOLBAR_EXTRAS.pop()
+    }
   })
 })
 

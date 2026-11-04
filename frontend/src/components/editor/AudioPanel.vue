@@ -19,7 +19,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
 import AudioEffectDialog from './audio/AudioEffectDialog.vue'
 import AudioMeter from './audio/AudioMeter.vue'
-import AudioWaveView from './audio/AudioWaveView.vue'
+import { AUDIO_TOOLBAR_EXTRAS, AUDIO_VIEWS } from './audio/views'
 import TransportIcon from './TransportIcon.vue'
 
 const panel = useAudioPanelStore()
@@ -30,7 +30,10 @@ const waveWidth = ref(0)
 const { data, error } = useWaveData(waveWidth)
 const playback = useWavePlayback()
 const effectOpen = ref(false)
-const waveView = ref<InstanceType<typeof AudioWaveView> | null>(null)
+const activeView = ref<{ focus?: () => void } | null>(null)
+/** A vista mostrada: a escolhida no seletor, ou a primeira (a onda) se a escolha deixou de existir. */
+const view = computed(() => AUDIO_VIEWS.find((candidate) => candidate.id === panel.viewId) ?? (AUDIO_VIEWS[0] as (typeof AUDIO_VIEWS)[number]))
+const viewOptions = AUDIO_VIEWS.map((candidate) => ({ value: candidate.id, label: candidate.title }))
 
 const toolOptions: Array<{ value: PanelTool; label: string }> = [
   { value: 'select', label: 'Seleção' },
@@ -102,7 +105,7 @@ const actions: Record<AudioShortcutId, () => void> = {
 for (const [id, run] of Object.entries(actions) as Array<[AudioShortcutId, () => void]>) useShortcutHandler(id, run)
 
 function focusWave(): void {
-  waveView.value?.focus()
+  activeView.value?.focus?.()
 }
 
 function openEffect(): void {
@@ -180,6 +183,15 @@ function onSpeed(value: string): void {
       </AppButton>
       <AppSelect label="Velocidade" hide-label :model-value="String(panel.speed)" :options="speedOptions" data-audio-speed @update:model-value="onSpeed" />
       <AudioMeter :levels="playback.levels.value" />
+      <component :is="extra.component" v-for="extra in AUDIO_TOOLBAR_EXTRAS" :key="extra.id" />
+      <SegmentedControl
+        v-if="viewOptions.length > 1"
+        :model-value="view.id"
+        label="Vista"
+        :options="viewOptions"
+        data-audio-views
+        @update:model-value="panel.viewId = $event"
+      />
     </div>
 
     <p v-if="error" class="audio__error" role="alert" data-audio-error>{{ error }}</p>
@@ -187,8 +199,10 @@ function onSpeed(value: string): void {
       <li v-for="note in wave.notes" :key="note">{{ note }}</li>
     </ul>
 
-    <AudioWaveView
-      ref="waveView"
+    <component
+      :is="view.component"
+      :key="view.id"
+      ref="activeView"
       :data="data"
       @size="waveWidth = $event"
       @scrub="playback.scrub($event)"

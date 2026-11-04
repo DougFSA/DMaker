@@ -63,6 +63,8 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
   const selection = ref<AxisSelection | null>(null)
   const cursor = ref(0)
   const tool = ref<PanelTool>('select')
+  /** A vista mostrada (`AUDIO_VIEWS`): a onda, e as que outros cards acrescentarem, como o espectrograma. */
+  const viewId = ref('wave')
   const loop = ref(false)
   const speed = ref(1)
   const playing = ref(false)
@@ -290,6 +292,7 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     selection,
     cursor,
     tool,
+    viewId,
     loop,
     speed,
     playing,
