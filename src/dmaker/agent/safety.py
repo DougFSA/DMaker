@@ -636,6 +636,8 @@ DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "markers_export": _markers_export_outputs,
     "audio_export": _audio_export_outputs,
     "audio_analyze": _analysis_outputs,
+    # o `out` é obrigatório em `audio_generate`: sem ele a ferramenta nem roda, então não há destino padrão a conferir
+    "audio_generate": _analysis_outputs,
 }
 # O mesmo, para as ferramentas cujo destino padrão sai do projeto de dublagem (o argumento `project`).
 DUB_PROJECT_OUTPUTS: dict[str, Callable[[DubProject], list[str]]] = {

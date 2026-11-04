@@ -4298,7 +4298,7 @@ def generated_list(spec: _WAVE_SPEC) -> None:
     if not project.audio.generated:
         console.print("O projeto não tem som gerado. Ponha um com `dmaker audio generated add`.")
         return
-    table = Table("#", "Som", "Início (s)", "Duração (s)", "Volume", "Pan", "Efeitos")
+    table = Table("#", Column("Som", no_wrap=True), "Início (s)", "Duração (s)", "Volume", "Pan", "Efeitos")
     for position, sound in enumerate(project.audio.generated):
         table.add_row(
             str(position),

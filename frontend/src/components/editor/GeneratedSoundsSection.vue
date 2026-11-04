@@ -44,11 +44,11 @@ const selectedIndex = computed(() => {
 })
 
 /** Os campos do item, que todo gerador tem; o servidor recusa o que passar da faixa. */
-const ITEM_FIELDS: Array<Pick<AudioEffectParam, 'name' | 'label' | 'kind' | 'unit' | 'hint' | 'minimum' | 'maximum' | 'options'>> = [
-  { name: 'start', label: 'Início', kind: 'number', unit: 's', hint: 'O instante do vídeo final em que o som começa.', minimum: 0, maximum: null, options: [] },
-  { name: 'duration', label: 'Duração', kind: 'number', unit: 's', hint: 'Quanto o som dura.', minimum: MIN_SOUND_SECONDS, maximum: MAX_SOUND_SECONDS, options: [] },
-  { name: 'volume', label: 'Volume', kind: 'number', unit: '', hint: 'Ganho linear do item (1 é o nível do gerador).', minimum: 0, maximum: 4, options: [] },
-  { name: 'pan', label: 'Equilíbrio', kind: 'number', unit: '', hint: 'De -1 (esquerda) a 1 (direita).', minimum: -1, maximum: 1, options: [] },
+const ITEM_FIELDS: Array<Pick<AudioEffectParam, 'name' | 'label' | 'kind' | 'unit' | 'hint' | 'minimum' | 'maximum' | 'options' | 'default'>> = [
+  { name: 'start', default: 0, label: 'Início', kind: 'number', unit: 's', hint: 'O instante do vídeo final em que o som começa.', minimum: 0, maximum: null, options: [] },
+  { name: 'duration', default: 1, label: 'Duração', kind: 'number', unit: 's', hint: 'Quanto o som dura.', minimum: MIN_SOUND_SECONDS, maximum: MAX_SOUND_SECONDS, options: [] },
+  { name: 'volume', default: 1, label: 'Volume', kind: 'number', unit: '', hint: 'Ganho linear do item (1 é o nível do gerador).', minimum: 0, maximum: 4, options: [] },
+  { name: 'pan', default: 0, label: 'Equilíbrio', kind: 'number', unit: '', hint: 'De -1 (esquerda) a 1 (direita).', minimum: -1, maximum: 1, options: [] },
 ]
 const ITEM_DEFAULTS: Record<string, number> = { start: 0, duration: 1, volume: 1, pan: 0 }
 
@@ -79,7 +79,7 @@ function remove(index: number): void {
     <header class="sounds__head">
       <div class="sounds__heading">
         <h4 class="sounds__title">Sons gerados</h4>
-        <p class="sounds__hint">Tom, ruído, bipe, metrônomo... somados nos efeitos sonoros (trilha SFX), sem abaixar a música.</p>
+        <p class="sounds__hint">Tom, ruído, bipe, metrônomo: entram na trilha SFX e não abaixam a música.</p>
       </div>
       <PopoverRoot v-model:open="menuOpen">
         <PopoverTrigger as-child>
@@ -152,20 +152,30 @@ function remove(index: number): void {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding-top: var(--space-3);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
 }
 
 .sounds__head {
   display: flex;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+}
+
+.sounds__heading {
+  flex: 1 1 8rem;
+  min-width: 0;
 }
 
 .sounds__title {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .sounds__hint,
@@ -206,8 +216,8 @@ function remove(index: number): void {
 
 .sound__fields {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 </style>
 

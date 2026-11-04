@@ -171,9 +171,9 @@ const ready = computed(() => !!editor.spec)
       <p v-if="shown.length === 0" class="filters__empty">Nenhum filtro aplicado. Use o botão Filtro para adicionar.</p>
       <AudioSpectrumSection />
       <AudioLevelSection />
+      <GeneratedSoundsSection />
       <AudioEffectsSection />
       <AutoDuckSection />
-      <GeneratedSoundsSection />
     </div>
   </AppCard>
 </template>

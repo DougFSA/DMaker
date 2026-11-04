@@ -16,7 +16,7 @@ import { useEditorStore } from '@/stores/editor'
 const DEBOUNCE_MS = 300
 
 const props = defineProps<{
-  param: Pick<AudioEffectParam, 'name' | 'label' | 'kind' | 'unit' | 'hint' | 'minimum' | 'maximum' | 'options'>
+  param: Pick<AudioEffectParam, 'name' | 'label' | 'kind' | 'unit' | 'hint' | 'minimum' | 'maximum' | 'options' | 'default'>
   /** O valor que a spec tem (ou o padrão do catálogo). */
   value: AudioEffectValue | null
   /** Onde o campo mora na spec. */
