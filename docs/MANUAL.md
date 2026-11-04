@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 56 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 57 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -91,6 +91,7 @@ São 56 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
 | [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
 | [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](#gerar-sons-tom-ruído-tons-de-discagem-metrônomo-e-bipe-de-censura) | Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la. | ainda não: `audio_generators`, `audio_generate` |
+| [Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem](#gravar-do-microfone-narração-punch-in-hora-marcada-ativada-por-som-e-clonagem) | Grava a voz pelo microfone direto numa trilha de voz gravada, sobre o vídeo e com a latência compensada, regrava um trecho sem perder o antigo, grava numa hora marcada ou só quando há som, recupera a gravação de uma aba que fechou e grava os 15 s de referência para clonar uma voz. | ainda não: `audio_recordings` |
 
 **Tarefas de dublagem e modelos**
 
@@ -2700,6 +2701,16 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Gerar um som solto, fora de um projeto | `audio_generate` (`dmaker audio generate <tipo> --param nome=valor --duration s --out arquivo.wav`): grava um WAV estéreo de ponto flutuante de 32 bits e devolve o pico medido; só troca um arquivo que existe com `overwrite`. `audio_generators` (`dmaker audio generators`) lista os geradores com as faixas | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 | Um som gerado na linha do tempo | `audio.generated` na spec, com `start`, `duration`, `volume`, `pan` e `effects`: a trilha **SFX** do editor (arrastar muda o início, a borda muda a duração), com mudo, solo, ganho e Auto Duck da trilha. Soma depois do ducking e antes da normalização, sem abaixar a música, e o nível é o do próprio gerador (não se nivela contra a voz). A cadeia de efeitos vale nele (`audio.generated.N`) | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 | Bipe de censura (Silence + Tone sobre a palavra) | `censor_beep` do `edit_project` (`dmaker audio censor`; no editor, **Bipar a seleção** do painel Áudio): silencia o item no intervalo e põe um Tom de 1 kHz no mesmo lugar, num passo só do desfazer. O intervalo vem de `word` (a palavra, achada na transcrição do item pelo Whisper local; `occurrence` escolhe entre repetidas), de `region` ou de `start` e `end`; `margin` alarga o bipe dos dois lados | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Transport > Record (Gravar) | **Gravar** no painel Áudio, ou **Gravar narração** na barra da linha do tempo: abre a janela de gravação. O som é captado cru (float32, sem compressão), com o cancelamento de eco, a supressão de ruído e o ganho automático do navegador **desligados**, e mandado ao servidor em pedaços de um segundo; ao parar, o servidor junta os pedaços num WAV em `projects/<nome>/recordings/<id>/gravacao.wav` e o item de voz gravada entra na linha do tempo (`audio_record_add`, um passo do desfazer). Escolhe-se o dispositivo, mono ou estéreo e a taxa (44,1 ou 48 kHz) | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Transport > Start Monitoring / Recording Meter | **Monitorar** mostra o nível por canal (pico, valor eficaz, pico segurado) e acende a luz de clipping sem gravar nada; a escuta pelo fone é opcional e avisa da microfonia | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Preferences > Recording > Latency compensation | A prévia toca enquanto se grava e a gravação cai no lugar certo: o item entra em `início no relógio da prévia - latência`, com a latência da Web Audio (entrada + base + saída) mais a correção da calibração do dispositivo. Um clique gravado sobre um clique da prévia cai no mesmo instante, a menos de 10 ms | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Tools > Latency Test (teste de latência) | **Calibrar a latência** na janela de gravação toca um clique, grava e acha o atraso por correlação; a correção fica guardada no navegador, por dispositivo | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Transport > Punch and Roll Record | Selecione um trecho da voz gravada no painel Áudio e use **Gravar**: a prévia toca a pré-rolagem (3 s por padrão), grava e para sozinha no fim do trecho. A operação `audio_punch` divide a voz em até três itens, o do meio passa a tocar a gravação nova e as emendas levam um fade de 10 ms nos dois lados | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Os takes de um trecho regravado | O trecho antigo não se perde: fica em `takes` do item (`VoiceoverClip.takes`), e a lista **Takes deste trecho** do painel Áudio troca o que toca (`voiceover_take_set`, `dmaker audio take`), num passo do desfazer. Regravar o mesmo trecho de novo acumula os takes | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Transport > Timed Record (Timer Record) | **Gravar numa hora marcada**: início, duração ou fim (início + duração, início + fim, só a duração ou só o fim). A gravação roda na aba, que precisa ficar aberta e o computador acordado até o fim | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Transport > Sound Activated Recording | **Gravar só quando há som**: limiar em dB (-40) e tempo de espera (1,5 s). Pausa nos silêncios maiores que a espera, volta quando o som passa do limiar e guarda 300 ms de antes da fala; o arquivo final não tem os silêncios entre as falas | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Automatic Crash Recovery (recuperar a gravação da aba que fechou) | O que chegou ao servidor está salvo. Ao abrir o projeto o painel Áudio avisa **Uma gravação ficou aberta** e oferece **Recuperar** (finaliza com o que chegou e põe como voz nova) ou **Descartar**; pela IA e pela CLI, `audio_recordings` e `dmaker audio recordings recover` | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Gravar a referência de uma voz para clonar | Aba **Gravar para clonar uma voz** da janela de gravação: 15 s lendo a folha de gravação na tela, e o WAV vai direto para a clonagem (`/api/voices/clone`), sem arquivo no meio, com o texto da folha como transcrição | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -3838,6 +3849,78 @@ Medido no WAV: o tom de 1 kHz a -6 dBFS tem pico de -6,000 dBFS e 1000,00 Hz; o 
 - **"há valores fora de -1 a 1"**: ligue `normalize` no Importar Amostras.
 - **"já existe; use overwrite"**: escolha outro destino ou use `overwrite`.
 
+---
+
+### Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem
+<!-- tarefa: gravar-microfone -->
+Grava a voz pelo microfone direto numa trilha de voz gravada, sobre o vídeo e com a latência compensada, regrava um trecho sem perder o antigo, grava numa hora marcada ou só quando há som, recupera a gravação de uma aba que fechou e grava os 15 s de referência para clonar uma voz.
+
+#### Quando usar
+
+Uma narração de verdade (em vez da sintetizada) sobre o vídeo, regravar uma frase que saiu errada, gravar uma live ou um culto sem ficar na frente do computador, ou clonar a própria voz sem passar por arquivo.
+
+**Pedidos que levam a esta tarefa:**
+- "Quero gravar a narração do vídeo pelo microfone"
+- "Regrava só essa frase, sem perder a que eu gravei"
+- "Recupera a gravação que ficou aberta quando a aba fechou"
+
+#### Antes de começar
+
+- **A gravação é feita pelo navegador** (interface nova, Chrome, Edge ou Firefox atuais, em localhost): ele precisa da permissão do microfone. A IA e a CLI não gravam; elas recuperam o que a interface deixou no disco (`audio_recordings`) e editam os takes (`edit_project`).
+- Nada sai da máquina. O som vai em pedaços de um segundo para `projects/<nome>/recordings/<id>/`, numerados: reenviar um pedaço não duplica, e fechar a aba no meio não perde o que já chegou.
+- **Gravação com hora marcada e ativada por som rodam na aba**: ela precisa ficar aberta, e o computador acordado, até o fim.
+- Use fone ao gravar sobre o vídeo e ao escutar o microfone: com o alto-falante o som volta ao microfone. Para **calibrar a latência** é o contrário: tire o fone, o microfone precisa ouvir o clique do alto-falante.
+- Para o punch-in, o projeto precisa de uma voz gravada (`audio.voiceover`); a voz sintetizada (`audio.narration`) não tem um arquivo para regravar.
+
+#### Pela IA
+
+A IA não grava. Ela lista as gravações do projeto e recupera a que a aba deixou aberta com `audio_recordings` (`recover` finaliza com o que chegou e põe como voz nova, num passo do histórico), e troca o take de um trecho regravado com `voiceover_take_set`. O punch-in com uma gravação já finalizada é a operação `audio_punch`. `undo_edit` desfaz qualquer um.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_recordings", "arguments": {"name": "entrevista", "action": "list", "unfinished": true}, "para": "ver as gravações que a aba deixou abertas, com a duração que chegou"},
+  {"tool": "audio_recordings", "arguments": {"name": "entrevista", "action": "recover"}, "para": "finalizar a gravação aberta com o que chegou e pô-la como voz gravada nova"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "audio_punch", "target": "audio.voiceover.0", "start": 12.0, "end": 15.0, "src": "recordings/20261104-190000-ab12/gravacao.wav", "recorded_at": 9.0, "duration": 8.0}}, "para": "regravar de 12 a 15 s com uma gravação que começou em 9 s"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "voiceover_take_set", "target": "audio.voiceover.1", "take": 0}}, "para": "voltar ao take antigo do trecho regravado"},
+  {"tool": "undo_edit", "arguments": {"name": "entrevista"}, "para": "desfazer a troca"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**. Dois caminhos para a mesma janela **Gravar**: o botão **Gravar** do painel **Áudio** (duplo clique num item de áudio) e **Gravar narração** na barra da linha do tempo.
+
+- **Microfone**: escolha o dispositivo, mono ou estéreo e a taxa. **Monitorar** mostra o nível sem gravar; a luz de clipping acende quando o pico chega a 0 dBFS. **Escutar o microfone pelo fone** é opcional.
+- **Gravar sobre o vídeo** (ligado por padrão): a prévia toca enquanto se grava e, ao parar, a voz entra no instante certo da linha do tempo. **Calibrar a latência** mede o caminho do seu equipamento (clique tocado, gravado e achado por correlação) e guarda a correção por dispositivo no navegador.
+- **Punch-in**: abra uma voz gravada no painel Áudio, selecione na onda o trecho a regravar e clique em **Gravar**. A janela já vem em **Regravar o trecho selecionado**; a pré-rolagem toca o que vem antes, a gravação para sozinha no fim do trecho, e o trecho antigo fica na lista **Takes deste trecho** do painel, onde um clique troca o que toca.
+- **Gravar só quando há som**: limiar (-40 dB) e espera (1,5 s). **Gravar numa hora marcada**: início, fim ou duração.
+- **Gravações interrompidas**: se a aba fechou no meio, o painel Áudio mostra **Uma gravação ficou aberta** ao abrir o projeto, com **Recuperar** e **Descartar**.
+- **Gravar para clonar uma voz**: a segunda aba da janela mostra a folha de gravação, grava 15 s e clona a voz direto na biblioteca (marque que a voz é sua ou que tem a permissão do dono).
+
+#### Pela CLI
+
+```powershell
+dmaker audio recordings list projects/entrevista/spec.json --unfinished
+dmaker audio recordings recover projects/entrevista/spec.json
+dmaker audio punch projects/entrevista/spec.json audio.voiceover.0 20261104-190000-ab12 --start 12 --end 15
+dmaker audio take projects/entrevista/spec.json audio.voiceover.1 0
+dmaker undo projects/entrevista/spec.json
+```
+
+#### Como conferir
+
+Medido: dez minutos de pedaços mandados por um cliente que some no meio ficam no disco e a recuperação devolve a duração certa; um clique gravado sobre um da prévia cai a menos de 10 ms depois da compensação; o punch-in de 3 s troca só o trecho, sem estalo nas emendas, e o take antigo continua na lista; a gravação ativada por som deixa de fora o silêncio entre as falas.
+
+#### Se der errado
+
+- **"Sem acesso ao microfone"**: libere a permissão do navegador para o endereço do DMaker.
+- **"Não ouvi o clique"** na calibração: tire o fone, aproxime o microfone do alto-falante e aumente o volume do computador.
+- **"Sem conexão com o servidor"**: a gravação continua e os pedaços são reenviados quando o servidor volta; se a aba fechar antes, use **Recuperar**.
+- **"Selecione na onda o trecho da voz gravada"**: o punch-in pede um trecho selecionado numa voz gravada.
+- **"não há som gravado no trecho"**: a gravação não cobre o trecho pedido; grave de novo com a pré-rolagem.
+
 ## Tarefas de dublagem e modelos
 
 A dublagem troca a fala de um vídeo ou áudio por outro idioma, mantendo a música e o ruído de fundo. Ela junta várias peças que também existem sozinhas: separar a voz do fundo, transcrever, traduzir com o Ollama local, clonar a voz de quem fala e sintetizar. Precisa do extra `voice`, do Ollama no ar com o modelo de tradução (`gpt-oss:20b` por padrão; `DMAKER_TRANSLATE_MODEL` troca) e de bastante paciência na CPU: conte cerca de 20 s por segundo de fala sintetizada, mais a separação (3 a 6 vezes a duração, uma vez) e a tradução (minutos). Fora do escopo: sincronia labial.
@@ -4194,6 +4277,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-56 | Tempo e afinação: os efeitos Mudar Tom (semitons e centavos, de nota para nota ou em porcentagem, com a opção de preservar os formantes da voz, sem mudar a duração), Mudar Velocidade e Tom (o "vinil", por porcentagem ou de RPM para RPM), Mudar Andamento (por porcentagem, de BPM para BPM ou de uma duração para outra, sem mudar o tom), Esticar Gradualmente (andamento e tom variando do início ao fim do trecho) e Paulstretch (esticar por um fator grande, até 20 minutos de saída, para a abertura etérea); o catálogo ganha a condição de exibição `shown_when`, e os campos de cada unidade só aparecem na tela no modo dela; a vista da linha do tempo, o `validate` e a duração do projeto só de áudio mostram a duração nova do item depois de esticar; `audio_effect` (`dmaker audio effect add ... change_tempo --param mode=bpm`) | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 | DMK-66 | Macros de áudio: a cadeia de efeitos com nome, para repetir. Quatro embutidas (**Limpar narração**, **Limpar gravação de celular**, **MP3 para o padrão** e **Fade nas pontas**) e as suas, uma por arquivo em `assets/macros` (globais) ou `assets/brands/<marca>/macros` (da marca); o **Salvar a cadeia como macro** do bloco de efeitos guarda a cadeia de um item, e o menu **+ Efeito** (grupo **Predefinições e macros**) põe uma macro num item. `apply_macro` e `dmaker audio macro run` aplicam a macro a uma pasta de arquivos de áudio, no formato escolhido, num trabalho em segundo plano que retoma de onde parou (`--resume`); as predefinições do `effect-presets.json` viraram macros e o arquivo ganhou o nome `.importado` | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
 | DMK-58 | Sons gerados: os nove geradores do Audacity (Tom em quatro ondas, Chirp linear ou log, Ruído branco, rosa e marrom, Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de Ritmo e Importar Amostras) em `audio.generated`, na trilha **SFX** da linha do tempo (arrastar muda o início e a duração, com efeitos, mudo, solo, ganho e Auto Duck), ou soltos num WAV com `dmaker audio generate` e `audio_generate`; o bipe de censura (`censor_beep`, `dmaker audio censor`, **Bipar a seleção** no painel Áudio) silencia a palavra achada pelo Whisper local e põe um Tom de 1 kHz no mesmo intervalo, num passo do desfazer | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| DMK-65 | Gravar do microfone: a janela **Gravar** (botão no painel Áudio e **Gravar narração** na linha do tempo) capta o som cru, sem eco, ruído ou ganho automático, e manda um pedaço de um segundo por vez para `projects/<nome>/recordings`, então a aba que fecha no meio não perde o que já chegou (**Recuperar** ou **Descartar** ao abrir o projeto); medidor com clipping e monitoramento; gravar sobre o vídeo com a latência compensada e calibrada; punch-in que guarda o trecho antigo como take (`VoiceoverClip.takes`, `audio_punch`, `voiceover_take_set`); gravação com hora marcada e ativada por som; e o atalho de 15 s que clona a voz direto na biblioteca. `audio_recordings` no MCP e `dmaker audio recordings|punch|take` na CLI | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -4207,7 +4291,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 138 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 142 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -4427,6 +4511,10 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
   - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
   - `--region` TEXTO: Uma região de marcador (marker:<texto>), no lugar de --start e --end.
 - **`dmaker audio presets`**: Lista os formatos de arquivo de áudio com o padrão de cada um e os alvos de loudness.
+- **`dmaker audio punch SPEC TARGET RECORDING`**: Regrava o trecho --start..--end da voz com uma gravação já finalizada: o trecho passa a tocar o take novo, o antigo fica na lista de takes e as emendas levam um fade de 10 ms.
+  - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
+  - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
+  - `--recorded-at` NÚMERO: Onde a gravação começa na linha do tempo (padrão: o que ela guardou).
 - **`dmaker audio shift SPEC TARGET`**: Desloca o som no tempo: em clipe, PiP e faixa externa muda o `audio_offset` (corrige câmera dessincronizada); na voz gravada e na narração muda o instante de início.
   - `--delta` NÚMERO: Quanto mover, em segundos (positivo atrasa).
   - `--to` NÚMERO: O deslocamento final, em segundos.
@@ -4437,6 +4525,7 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
 - **`dmaker audio split SPEC TARGET`**: Divide uma voz gravada em duas, que se encontram no ponto, no mesmo arquivo.
   - `--at` TEXTO: Onde dividir, em segundos do vídeo final (ou marker:<texto>). (obrigatória)
 - **`dmaker audio split-stereo SPEC TARGET`**: Divide um som estéreo em dois itens mono: um com o canal esquerdo e outro com o direito.
+- **`dmaker audio take SPEC TARGET TAKE`**: Troca o take que toca numa voz gravada regravada por punch-in; o que tocava vai para a lista.
 - **`dmaker audio track SPEC TRACK`**: Ganho, pan, mudo e solo de uma trilha de áudio (os controles do cabeçalho de trilha do Audacity).
   - `--gain-db` NÚMERO: Ganho da trilha, em dB.
   - `--pan` NÚMERO: Equilíbrio, de -1 (esquerda) a 1 (direita).
@@ -4592,6 +4681,17 @@ Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeit
   - `--effect` / `-e` TEXTO: Um efeito em JSON, por exemplo '{"type": "highpass", "frequency_hz": 80}' (repetível). (pode repetir)
   - `--file` CAMINHO: Um arquivo JSON com a lista de efeitos da cadeia.
   - `--summary` TEXTO: Uma frase do que a predefinição faz.
+
+#### dmaker audio recordings
+
+Gravações do microfone no projeto: as que a aba deixou abertas, recuperar e pôr na linha do tempo.
+
+- **`dmaker audio recordings list SPEC`**: Lista as gravações do projeto, com a duração que chegou ao disco e os pedaços que faltam.
+  - `--unfinished`: Só as abertas (a aba fechou antes de parar).
+  - `--json`: Saída em JSON.
+- **`dmaker audio recordings recover SPEC`**: Finaliza uma gravação com o que chegou ao disco e a põe na linha do tempo (um passo do `dmaker undo`).
+  - `--id` TEXTO: A gravação (padrão: a única que está aberta).
+  - `--punch`: Aplica como punch-in, se a gravação abriu para regravar um trecho.
 
 #### dmaker batch
 
@@ -4889,7 +4989,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 85 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -4973,6 +5073,8 @@ São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name`\* (texto), `src`\* (texto), `encoding` ("s8" ou "u8" ou "s16" ou "u16" ou "s24" ou "s32" ou "f32" ou "f64" ou "ulaw" ou "alaw", padrão s16), `byte_order` ("little" ou "big", padrão little), `channels` (inteiro, padrão 1), `sample_rate` (inteiro, padrão 44100), `offset_bytes` (inteiro, padrão 0), `percent` (número, padrão 100.0), `start` (número, padrão 0.0), `volume` (número, padrão 1.0), `wav_name` (texto), `overwrite` (sim ou não, padrão não).
 - **`audio_analyzers`**: O catálogo dos analisadores de áudio (as funções Analyze do Audacity): Contraste (fala contra fundo, critério de 20 dB), Achar Clipping, Medir RMS, Espectro de Frequência (espectro, autocorrelação, cepstro; CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras.
   Parâmetros: `type` (texto).
+- **`audio_recordings`**: As gravações do microfone de um projeto (a interface grava pelo navegador e manda o som em pedaços de um segundo para `projects/<nome>/recordings/<id>/`).
+  Parâmetros: `name`\* (texto), `action` (texto, padrão list), `id` (texto), `unfinished` (sim ou não, padrão não).
 - **`audio_generators`**: O catálogo dos geradores de som (o menu Gerar do Audacity): Tom (senoidal, quadrada, dente de serra, quadrada sem aliasing), Chirp (varredura linear ou log), Ruído (branco, rosa, marrom), Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de ritmo e Importar amostras (um texto com um valor por linha).
   Parâmetros: `type` (texto).
 - **`audio_generate`**: Gera um som solto e o grava num WAV (estéreo, ponto flutuante de 32 bits): `generator` é o tipo (veja `audio_generators`), `params` os parâmetros dele (os que faltam ficam no padrão), `duration` os segundos (sem ela vale a que o gerador pede) e `out` o arquivo .wav de destino.
@@ -5066,7 +5168,7 @@ São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 82 blocos e 667 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 83 blocos e 673 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -6192,6 +6294,17 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `duration` | número, maior que 0, até 3600 | 3.0 |  |
 | `final_cutoff` | número, de 50 a 5000 | 200.0 |  |
 
+#### Take
+
+Usado em `VoiceoverClip.takes`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `src` | texto | obrigatório | Arquivo de áudio do take, relativo à pasta da spec. |
+| `offset` | número, mínimo 0 | 0.0 | Ponto de entrada do take no arquivo, em segundos. |
+| `end` | número, maior que 0 | obrigatório | Ponto de saída do take no arquivo, em segundos. |
+| `label` | texto | texto vazio | Nome do take na lista (por exemplo, Original ou Take 2). |
+
 #### TextOverlay
 
 Usado em `Project.overlays`.
@@ -6308,6 +6421,8 @@ Usado em `AudioSettings.voiceover`.
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
 | `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `takes` | lista de `Take` | vazio | Os outros takes deste trecho (o punch-in guarda a gravação antiga aqui); `voiceover_take_set` troca o que toca. |
+| `take_label` | texto | texto vazio | Nome do take que toca agora na lista de takes (por exemplo, Original ou Take 2). |
 
 <!-- dmaker:fim-gerado spec -->
 

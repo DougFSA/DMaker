@@ -544,6 +544,19 @@ def _narration_track(
     return Track(id="NAR", kind="audio", label="NAR", items=items, muted=muted, hidden=hidden, locked=locked)
 
 
+def _takes_extra(clip) -> dict:
+    """Os takes de uma voz gravada para a lista da interface: o que toca (`current`) e os outros, na ordem da spec."""
+    if not clip.takes:
+        return {}
+    return {
+        "takes": [
+            {"index": index, "label": take.label or f"Take {index + 1}", "src": take.src}
+            for index, take in enumerate(clip.takes)
+        ],
+        "take_label": clip.take_label or "Take atual",
+    }
+
+
 def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -> Track | None:
     """Um item por arquivo de voz gravada (`audio.voiceover`). `durations` traz quanto cada um toca depois dos
     efeitos dele (o Repetir a aumenta); sem o número (arquivo ausente), o item mostra o que a spec diz."""
@@ -575,6 +588,7 @@ def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -
                     "duration": known,
                     **({"fades": fades} if (fades := _edge_fades(clip.effects)) else {}),
                     **({"pan": clip.pan} if clip.pan else {}),
+                    **_takes_extra(clip),
                 },
                 path=str(project.resolve(clip.src)),
             )

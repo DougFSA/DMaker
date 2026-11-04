@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import struct
 import wave
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,34 @@ def write_wav_float(path: Path, samples: np.ndarray, sample_rate: int) -> Path:
     fact = b"fact" + struct.pack("<II", 4, frames.shape[0])
     body = b"WAVE" + header + fact + chunk
     path.write_bytes(b"RIFF" + struct.pack("<I", len(body) + len(data)) + body + data)
+    return path
+
+
+def write_wav_float_stream(
+    path: Path, blocks: Iterable[bytes], frames: int, channels: int, sample_rate: int
+) -> Path:
+    """Como `write_wav_float`, para amostras que já são bytes float32 little-endian intercalados e que não cabem de uma vez
+    na memória (uma gravação de dez minutos estéreo tem uns 230 MB): o cabeçalho leva o total de `frames` e os `blocks`
+    vão para o arquivo um a um. Grava num arquivo temporário e só então troca, para ninguém ler um WAV pela metade."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    block = channels * 4
+    size = frames * block
+    header = b"fmt " + struct.pack(
+        "<IHHIIHH", 16, _FORMAT_FLOAT, channels, sample_rate, sample_rate * block, block, 32
+    )
+    fact = b"fact" + struct.pack("<II", 4, frames)
+    body = b"WAVE" + header + fact + b"data" + struct.pack("<I", size)
+    partial = path.with_name(path.name + ".part")
+    written = 0
+    with partial.open("wb") as handle:
+        handle.write(b"RIFF" + struct.pack("<I", len(body) + size) + body)
+        for piece in blocks:
+            handle.write(piece)
+            written += len(piece)
+    if written != size:
+        partial.unlink(missing_ok=True)
+        raise ValueError(f"o total de bytes ({written}) não bate com o cabeçalho ({size})")
+    partial.replace(path)
     return path
 
 

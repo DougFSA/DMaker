@@ -75,6 +75,9 @@ OPERATION_LABELS = {
     "audio_duplicate": "Duplicar som",
     "audio_split": "Dividir voz",
     "audio_join": "Juntar vozes",
+    "audio_record_add": "Gravação do microfone",
+    "audio_punch": "Punch-in",
+    "voiceover_take_set": "Trocar o take",
     "audio_shift": "Deslocar som",
     "audio_split_stereo": "Dividir estéreo",
     "track_set": "Estado da trilha",
@@ -100,6 +103,7 @@ _DETAIL_KEYS = (
     "mode",
     "side",
     "kind",
+    "take",
     "out_target",
     "in_target",
 )
