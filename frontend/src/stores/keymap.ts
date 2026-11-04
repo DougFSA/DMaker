@@ -6,11 +6,13 @@ import { computed, ref } from 'vue'
 import {
   comboIndex,
   findConflict,
+  isAudioShortcut,
   KEYMAP_STORAGE_KEY,
   keyLabel,
   mergeKeymap,
   parseOverrides,
-  SHORTCUT_DEFAULTS,
+  ALL_SHORTCUTS,
+  AUDIO_SHORTCUT_DEFAULTS,
   withBinding,
   type KeymapOverrides,
   type ShortcutDef,
@@ -27,8 +29,15 @@ export const useKeymapStore = defineStore('keymap', () => {
   // quem registra um comando por fora (o painel Mídia) vive aqui; a cada id cabe um só, o último que chegou
   const registered = ref(new Map<ShortcutId, ShortcutHandler>())
 
-  const entries = computed<ShortcutDef[]>(() => mergeKeymap(overrides.value))
-  const byCombo = computed(() => comboIndex(entries.value))
+  const entries = computed<ShortcutDef[]>(() => [
+    ...mergeKeymap(overrides.value),
+    ...mergeKeymap(overrides.value, AUDIO_SHORTCUT_DEFAULTS),
+  ])
+  // duas tabelas de teclas: a do editor e a do painel Áudio. A mesma tecla pode estar nas duas (Espaço, Ctrl+L...)
+  // porque a segunda só vale com o foco dentro do painel (`idsForContext`); por isso cada uma tem o seu índice
+  // e o conflito de uma troca só conta dentro da mesma tabela
+  const byCombo = computed(() => comboIndex(entries.value.filter((entry) => !isAudioShortcut(entry.id))))
+  const audioByCombo = computed(() => comboIndex(entries.value.filter((entry) => isAudioShortcut(entry.id))))
   /** Quantas ações têm ao menos uma tecla trocada pela pessoa. */
   const customCount = computed(() => Object.keys(overrides.value).length)
 
@@ -45,7 +54,8 @@ export const useKeymapStore = defineStore('keymap', () => {
 
   /** Outra ação que já usa a combinação (a troca não é bloqueada: duas ações na mesma tecla é escolha da pessoa). */
   function conflictFor(combo: string, id: ShortcutId): ShortcutDef | null {
-    return findConflict(entries.value, combo, id)
+    const sameTable = entries.value.filter((entry) => isAudioShortcut(entry.id) === isAudioShortcut(id))
+    return findConflict(sameTable, combo, id)
   }
 
   /** Troca a combinação principal (ou a alternativa `index`) de uma ação e guarda no navegador. */
@@ -82,7 +92,8 @@ export const useKeymapStore = defineStore('keymap', () => {
   return {
     entries,
     byCombo,
-    defaults: SHORTCUT_DEFAULTS,
+    audioByCombo,
+    defaults: ALL_SHORTCUTS,
     customCount,
     dialogOpen,
     registered,

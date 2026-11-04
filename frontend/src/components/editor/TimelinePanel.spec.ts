@@ -6,6 +6,7 @@ import { MEDIA_DND_MIME, TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineItem, timelineTrack } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { reply } from '@/test/routedFetch'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import TimelinePanel from './TimelinePanel.vue'
@@ -144,12 +145,12 @@ describe('trilhas e rótulos', () => {
     expect(hatch.attributes('style')).toContain('width: 30px')
   })
 
-  it('o cabeçalho mostra só os botões que a trilha tem: M no áudio, H nas camadas, cadeado em todas', async () => {
+  it('o cabeçalho mostra só os botões que a trilha tem: M e S no áudio, H nas camadas, cadeado em todas', async () => {
     await mountTimeline()
     const letters = (id: string) => (wrapper as VueWrapper).findAll(`.row[data-track-id="${id}"] .row__button`).map((button) => button.text())
     expect(letters('V1')).toEqual(['L'])
     expect(letters('V2')).toEqual(['H', 'L'])
-    expect(letters('A1')).toEqual(['M', 'L'])
+    expect(letters('A1')).toEqual(['M', 'L', 'S']) // o solo é do áudio; o ganho e o pan abrem no popover dB
     expect(letters('CC')).toEqual(['H', 'L'])
     expect((wrapper as VueWrapper).find('.row[data-track-id="A2"] [data-track-action="muted"]').classes()).toContain('row__button--on')
   })
@@ -293,7 +294,7 @@ describe('zoom', () => {
     opened.store.setPlayhead(6)
     useTimelineStore().zoomIn()
     await flushPromises()
-    // 92 de cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
+    // o cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
     expect(area.scrollLeft).toBeCloseTo(TRACK_HEADER_WIDTH + 6 * 78 - 300, 6)
   })
 })
@@ -309,10 +310,10 @@ describe('o cursor fica à vista', () => {
 
   it('ao sair pela direita a área rola uma página, e o cursor fica perto da borda esquerda', async () => {
     const area = await mountMeasured()
-    // 92 px de cabeçalho mais 12 s a 60 px/s
+    // 12 s a 60 px/s, menos a folga (o cabeçalho entra nos dois lados da conta)
     opened.store.setPlayhead(12)
     await flushPromises()
-    expect(area.scrollLeft).toBe(92 + 12 * 60 - TRACK_HEADER_WIDTH - 40)
+    expect(area.scrollLeft).toBe(12 * 60 - 40)
     expect(useTimelineStore().scrollLeft).toBe(area.scrollLeft)
   })
 
@@ -696,10 +697,10 @@ describe('a trilha VO (voz gravada)', () => {
     })
   })
 
-  it('o mudo da trilha funciona como nas outras de áudio: M e cadeado, sem ocultar', async () => {
+  it('o mudo da trilha funciona como nas outras de áudio: M, cadeado e solo, sem ocultar', async () => {
     await mountTimeline(voiceoverView())
     const letters = (wrapper as VueWrapper).findAll('.row[data-track-id="VO"] .row__button').map((button) => button.text())
-    expect(letters).toEqual(['M', 'L'])
+    expect(letters).toEqual(['M', 'L', 'S'])
     await (wrapper as VueWrapper).find('.row[data-track-id="VO"] [data-track-action="muted"]').trigger('click')
     await flushPromises()
     expect(edits()[0]?.body).toMatchObject({ op: { type: 'set_field', path: 'tracks.VO.muted', value: true } })
@@ -862,5 +863,55 @@ describe('a trilha de marcadores (MK)', () => {
     await mountTimeline(markersView())
     await item('TX-0').trigger('dblclick')
     expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+  })
+})
+
+describe('abrir o painel Áudio e a mixagem no cabeçalho', () => {
+  it('o duplo clique num item de áudio abre o painel nele, no alvo certo', async () => {
+    await mountTimeline()
+    const panel = useAudioPanelStore()
+    await item('MUS-0').trigger('dblclick')
+    expect(panel.open).toBe(true)
+    expect(panel.target).toBe('audio.music')
+    await item('NAR-0').trigger('dblclick')
+    expect(panel.target).toBe('audio.narration.0')
+    panel.close()
+    await item('A1-0').trigger('dblclick')
+    expect(panel.target).toBe('timeline.0')
+  })
+
+  it('o duplo clique no vídeo (V1) não abre o painel Áudio', async () => {
+    await mountTimeline()
+    await item('V1-0').trigger('dblclick')
+    expect(useAudioPanelStore().open).toBe(false)
+  })
+
+  it('o botão Editar áudio da barra depende de um item com som selecionado', async () => {
+    await mountTimeline()
+    const button = (wrapper as VueWrapper).get('[data-open-audio]')
+    expect(button.attributes('disabled')).toBeDefined()
+    await item('MUS-0').trigger('mousedown', { button: 0 })
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    expect(useAudioPanelStore().target).toBe('audio.music')
+  })
+
+  it('o solo do cabeçalho e o ganho mandam a operação da trilha, um passo do desfazer cada', async () => {
+    await mountTimeline()
+    await (wrapper as VueWrapper).get('.row[data-track-id="MUS"] [data-track-action="solo"]').trigger('click')
+    await flushPromises()
+    expect(edits().at(-1)?.body).toMatchObject({ op: { type: 'track_set', track: 'MUS', solo: true } })
+    expect(opened.store.canUndo).toBe(true)
+  })
+
+  it('trilha bloqueada recusa o solo e avisa', async () => {
+    const view = fullView()
+    const music = view.tracks.find((track) => track.id === 'MUS')
+    if (music) music.locked = true
+    await mountTimeline(view)
+    await (wrapper as VueWrapper).get('.row[data-track-id="MUS"] [data-track-action="solo"]').trigger('click')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(useToastsStore().items.some((toast) => toast.title.includes('bloqueada'))).toBe(true)
   })
 })

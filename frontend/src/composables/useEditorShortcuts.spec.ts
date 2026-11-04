@@ -506,3 +506,73 @@ describe('marcadores', () => {
     expect(combos.get('Alt+ArrowLeft')).toEqual(['prev_edit'])
   })
 })
+
+describe('painel Áudio: as teclas valem só com o foco dentro dele', () => {
+  /** Um elemento do painel, no documento, de onde a tecla nasce. */
+  function insidePanel(): HTMLElement {
+    const panel = document.createElement('section')
+    panel.setAttribute('data-audio-panel', '')
+    const inner = document.createElement('div')
+    panel.appendChild(inner)
+    document.body.appendChild(panel)
+    return inner
+  }
+
+  it('o Espaço dentro do painel faz a ação dele e não toca o vídeo; fora dele, é do player', async () => {
+    await mountShortcuts()
+    const player = usePlayerStore()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    const stop = keymap.register('audio_play', () => calls.push('audio_play'))
+    expect(press({ key: ' ' }, insidePanel()).defaultPrevented).toBe(true)
+    expect(calls).toEqual(['audio_play'])
+    expect(player.playing).toBe(false)
+    press({ key: ' ' }) // foco fora do painel
+    expect(calls).toEqual(['audio_play'])
+    expect(player.playing).toBe(true)
+    stop()
+  })
+
+  it('Ctrl+L silencia dentro do painel e continua bloqueando a trilha fora dele', async () => {
+    await mountShortcuts()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    keymap.register('audio_silence', () => calls.push('silencia'))
+    press({ key: 'l', ctrlKey: true }, insidePanel())
+    expect(calls).toEqual(['silencia'])
+    expect(edits()).toHaveLength(0) // não chegou a mexer no cadeado de trilha nenhuma
+    useEditorStore().select(['V1:0'])
+    press({ key: 'l', ctrlKey: true })
+    await flushPromises()
+    expect(calls).toEqual(['silencia'])
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'set_field', path: 'tracks.V1.locked' } })
+  })
+
+  it('as outras teclas do editor seguem valendo dentro do painel (Ctrl+S salva)', async () => {
+    await mountShortcuts()
+    const editor = useEditorStore()
+    editor.setField('timeline.0.speed', 2)
+    press({ key: 's', ctrlKey: true }, insidePanel())
+    await flushPromises()
+    expect(opened.fetch.to('PUT /api/projects/demo')).toHaveLength(1)
+  })
+
+  it('Ctrl+Z, Ctrl+B e Ctrl+I do painel chegam às ações dele e não às do editor', async () => {
+    await mountShortcuts()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    keymap.register('audio_undo', () => calls.push('desfaz'))
+    keymap.register('audio_label', () => calls.push('marcador'))
+    keymap.register('audio_split', () => calls.push('divide'))
+    for (const init of [{ key: 'z', ctrlKey: true }, { key: 'b', ctrlKey: true }, { key: 'i', ctrlKey: true }]) {
+      expect(press(init, insidePanel()).defaultPrevented).toBe(true)
+    }
+    expect(calls).toEqual(['desfaz', 'marcador', 'divide'])
+  })
+
+  it('as ações do painel sem o painel registrado não fazem nada', async () => {
+    await mountShortcuts()
+    expect(() => press({ key: 'c' }, insidePanel())).not.toThrow()
+    expect(edits()).toHaveLength(0)
+  })
+})

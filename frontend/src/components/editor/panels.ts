@@ -7,7 +7,7 @@
 import { defineAsyncComponent, type Component } from 'vue'
 import type { useEditorStore } from '@/stores/editor'
 
-export type EditorPanelId = 'properties' | 'json' | 'captions' | 'preview' | 'player' | 'timeline' | 'filters' | 'media'
+export type EditorPanelId = 'properties' | 'json' | 'captions' | 'preview' | 'player' | 'timeline' | 'filters' | 'media' | 'audio'
 
 /**
  * Onde o painel mora: nos encaixes da bancada (player, linha do tempo, filtros e mídia, no alto da tela) ou nas
@@ -43,6 +43,18 @@ export const EDITOR_PANELS: EditorPanelDef[] = [
   },
   { id: 'preview', title: 'Preview', zone: 'inspector', load: () => import('./PreviewPanel.vue') },
 ]
+
+/**
+ * O painel Áudio (o editor de onda). Não é um dos painéis do layout: o formato salvo em `layouts.json` é lido também pela
+ * interface clássica, que só conhece os oito painéis acima, e um painel novo ali faria os layouts salvos trocarem de lugar
+ * entre as duas. Ele abre no encaixe da linha do tempo (`EditorSlot`), com o "Voltar à linha do tempo" dentro dele.
+ */
+export const AUDIO_PANEL: EditorPanelDef = {
+  id: 'audio',
+  title: 'Áudio',
+  zone: 'workbench',
+  load: () => import('./AudioPanel.vue'),
+}
 
 export function panelsIn(zone: EditorZone): EditorPanelDef[] {
   return EDITOR_PANELS.filter((panel) => panel.zone === zone)

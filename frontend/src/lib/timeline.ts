@@ -3,8 +3,8 @@
    a base do painel da linha do tempo e das ações do teclado. */
 import type { TimelineItem, TimelineTrack, TimelineView } from '@/api'
 
-/** Largura do cabeçalho da trilha (rótulo e botões M, H e cadeado), que fica colado à esquerda ao rolar. */
-export const TRACK_HEADER_WIDTH = 92
+/** Largura do cabeçalho da trilha (rótulo e botões M, S, H, cadeado e o de ganho e pan), que fica colado à esquerda ao rolar. */
+export const TRACK_HEADER_WIDTH = 132
 export const TRACK_ROW_HEIGHT = 34
 export const RULER_HEIGHT = 26
 export const MIN_PX_PER_SEC = 4

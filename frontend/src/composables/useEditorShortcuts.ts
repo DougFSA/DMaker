@@ -4,9 +4,12 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import {
   comboFromEvent,
+  idsForContext,
   isModifierKey,
+  AUDIO_SHORTCUT_DEFAULTS,
   keyBelongsToTarget,
   WORKS_WHILE_TYPING,
+  type AudioShortcutId,
   type ShortcutId,
 } from '@/lib/keymap'
 import { useEditorStore } from '@/stores/editor'
@@ -20,6 +23,12 @@ import { useEditorActions } from './useEditorActions'
 /** O A e o V do painel Mídia quando ele não está na tela: dizem o que falta em vez de ficarem mudos. */
 const NEEDS_MEDIA_PANEL = 'Selecione um arquivo no painel de mídia.'
 const MEDIA_PANEL_HIDDEN = 'O painel Mídia está oculto: mostre-o com o botão M e selecione um arquivo.'
+
+/** As ações do painel Áudio sem o painel aberto: quem as faz é o painel, que as registra ao abrir. */
+const AUDIO_IDLE = Object.fromEntries(AUDIO_SHORTCUT_DEFAULTS.map((entry) => [entry.id, () => undefined])) as unknown as Record<
+  AudioShortcutId,
+  ShortcutHandler
+>
 
 export function useEditorShortcuts(): void {
   const editor = useEditorStore()
@@ -79,13 +88,19 @@ export function useEditorShortcuts(): void {
     add_marker: () => void actions.addMarker(),
     prev_marker: () => actions.jumpMarker(-1),
     next_marker: () => actions.jumpMarker(1),
+    // os do painel Áudio são registrados por ele enquanto está aberto (`useShortcutHandler`); sem ele, nada a fazer
+    ...AUDIO_IDLE,
   }
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.defaultPrevented || event.isComposing || editor.status !== 'ready' || isModifierKey(event.key)) return
     const combo = comboFromEvent(event)
-    const ids = keymap.byCombo.get(combo)
-    if (!ids) return
+    const all = [...(keymap.byCombo.get(combo) ?? []), ...(keymap.audioByCombo.get(combo) ?? [])]
+    if (all.length === 0) return
+    // dentro do painel Áudio a tecla faz a ação dele; fora, as ações dele não existem (ver `idsForContext`)
+    const inPanel = event.target instanceof Element && event.target.closest('[data-audio-panel]') !== null
+    const ids = idsForContext(all, inPanel)
+    if (ids.length === 0) return
     if (keyBelongsToTarget(event.target, combo, ids.every((id) => WORKS_WHILE_TYPING.has(id)))) return
     event.preventDefault()
     for (const id of ids) (keymap.registered.get(id) ?? handlers[id])(event)

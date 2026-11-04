@@ -6,6 +6,7 @@ import { computed } from 'vue'
 import { useEditorActions } from '@/composables/useEditorActions'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { ShortcutId } from '@/lib/keymap'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
@@ -16,8 +17,14 @@ const timeline = useTimelineStore()
 const keymap = useKeymapStore()
 const layout = useScreenLayoutStore()
 const actions = useEditorActions()
+const audioPanel = useAudioPanelStore()
 
 const ready = computed(() => !!editor.view)
+/** O último item selecionado: o que o painel Áudio abre. */
+const primary = computed(() => {
+  const last = editor.selection[editor.selection.length - 1]
+  return last ? editor.findItem(last) : null
+})
 
 /** O balão de um botão: o que ele faz e a tecla do atalho. */
 function hint(text: string, id: ShortcutId): string {
@@ -49,6 +56,15 @@ function hint(text: string, id: ShortcutId): string {
       </AppButton>
       <AppButton size="sm" :disabled="!ready" :title="hint('Criar um marcador no cursor', 'add_marker')" @click="actions.addMarker()">
         Marcador
+      </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!ready || !primary"
+        title="Abrir o item selecionado no painel Áudio (onda, seleção, efeitos). Também vale o duplo clique no item de áudio."
+        data-open-audio
+        @click="audioPanel.openFor(primary)"
+      >
+        Editar áudio
       </AppButton>
     </div>
 
