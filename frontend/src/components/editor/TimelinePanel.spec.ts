@@ -293,7 +293,7 @@ describe('zoom', () => {
     opened.store.setPlayhead(6)
     useTimelineStore().zoomIn()
     await flushPromises()
-    // 92 de cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
+    // o cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
     expect(area.scrollLeft).toBeCloseTo(TRACK_HEADER_WIDTH + 6 * 78 - 300, 6)
   })
 })
@@ -309,10 +309,10 @@ describe('o cursor fica à vista', () => {
 
   it('ao sair pela direita a área rola uma página, e o cursor fica perto da borda esquerda', async () => {
     const area = await mountMeasured()
-    // 92 px de cabeçalho mais 12 s a 60 px/s
+    // 12 s a 60 px/s, menos a folga (o cabeçalho entra nos dois lados da conta)
     opened.store.setPlayhead(12)
     await flushPromises()
-    expect(area.scrollLeft).toBe(92 + 12 * 60 - TRACK_HEADER_WIDTH - 40)
+    expect(area.scrollLeft).toBe(12 * 60 - 40)
     expect(useTimelineStore().scrollLeft).toBe(area.scrollLeft)
   })
 

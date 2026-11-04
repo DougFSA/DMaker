@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KEYMAP_STORAGE_KEY } from '@/lib/keymap'
+import { ALL_SHORTCUTS, KEYMAP_STORAGE_KEY } from '@/lib/keymap'
 import { useKeymapStore } from '@/stores/keymap'
 import ShortcutsDialog from './ShortcutsDialog.vue'
 
@@ -50,11 +50,11 @@ describe('a janela de atalhos', () => {
     expect(dialog?.textContent).toContain('Clique numa tecla para trocá-la')
   })
 
-  it('lista os 37 atalhos em seis categorias, cada um com a tecla', async () => {
+  it('lista os 37 atalhos do editor e os do painel Áudio em sete categorias, cada um com a tecla', async () => {
     await openDialog()
-    expect(document.body.querySelectorAll('[data-shortcut]')).toHaveLength(37)
+    expect(document.body.querySelectorAll('[data-shortcut]')).toHaveLength(ALL_SHORTCUTS.length)
     const titles = Array.from(document.body.querySelectorAll('h3')).map((heading) => heading.textContent)
-    expect(titles).toEqual(['Reprodução', 'Navegação', 'Edição', 'Mídia', 'Visualização', 'Geral'])
+    expect(titles).toEqual(['Reprodução', 'Navegação', 'Edição', 'Mídia', 'Visualização', 'Geral', 'Painel Áudio (com o foco nele)'])
     expect(keyButton('play_pause')?.textContent?.trim()).toBe('Espaço')
     expect(keyButton('remove_ripple')?.textContent?.trim()).toBe('X ou Del')
     expect(keyButton('redo')?.textContent?.trim()).toBe('Ctrl + Y ou Ctrl + Shift + Z')

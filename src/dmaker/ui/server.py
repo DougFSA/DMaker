@@ -38,6 +38,7 @@ from . import layouts as layout_files
 from .agent_routes import build_agent_router
 from .audio_analysis_routes import build_audio_analysis_router
 from .audio_effect_routes import build_audio_effects_router
+from .audio_panel_routes import build_audio_panel_router
 from .audio_routes import audio_catalog, build_audio_router
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
@@ -84,6 +85,7 @@ app.include_router(build_batch_router(jobs))
 app.include_router(build_transitions_router())
 app.include_router(build_audio_effects_router())
 app.include_router(build_audio_analysis_router())
+app.include_router(build_audio_panel_router())
 app.include_router(build_looks_router())
 app.include_router(build_infographics_router())
 app.include_router(build_agent_router(jobs))

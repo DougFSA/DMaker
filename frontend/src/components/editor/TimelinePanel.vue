@@ -28,6 +28,8 @@ import {
   TRACK_ROW_HEIGHT,
   type TrackToggle,
 } from '@/lib/timeline'
+import { trackSetOp } from '@/lib/audioPanelOps'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { usePlayerStore } from '@/stores/player'
 import { useTimelineStore } from '@/stores/timeline'
@@ -43,6 +45,7 @@ const player = usePlayerStore()
 const timeline = useTimelineStore()
 const toasts = useToastsStore()
 const actions = useEditorActions()
+const audioPanel = useAudioPanelStore()
 
 /** Quanto o mouse precisa andar (pixels) antes de um clique virar arrasto. */
 const DRAG_THRESHOLD_PX = 3
@@ -135,6 +138,15 @@ function snapContext(points: readonly number[]): SnapContext {
 
 function onTrackToggle(trackId: string, field: TrackToggle): void {
   void actions.toggleTrack(field, trackId)
+}
+
+/** Solo, ganho ou pan de uma trilha de áudio: cada mudança é um passo do desfazer. */
+function onTrackSet(trackId: string, changes: { solo?: boolean; gain_db?: number; pan?: number }): void {
+  if (tracks.value.find((track) => track.id === trackId)?.locked) {
+    lockedWarning(trackId)
+    return
+  }
+  void editor.applyOp(trackSetOp(trackId, changes))
 }
 
 let stopSeek: (() => void) | null = null
@@ -259,9 +271,18 @@ function onMouseDown(event: MouseEvent): void {
   }
 }
 
-/** O duplo clique num marcador abre a caixa de texto dele; nos outros itens não faz nada. */
+/** As trilhas de áudio, cujo duplo clique abre o item no painel Áudio. */
+const AUDIO_TRACK = /^(A\d+|MUS|NAR|VO)$/
+
+/** O duplo clique num marcador abre a caixa de texto dele; num item de áudio, abre o painel Áudio nele. */
 function onDoubleClick(event: MouseEvent): void {
   if (!(event.target instanceof HTMLElement)) return
+  const item = event.target.closest<HTMLElement>('[data-item-id]')
+  if (item?.dataset.trackId && AUDIO_TRACK.test(item.dataset.trackId) && item.dataset.itemId) {
+    const entry = editor.findItem(item.dataset.itemId)
+    if (entry) audioPanel.openFor(entry)
+    return
+  }
   const element = event.target.closest<HTMLElement>('[data-marker]')
   const id = element?.dataset.itemId
   const trackId = element?.dataset.trackId
@@ -392,6 +413,7 @@ onBeforeUnmount(() => {
             :window-end="windowEnd"
             :selected="selected"
             @toggle="onTrackToggle"
+            @track-set="onTrackSet"
           />
           <TimelinePlayhead />
           <div v-if="ghostStyle" class="timeline__ghost" :style="ghostStyle" data-ghost="1" />
@@ -410,7 +432,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .timeline {
   /* medidas e cores dos blocos: as mesmas nos dois temas, porque o texto dos blocos é sempre branco */
-  --tl-header-width: 92px;
+  --tl-header-width: 132px;
   --tl-row-height: 34px;
   --tl-ruler-height: 26px;
   --tl-clip: #1f5c63;

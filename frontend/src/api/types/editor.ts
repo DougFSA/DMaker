@@ -1,6 +1,7 @@
 /* Tipos das rotas do editor (src/dmaker/ui/server.py): salvar a spec, legendas, linha do tempo, edição por
    operação, tema, proxies, sondagem de mídia, forma de onda, sincronização, conferência do vídeo e layouts. */
 import type { JobSnapshot } from '../types'
+import type { AudioEffectSettings } from './audioEffects'
 
 /** A spec do projeto como o servidor a aceita (PUT /api/projects/{nome}); a validação completa é do backend. */
 export type SpecDocument = Record<string, unknown>
@@ -200,7 +201,8 @@ export interface InstantFrame {
   percent?: number
 }
 
-/** As treze operações de POST /api/projects/{nome}/edit. */
+/** As operações de POST /api/projects/{nome}/edit que a interface usa: as da linha do tempo, as de marcador e as de
+ * edição de onda (`audio_*`, `track_set`). Os tempos das `audio_*` são da linha do tempo do projeto. */
 export type EditOperation =
   | { type: 'split'; index: number; at: number }
   | { type: 'remove'; index: number }
@@ -224,6 +226,21 @@ export type EditOperation =
       group?: string
     }
   | { type: 'marker_remove'; index: number }
+  | {
+      type: 'audio_effect'
+      action: 'add' | 'remove' | 'move' | 'enable' | 'disable' | 'set'
+      target: string
+      /** O efeito novo (`add`), com o intervalo em tempo do item. */
+      effect?: AudioEffectSettings
+      index?: number
+      to?: number
+      params?: Record<string, unknown>
+    }
+  | { type: 'audio_silence'; target: string; start: number; end: number }
+  | { type: 'audio_cut'; target: string; start: number; end: number }
+  | { type: 'audio_split'; target: string; at: number }
+  | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
+  | { type: 'track_set'; track: string; gain_db?: number; pan?: number; solo?: boolean; muted?: boolean; hidden?: boolean; locked?: boolean }
 
 export interface EditResponse {
   spec: SpecDocument
