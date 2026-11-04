@@ -25,6 +25,7 @@ for _module in pkgutil.iter_modules(__path__):
         "catalog",
         "presets",
         "eq_presets",
+        "creative_presets",
         "builtin_macros",
         "macro_output",
         "user_presets",
@@ -36,7 +37,11 @@ AudioEffect = Annotated[Union[tuple(EFFECT_CLASSES.values())], Field(discriminat
 
 _ADAPTER: TypeAdapter[Any] = TypeAdapter(AudioEffect)
 
-from . import builtin_macros, eq_presets  # noqa: E402,F401  (registram as predefinições de equalização e as macros)
+from . import (  # noqa: E402,F401  (registram as predefinições de equalização e de uso, e as macros)
+    builtin_macros,
+    creative_presets,
+    eq_presets,
+)
 from .catalog import (  # noqa: E402
     EFFECT_TARGETS,
     EffectInfo,

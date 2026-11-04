@@ -58,25 +58,47 @@ register_effect_preset(
     )
 )
 
+
+def telephone_curve() -> dict:
+    """O EQ por curva do telefone (300 Hz a 3,4 kHz), que a voz de telefone das predefinições de uso reaproveita."""
+    return {
+        "type": "filter_curve_eq",
+        "points": [
+            {"hz": 20.0, "db": -40.0},
+            {"hz": 200.0, "db": -30.0},
+            {"hz": 300.0, "db": 0.0},
+            {"hz": 3400.0, "db": 0.0},
+            {"hz": 4200.0, "db": -30.0},
+            {"hz": 20000.0, "db": -40.0},
+        ],
+        "interpolation": "cosine",
+    }
+
+
+def am_radio_curve() -> dict:
+    """O EQ por curva do rádio AM, que a voz de rádio antigo reaproveita."""
+    return {
+        "type": "filter_curve_eq",
+        "points": [
+            {"hz": 20.0, "db": -40.0},
+            {"hz": 120.0, "db": -26.0},
+            {"hz": 250.0, "db": -4.0},
+            {"hz": 600.0, "db": 0.0},
+            {"hz": 2500.0, "db": 2.0},
+            {"hz": 4500.0, "db": -8.0},
+            {"hz": 6000.0, "db": -32.0},
+            {"hz": 20000.0, "db": -40.0},
+        ],
+        "interpolation": "cosine",
+    }
+
+
 register_effect_preset(
     EffectPreset(
         id="telephone",
         label="Telefone",
         summary="EQ por curva que deixa só a faixa de 300 Hz a 3,4 kHz, como numa ligação.",
-        effects=(
-            {
-                "type": "filter_curve_eq",
-                "points": [
-                    {"hz": 20.0, "db": -40.0},
-                    {"hz": 200.0, "db": -30.0},
-                    {"hz": 300.0, "db": 0.0},
-                    {"hz": 3400.0, "db": 0.0},
-                    {"hz": 4200.0, "db": -30.0},
-                    {"hz": 20000.0, "db": -40.0},
-                ],
-                "interpolation": "cosine",
-            },
-        ),
+        effects=(telephone_curve(),),
     )
 )
 
@@ -85,22 +107,7 @@ register_effect_preset(
         id="am_radio",
         label="Rádio AM",
         summary="EQ por curva de faixa estreita, com um realce de 2 dB nos médios, como um rádio AM antigo.",
-        effects=(
-            {
-                "type": "filter_curve_eq",
-                "points": [
-                    {"hz": 20.0, "db": -40.0},
-                    {"hz": 120.0, "db": -26.0},
-                    {"hz": 250.0, "db": -4.0},
-                    {"hz": 600.0, "db": 0.0},
-                    {"hz": 2500.0, "db": 2.0},
-                    {"hz": 4500.0, "db": -8.0},
-                    {"hz": 6000.0, "db": -32.0},
-                    {"hz": 20000.0, "db": -40.0},
-                ],
-                "interpolation": "cosine",
-            },
-        ),
+        effects=(am_radio_curve(),),
     )
 )
 

@@ -7,6 +7,7 @@ import type {
   AudioEffectSettings,
   AudioEffectTarget,
   AudioEffectValue,
+  CarrierValue,
   CurvePoint,
   TimelineItem,
   TimelineView,
@@ -121,7 +122,7 @@ export function newEffect(info: AudioEffectInfo): AudioEffectSettings {
   for (const param of info.parameters) {
     if (param.default === null || param.default === undefined) continue
     // a lista do EQ vai por cópia: o efeito da spec nunca compartilha o array do catálogo
-    effect[param.name] = Array.isArray(param.default) ? JSON.parse(JSON.stringify(param.default)) : param.default
+    effect[param.name] = typeof param.default === 'object' ? JSON.parse(JSON.stringify(param.default)) : param.default
   }
   return effect
 }
@@ -144,10 +145,21 @@ export function isListParam(param: Pick<AudioEffectParam, 'kind'>): boolean {
   return param.kind === 'band_gains' || param.kind === 'freq_points'
 }
 
+/** O valor é uma portadora: `{ generator, params }`. */
+export function isCarrier(value: unknown): value is CarrierValue {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'generator' in value && 'params' in value
+}
+
+/** A portadora do Vocoder (um som gerado): é um objeto, não um campo de formulário. */
+export function isCarrierParam(param: Pick<AudioEffectParam, 'kind'>): boolean {
+  return param.kind === 'carrier'
+}
+
 /** O valor do parâmetro como o formulário o mostra: o da spec, ou o padrão do catálogo quando a spec não o tem. */
 export function paramValue(effect: AudioEffectSettings, param: Pick<AudioEffectParam, 'name' | 'kind' | 'default'>): AudioEffectValue | null {
   const stored = effect[param.name]
   if (param.kind === 'boolean') return typeof stored === 'boolean' ? stored : param.default === true
+  if (isCarrierParam(param)) return isCarrier(stored) ? stored : isCarrier(param.default) ? param.default : null
   if (isListParam(param)) return Array.isArray(stored) ? (stored as number[] | CurvePoint[]) : Array.isArray(param.default) ? param.default : null
   if (param.kind === 'choice' || param.kind === 'profile') {
     // uma escolha pode ter opções numéricas (a inclinação do passa-alta, 6 a 48 dB por oitava): a spec guarda o número

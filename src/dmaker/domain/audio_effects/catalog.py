@@ -16,8 +16,18 @@ from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 # "band_gains" é a lista fixa de ganhos em dB do EQ Gráfico (um por banda, `options` traz a frequência de cada uma) e
 # "freq_points" a lista de pontos `{hz, db}` do EQ por Curva: a interface os desenha como controles deslizantes e como
 # um gráfico de pontos arrastáveis; "text" é um campo de texto livre (os dígitos do DTMF, o arquivo do Importar Amostras)
+# um som gerado `{generator, params}` (a portadora do Vocoder): a interface o escolhe entre os geradores do catálogo de sons
 ParamKind = Literal[
-    "number", "integer", "boolean", "choice", "points", "profile", "band_gains", "freq_points", "text"
+    "number",
+    "integer",
+    "boolean",
+    "choice",
+    "points",
+    "profile",
+    "band_gains",
+    "freq_points",
+    "text",
+    "carrier",
 ]
 
 

@@ -101,12 +101,14 @@ class SampleRequest:
 
     `samples` tem a forma `(amostras, canais)`, em ponto flutuante, a `sample_rate`; quando o efeito tem intervalo
     (e não é dono dele), já vem recortado e com o tempo zerado, como no construtor de filtro. `measure` traz o que a
-    passada de medida leu (o espectro do perfil de ruído, em `measure.noise`)."""
+    passada de medida leu (o espectro do perfil de ruído, em `measure.noise`). `side` é a segunda entrada, quando o efeito
+    pede uma (a portadora do Vocoder): o mesmo comprimento e a mesma forma de `samples`, e recortada junto com ele."""
 
     effect: EffectBase
     samples: np.ndarray
     sample_rate: int = SAMPLE_RATE
     measure: Measure | None = None
+    side: np.ndarray | None = None
 
 
 class SampleBuilder(Protocol):

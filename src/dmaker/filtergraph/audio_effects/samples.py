@@ -31,7 +31,8 @@ def apply_sample_effect(request: SampleRequest) -> np.ndarray:
         return build_samples(request)
     if last - first < 2:  # nada a processar: um intervalo vazio deixa o som como está
         return samples
-    inner = SampleRequest(effect, samples[first:last], request.sample_rate, request.measure)
+    side = None if request.side is None else request.side[first:last]
+    inner = SampleRequest(effect, samples[first:last], request.sample_rate, request.measure, side)
     wet = build_samples(inner)
     if effect.alters_duration():
         return np.concatenate([samples[:first], wet, samples[last:]])

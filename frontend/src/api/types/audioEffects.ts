@@ -15,6 +15,8 @@ export type AudioEffectParamKind =
   | 'freq_points'
   /** Texto livre (os dígitos do DTMF, o arquivo do Importar Amostras): só os geradores usam. */
   | 'text'
+  /** Um som gerado `{ generator, params }` (a portadora do Vocoder): a interface edita a onda e a frequência do Tom. */
+  | 'carrier'
 
 /** Um ponto da curva do EQ por Curva: a frequência (Hz) e o ganho nela (dB). */
 export interface CurvePoint {
@@ -22,8 +24,14 @@ export interface CurvePoint {
   db: number
 }
 
-/** O valor de um parâmetro na spec: número, caixa de marcar, uma das opções de uma escolha ou uma das listas do EQ. */
-export type AudioEffectValue = number | boolean | string | number[] | CurvePoint[]
+/** Um som gerado como a spec o guarda: o tipo do gerador (`tone`, `noise`...) e os parâmetros dele. */
+export interface CarrierValue {
+  generator: string
+  params: Record<string, number | string | boolean>
+}
+
+/** O valor de um parâmetro na spec: número, caixa de marcar, uma das opções de uma escolha, uma das listas do EQ ou a portadora. */
+export type AudioEffectValue = number | boolean | string | number[] | CurvePoint[] | CarrierValue
 
 export interface AudioEffectParam {
   /** O nome do campo na spec (`gain_db`). */
