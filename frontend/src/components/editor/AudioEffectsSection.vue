@@ -2,7 +2,7 @@
 /* O bloco "Efeitos de áudio" do painel Filtros: a cadeia de efeitos do item selecionado na linha do tempo (ou a do
    master, sem seleção), na ordem em que o som passa por ela. O menu "+ Efeito" e o formulário de cada efeito saem do
    catálogo do servidor. Cada ação (adicionar, remover, mover, ligar, mudar um valor) é um passo do desfazer. */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import type { AudioEffectInfo, AudioEffectPreset } from '@/api'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -17,18 +17,24 @@ import {
   removeEffectIn,
   setEnabledIn,
   targetMayGrow,
+  targetOfList,
 } from '@/lib/audioEffects'
 import { useConfirm } from '@/composables/useConfirm'
 import { stableKey } from '@/lib/editorSpec'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
 import AudioEffectCard from './AudioEffectCard.vue'
+import SaveChainMacroButton from './SaveChainMacroButton.vue'
 
 const editor = useEditorStore()
 const catalog = useAudioEffectsStore()
 const confirm = useConfirm()
 
 onMounted(() => void catalog.load())
+
+/** As macros da marca do projeto entram no menu junto com as globais; trocar de projeto (ou de marca) as atualiza. */
+const projectBrand = computed(() => (editor.get('brand') as string | undefined) ?? '')
+watch(projectBrand, (brand) => void catalog.useBrand(brand), { immediate: true })
 
 /** O item de que os efeitos falam: o último que a pessoa selecionou, como no resto do painel Filtros. */
 const primary = computed(() => {
@@ -80,15 +86,33 @@ function addPreset(preset: AudioEffectPreset): void {
   menuOpen.value = false
 }
 
-/** Apaga uma predefinição que a pessoa salvou (as embutidas não têm o botão). Pergunta antes: não há desfazer para isto. */
+/** A marca de uma macro da pasta de uma marca (`brand:acme` -> `acme`); vazio nas globais e nas embutidas. */
+function brandOf(preset: AudioEffectPreset): string {
+  return preset.scope?.startsWith('brand:') ? preset.scope.slice('brand:'.length) : ''
+}
+
+/** O formato de saída que a macro leva para quando é aplicada a uma pasta de arquivos (`audio/mp3` -> `MP3`), ou vazio. */
+function outputLabel(preset: AudioEffectPreset): string {
+  return preset.output ? preset.output.preset.replace(/^audio\//, '').toUpperCase() : ''
+}
+
+/** O que a linha da macro mostra sob o nome: a frase dela e, se houver, o formato de saída e a marca. */
+function presetNote(preset: AudioEffectPreset): string {
+  const parts = [preset.summary || (preset.origin === 'user' ? 'Salva por você' : '')]
+  if (outputLabel(preset)) parts.push(`saída ${outputLabel(preset)} ao aplicar a arquivos`)
+  if (brandOf(preset)) parts.push(`marca ${brandOf(preset)}`)
+  return parts.filter(Boolean).join(' · ')
+}
+
+/** Apaga uma macro que a pessoa salvou (as embutidas não têm o botão). Pergunta antes: não há desfazer para isto. */
 async function removePreset(preset: AudioEffectPreset): Promise<void> {
   const accepted = await confirm({
-    title: `Apagar a predefinição "${preset.label}"?`,
+    title: `Apagar a macro "${preset.label}"?`,
     description: 'Ela sai da lista. Os efeitos que você já pôs em itens com ela continuam como estão.',
     tone: 'danger',
     confirmLabel: 'Apagar',
   })
-  if (accepted) await catalog.removePreset(preset.id)
+  if (accepted) await catalog.removePreset(preset.id, brandOf(preset) || undefined)
 }
 
 const remove = (index: number) => act((draft, listPath) => removeEffectIn(draft, listPath, index))
@@ -128,6 +152,7 @@ function endDrag(): void {
         <h4 class="effects__title">Efeitos de áudio</h4>
         <p v-if="chain" class="effects__target" data-effects-target>{{ chain.title }}</p>
       </div>
+      <SaveChainMacroButton v-if="chain && effects.length > 0" :target="targetOfList(chain.listPath)" :suggestion="chain.title" />
       <PopoverRoot v-model:open="menuOpen">
         <PopoverTrigger as-child>
           <AppButton
@@ -153,19 +178,19 @@ function endDrag(): void {
             </ul>
             <p v-else class="effects-menu__note">Nenhum efeito disponível.</p>
             <div v-if="offeredPresets.length > 0" class="effects-menu__group" data-effects-presets>
-              <p class="effects-menu__heading">Predefinições</p>
+              <p class="effects-menu__heading">Predefinições e macros</p>
               <ul class="effects-menu__list">
                 <li v-for="preset in offeredPresets" :key="preset.id" class="effects-menu__preset" :data-preset-origin="preset.origin ?? 'builtin'">
                   <button type="button" class="effects-menu__item" :data-add-preset="preset.id" :title="preset.summary" @click="addPreset(preset)">
                     <span class="effects-menu__name">{{ preset.label }}</span>
-                    <span class="effects-menu__audacity">{{ preset.summary || (preset.origin === 'user' ? 'Salva por você' : '') }}</span>
+                    <span class="effects-menu__audacity" data-preset-note>{{ presetNote(preset) }}</span>
                   </button>
                   <button
                     v-if="preset.origin === 'user'"
                     type="button"
                     class="effects-menu__remove"
-                    :aria-label="`Apagar a predefinição ${preset.label}`"
-                    title="Apagar esta predefinição"
+                    :aria-label="`Apagar a macro ${preset.label}`"
+                    title="Apagar esta macro"
                     :data-remove-preset="preset.id"
                     @click="removePreset(preset)"
                   >

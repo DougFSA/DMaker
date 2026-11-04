@@ -3299,7 +3299,7 @@ def audio_effect_response_command(
 
 audio_preset_app = typer.Typer(
     help="Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeitos já ajustada) para pôr em outros "
-    "itens com `dmaker audio effect preset`.",
+    "itens com `dmaker audio effect preset`. São as mesmas macros de `dmaker audio macro` (guardadas em assets/macros).",
     no_args_is_help=True,
 )
 audio_app.add_typer(audio_preset_app, name="preset")
@@ -3348,7 +3348,7 @@ def audio_preset_save(
     ] = None,
     summary: Annotated[str, typer.Option(help="Uma frase do que a predefinição faz.")] = "",
 ) -> None:
-    """Salva uma cadeia de efeitos com um nome, na pasta de dados (effect-presets.json). O intervalo e o bypass de cada
+    """Salva uma cadeia de efeitos com um nome, na pasta de macros (assets/macros). O intervalo e o bypass de cada
     efeito não entram: a predefinição vale para qualquer item."""
     from .domain.audio_effects import save_user_preset
 
@@ -3380,6 +3380,225 @@ def audio_preset_remove(
     except ValueError as exc:
         _fail(str(exc))
     console.print(f"[green]Predefinição removida:[/green] {preset.label}", highlight=False)
+
+
+macro_app = typer.Typer(
+    help="Macros de áudio: uma cadeia de efeitos salva com nome, que se põe num item (`dmaker audio effect preset`) ou se "
+    "aplica a uma pasta inteira de arquivos (`dmaker audio macro run`). As embutidas e as suas.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(macro_app, name="macro")
+
+
+def _macro_table(presets: list[dict], title: str) -> Table:
+    table = Table(Column("id", no_wrap=True), "nome", "onde", "efeitos", "saída", title=title)
+    for preset in presets:
+        output = (preset.get("output") or {}).get("preset", "")
+        table.add_row(
+            preset["id"],
+            preset["label"],
+            preset.get("scope", ""),
+            ", ".join(effect["type"] for effect in preset["effects"]),
+            output,
+        )
+    return table
+
+
+@macro_app.command("list")
+def macro_list(
+    brand: Annotated[str | None, typer.Option(help="Junta as macros desta marca às globais.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista as macros: as embutidas e as que você salvou (globais e da marca)."""
+    from .domain.audio_effects import preset_catalog
+
+    try:
+        presets = preset_catalog(brand)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps({"presets": presets}, ensure_ascii=False, indent=2))
+        return
+    console.print(_macro_table(presets, "Macros de áudio"))
+
+
+@macro_app.command("show")
+def macro_show(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    brand: Annotated[str | None, typer.Option(help="Busca também entre as macros desta marca.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Mostra uma macro: a cadeia de efeitos, com os parâmetros, e a saída (formato) que ela traz."""
+    from .domain.audio_effects import get_effect_preset
+
+    try:
+        preset = get_effect_preset(macro, brand).to_dict()
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(preset, ensure_ascii=False, indent=2))
+        return
+    console.print(f"[bold]{preset['label']}[/bold] (id {preset['id']}, {preset['scope']})", highlight=False)
+    if preset["summary"]:
+        console.print(preset["summary"], highlight=False)
+    for position, effect in enumerate(preset["effects"], start=1):
+        params = ", ".join(f"{key}={value}" for key, value in effect.items() if key != "type")
+        console.print(f"  {position}. {effect['type']}" + (f" ({params})" if params else ""), highlight=False)
+    if preset.get("output"):
+        console.print(f"Saída: {json.dumps(preset['output'], ensure_ascii=False)}", highlight=False)
+
+
+@macro_app.command("save")
+def macro_save(
+    name: Annotated[str, typer.Argument(help="O nome da macro (salvar de novo com o mesmo nome a troca).")],
+    effect: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--effect",
+            "-e",
+            help='Um efeito em JSON, por exemplo \'{"type": "highpass", "frequency_hz": 80}\' (repetível).',
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option("--file", help="Um arquivo JSON com a lista de efeitos da cadeia.")
+    ] = None,
+    from_project: Annotated[
+        str | None,
+        typer.Option(
+            "--from-project", help="Salva a cadeia de um item deste projeto (nome ou caminho da spec)."
+        ),
+    ] = None,
+    target: Annotated[
+        str | None,
+        typer.Option(help="O item do projeto, como audio.voiceover.0, audio.narration.0 ou timeline.2."),
+    ] = None,
+    scope: Annotated[
+        str, typer.Option(help="`global` (padrão) ou `brand`: a marca do projeto de --from-project.")
+    ] = "global",
+    brand: Annotated[
+        str | None, typer.Option(help="Guarda na pasta desta marca (quando não vem de um projeto).")
+    ] = None,
+    format: Annotated[
+        str | None,
+        typer.Option(
+            "--format",
+            help="O formato que vale ao aplicar a arquivos (mp3, wav, flac, ogg, opus, m4a, aiff).",
+        ),
+    ] = None,
+    summary: Annotated[str, typer.Option(help="Uma frase do que a macro faz.")] = "",
+) -> None:
+    """Salva uma cadeia de efeitos como macro em assets/macros (ou na pasta da marca). A cadeia vem de --effect/--file ou
+    de um item de projeto (--from-project e --target). O intervalo e o bypass de cada efeito não entram."""
+    from .domain.audio_effects import save_user_preset
+
+    output = {"preset": format} if format else None
+    try:
+        if from_project or target:
+            if not (from_project and target):
+                _fail("para salvar a cadeia de um item, informe --from-project e --target")
+            from .pipeline.macros import save_chain_as_macro
+
+            saved = save_chain_as_macro(
+                _load_named(from_project),
+                target,
+                name,
+                scope=scope,
+                summary=summary,
+                output=output,
+            )
+        else:
+            effects: list = []
+            for text in effect or []:
+                effects.append(json.loads(text))
+            if file is not None:
+                loaded = json.loads(file.read_text(encoding="utf-8"))
+                effects.extend(loaded if isinstance(loaded, list) else [loaded])
+            saved = save_user_preset(name, effects, summary, output=output, brand=brand)
+    except (OSError, ValueError) as exc:
+        _fail(f"Não consegui salvar a macro: {exc}")
+    console.print(
+        f"[green]Macro salva:[/green] {saved.label} (id {saved.id}, {saved.scope})", highlight=False
+    )
+
+
+def _load_named(name: str):
+    from .pipeline.projects import load_project
+
+    try:
+        return load_project(name)
+    except (OSError, ValueError, KeyError) as exc:
+        _fail(f"Não consegui abrir o projeto {name}: {exc}")
+
+
+@macro_app.command("remove")
+def macro_remove(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    brand: Annotated[
+        str | None, typer.Option(help="Remove da pasta desta marca (sem isso, da global).")
+    ] = None,
+) -> None:
+    """Apaga uma macro salva. As embutidas não se apagam."""
+    from .domain.audio_effects import remove_user_preset
+
+    try:
+        preset = remove_user_preset(macro, brand)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Macro removida:[/green] {preset.label}", highlight=False)
+
+
+@macro_app.command("run")
+def macro_run(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    inputs: Annotated[
+        list[Path], typer.Argument(help="Uma pasta (os arquivos de áudio dela) e/ou arquivos.")
+    ],
+    out: Annotated[Path, typer.Option("--out", help="A pasta onde os arquivos tratados caem.")],
+    format: Annotated[
+        str | None,
+        typer.Option(
+            "--format", help="mp3, wav, flac, ogg, opus, m4a ou aiff (padrão: o formato que a macro traz)."
+        ),
+    ] = None,
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            help="Retoma o que parou (queda, Ctrl+C): pula o que já saiu inteiro e refaz o que ficou pela metade.",
+        ),
+    ] = False,
+    brand: Annotated[str | None, typer.Option(help="Busca a macro também entre as desta marca.")] = None,
+) -> None:
+    """Aplica a macro a cada arquivo (o Apply Macro to Files do Audacity): a cadeia, e mais nada, sem normalização final
+    do master. O original não muda. O estado fica em <pasta de saída>/.dmaker-macro. Ctrl+C interrompe; retome com --resume."""
+    from .domain.audio_effects import get_effect_preset
+    from .pipeline.macro_run import MacroRunBusyError, MacroRunError, MacroRunService, plan_macro_run
+
+    service = MacroRunService()
+    try:
+        plan = plan_macro_run(get_effect_preset(macro, brand), inputs, out, format)
+        report = service.run(plan, resume=resume, log=_console_log)
+    except KeyboardInterrupt:
+        _fail(f"Interrompido. O que já saiu fica; retome com a mesma linha e --resume ({out})")
+    except (MacroRunError, MacroRunBusyError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if report.failed:
+        raise typer.Exit(code=1)
+
+
+@macro_app.command("status")
+def macro_status(
+    out: Annotated[Path, typer.Argument(help="A pasta de saída de um `dmaker audio macro run`.")],
+) -> None:
+    """Mostra o andamento de um tratamento: o que saiu, o que falhou e o que falta (para o `--resume`)."""
+    from .pipeline.macro_run import MacroRunService
+
+    try:
+        report = MacroRunService().report(out)
+    except (KeyError, RuntimeError, OSError) as exc:
+        _fail(f"Não há tratamento em {out}: {exc}")
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
 
 
 duck_app = typer.Typer(

@@ -36,6 +36,7 @@ class RowReport:
     error: str | None
     warnings: list[str] = field(default_factory=list)
     issues: list[dict[str, Any]] = field(default_factory=list)
+    source: str | None = None
 
     @classmethod
     def from_row(cls, row: BatchRow) -> RowReport:
@@ -51,6 +52,7 @@ class RowReport:
             row.error,
             list(row.warnings),
             list(row.issues),
+            row.source,
         )
 
     @property
@@ -71,13 +73,15 @@ class RowReport:
             "error": self.error,
             "warnings": self.warnings,
             "issues": self.issues,
+            "source": self.source,
         }
 
     def to_text(self) -> str:
-        where = f" (linha {self.line})" if self.title else ""
+        where = f" (linha {self.line})" if self.title and self.source is None else ""
         head = f"{self.index:>3}. [{ROW_LABELS[self.state].lower()}] {self.label}{where}"
         if self.state == DONE:
-            took = f", renderizou em {self.render_s:.0f} s" if self.render_s is not None else ""
+            verb = "renderizou" if self.source is None else "levou"
+            took = f", {verb} em {self.render_s:.0f} s" if self.render_s is not None else ""
             return f"{head}: {self.output}{took}"
         if self.state == FAILED:
             return f"{head}: {self.error or 'sem detalhe'}"
@@ -95,6 +99,7 @@ class BatchReport:
     preview: bool
     output_dir: str
     rows: list[RowReport]
+    noun: str = "vídeo"
 
     def count(self, state: str) -> int:
         return sum(1 for row in self.rows if row.state == state)
@@ -117,7 +122,7 @@ class BatchReport:
 
     @property
     def total(self) -> int:
-        """Vídeos que o lote tenta fazer: as linhas puladas por problema não entram na conta."""
+        """Itens que o lote tenta fazer: as linhas puladas por problema não entram na conta."""
         return len(self.rows) - self.skipped
 
     @property
@@ -125,7 +130,7 @@ class BatchReport:
         return self.status == "paused"
 
     def summary(self) -> str:
-        parts = [f"{self.done} de {self.total} vídeo(s) pronto(s)"]
+        parts = [f"{self.done} de {self.total} {self.noun}(s) pronto(s)"]
         if self.failed:
             parts.append(f"{self.failed} falhou(aram)")
         if self.skipped:
@@ -148,17 +153,19 @@ class BatchReport:
             "skipped": self.skipped,
             "waiting": self.waiting,
             "summary": self.summary(),
+            "noun": self.noun,
             "rows": [row.to_dict() for row in self.rows],
         }
 
     def to_text(self) -> str:
         """O relatório que a CLI mostra e o serviço grava: resumo, vídeo por vídeo e o motivo de cada falha."""
-        kind = "prévias" if self.preview else "vídeos"
-        lines = [
-            f"Lote {self.name} (modelo {self.template}, {BATCH_LABELS[self.status].lower()}): {self.summary()}.",
-            f"Saída ({kind}): {self.output_dir}",
-            "",
-        ]
+        kind = "prévias" if self.preview else f"{self.noun}s"
+        head = (
+            f"Lote {self.name} (modelo {self.template}, {BATCH_LABELS[self.status].lower()})"
+            if self.noun == "vídeo"
+            else f"Macro {self.template} ({BATCH_LABELS[self.status].lower()})"
+        )
+        lines = [f"{head}: {self.summary()}.", f"Saída ({kind}): {self.output_dir}", ""]
         lines += [row.to_text() for row in self.rows]
         warned = [row for row in self.rows if row.warnings]
         if warned:
@@ -175,4 +182,5 @@ def build_report(batch: Batch, status: str, output_dir: Path) -> BatchReport:
         batch.preview,
         str(output_dir),
         [RowReport.from_row(row) for row in batch.rows],
+        batch.noun,
     )

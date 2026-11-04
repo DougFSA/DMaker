@@ -83,7 +83,7 @@ def apply_effect_op(project: Project, op: dict[str, Any]) -> Project:
     def mutate(data: dict) -> None:
         chain = _effect_list(data, target)
         if action == "preset":
-            _add_preset(chain, op, target)
+            _add_preset(chain, op, target, project.brand)
             return
         if action == "add":
             effect = _parsed(op.get("effect"))
@@ -118,12 +118,25 @@ def apply_effect_op(project: Project, op: dict[str, Any]) -> Project:
         raise EditError(_readable(str(exc))) from exc
 
 
-def _add_preset(chain: list[dict], op: dict[str, Any], target: str) -> None:
+def item_chain(project: Project, target: str) -> list[dict]:
+    """A cadeia de efeitos do item `target` como a spec a escreve (lista vazia se ele ainda não tem efeitos): é o que
+    "salvar a cadeia como macro" lê. Não muda o projeto."""
+    data = project.model_dump(mode="json")
+    try:
+        chain = _effect_list(data, target)
+    except KeyError as exc:  # projeto sem o campo (`audio`) que o alvo cita
+        raise EditError(f"o alvo {target!r} não existe neste projeto") from exc
+    return [dict(effect) for effect in chain]
+
+
+def _add_preset(chain: list[dict], op: dict[str, Any], target: str, brand: str | None = None) -> None:
     """Acrescenta à cadeia, um a um, os efeitos da predefinição `op["preset"]` (ver `domain.audio_effects.presets`): cada
     um é um efeito comum, que a pessoa liga, desliga, ajusta ou tira depois. Entram no fim da cadeia, ou em `index`. No áudio
-    mestre, a predefinição que tem um efeito de amostras (o Noise Gate) é recusada com o motivo."""
+    mestre, a predefinição que tem um efeito de amostras (o Noise Gate) é recusada com o motivo. A macro tem também uma
+    saída (formato do arquivo), que aqui não conta: ela só vale ao aplicar a macro a arquivos. As macros da marca do projeto
+    valem tanto quanto as globais."""
     try:
-        preset = get_effect_preset(str(op.get("preset") or ""))
+        preset = get_effect_preset(str(op.get("preset") or ""), brand)
         check_preset_fits(
             preset, target not in _SINGLE or target == "audio.music", _SINGLE.get(target, target)
         )

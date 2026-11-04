@@ -51,5 +51,4 @@ No render pela CLI: o passa-alta de 80 Hz a 24 dB derruba o tom de 40 Hz em 24,1
 - **"slope_db"**: a inclinação é de 6 em 6 dB por oitava, de 6 a 48.
 - **"dois pontos na mesma frequência"**: arraste um dos pontos do EQ por Curva.
 - **"gains_db"**: o EQ Gráfico tem exatamente 31 ganhos, de -20 a +20 dB.
-- **"é o nome de uma predefinição embutida"**: escolha outro nome.
-- **"não consegui ler as predefinições salvas"**: o `effect-presets.json` da pasta de dados foi estragado à mão; corrija o JSON (o DMaker nunca o sobrescreve sozinho).
+- **"não consegui ler a macro"**: o arquivo dessa predefinição em `assets/macros` foi estragado à mão; corrija o JSON (o DMaker nunca o sobrescreve sozinho, e as outras seguem funcionando).

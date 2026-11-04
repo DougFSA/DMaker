@@ -171,10 +171,10 @@ EFFECT_TARGETS: tuple[dict[str, Any], ...] = (
 )
 
 
-def catalog_payload(effect_type_name: str | None = None) -> dict[str, Any]:
+def catalog_payload(effect_type_name: str | None = None, brand: str | None = None) -> dict[str, Any]:
     """O catálogo como a API, o MCP e a CLI o entregam: os efeitos (todos, ou só o de `effect_type_name`), os
     campos comuns a todo efeito, os lugares onde a cadeia pode ficar e as predefinições (cadeias prontas que a ação
-    `preset` põe no item). Um nome que não existe é erro."""
+    `preset` põe no item). Com `brand`, as macros da marca entram junto com as globais. Um nome que não existe é erro."""
     effects = catalog()
     if effect_type_name is not None:
         effects = [info for info in effects if info.type == effect_type_name]
@@ -187,7 +187,7 @@ def catalog_payload(effect_type_name: str | None = None) -> dict[str, Any]:
         "effects": [info.to_dict() for info in effects],
         "common": [_plain(asdict(info)) for info in common_parameters()],
         "targets": [dict(target) for target in EFFECT_TARGETS],
-        "presets": preset_catalog(),
+        "presets": preset_catalog(brand),
     }
 
 

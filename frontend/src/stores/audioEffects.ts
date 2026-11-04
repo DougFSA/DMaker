@@ -3,7 +3,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { errorMessage } from '@/api'
-import { deleteUserPreset, fetchAudioEffects, fetchUserPresets, saveUserPreset } from '@/api/audioEffects'
+import { deleteUserPreset, fetchAudioEffects, fetchUserPresets, saveChainAsMacro, saveUserPreset } from '@/api/audioEffects'
 import type {
   AudioEffectCatalog,
   AudioEffectInfo,
@@ -11,12 +11,15 @@ import type {
   AudioEffectPreset,
   AudioEffectSettings,
   AudioEffectTarget,
+  MacroScope,
 } from '@/api'
 import { useToastsStore } from './toasts'
 
 export const useAudioEffectsStore = defineStore('audioEffects', () => {
   const catalog = ref<AudioEffectCatalog | null>(null)
   const error = ref('')
+  /** A marca do projeto aberto: as macros dela entram no menu junto com as globais. */
+  const brand = ref('')
   let loading: Promise<void> | null = null
 
   const effects = computed<AudioEffectInfo[]>(() => catalog.value?.effects ?? [])
@@ -39,7 +42,7 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
     if (catalog.value) return
     loading ??= (async () => {
       try {
-        const loadedCatalog = await fetchAudioEffects()
+        const loadedCatalog = await fetchAudioEffects(undefined, brand.value || undefined)
         // resposta fora do contrato (servidor antigo): trata como falha em vez de quebrar o painel
         if (!loadedCatalog || !Array.isArray(loadedCatalog.effects)) throw new Error('Resposta inesperada do servidor.')
         catalog.value = loadedCatalog
@@ -53,21 +56,32 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
     await loading
   }
 
-  /** Troca no catálogo só as predefinições salvas pela pessoa pelas que o servidor tem agora (as embutidas não mudam). */
+  /** Troca no catálogo só as macros salvas pela pessoa (globais e da marca do projeto) pelas que o servidor tem agora (as embutidas não mudam). */
   async function refreshUserPresets(): Promise<void> {
     if (!catalog.value) return
-    const saved = await fetchUserPresets()
+    const saved = await fetchUserPresets(brand.value || undefined)
     const builtin = (catalog.value.presets ?? []).filter((preset) => preset.origin !== 'user')
     catalog.value = { ...catalog.value, presets: [...builtin, ...saved] }
   }
 
-  /** Salva a cadeia com o nome dado (o mesmo nome troca a predefinição). Devolve a predefinição, ou null com o motivo num aviso. */
+  /** Diz de que marca é o projeto aberto e traz as macros dela; sem marca, só as globais. Falhar aqui só deixa as macros da marca de fora. */
+  async function useBrand(name: string): Promise<void> {
+    if (brand.value === name && catalog.value) return
+    brand.value = name
+    try {
+      await refreshUserPresets()
+    } catch {
+      /* o menu segue com o que já tem; a próxima troca de projeto tenta de novo */
+    }
+  }
+
+  /** Salva a cadeia com o nome dado (o mesmo nome troca a macro). Devolve a macro, ou null com o motivo num aviso. */
   async function savePreset(label: string, chain: AudioEffectSettings[]): Promise<AudioEffectPreset | null> {
     const toasts = useToastsStore()
     try {
       const saved = await saveUserPreset(label, chain)
       await refreshUserPresets()
-      toasts.push({ tone: 'success', title: `Predefinição "${saved.label}" salva`, description: 'Ela aparece em Predefinições, no menu + Efeito.' })
+      toasts.push({ tone: 'success', title: `Predefinição "${saved.label}" salva`, description: 'Ela aparece em Predefinições e macros, no menu + Efeito.' })
       return saved
     } catch (failure) {
       toasts.push({ tone: 'error', title: 'Não consegui salvar a predefinição', description: errorMessage(failure) })
@@ -75,18 +89,39 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
     }
   }
 
-  /** Apaga uma predefinição salva pela pessoa. Devolve se apagou. */
-  async function removePreset(id: string): Promise<boolean> {
+  /** "Salvar a cadeia como macro": a cadeia do item `target` do projeto vira uma macro com o nome e o escopo dados. */
+  async function saveChain(
+    project: string,
+    spec: unknown,
+    target: string,
+    label: string,
+    scope: MacroScope,
+  ): Promise<AudioEffectPreset | null> {
     const toasts = useToastsStore()
     try {
-      await deleteUserPreset(id)
+      const saved = await saveChainAsMacro(project, { spec, target, label, scope })
+      await refreshUserPresets()
+      const where = scope === 'brand' ? 'dos projetos da marca' : 'de todos os projetos'
+      toasts.push({ tone: 'success', title: `Macro "${saved.label}" salva`, description: `Ela vale ${where}, em Predefinições e macros, no menu + Efeito.` })
+      return saved
+    } catch (failure) {
+      toasts.push({ tone: 'error', title: 'Não consegui salvar a macro', description: errorMessage(failure) })
+      return null
+    }
+  }
+
+  /** Apaga uma macro salva pela pessoa (da pasta da marca, quando for dela). Devolve se apagou. */
+  async function removePreset(id: string, fromBrand?: string): Promise<boolean> {
+    const toasts = useToastsStore()
+    try {
+      await deleteUserPreset(id, fromBrand)
       await refreshUserPresets()
       return true
     } catch (failure) {
-      toasts.push({ tone: 'error', title: 'Não consegui apagar a predefinição', description: errorMessage(failure) })
+      toasts.push({ tone: 'error', title: 'Não consegui apagar a macro', description: errorMessage(failure) })
       return false
     }
   }
 
-  return { catalog, error, effects, common, targets, presets, loaded, commonParam, infoOf, load, savePreset, removePreset }
+  return { catalog, error, brand, effects, common, targets, presets, loaded, commonParam, infoOf, load, useBrand, savePreset, saveChain, removePreset }
 })

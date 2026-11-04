@@ -76,16 +76,35 @@ export interface AudioEffectAction {
   needs_range: boolean
 }
 
-/** Uma cadeia pronta que o menu "+ Efeito" põe no item de uma vez, cada efeito separado e editável depois. */
+/** O formato do arquivo de uma macro, que só vale ao aplicá-la a uma pasta de arquivos (`dmaker audio macro run`). */
+export interface MacroOutput {
+  /** O formato, como `audio/mp3`. */
+  preset: string
+  sample_rate?: number
+  channels?: number
+  bit_depth?: number
+  bitrate_mode?: string
+  bitrate_k?: number
+  quality?: number
+}
+
+/** Uma macro (predefinição): a cadeia pronta que o menu "+ Efeito" põe no item de uma vez, cada efeito separado e editável depois. */
 export interface AudioEffectPreset {
   id: string
   label: string
   summary: string
   /** Os efeitos como a spec os escreve (só o que difere do padrão). */
   effects: Array<{ type: string; [parameter: string]: unknown }>
-  /** De onde vem: `builtin` (embutida) ou `user` (salva pela pessoa, no arquivo effect-presets.json da pasta de dados). */
+  /** De onde vem: `builtin` (embutida) ou `user` (salva pela pessoa, uma por arquivo em assets/macros). */
   origin?: 'builtin' | 'user'
+  /** Onde mora: `builtin`, `global` ou `brand:<marca>`. */
+  scope?: string
+  /** O formato de saída ao aplicar a arquivos (a tela só o mostra: aplicada a um item, a macro vira só a cadeia). */
+  output?: MacroOutput
 }
+
+/** Onde "Salvar a cadeia como macro" guarda: para qualquer projeto (`global`) ou só para os da marca do projeto (`brand`). */
+export type MacroScope = 'global' | 'brand'
 
 /** A resposta de frequência de um efeito de equalização (POST /api/audio-effects/response): o ganho em dB em cada frequência. */
 export interface EffectResponse {

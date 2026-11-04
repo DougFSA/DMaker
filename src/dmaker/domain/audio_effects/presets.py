@@ -1,6 +1,7 @@
 """Predefinições de efeitos de áudio: uma cadeia de efeitos já ajustada, posta no item de uma vez.
 
-São dados puros. Cada predefinição lista os efeitos (como a spec os escreve) que a operação `audio_effect` com a ação
+São dados puros. Predefinição e macro são a mesma estrutura (uma macro é a predefinição com nome, mais a saída opcional que só
+vale ao aplicar a arquivos). Cada predefinição lista os efeitos (como a spec os escreve) que a operação `audio_effect` com a ação
 `preset` acrescenta ao fim da cadeia do alvo, cada um como um efeito separado e editável depois: nada fica "preso" na
 predefinição. O registro é `register_effect_preset`, e quem quer acrescentar outras (as macros do DMK-66) só registra
 mais uma, sem tocar no catálogo, no MCP, na CLI nem na interface.
@@ -18,7 +19,9 @@ from .base import EFFECT_CLASSES
 
 @dataclass(frozen=True)
 class EffectPreset:
-    """Uma predefinição: `id` (como a operação a cita), nome, uma frase do que faz e os efeitos da cadeia."""
+    """Uma predefinição, que também é uma macro: `id` (como a operação a cita), nome, uma frase do que faz e os efeitos
+    da cadeia. `output` (o formato do arquivo e as escolhas de codificação, ver `macro_output`) só vale ao aplicar a
+    macro a arquivos; aplicada a um item, a macro vira só a cadeia."""
 
     id: str
     label: str
@@ -26,52 +29,65 @@ class EffectPreset:
     effects: tuple[dict, ...]
     # de onde vem: `builtin` (registrada no código) ou `user` (salva pela pessoa, em `user_presets`)
     origin: str = "builtin"
+    output: dict | None = None
+    # onde mora: `builtin`, `global` (a pasta de macros) ou `brand:<marca>` (a pasta de macros da marca)
+    scope: str = "builtin"
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "id": self.id,
             "label": self.label,
             "summary": self.summary,
             "effects": [dict(effect) for effect in self.effects],
             "origin": self.origin,
+            "scope": self.scope,
         }
+        if self.output:
+            data["output"] = dict(self.output)
+        return data
 
 
 EFFECT_PRESETS: dict[str, EffectPreset] = {}
 
 
 def register_effect_preset(preset: EffectPreset) -> EffectPreset:
-    """Registra a predefinição pelo `id`. Um efeito que o catálogo não conhece, ou um `id` repetido, é erro na hora de
-    importar: a predefinição nunca chega à pessoa quebrada."""
+    """Registra a predefinição pelo `id`. Um efeito que o catálogo não conhece, uma saída inválida ou um `id` repetido
+    é erro na hora de importar: a predefinição nunca chega à pessoa quebrada."""
+    from .macro_output import clean_output
+
     if preset.id in EFFECT_PRESETS:
         raise ValueError(f"Predefinição de efeitos já registrada: {preset.id}")
     unknown = sorted({effect["type"] for effect in preset.effects} - set(EFFECT_CLASSES))
     if unknown:
         raise ValueError(f"Predefinição {preset.id}: efeito(s) desconhecido(s): {', '.join(unknown)}")
+    if clean_output(preset.output) != (preset.output or None):
+        raise ValueError(f"Predefinição {preset.id}: a saída precisa vir já normalizada (clean_output)")
     EFFECT_PRESETS[preset.id] = preset
     return preset
 
 
-def get_effect_preset(preset_id: str) -> EffectPreset:
-    """A predefinição de `id` dado: as embutidas primeiro e, não achando, as que a pessoa salvou."""
+def get_effect_preset(preset_id: str, brand: str | None = None) -> EffectPreset:
+    """A predefinição de `id` dado: as embutidas primeiro e, não achando, as da marca (quando se diz a marca) e as
+    globais que a pessoa salvou (a da marca já vem por cima da global de mesmo id)."""
     from .user_presets import load_user_presets
 
     if preset_id in EFFECT_PRESETS:
         return EFFECT_PRESETS[preset_id]
-    for preset in load_user_presets():
+    saved = load_user_presets(brand)
+    for preset in saved:
         if preset.id == preset_id:
             return preset
-    known = ", ".join(sorted([*EFFECT_PRESETS, *(preset.id for preset in load_user_presets())]))
+    known = ", ".join(sorted([*EFFECT_PRESETS, *(preset.id for preset in saved)]))
     raise ValueError(f"Predefinição desconhecida: {preset_id!r}. Use uma de: {known}")
 
 
-def preset_catalog() -> list[dict]:
+def preset_catalog(brand: str | None = None) -> list[dict]:
     """As predefinições como o catálogo as entrega (`presets` de `catalog_payload`): as embutidas e, depois, as que a
-    pessoa salvou (`origin: "user"`). O arquivo é lido a cada chamada, então uma predefinição salva aparece na hora e
-    sobrevive a reiniciar o programa."""
+    pessoa salvou (`origin: "user"`), as globais e, com a marca, as dela. A pasta é lida a cada chamada, então uma macro
+    salva aparece na hora e sobrevive a reiniciar o programa."""
     from .user_presets import load_user_presets
 
-    return [preset.to_dict() for preset in [*EFFECT_PRESETS.values(), *load_user_presets()]]
+    return [preset.to_dict() for preset in [*EFFECT_PRESETS.values(), *load_user_presets(brand)]]
 
 
 def check_preset_fits(preset: EffectPreset, sample_stage_allowed: bool, place: str) -> None:
