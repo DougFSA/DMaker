@@ -7,6 +7,7 @@ no Audacity, unidade de cada parâmetro). Quem monta o grafo do ffmpeg é a fun�
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -32,6 +33,20 @@ def param(
     if kind:
         extra["kind"] = kind
     return Field(default, description=hint or label, json_schema_extra=extra, **constraints)
+
+
+@dataclass(frozen=True)
+class EffectAction:
+    """Uma ação que o catálogo oferece ao lado dos parâmetros de um efeito: ela lê o som do item e devolve valores para
+    preencher campos (o Noise Gate sugere o limiar a partir de um trecho silencioso). `fills` nomeia os campos que a
+    resposta preenche, `needs_range` diz se a ação mede um trecho (`start`/`end` do item) ou o item todo. Quem a executa
+    é registrado em `pipeline.effect_actions` com o mesmo par (tipo do efeito, `id`)."""
+
+    id: str
+    label: str
+    hint: str
+    fills: tuple[str, ...]
+    needs_range: bool = True
 
 
 class EffectBase(BaseModel):
@@ -69,6 +84,8 @@ class EffectBase(BaseModel):
     # True quando o efeito trabalha sobre as amostras em numpy (`register_sample_builder`), e não como filtro do ffmpeg:
     # ele precisa do sinal inteiro na memória, então não roda dentro do grafo ao vivo da mistura (o áudio mestre o recusa)
     sample_stage: ClassVar[bool] = False
+    # ações do catálogo deste efeito (ver `EffectAction`); o corpo de cada uma é registrado em `pipeline.effect_actions`
+    actions: ClassVar[tuple[EffectAction, ...]] = ()
 
     @model_validator(mode="after")
     def _interval(self) -> EffectBase:
@@ -81,6 +98,12 @@ class EffectBase(BaseModel):
     def needs_measure(self) -> bool:
         """Se o efeito precisa do pico (e do nível médio) do sinal que entra nele antes de montar o filtro."""
         return False
+
+    def measure_kind(self) -> str:
+        """O que a passada de medida lê para este efeito: `peak` (o `astats` por canal, o de sempre), `lufs` (o loudness
+        integrado, pelo `ebur128`) ou `rms` (o nível RMS da mistura dos canais). Só vale quando `needs_measure()` é
+        verdadeiro; os efeitos que já existiam não declaram nada e ficam com a medida de pico."""
+        return "peak"
 
     def noise_profile(self) -> str | None:
         """A referência de perfil de ruído que o efeito pede (`auto` ou o nome de um perfil do projeto), ou None quando

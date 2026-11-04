@@ -36,8 +36,8 @@ from ..filtergraph.audio_effects import (
     Stage,
     apply_sample_effect,
     ingress_line,
-    measure_lines,
-    parse_astats,
+    level_measure_lines,
+    parse_level_measure,
     span_samples,
     split_stages,
     stage_lines,
@@ -252,7 +252,7 @@ class EffectProcessor:
             inputs = Inputs()
             inputs.add(entering, *STAGE_CODEC)
             ingress = "[0:a]anull[fx_in]"
-        measures = self._measures(inputs, ingress, stage, duration)
+        measures = self._measures(inputs, ingress, stage, duration, item.stream if entering is None else 0)
         lines = [ingress, *stage_lines("[fx_in]", "[fx_out]", stage.effects, duration, measures)]
         target.parent.mkdir(parents=True, exist_ok=True)
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_out]"]
@@ -282,9 +282,12 @@ class EffectProcessor:
         result = apply_sample_effect(SampleRequest(effect, entering_samples, SAMPLE_RATE, measure))
         np.asarray(result, dtype="<f4").tofile(target)
 
-    def _measures(self, inputs: Inputs, ingress: str, stage: Stage, duration: float) -> dict[int, Measure]:
+    def _measures(
+        self, inputs: Inputs, ingress: str, stage: Stage, duration: float, item_stream: int = 0
+    ) -> dict[int, Measure]:
         """A medida do sinal que entra em cada efeito do trecho que a pede: uma passada de análise até aquele ponto do
-        trecho. Os efeitos anteriores já entram com as próprias medidas, na ordem."""
+        trecho. Os efeitos anteriores já entram com as próprias medidas, na ordem. O que se mede (pico, LUFS ou RMS) é
+        o `measure_kind()` do efeito; `item_stream` é a faixa do arquivo que o item usa, que diz se ele é mono."""
         measures: dict[int, Measure] = {}
         for index, effect in stage.effects:
             if not effect.needs_measure():
@@ -295,9 +298,11 @@ class EffectProcessor:
                 reaching = earlier.output_duration(reaching)
             lines = [ingress]
             lines += stage_lines("[fx_in]", "[fx_pre]", before, duration, measures)
-            lines += measure_lines("[fx_pre]", "[fx_meas]", span_samples(effect, reaching))
+            kind = effect.measure_kind()
+            lines += level_measure_lines(kind, "[fx_pre]", "[fx_meas]", span_samples(effect, reaching))
             args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_meas]", "-f", "null", "-"]
-            measure = parse_astats(self.runner.capture(args, label="medida do efeito de áudio"))
+            report = self.runner.capture(args, label="medida do efeito de áudio")
+            measure = parse_level_measure(kind, report, item_stream)
             if measure is not None:
                 measures[index] = measure
         return measures

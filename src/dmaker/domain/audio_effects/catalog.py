@@ -32,6 +32,18 @@ class ParamInfo:
 
 
 @dataclass(frozen=True)
+class ActionInfo:
+    """Uma ação do efeito (`EffectAction`) como o catálogo a mostra: a interface a desenha como um botão que preenche os
+    campos de `fills`; o MCP e a CLI a chamam pelo `id`."""
+
+    id: str
+    label: str
+    hint: str
+    fills: tuple[str, ...]
+    needs_range: bool
+
+
+@dataclass(frozen=True)
 class EffectInfo:
     """Um efeito do catálogo: o `type` da spec, os nomes (português e Audacity), o que faz e os parâmetros."""
 
@@ -45,6 +57,8 @@ class EffectInfo:
     needs_selection: bool = False
     # trabalha sobre as amostras (Redução de ruído, Reparar): não vale no áudio mestre, que roda num grafo ao vivo
     sample_stage: bool = False
+    # o que o efeito sabe fazer além de ser aplicado (o Noise Gate sugere o limiar a partir do ruído)
+    actions: tuple[ActionInfo, ...] = ()
 
     def to_dict(self) -> dict:
         return _plain(asdict(self))
@@ -113,6 +127,10 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         parameters=tuple(param_info(name, cls) for name in own),
         needs_selection=cls.needs_selection,
         sample_stage=cls.sample_stage,
+        actions=tuple(
+            ActionInfo(action.id, action.label, action.hint, action.fills, action.needs_range)
+            for action in cls.actions
+        ),
     )
 
 
@@ -136,17 +154,21 @@ EFFECT_TARGETS: tuple[dict[str, Any], ...] = (
 
 def catalog_payload(effect_type_name: str | None = None) -> dict[str, Any]:
     """O catálogo como a API, o MCP e a CLI o entregam: os efeitos (todos, ou só o de `effect_type_name`), os
-    campos comuns a todo efeito e os lugares onde a cadeia pode ficar. Um nome que não existe é erro."""
+    campos comuns a todo efeito, os lugares onde a cadeia pode ficar e as predefinições (cadeias prontas que a ação
+    `preset` põe no item). Um nome que não existe é erro."""
     effects = catalog()
     if effect_type_name is not None:
         effects = [info for info in effects if info.type == effect_type_name]
         if not effects:
             known = ", ".join(sorted(EFFECT_CLASSES))
             raise ValueError(f"Efeito de áudio desconhecido: {effect_type_name!r}. Use um de: {known}")
+    from .presets import preset_catalog
+
     return {
         "effects": [info.to_dict() for info in effects],
         "common": [_plain(asdict(info)) for info in common_parameters()],
         "targets": [dict(target) for target in EFFECT_TARGETS],
+        "presets": preset_catalog(),
     }
 
 

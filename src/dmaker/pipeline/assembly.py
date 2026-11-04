@@ -13,7 +13,7 @@ from ..config import FONTS_DIR
 from ..domain.audio_effects import active_effects
 from ..domain.spec import Transition
 from ..filtergraph.audio import AudioTaps, StemTaps, audio_graph, loudnorm_measure_graph, silent_base
-from ..filtergraph.audio_effects import Measure, measure_lines, parse_astats, span_samples
+from ..filtergraph.audio_effects import Measure, level_measure_lines, parse_level_measure, span_samples
 from ..filtergraph.audiogram import audiogram_graph, normalization_gain_db
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
@@ -254,9 +254,11 @@ class MasterEffectMeter:
             voice_files=voice_files,
             master_upto=index,
         )
-        lines += measure_lines(aout, "[mmeas]", span_samples(ctx.project.audio.master_effects[index], total))
+        effect = ctx.project.audio.master_effects[index]
+        kind = effect.measure_kind()
+        lines += level_measure_lines(kind, aout, "[mmeas]", span_samples(effect, total))
         args = [*graph_args(ctx, inputs, lines, "master_effect.txt"), "-map", "[mmeas]", "-f", "null", "-"]
-        return parse_astats(ctx.runner.capture(args, label="medida do efeito do master"))
+        return parse_level_measure(kind, ctx.runner.capture(args, label="medida do efeito do master"))
 
 
 def plan_master_effects(
