@@ -174,7 +174,8 @@ class NoiseGate(EffectBase):
         -40.0,
         label="Limiar",
         unit="dB",
-        hint="Abaixo deste nível o gate fecha. Ponha uns 6 dB acima do ruído (Analisar ruído sugere o valor).",
+        hint="Abaixo deste nível de pico o gate fecha. O pico do chiado fica uns 11 dB acima do RMS dele: ponha uns "
+        "6 dB acima do pico do ruído (Analisar ruído sugere o valor).",
         ge=-96.0,
         le=-6.0,
     )

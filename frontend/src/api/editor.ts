@@ -2,6 +2,7 @@
    forma de onda, sincronização, conferência do vídeo e layouts de tela (rotas de ui/server.py que a
    interface clássica já usava). Ler o projeto, validar, renderizar e exportar continuam em `api.projects`. */
 import { http, withQuery } from './http'
+import type { AudioEffectActionResponse, AudioItemLevel } from './types/audioEffects'
 import type {
   BoxLayout,
   CaptionCue,
@@ -10,6 +11,7 @@ import type {
   CardPreviewParams,
   EditOperation,
   EditResponse,
+  EffectActionRequest,
   EffectCompareRequest,
   EffectCompareResponse,
   InstantFrame,
@@ -74,6 +76,12 @@ export const editorApi = {
   /** Um trecho de um item de áudio com um efeito da cadeia desligado e ligado, para ouvir a diferença sem gravar. */
   effectCompare: (name: string, spec: SpecDocument, body: EffectCompareRequest) =>
     http.post<EffectCompareResponse>(`${project(name)}/effect-compare`, { spec, ...body }),
+  /** Roda uma ação de um efeito (o Analisar ruído do Noise Gate) sobre a spec na tela: só lê e sugere valores. */
+  effectAction: (name: string, spec: SpecDocument, body: EffectActionRequest) =>
+    http.post<AudioEffectActionResponse>(`${project(name)}/audio-effect-action`, { spec, ...body }),
+  /** RMS, pico e LUFS integrado de um item como ele soa, com os efeitos da spec na tela. */
+  audioLevel: (name: string, spec: SpecDocument, target: string) =>
+    http.post<AudioItemLevel>(`${project(name)}/audio-level`, { spec, target }),
   previewAudio: {
     /** Pede a mixagem de áudio da prévia (a mesma do render, num arquivo leve) para a edição dada; já pronta no
      * cache volta com a URL, senão começa em segundo plano. Sem `spec`, vale a do arquivo do projeto. */

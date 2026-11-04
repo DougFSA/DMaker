@@ -4,7 +4,7 @@ prévia e o vídeo final nunca discordarem sobre o que toca em cada instante. Pu
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +23,11 @@ def source_covers(source: Source, segment: ClipSegment, shift: float = 0.0) -> b
 
 
 def track_slice(
-    track: AudioTrack, source: Source, segment: ClipSegment, processed: Path | None = None
+    track: AudioTrack,
+    source: Source,
+    segment: ClipSegment,
+    processed: Path | None = None,
+    duck: tuple = (),
 ) -> TrackSlice | None:
     """Fatia da faixa alinhada ao início do trecho (tempo da sessão -> tempo no arquivo da faixa), ou
     None quando o arquivo não grava nenhum instante do trecho: um gravador em vários arquivos (câmera
@@ -34,8 +38,8 @@ def track_slice(
         return None
     in_point = source.in_point(segment.start) - shift
     if processed is not None:
-        return TrackSlice(processed, in_point, track.volume, 0, track.pan)
-    return TrackSlice(source.path, in_point, track.volume, source.audio_stream, track.pan)
+        return TrackSlice(processed, in_point, track.volume, 0, track.pan, duck)
+    return TrackSlice(source.path, in_point, track.volume, source.audio_stream, track.pan, duck)
 
 
 def track_slices(
@@ -43,12 +47,17 @@ def track_slices(
     session: Mapping[str, Source],
     segment: ClipSegment,
     processed: Sequence[Path | None] = (),
+    ducks: Callable[[int], tuple] | None = None,
 ) -> tuple[TrackSlice, ...]:
     """Fatias de todas as faixas externas que soam no trecho, na ordem das faixas da spec. `processed` traz, por
     faixa, o arquivo já com efeitos (ver `pipeline.audio_effects.track_audio_overrides`); vazio, tudo sai da fonte."""
     found = (
         track_slice(
-            track, session[track.source], segment, processed[index] if index < len(processed) else None
+            track,
+            session[track.source],
+            segment,
+            processed[index] if index < len(processed) else None,
+            ducks(index) if ducks else (),
         )
         for index, track in enumerate(tracks)
     )

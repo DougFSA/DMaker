@@ -4,7 +4,7 @@
    catálogo do servidor. Cada ação (adicionar, remover, mover, ligar, mudar um valor) é um passo do desfazer. */
 import { computed, onMounted, ref } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
-import type { AudioEffectInfo } from '@/api'
+import type { AudioEffectInfo, AudioEffectPreset } from '@/api'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
@@ -46,6 +46,14 @@ const hidden = computed(() =>
 )
 const growableLabels = computed(() => catalog.targets.filter((target) => target.may_grow).map((target) => target.label))
 
+/** As predefinições que valem aqui: no master, as que têm um efeito de amostras (o Noise Gate) ficam de fora, porque ele
+ *  roda num grafo ao vivo; a mesma regra do servidor, que as recusa com o motivo. */
+const offeredPresets = computed(() =>
+  catalog.presets.filter((preset) =>
+    onItem.value ? true : preset.effects.every((effect) => catalog.infoOf(effect.type)?.sample_stage !== true),
+  ),
+)
+
 const menuOpen = ref(false)
 
 /** A cadeia em edição na hora da ação; as ações pedem antes a digitação que ainda espera, para ela não se perder. */
@@ -58,6 +66,14 @@ function act(change: (draft: Record<string, unknown>, listPath: string) => unkno
 
 function add(info: AudioEffectInfo): void {
   act((draft, listPath) => addEffectIn(draft, listPath, newEffect(info)))
+  menuOpen.value = false
+}
+
+/** Põe a cadeia pronta no fim da do item, cada efeito separado (e editável depois), num passo só do desfazer. */
+function addPreset(preset: AudioEffectPreset): void {
+  act((draft, listPath) => {
+    for (const effect of preset.effects) addEffectIn(draft, listPath, { ...effect })
+  })
   menuOpen.value = false
 }
 
@@ -122,6 +138,17 @@ function endDrag(): void {
               </li>
             </ul>
             <p v-else class="effects-menu__note">Nenhum efeito disponível.</p>
+            <div v-if="offeredPresets.length > 0" class="effects-menu__group" data-effects-presets>
+              <p class="effects-menu__heading">Predefinições</p>
+              <ul class="effects-menu__list">
+                <li v-for="preset in offeredPresets" :key="preset.id">
+                  <button type="button" class="effects-menu__item" :data-add-preset="preset.id" :title="preset.summary" @click="addPreset(preset)">
+                    <span class="effects-menu__name">{{ preset.label }}</span>
+                    <span class="effects-menu__audacity">{{ preset.summary }}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
             <p v-if="hidden.length > 0 && offered.length > 0" class="effects-menu__note" data-effects-hidden>
               {{ hidden.map((info) => info.label).join(', ') }}: só vale em {{ growableLabels.join(' e ').toLowerCase() }}.
             </p>
@@ -272,6 +299,20 @@ function endDrag(): void {
 .effects-menu__audacity {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.effects-menu__heading {
+  padding: var(--space-2) var(--space-3) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.effects-menu__group {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
 }
 
 .effects-menu__note {

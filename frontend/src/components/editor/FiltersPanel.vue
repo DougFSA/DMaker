@@ -25,7 +25,9 @@ import { displayLabel } from '@/lib/timeline'
 import { useCatalogStore } from '@/stores/catalog'
 import { useEditorStore } from '@/stores/editor'
 import AudioEffectsSection from './AudioEffectsSection.vue'
+import AudioLevelSection from './AudioLevelSection.vue'
 import AudioSpectrumSection from './AudioSpectrumSection.vue'
+import AutoDuckSection from './AutoDuckSection.vue'
 import FilterGroupCard from './FilterGroupCard.vue'
 
 interface GroupEntry {
@@ -167,7 +169,9 @@ const ready = computed(() => !!editor.spec)
       />
       <p v-if="shown.length === 0" class="filters__empty">Nenhum filtro aplicado. Use o botão Filtro para adicionar.</p>
       <AudioSpectrumSection />
+      <AudioLevelSection />
       <AudioEffectsSection />
+      <AutoDuckSection />
     </div>
   </AppCard>
 </template>

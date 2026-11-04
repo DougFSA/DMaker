@@ -250,6 +250,16 @@ export interface NoiseProfileReport {
   bands: Array<{ hz: number; db: number }>
 }
 
+/** Pedido de POST /api/projects/{nome}/audio-effect-action. */
+export interface EffectActionRequest {
+  effect: string
+  action: string
+  /** O item de onde sai o trecho (`audio.voiceover.0`). */
+  target: string
+  /** Um perfil de ruído do projeto, ou `auto` (o trecho mais quieto do item). */
+  profile?: string
+}
+
 /** Pedido de POST /api/projects/{nome}/effect-compare: um trecho do item com o efeito desligado e ligado. */
 export interface EffectCompareRequest {
   target: string

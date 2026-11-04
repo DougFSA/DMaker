@@ -12,6 +12,7 @@ from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
 from .audio_effects import Measure, chain_lines
 from .common import AUDIO_FMT_MIX, LOUDNORM_TRUE_PEAK_DB, Inputs
+from .duck import DuckCurve, curves_for, duck_chain, duck_streams
 from .mix import pan_filter
 from .sfx import SfxInput, sfx_streams
 
@@ -113,6 +114,7 @@ def audio_graph(
     master_upto: int | None = None,
     include_master: bool = True,
     stems: StemTaps | None = None,
+    duck_curves: Sequence[DuckCurve] = (),
 ) -> str:
     """Encadeia ganho de voz, música (ducking) e loudnorm sobre `cur_a`; devolve o rótulo final.
     `audio.master_effects` (a cadeia de efeitos do master) entra depois da mistura inteira e antes da
@@ -129,6 +131,8 @@ def audio_graph(
     `taps` pede cópias do barramento para o audiograma (ver `AudioTaps`); sem ele o grafo é o de sempre.
     `stems` pede uma cópia de cada trilha para a exportação por trilha (ver `StemTaps`); sem ele o grafo é o de
     sempre, linha por linha.
+    `duck_curves` são as curvas do Auto Duck (`audio.ducks`) que abaixam cada trilha (A1, NAR, VO, MUS, SFX); a da música
+    substitui o sidechain antigo, e sem curva nenhuma o grafo é o de sempre, linha por linha.
     `music_duration` é a duração da música, só necessária quando algum span usa `tail`."""
     a = cur_a
     if extra_voices:
@@ -143,10 +147,17 @@ def audio_graph(
     elif audio.voice_gain != 1:
         lines.append(f"{a}volume={audio.voice_gain:.3f}[a_gain]")
         a = "[a_gain]"
+    a = _duck_bus(lines, a, curves_for(duck_curves, "A1"), "a_duck")
     a = _stem_tap(lines, stems, "A1", a)
 
-    narration_labels = _stem_group(lines, stems, "NAR", narration_streams(lines, inputs, narrations))
-    voice_file_labels = _stem_group(lines, stems, "VO", voice_file_streams(lines, inputs, voice_files))
+    narration_labels = duck_streams(
+        lines, narration_streams(lines, inputs, narrations), curves_for(duck_curves, "NAR"), "nar_duck"
+    )
+    narration_labels = _stem_group(lines, stems, "NAR", narration_labels)
+    voice_file_labels = duck_streams(
+        lines, voice_file_streams(lines, inputs, voice_files), curves_for(duck_curves, "VO"), "vf_duck"
+    )
+    voice_file_labels = _stem_group(lines, stems, "VO", voice_file_labels)
     spoken = narration_labels + voice_file_labels
     if spoken:
         lines.append(
@@ -159,7 +170,12 @@ def audio_graph(
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
         mus = music_stream(lines, inputs, music, music_path, total, music_duration)
-        if music.ducking and (spoken or not audio.mute_clips):
+        music_curves = curves_for(duck_curves, "MUS")
+        if music_curves:
+            # a regra do Auto Duck para a música substitui o sidechain antigo: os dois não rodam juntos
+            mus = _stem_tap(lines, stems, "MUS", _duck_bus(lines, mus, music_curves, "mus_duck"))
+            lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
+        elif music.ducking and (spoken or not audio.mute_clips):
             lines.append(f"{a}asplit=2[voice][sc]")
             sidechain_compress(lines, mus, "[sc]", music)
             ducked = _stem_tap(lines, stems, "MUS", "[musd]")
@@ -171,7 +187,8 @@ def audio_graph(
             lines.append(f"{a}{mus}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]")
         a = "[amix]"
 
-    effects = _stem_group(lines, stems, "SFX", sfx_streams(lines, inputs, sfx))
+    effects = duck_streams(lines, sfx_streams(lines, inputs, sfx), curves_for(duck_curves, "SFX"), "sfx_duck")
+    effects = _stem_group(lines, stems, "SFX", effects)
     if effects:
         # sem normalizar (`normalize=0`): o nível de cada efeito já foi acertado contra a voz, e dividir por
         # N entradas o rebaixaria; `duration=first` corta o que passa do fim do vídeo
@@ -213,6 +230,15 @@ def sidechain_compress(lines: list[str], music_bus: str, sidechain: str, music: 
         f"[musp][scp]sidechaincompress=threshold={music.duck_threshold:.4f}:ratio={music.duck_ratio:g}"
         f":attack=20:release={music.duck_release:g}:makeup=1:level_sc=1[musd]"
     )
+
+
+def _duck_bus(lines: list[str], label: str, curves: Sequence[DuckCurve], name: str) -> str:
+    """Abaixa um barramento inteiro (o som dos clipes, a música) pelas curvas do Auto Duck; sem curva devolve o rótulo."""
+    chain = duck_chain(curves)
+    if not chain:
+        return label
+    lines.append(f"{label}{','.join(chain)}[{name}]")
+    return f"[{name}]"
 
 
 def _stem_tap(lines: list[str], stems: StemTaps | None, name: str, a: str) -> str:

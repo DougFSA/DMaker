@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ..domain.duck_edits import RULE_FIELDS, add_duck, remove_duck, set_duck
 from ..domain.edits import (
     EditError,
     duplicate_overlay,
@@ -130,6 +131,26 @@ def _op_audio_effect(project: Project, op: dict, layout: OriginAggregate) -> Pro
     return apply_effect_op(project, op)
 
 
+def _duck_fields(op: dict) -> dict:
+    return {name: op[name] for name in RULE_FIELDS if name in op}
+
+
+def _op_auto_duck_add(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    return add_duck(project, _duck_fields(op))
+
+
+def _op_auto_duck_set(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    if not isinstance(op.get("index"), int):
+        raise EditError("informe o `index` da regra de Auto Duck (0 é a primeira)")
+    return set_duck(project, op["index"], _duck_fields(op))
+
+
+def _op_auto_duck_remove(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    if not isinstance(op.get("index"), int):
+        raise EditError("informe o `index` da regra de Auto Duck (0 é a primeira)")
+    return remove_duck(project, op["index"])
+
+
 def _op_marker_add(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return add_marker(project, op)
 
@@ -158,6 +179,9 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     "overlay_duplicate": _op_overlay_duplicate,
     "set_field": _op_set_field,
     "audio_effect": _op_audio_effect,
+    "auto_duck_add": _op_auto_duck_add,
+    "auto_duck_set": _op_auto_duck_set,
+    "auto_duck_remove": _op_auto_duck_remove,
     "marker_add": _op_marker_add,
     "marker_set": _op_marker_set,
     "marker_remove": _op_marker_remove,

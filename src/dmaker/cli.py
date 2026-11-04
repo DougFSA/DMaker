@@ -3202,6 +3202,152 @@ def noise_profile_remove(
     _run_wave_edit(spec, {"type": "noise_profile_remove", "name": name}, f"Perfil {name} apagado.")
 
 
+@audio_effect_app.command("preset")
+def audio_effect_preset(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    preset: Annotated[str, typer.Argument(help="O id da predefinição (veja `dmaker audio effects`).")],
+    position: Annotated[int | None, typer.Option(help="Posição na cadeia (padrão: no fim).")] = None,
+) -> None:
+    """Põe no item uma cadeia pronta (por exemplo: audio effect preset spec.json audio.narration.0 podcast_voice). Cada
+    efeito entra separado, e a pessoa ajusta ou tira depois."""
+    op: dict = {"action": "preset", "target": target, "preset": preset}
+    if position is not None:
+        op["index"] = position
+    _apply_effect_op(spec, op)
+
+
+@audio_effect_app.command("action")
+def audio_effect_action_command(
+    spec: _EFFECT_SPEC,
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito (por exemplo noise_gate).")],
+    action: Annotated[str, typer.Argument(help="A ação do efeito (por exemplo analyze_noise).")],
+    target: Annotated[
+        str | None, typer.Option(help="O item de onde sai o trecho (por exemplo audio.voiceover.0).")
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(help="Um perfil de ruído do projeto, ou auto (o trecho mais quieto do item)."),
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Roda uma ação de um efeito e mostra o que ela sugere para os campos (o Analisar ruído do Noise Gate mede um trecho
+    sem fala e sugere o limiar). Só lê: para gravar o valor, use `dmaker audio effect set`."""
+    from .domain.edits import EditError
+    from .pipeline.effect_actions import run_effect_action
+
+    params = {"target": target, "profile": profile, "start": _instant_arg(start), "end": _instant_arg(end)}
+    try:
+        report = run_effect_action(
+            _load(spec), effect, action, {key: value for key, value in params.items() if value is not None}
+        )
+    except (EditError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    console.print(escape(report.get("message", "Pronto.")), highlight=False)
+    for name, value in report["fills"].items():
+        console.print(f"  {name} = {value}", highlight=False)
+
+
+duck_app = typer.Typer(
+    help="Auto Duck: abaixa uma trilha enquanto outra fala (a música sob a voz, o DJ sob o celebrante).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(duck_app, name="duck")
+
+_DUCK_OPTIONS = {
+    "amount_db": "Quanto o fundo abaixa, em dB (padrão -12).",
+    "threshold_db": "Nível RMS da chave a partir do qual ela conta como som (padrão -30).",
+    "max_pause": "Pausa da chave, em segundos, que ainda não deixa o fundo voltar (padrão 1).",
+    "outer_fade_down": "Descida antes da chave soar, em segundos (padrão 0,5).",
+    "inner_fade_down": "Descida dentro do trecho da chave (padrão 0).",
+    "inner_fade_up": "Subida dentro do trecho da chave (padrão 0).",
+    "outer_fade_up": "Subida depois da chave calar, em segundos (padrão 0,5).",
+}
+
+
+@duck_app.command("add")
+def duck_add(
+    spec: _EFFECT_SPEC,
+    background: Annotated[str, typer.Argument(help="A trilha que abaixa: A1, A2..., MUS, NAR, VO ou SFX.")],
+    key: Annotated[str, typer.Argument(help="A trilha que comanda: o fundo abaixa quando ela soa.")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--param", "-p", help="Ajuste da regra, nome=valor (amount_db, threshold_db, max_pause...)."
+        ),
+    ] = None,
+) -> None:
+    """Acrescenta uma regra (por exemplo: audio duck add spec.json MUS VO -p amount_db=-15). Uma regra para a música
+    substitui o ducking antigo dela; a faixa externa só abaixa sob outra faixa externa."""
+    _run_wave_edit(
+        spec,
+        {"type": "auto_duck_add", "background": background, "key": key, **_parse_effect_params(param)},
+        "Regra de Auto Duck acrescentada.",
+    )
+
+
+@duck_app.command("set")
+def duck_set(
+    spec: _EFFECT_SPEC,
+    index: Annotated[int, typer.Argument(help="A posição da regra (veja `dmaker audio duck list`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Ajuste da regra, nome=valor.")
+    ] = None,
+) -> None:
+    """Muda campos de uma regra (os que não forem citados ficam como estão)."""
+    _run_wave_edit(
+        spec,
+        {"type": "auto_duck_set", "index": index, **_parse_effect_params(param)},
+        "Regra de Auto Duck mudada.",
+    )
+
+
+@duck_app.command("remove")
+def duck_remove(
+    spec: _EFFECT_SPEC, index: Annotated[int, typer.Argument(help="A posição da regra.")]
+) -> None:
+    """Tira uma regra de Auto Duck."""
+    _run_wave_edit(spec, {"type": "auto_duck_remove", "index": index}, "Regra de Auto Duck removida.")
+
+
+@duck_app.command("list")
+def duck_list(spec: _EFFECT_SPEC) -> None:
+    """Lista as regras de Auto Duck do projeto."""
+    project = _load(spec)
+    rules = project.audio.ducks
+    music = project.audio.music
+    if not rules:
+        legacy = "ligado" if music is not None and music.ducking else "desligado"
+        console.print(
+            f"O projeto não tem regra de Auto Duck (o ducking antigo da música está {legacy}). "
+            "Crie com `dmaker audio duck add`."
+        )
+        return
+    table = Table("#", "Abaixa", "Sob", "Quantidade (dB)", "Limiar (dB)", "Pausa (s)", "Rampas (s)")
+    for position, rule in enumerate(rules):
+        ramps = (
+            f"{rule.outer_fade_down:g}/{rule.inner_fade_down:g}/{rule.inner_fade_up:g}/{rule.outer_fade_up:g}"
+        )
+        table.add_row(
+            str(position),
+            rule.background,
+            rule.key,
+            f"{rule.amount_db:g}",
+            f"{rule.threshold_db:g}",
+            f"{rule.max_pause:g}",
+            ramps,
+        )
+    console.print(table)
+    console.print("Rampas: descida de fora / de dentro, subida de dentro / de fora.")
+    if any(rule.is_music_rule for rule in rules):
+        console.print("A regra da música substitui o ducking antigo (`music.ducking`).")
+
+
 @audio_app.command("silence")
 def audio_silence_command(
     spec: _WAVE_SPEC,
