@@ -2,7 +2,7 @@
    desenho bater com o som), o que o item da vista diz dos fades dele, para onde o arrasto leva a duração e a operação
    que o gesto solto vira. O arrasto grava ao soltar; durante ele só o desenho muda. */
 import type { EditOperation, TimelineItem } from '@/api'
-import { roundSeconds } from './timeline'
+import { roundSeconds, snapTime } from './timeline'
 
 export const FADE_CURVES = ['linear', 'logarithmic', 'exponential', 'sine', 'quadratic'] as const
 export type FadeCurve = (typeof FADE_CURVES)[number]
@@ -95,6 +95,24 @@ export function draggedFadeDuration(pointerSeconds: number, lengthSeconds: numbe
   const inside = Math.min(Math.max(pointerSeconds, 0), lengthSeconds)
   if (inside < MIN_FADE_SECONDS) return 0
   return roundSeconds(inside * speed)
+}
+
+/**
+ * Encaixa a ponta do fade (onde a rampa acaba) no ponto de `points` mais perto, dentro da tolerância. `edgeSeconds` é a
+ * borda do item na linha do tempo e `pointerSeconds` a distância dela ao ponteiro, para dentro; devolve a distância
+ * (a mesma convenção) que põe a ponta exatamente no ponto. Sem pontos ou com a tolerância zero, devolve a distância como veio.
+ */
+export function snapFadeSeconds(
+  side: FadeSide,
+  edgeSeconds: number,
+  pointerSeconds: number,
+  points: readonly number[],
+  toleranceSeconds: number,
+): number {
+  if (toleranceSeconds <= 0 || points.length === 0) return pointerSeconds
+  const tip = side === 'in' ? edgeSeconds + pointerSeconds : edgeSeconds - pointerSeconds
+  const snapped = snapTime(tip, points, toleranceSeconds)
+  return side === 'in' ? snapped - edgeSeconds : edgeSeconds - snapped
 }
 
 /** A operação que o gesto solto vira: grava o fade da borda com a duração nova (0 tira) e mantém a curva que ele já tinha. */

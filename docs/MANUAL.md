@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 57 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 58 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -90,6 +90,7 @@ São 57 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta](#tratar-vários-áudios-com-uma-macro-salvar-aplicar-a-um-item-e-a-uma-pasta) | Guarda uma cadeia de efeitos com nome (uma macro), põe a macro num item e a aplica a uma pasta de arquivos de áudio, num trabalho em segundo plano que retoma de onde parou. | ainda não: `audio_effect_presets`, `apply_macro` |
 | [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
 | [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
+| [Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado](#pôr-a-música-no-andamento-do-projeto-bpm-compasso-régua-em-compassos-e-loop-esticado) | Dá um andamento ao projeto (BPM e compasso), mostra a régua em compassos, encaixa os cortes nos tempos, detecta o BPM de uma música ou loop e a estica, sem mudar o tom, para casar com a grade. | ainda não: `audio_tempo`, `cut_on_beat` |
 | [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](#gerar-sons-tom-ruído-tons-de-discagem-metrônomo-e-bipe-de-censura) | Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la. | ainda não: `audio_generators`, `audio_generate` |
 | [Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem](#gravar-do-microfone-narração-punch-in-hora-marcada-ativada-por-som-e-clonagem) | Grava a voz pelo microfone direto numa trilha de voz gravada, sobre o vídeo e com a latência compensada, regrava um trecho sem perder o antigo, grava numa hora marcada ou só quando há som, recupera a gravação de uma aba que fechou e grava os 15 s de referência para clonar uma voz. | ainda não: `audio_recordings` |
 
@@ -2711,6 +2712,13 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Transport > Sound Activated Recording | **Gravar só quando há som**: limiar em dB (-40) e tempo de espera (1,5 s). Pausa nos silêncios maiores que a espera, volta quando o som passa do limiar e guarda 300 ms de antes da fala; o arquivo final não tem os silêncios entre as falas | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 | Automatic Crash Recovery (recuperar a gravação da aba que fechou) | O que chegou ao servidor está salvo. Ao abrir o projeto o painel Áudio avisa **Uma gravação ficou aberta** e oferece **Recuperar** (finaliza com o que chegou e põe como voz nova) ou **Descartar**; pela IA e pela CLI, `audio_recordings` e `dmaker audio recordings recover` | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 | Gravar a referência de uma voz para clonar | Aba **Gravar para clonar uma voz** da janela de gravação: 15 s lendo a folha de gravação na tela, e o WAV vai direto para a clonagem (`/api/voices/clone`), sem arquivo no meio, com o texto da folha como transcrição | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| Project Tempo and Time Signature (andamento e compasso do projeto) | `audio.tempo`: `{"bpm": 120, "time_signature": "4/4", "offset": 0}` (`tempo_set` do `edit_project`, `dmaker audio tempo set`, e a seção **Andamento do projeto** do bloco Áudio). `offset` é o segundo em que cai o tempo 1. Sem o campo, o projeto não tem grade e tudo segue como era | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Ruler > Beats and Measures (régua em compassos) | O botão **Régua: segundos / Régua: compassos** da barra da linha do tempo troca a régua da linha do tempo e a do painel Áudio. Em compassos ela escreve `9` no início do compasso 9 e `9.3` no terceiro tempo (o tempo só aparece quando cabe). A escolha fica no navegador e, sem andamento, o botão fica desligado | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Snap > Bar / Beat (encaixe nos tempos) | Com o **Snap** ligado e o andamento definido, arrastar a borda de um item, um corte, um marcador, a alça de fade ou o cursor da régua faz o valor cair exatamente no tempo mais perto (a 8 px dele; com o zoom afastado só nos compassos, e mais afastado ainda nada atrai). Os tempos são alvos do mesmo encaixe das bordas dos itens. No painel Áudio vale para a seleção e o cursor | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Editar num compasso ou tempo exato | `beat:<n>` e `bar:<n>` (contados a partir de 1) valem onde `marker:<texto>` vale (`at` do `split`, `start`/`end` das edições de áudio, `generated_add`, `overlay_span`, a exportação de uma seleção): com 120 BPM em 4/4, `bar:9` é 16 s. Sem `audio.tempo` a referência é recusada dizendo como definir o andamento | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Detectar o BPM de um loop (Beat Finder, BPM) | **Detectar BPM** no bloco da música, `audio_tempo` com `action: "detect"` e `dmaker audio tempo detect` medem o andamento e o primeiro tempo do arquivo (autocorrelação dos ataques) e preenchem `audio.music.bpm` e `beat_offset`, editáveis. Numa Faixa de Ritmo gerada a 90, 120 e 128 BPM o valor sai com menos de 1 BPM de erro; com `--apply` a gravação entra no histórico | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Clip Stretch (esticar o loop para o andamento do projeto) | `audio.music.stretch_to_tempo: true` com o `bpm` da música: o DMaker põe na frente da cadeia da música um Mudar Andamento derivado (de `music.bpm` para `tempo.bpm`, sem mudar o tom) que não vira efeito seu e acompanha o andamento do projeto. O primeiro tempo da música entra num tempo da grade (a entrada atrasa até lá) e o loop repete em tempos inteiros, com um fade de 3 ms na emenda quando o arquivo esticado não fecha um número inteiro de tempos. Um loop de 100 BPM num projeto de 120 BPM dura 100/120 do que durava e as batidas caem na grade a menos de 15 ms | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Cortar o vídeo na batida pela grade | `cut_on_beat` com `source: "grid"` (`dmaker audio analyze cut-on-beat --source grid`) puxa cada corte entre clipes para o tempo mais perto do andamento do projeto (ou o início de compasso, com `params: {"level": "bar"}`), em vez das batidas medidas na música | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -3769,7 +3777,7 @@ dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --tolerance 0.
 dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --apply
 ```
 
-`--group` usa as batidas de um grupo de marcadores que já existe, no lugar da análise.
+`--group` usa as batidas de um grupo de marcadores que já existe, no lugar da análise. `--source grid` usa os tempos do andamento do projeto (`audio.tempo`) no lugar das batidas medidas: o corte cai exatamente na grade (ver "Pôr a música no andamento do projeto").
 
 #### Como conferir
 
@@ -3780,6 +3788,76 @@ Numa faixa de 120 BPM há uma batida a cada 0,5 s (±20 ms). Depois de `--apply`
 - **"nenhuma batida a menos de ... s"**: aumente a `tolerance` ou baixe o limiar do Achar Batidas (`threshold_percent`).
 - **"há uma transição entre os trechos"**: troque a transição por corte seco para essa fronteira andar.
 - **"um trecho só"**: o cortar no ritmo precisa de pelo menos dois clipes.
+
+---
+
+### Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado
+<!-- tarefa: musica-no-andamento -->
+Dá um andamento ao projeto (BPM e compasso), mostra a régua em compassos, encaixa os cortes nos tempos, detecta o BPM de uma música ou loop e a estica, sem mudar o tom, para casar com a grade.
+
+#### Quando usar
+
+Você monta a trilha de um reel a partir de loops, ou quer cortar o vídeo na batida. Com o **andamento do projeto** (`audio.tempo`) a régua mostra compassos, o Snap atrai para os tempos e o agente escreve `bar:9` no lugar de contar segundos. Com o **BPM da música** (`audio.music.bpm`) ela é esticada até o andamento do projeto. Sem `audio.tempo` nada disso existe e o projeto segue como sempre.
+
+**Pedidos que levam a esta tarefa:**
+- "Define o andamento do projeto em 120 BPM"
+- "Qual é o BPM dessa música?"
+- "Estica esse loop de 100 BPM para o andamento do projeto"
+
+#### Antes de começar
+
+- Uma música no projeto (`audio.music`), de preferência um loop que começa no primeiro tempo.
+- Para esticar é preciso o BPM da música: detecte-o ou informe-o. A razão entre o andamento do projeto e o da música fica entre 0,1 e 10; perto de 1 o som é melhor.
+
+#### Pela IA
+
+Diga: "Define o andamento em 120 BPM, detecta o BPM da música e estica ela para o projeto." A IA define o andamento (`tempo_set`), roda `audio_tempo` com `action: "detect"` e, com o seu sim (`apply: true`), grava o BPM e o primeiro tempo; depois liga o esticamento (`music_tempo_set`). Para cortar num compasso ela escreve `at: "bar:9"`. Sem andamento ela é recusada.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "reel-musical", "op": {"type": "tempo_set", "bpm": 120, "time_signature": "4/4", "offset": 0}}, "para": "dar ao projeto o andamento de 120 BPM em 4/4, com o tempo 1 em 0 s"},
+  {"tool": "audio_tempo", "arguments": {"name": "reel-musical", "action": "detect", "apply": true}, "para": "medir o BPM e o primeiro tempo da música e gravá-los"},
+  {"tool": "edit_project", "arguments": {"name": "reel-musical", "op": {"type": "music_tempo_set", "stretch_to_tempo": true}}, "para": "esticar a música até o andamento do projeto, sem mudar o tom"},
+  {"tool": "audio_tempo", "arguments": {"name": "reel-musical", "action": "grid", "level": "bar", "start": 0, "end": 20}, "para": "listar os inícios de compasso"},
+  {"tool": "edit_project", "arguments": {"name": "reel-musical", "op": {"type": "split", "index": 0, "at": "bar:3"}}, "para": "cortar o primeiro trecho exatamente no compasso 3"},
+  {"tool": "cut_on_beat", "arguments": {"name": "reel-musical", "source": "grid", "tolerance": 0.2}, "para": "propor o corte de cada fronteira no tempo mais perto da grade"}
+]
+```
+
+#### Pela interface
+
+1. No bloco **Áudio** do painel Propriedades, em **Andamento do projeto**, marque **Definir o andamento (BPM e compasso)** e ajuste BPM, compasso (4/4, 3/4, 6/8...) e onde cai o tempo 1.
+2. Na barra da linha do tempo, **Régua: segundos** vira **Régua: compassos** (e volta). O painel Áudio usa a mesma escolha, que fica no navegador. Sem andamento o botão fica desligado.
+3. Com o **Snap** ligado, a borda de um item, um corte, um marcador, a alça de fade e o cursor caem exatamente no tempo mais perto. Com o zoom afastado só os compassos atraem, e mais afastado ainda nada atrai.
+4. Em **Usar música de fundo**, **Detectar BPM** preenche **Andamento da música (BPM)** e **Primeiro tempo no arquivo (s)**, editáveis; se você ouve outro tempo, os botões com a metade e o dobro trocam o BPM.
+5. Marque **Esticar para o andamento do projeto**.
+
+#### Pela CLI
+
+```powershell
+dmaker audio tempo set projects\reel-musical\spec.json --bpm 120 --time-signature 4/4
+dmaker audio tempo detect projects\reel-musical\spec.json --apply
+dmaker audio tempo music projects\reel-musical\spec.json --stretch
+dmaker audio tempo grid projects\reel-musical\spec.json --level bar
+dmaker audio analyze cut-on-beat projects\reel-musical\spec.json --source grid
+```
+
+`dmaker audio tempo show` mostra o andamento do projeto e o da música, `clear` tira o do projeto e `music --bpm 100 --beat-offset 0.12` informa à mão o que a detecção mediria. Tudo entra no histórico (`dmaker undo`).
+
+#### Como conferir
+
+- Um loop de 100 BPM num projeto de 120 BPM dura 100/120 do que durava, o tom não muda (440 Hz continua 440 Hz) e as batidas caem a cada 0,5 s a menos de 15 ms da grade.
+- Numa Faixa de Ritmo gerada a 90, 120 e 128 BPM a detecção erra menos de 1 BPM.
+
+#### Se der errado
+
+- **"precisa do andamento do projeto (audio.tempo)"**: defina o andamento com `tempo_set` antes de usar `beat:<n>`, `bar:<n>` ou `--source grid`.
+- **"stretch_to_tempo precisa do andamento da música"**: detecte ou informe o `bpm` da música antes.
+- **Confiança baixa**: o ritmo é irregular; informe o BPM de ouvido. Acima de uns 155 BPM a detecção prefere a metade (87 em vez de 174) e traz a outra leitura.
+- **"fora do que o esticamento aceita"**: o BPM da música deve estar pela metade ou pelo dobro.
+- **A música entra um pouco depois do começo**: é o atraso (menos de um tempo) que põe o primeiro tempo dela na grade. Acerte o `beat_offset`.
 
 ---
 
@@ -4278,6 +4356,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-66 | Macros de áudio: a cadeia de efeitos com nome, para repetir. Quatro embutidas (**Limpar narração**, **Limpar gravação de celular**, **MP3 para o padrão** e **Fade nas pontas**) e as suas, uma por arquivo em `assets/macros` (globais) ou `assets/brands/<marca>/macros` (da marca); o **Salvar a cadeia como macro** do bloco de efeitos guarda a cadeia de um item, e o menu **+ Efeito** (grupo **Predefinições e macros**) põe uma macro num item. `apply_macro` e `dmaker audio macro run` aplicam a macro a uma pasta de arquivos de áudio, no formato escolhido, num trabalho em segundo plano que retoma de onde parou (`--resume`); as predefinições do `effect-presets.json` viraram macros e o arquivo ganhou o nome `.importado` | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
 | DMK-58 | Sons gerados: os nove geradores do Audacity (Tom em quatro ondas, Chirp linear ou log, Ruído branco, rosa e marrom, Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de Ritmo e Importar Amostras) em `audio.generated`, na trilha **SFX** da linha do tempo (arrastar muda o início e a duração, com efeitos, mudo, solo, ganho e Auto Duck), ou soltos num WAV com `dmaker audio generate` e `audio_generate`; o bipe de censura (`censor_beep`, `dmaker audio censor`, **Bipar a seleção** no painel Áudio) silencia a palavra achada pelo Whisper local e põe um Tom de 1 kHz no mesmo intervalo, num passo do desfazer | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 | DMK-65 | Gravar do microfone: a janela **Gravar** (botão no painel Áudio e **Gravar narração** na linha do tempo) capta o som cru, sem eco, ruído ou ganho automático, e manda um pedaço de um segundo por vez para `projects/<nome>/recordings`, então a aba que fecha no meio não perde o que já chegou (**Recuperar** ou **Descartar** ao abrir o projeto); medidor com clipping e monitoramento; gravar sobre o vídeo com a latência compensada e calibrada; punch-in que guarda o trecho antigo como take (`VoiceoverClip.takes`, `audio_punch`, `voiceover_take_set`); gravação com hora marcada e ativada por som; e o atalho de 15 s que clona a voz direto na biblioteca. `audio_recordings` no MCP e `dmaker audio recordings|punch|take` na CLI | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
+| DMK-67 | Música no andamento: `audio.tempo` (BPM, compasso e onde cai o tempo 1) dá ao projeto uma grade de tempos e compassos; a régua da linha do tempo e do painel Áudio alterna entre segundos e compassos (`9`, `9.3`), o **Snap** da linha do tempo e do painel Áudio atrai também para os tempos (bordas, cortes, marcadores, alça de fade e cursor), e `beat:<n>` e `bar:<n>` valem onde `marker:<texto>` vale. **Detectar BPM** (`audio_tempo`, `dmaker audio tempo detect`, a rota `audio-tempo/detect`) mede o andamento e o primeiro tempo do arquivo da música (autocorrelação dos ataques, que também corrige o BPM do Achar Batidas); `audio.music.stretch_to_tempo` estica a música até o andamento do projeto, sem mudar o tom e com o loop em tempos inteiros; e `cut_on_beat` ganha a fonte `grid`. Sem `audio.tempo` o projeto se comporta como antes | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -4291,7 +4370,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 142 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 148 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -4552,7 +4631,7 @@ Analisar o áudio sem mudar o som: Contraste, Achar Clipping, Medir RMS, Espectr
 - **`dmaker audio analyze catalog [ANALYZER]`**: Lista os analisadores de áudio: o nome em português e no Audacity, o que fazem e os parâmetros.
   - `--json`: Saída em JSON, como a ferramenta MCP.
 - **`dmaker audio analyze cut-on-beat SPEC`**: Propõe (ou, com --apply, aplica) o corte de cada fronteira entre clipes na batida da música mais perto.
-  - `--source` TEXTO: De onde vêm as batidas (padrão: a música). (padrão audio.music)
+  - `--source` TEXTO: De onde vêm as batidas: a música (padrão, audio.music) ou grid, os tempos do andamento do projeto. (padrão audio.music)
   - `--tolerance` NÚMERO: Quanto, em segundos, um corte pode andar para cair numa batida. (padrão 0.2)
   - `--apply`: Anda os cortes (por padrão só propõe e mostra a lista).
   - `--group` TEXTO: Usa as batidas de um grupo de marcadores que já existe, no lugar da análise.
@@ -4692,6 +4771,30 @@ Gravações do microfone no projeto: as que a aba deixou abertas, recuperar e p�
 - **`dmaker audio recordings recover SPEC`**: Finaliza uma gravação com o que chegou ao disco e a põe na linha do tempo (um passo do `dmaker undo`).
   - `--id` TEXTO: A gravação (padrão: a única que está aberta).
   - `--punch`: Aplica como punch-in, se a gravação abriu para regravar um trecho.
+
+#### dmaker audio tempo
+
+Andamento do projeto (BPM e compasso) e da música: a grade, a detecção do BPM e a música esticada até ela.
+
+- **`dmaker audio tempo clear SPEC`**: Tira o andamento do projeto (a régua em compassos e as referências beat:/bar: deixam de existir).
+- **`dmaker audio tempo detect SPEC`**: Sugere o BPM e o primeiro tempo do arquivo da música (e, com --apply, os grava num passo do histórico).
+  - `--apply`: Grava o BPM e o primeiro tempo na música (por padrão só sugere).
+  - `--json`: Saída em JSON.
+- **`dmaker audio tempo grid SPEC`**: Lista os instantes da grade do andamento do projeto.
+  - `--start` NÚMERO: Do instante (s). (padrão 0.0)
+  - `--end` NÚMERO: Até o instante (s); padrão: o fim do vídeo.
+  - `--level` TEXTO: beat (cada tempo) ou bar (cada início de compasso). (padrão beat)
+  - `--json`: Saída em JSON.
+- **`dmaker audio tempo music SPEC`**: Define o andamento da música e se ela é esticada até o do projeto.
+  - `--bpm` NÚMERO: O andamento da música, em batidas por minuto.
+  - `--beat-offset` NÚMERO: Onde cai o primeiro tempo dentro do arquivo (s).
+  - `--stretch` / `--no-stretch`: Estica a música, sem mudar o tom, até o andamento do projeto.
+- **`dmaker audio tempo set SPEC`**: Define o andamento do projeto (ou muda só os campos dados). Com ele valem `beat:<n>` e `bar:<n>` onde vale `marker:<texto>`, a régua em compassos e o encaixe da interface.
+  - `--bpm` NÚMERO: Batidas por minuto (de 20 a 400).
+  - `--time-signature` TEXTO: Fórmula de compasso: 4/4, 3/4, 6/8...
+  - `--offset` TEXTO: Onde cai o tempo 1, em segundos do vídeo final (ou marker:<texto>).
+- **`dmaker audio tempo show SPEC`**: Mostra o andamento do projeto e o da música.
+  - `--json`: Saída em JSON.
 
 #### dmaker batch
 
@@ -4989,7 +5092,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 85 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 86 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -5083,6 +5186,8 @@ São 85 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name`\* (texto), `analyzer`\* (texto), `target` (texto), `file` (texto), `start` (número ou texto), `end` (número ou texto), `params` (objeto), `mark` (sim ou não), `group` (texto), `out` (texto).
 - **`cut_on_beat`**: Cortar no ritmo: para cada fronteira entre dois clipes, acha a batida da música mais perto (dentro de `tolerance` segundos) e diz quanto o corte andaria.
   Parâmetros: `name`\* (texto), `source` (texto, padrão audio.music), `tolerance` (número, padrão 0.2), `apply` (sim ou não, padrão não), `group` (texto), `params` (objeto).
+- **`audio_tempo`**: O andamento (BPM) do projeto e da música.
+  Parâmetros: `name`\* (texto), `action` (texto, padrão show), `apply` (sim ou não, padrão não), `start` (número), `end` (número), `level` (texto, padrão beat).
 - **`job_status`**: Situação de um render em segundo plano (running | done | error | cancelled) e o resultado quando pronto.
   Parâmetros: `job_id`\* (texto).
 - **`list_jobs`**: Jobs de render desta sessão e, se a interface estiver aberta, os dela também.
@@ -5168,7 +5273,7 @@ São 85 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 83 blocos e 673 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 84 blocos e 680 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -5280,6 +5385,7 @@ Usado em `Project.audio`.
 | `noise_profiles` | mapa de `NoiseProfile` | vazio |  |
 | `ducks` | lista de `AutoDuck` | vazio |  |
 | `generated` | lista de `GeneratedSound` | vazio | Sons sintetizados (tom, ruído, bipe, metrônomo...) no barramento dos efeitos sonoros (trilha SFX): soma depois do ducking e antes da normalização, sem abaixar a música. `dmaker audio generators` lista os geradores. |
+| `tempo` | `Tempo` | nenhum | Andamento do projeto (BPM, compasso e onde cai o tempo 1): a grade da régua em compassos, do encaixe e das referências `beat:<n>` e `bar:<n>`. |
 
 #### AudioTrack
 
@@ -5963,6 +6069,9 @@ Usado em `AudioSettings.music`.
 | `duck_release` | número, de 10 a 5000 | 350 | Tempo para a música voltar ao volume, em milissegundos. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
 | `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `bpm` | número, de 20 a 400 | nenhum | Andamento da música em batidas por minuto (`dmaker audio tempo detect` o mede); vazio é desconhecido. |
+| `beat_offset` | número, de 0 a 3600 | 0.0 | Onde cai o primeiro tempo dentro do arquivo da música, em segundos. |
+| `stretch_to_tempo` | sim ou não | não | Estica a música, sem mudar o tom, até o andamento do projeto (`audio.tempo`); precisa do `bpm` da música. |
 
 #### MusicSpan
 
@@ -6304,6 +6413,16 @@ Usado em `VoiceoverClip.takes`.
 | `offset` | número, mínimo 0 | 0.0 | Ponto de entrada do take no arquivo, em segundos. |
 | `end` | número, maior que 0 | obrigatório | Ponto de saída do take no arquivo, em segundos. |
 | `label` | texto | texto vazio | Nome do take na lista (por exemplo, Original ou Take 2). |
+
+#### Tempo
+
+Usado em `AudioSettings.tempo`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `bpm` | número, de 20 a 400 | obrigatório | Batidas por minuto do projeto (de 20 a 400). |
+| `time_signature` | texto | `4/4` | Fórmula de compasso: tempos por compasso e figura, como `4/4`, `3/4` ou `6/8`. |
+| `offset` | número, de 0 a 3600 | 0.0 | Segundo do vídeo final em que cai o tempo 1 do compasso 1. |
 
 #### TextOverlay
 

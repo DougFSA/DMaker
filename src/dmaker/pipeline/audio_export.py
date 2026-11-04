@@ -85,7 +85,7 @@ def plan_files(project: Project, request: ExportRequest) -> list[ExportFile]:
     if request.mode == "regions":
         return region_files(project.markers, request.group, pauses=request.pauses, numbered=request.numbered)
     if request.mode == "selection":
-        return [selection_file(project.markers, request.start, request.end)]
+        return [selection_file(project.markers, request.start, request.end, project.audio.tempo)]
     if request.mode == "stems":
         return stem_files(spec_stem_tracks(project), request.tracks)
     return [ExportFile("mix", 0.0, None)]

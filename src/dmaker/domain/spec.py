@@ -38,6 +38,8 @@ from .audio_presets import (
 from .auto_duck import AutoDuck
 from .curves import Curve
 from .generators import normalized_params
+from .pitch_tempo import MAX_TIME_RATIO, MIN_TIME_RATIO
+from .tempo_grid import MAX_BPM, MIN_BPM, Tempo
 from .transitions import all_transition_names
 
 
@@ -768,10 +770,30 @@ class Music(EffectsOwner):
     duck_release: float = Field(350, ge=10, le=5000)
     pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[AudioEffect] = []  # cadeia de efeitos na música inteira (antes das janelas e do loop)
+    # andamento próprio da música (batidas por minuto) e onde cai o primeiro tempo dentro do ARQUIVO (segundos). Com o
+    # andamento do projeto (`audio.tempo`) e `stretch_to_tempo`, a música é esticada, sem mudar o tom, até casar com a
+    # grade. Os três ficam fora do dump enquanto valem o padrão: o hash de um projeto antigo não muda
+    bpm: float | None = Field(None, ge=MIN_BPM, le=MAX_BPM)
+    beat_offset: float = Field(0.0, ge=0, le=3600)
+    stretch_to_tempo: bool = False
 
     effects_place: ClassVar[str] = "música"
     effects_may_grow: ClassVar[bool] = True
-    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
+    omitted_at_default: ClassVar[dict[str, Any]] = {
+        "pan": 0.0,
+        "bpm": None,
+        "beat_offset": 0.0,
+        "stretch_to_tempo": False,
+    }
+
+    @model_validator(mode="after")
+    def _stretch_needs_bpm(self) -> Music:
+        if self.stretch_to_tempo and self.bpm is None:
+            raise ValueError(
+                "música: stretch_to_tempo precisa do andamento da música (audio.music.bpm); detecte-o com "
+                "`dmaker audio tempo detect` ou informe-o"
+            )
+        return self
 
 
 class AudioTrack(EffectsOwner):
@@ -952,6 +974,9 @@ class AudioSettings(EffectsOwner):
     # sons sintetizados (tom, ruído, bipe, metrônomo...), no barramento dos efeitos sonoros (SFX). Vazio fica fora do
     # dump, então um projeto sem som gerado mantém os mesmos bytes e o mesmo hash
     generated: list[GeneratedSound] = []
+    # o andamento do projeto (ver `Tempo`): a régua em compassos, o encaixe e as referências beat:/bar:. Ausente fica fora do
+    # dump, então um projeto sem andamento gera os mesmos bytes e o mesmo hash de antes de o campo existir
+    tempo: Tempo | None = None
 
     effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
     effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
@@ -961,7 +986,21 @@ class AudioSettings(EffectsOwner):
         "noise_profiles": {},
         "ducks": [],
         "generated": [],
+        "tempo": None,
     }
+
+    @model_validator(mode="after")
+    def _stretch_fits(self) -> AudioSettings:
+        """A razão entre o andamento do projeto e o da música tem que caber no que o Mudar Andamento aceita (de 0,1 a 10)."""
+        music, tempo = self.music, self.tempo
+        if music is not None and tempo is not None and music.stretch_to_tempo and music.bpm is not None:
+            ratio = tempo.bpm / music.bpm
+            if not MIN_TIME_RATIO <= ratio <= MAX_TIME_RATIO:
+                raise ValueError(
+                    f"música: esticar de {music.bpm:g} para {tempo.bpm:g} BPM pede uma razão de {ratio:.2f}, fora do "
+                    f"que o esticamento aceita ({MIN_TIME_RATIO:g} a {MAX_TIME_RATIO:g}); confira o andamento da música"
+                )
+        return self
 
     @model_validator(mode="after")
     def _master_runs_live(self) -> AudioSettings:

@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineView } from '@/test/editorFixtures'
+import { RULER_MODE_KEY } from '@/lib/tempoGrid'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useKeymapStore } from '@/stores/keymap'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
@@ -165,5 +166,25 @@ describe('painéis e atalhos', () => {
     await mountToolbar()
     await button('Atalhos de teclado')?.trigger('click')
     expect(useKeymapStore().dialogOpen).toBe(true)
+  })
+})
+
+describe('a régua em compassos', () => {
+  it('sem andamento o botão da régua está desligado e explica como ligar', async () => {
+    await mountToolbar()
+    const ruler = button('Régua: segundos')
+    expect(ruler?.attributes('disabled')).toBeDefined()
+    expect(ruler?.attributes('title')).toContain('Defina o andamento do projeto')
+  })
+
+  it('com andamento o botão alterna entre segundos e compassos e lembra a escolha', async () => {
+    const view = { ...timelineView(), tempo: { bpm: 120, time_signature: '4/4', beats_per_bar: 4, offset: 0, period: 0.5 } }
+    opened = await openEditor(projectSpec(), { 'POST /api/projects/demo/timeline': () => view })
+    wrapper = await mountEditorPart(TimelineToolbar, opened)
+    await button('Régua: segundos')?.trigger('click')
+    expect(button('Régua: compassos')?.attributes('aria-pressed')).toBe('true')
+    expect(window.localStorage.getItem(RULER_MODE_KEY)).toBe('bars')
+    await button('Régua: compassos')?.trigger('click')
+    expect(button('Régua: segundos')).toBeDefined()
   })
 })

@@ -12,6 +12,7 @@ import {
   WHEEL_ZOOM_STEP,
   ZOOM_STEP,
 } from '@/lib/timeline'
+import { gridSnapPoints, loadRulerMode, saveRulerMode, type RulerMode } from '@/lib/tempoGrid'
 import { useEditorStore } from './editor'
 
 /** A janela de itens desenhados anda em blocos deste tamanho (pixels), para rolar não refazer a lista a cada pixel. */
@@ -41,6 +42,9 @@ export const useTimelineStore = defineStore('timeline', () => {
 
   const pxPerSec = ref(DEFAULT_PX_PER_SEC)
   const snapEnabled = ref(true)
+  /** A régua da linha do tempo e do painel Áudio: segundos ou compassos. Lembrada no navegador; sem andamento no projeto,
+   *  a régua em compassos não existe e vale a de segundos. */
+  const rulerPreference = ref<RulerMode>(loadRulerMode())
   /** O botão "Ripple": só o rótulo muda. A V1 sempre fecha as lacunas, e o servidor decide isso. */
   const rippleAlways = ref(false)
   const hoverTrackId = ref<string | null>(null)
@@ -58,6 +62,14 @@ export const useTimelineStore = defineStore('timeline', () => {
   const effectiveViewport = computed(() => (viewportWidth.value > 0 ? viewportWidth.value : FALLBACK_VIEWPORT_PX))
   /** Até quantos segundos o encaixe atrai (zero com o encaixe desligado). */
   const snapTolerance = computed(() => (snapEnabled.value ? SNAP_PX / pxPerSec.value : 0))
+  /** O andamento do projeto (nulo se não tem): a régua em compassos e os tempos do encaixe só existem com ele. */
+  const tempo = computed(() => editor.view?.tempo ?? null)
+  /** A régua que vale agora: compassos só com andamento e só se a pessoa escolheu. */
+  const rulerMode = computed<RulerMode>(() => (tempo.value && rulerPreference.value === 'bars' ? 'bars' : 'seconds'))
+  /** Os tempos do andamento como alvos do encaixe (vazio com o encaixe desligado ou sem andamento). */
+  const gridPoints = computed<number[]>(() =>
+    snapEnabled.value && tempo.value && editor.view ? gridSnapPoints(tempo.value, editor.view.total, pxPerSec.value) : [],
+  )
   /** A janela visível da área das trilhas, em pixels da área, arredondada para blocos e com um bloco de folga. */
   const windowLeftPx = computed(
     () => Math.max(0, Math.floor((scrollLeft.value - TRACK_HEADER_WIDTH) / WINDOW_CHUNK_PX) * WINDOW_CHUNK_PX - WINDOW_CHUNK_PX),
@@ -105,6 +117,14 @@ export const useTimelineStore = defineStore('timeline', () => {
     return snapEnabled.value
   }
 
+  /** Alterna a régua entre segundos e compassos e lembra a escolha no navegador. Sem andamento não há o que alternar. */
+  function toggleRuler(): RulerMode {
+    if (!tempo.value) return 'seconds'
+    rulerPreference.value = rulerPreference.value === 'bars' ? 'seconds' : 'bars'
+    saveRulerMode(rulerPreference.value)
+    return rulerPreference.value
+  }
+
   function toggleRipple(): boolean {
     rippleAlways.value = !rippleAlways.value
     return rippleAlways.value
@@ -147,6 +167,10 @@ export const useTimelineStore = defineStore('timeline', () => {
   return {
     pxPerSec,
     snapEnabled,
+    rulerPreference,
+    rulerMode,
+    tempo,
+    gridPoints,
     rippleAlways,
     hoverTrackId,
     scrollLeft,
@@ -165,6 +189,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     zoomWheel,
     zoomFit,
     toggleSnap,
+    toggleRuler,
     toggleRipple,
     setScroll,
     onMediaDrop,

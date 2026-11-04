@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..domain.audio_effects import active_effects
+from ..domain.music_tempo import music_chain
 from ..domain.spec import Project
 from ..media.probe import probe
 from .context import Prober
@@ -43,6 +44,8 @@ def _music_duration_after_effects(project: Project, prober: Prober) -> float | N
     """A duração do arquivo da música quando os efeitos dela a mudam (o Mudar Andamento, o Paulstretch), senão None: a
     vista só a usa então, e uma música sem efeito de tempo segue sem o custo de sondar o arquivo."""
     music = project.audio.music
-    if music is None or not any(effect.alters_duration() for _, effect in active_effects(music.effects)):
+    if music is None or not any(
+        effect.alters_duration() for _, effect in active_effects(music_chain(project.audio))
+    ):
         return None
     return music_file_playtime(project, prober)

@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from .spec import Marker
+from .tempo_grid import Tempo, TempoError, grid_instant, is_grid_ref
 from .timeline import TIME_EPSILON
 
 MARKER_PREFIX = "marker:"
@@ -92,12 +93,27 @@ def marker_instant(markers: Sequence[Marker], reference: str) -> float:
     return markers[find_marker(markers, reference)].begin
 
 
-def resolve_instant(value: object, markers: Sequence[Marker], what: str = "instante") -> float:
-    """Um instante dado como número ou como `marker:<texto>`; qualquer outra coisa é erro com o nome do campo."""
+def is_time_ref(value: object) -> bool:
+    """Se o valor é uma referência a instante que não é número: `marker:<texto>`, `beat:<n>` ou `bar:<n>`."""
+    return is_marker_ref(value) or is_grid_ref(value)
+
+
+def resolve_instant(
+    value: object, markers: Sequence[Marker], what: str = "instante", tempo: Tempo | None = None
+) -> float:
+    """Um instante dado como número, como `marker:<texto>` ou como `beat:<n>` / `bar:<n>` (a grade do andamento do projeto,
+    `tempo`); qualquer outra coisa é erro com o nome do campo."""
     if is_marker_ref(value):
         return marker_instant(markers, str(value))
+    if is_grid_ref(value):
+        try:
+            return grid_instant(tempo, str(value))
+        except TempoError as exc:
+            raise MarkerError(f"{what}: {exc}") from exc
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise MarkerError(f"{what} precisa ser um número de segundos ou marker:<texto>, não {value!r}")
+        raise MarkerError(
+            f"{what} precisa ser um número de segundos ou marker:<texto> (ou beat:<n>, bar:<n>), não {value!r}"
+        )
     return float(value)
 
 

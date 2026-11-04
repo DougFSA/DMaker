@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..domain.audio_effects import active_effects
+from ..domain.music_tempo import SEAM_FADE_SECONDS, MusicGrid, music_grid
 from ..domain.spec import AudioSettings, Music, MusicSpan
 from ..voice.watermark import delay_on_detector_grid
 from .audio_effects import Measure, chain_lines
@@ -169,7 +170,7 @@ def audio_graph(
 
     music: Music | None = audio.music
     if music and music_path and include_music and music.volume > 0:
-        mus = music_stream(lines, inputs, music, music_path, total, music_duration)
+        mus = music_stream(lines, inputs, music, music_path, total, music_duration, music_grid(audio))
         music_curves = curves_for(duck_curves, "MUS")
         if music_curves:
             # a regra do Auto Duck para a música substitui o sidechain antigo: os dois não rodam juntos
@@ -358,11 +359,17 @@ def music_stream(
     music_path: Path,
     total: float,
     music_duration: float | None = None,
+    grid: MusicGrid | None = None,
 ) -> str:
     """Música alinhada à linha do tempo: uma entrada por janela (`spans`), cada uma aparada, com
     ganho e fades, atrasada até o instante em que entra; sem janelas, uma só cobrindo o vídeo
     inteiro. Devolve o rótulo da mistura das janelas. `music_duration` é obrigatória quando algum
-    span usa `tail` (só assim dá para ancorar `start_at` no final da faixa)."""
+    span usa `tail` (só assim dá para ancorar `start_at` no final da faixa).
+
+    `grid` existe quando a música é esticada para o andamento do projeto (ver `domain.music_tempo`): a entrada ganha o atraso
+    que põe o primeiro tempo dela num tempo da grade e, com `loop`, o arquivo esticado repete em tempos inteiros (o
+    `aloop` do filtro no lugar do `-stream_loop` da entrada, que repetiria o arquivo no tamanho que ele tem). Sem `grid` o
+    grafo é o de sempre, linha por linha."""
     spans = music.spans or [
         MusicSpan(
             start=0.0, end=None, start_at=music.start_at, fade_in=music.fade_in, fade_out=music.fade_out
@@ -374,14 +381,30 @@ def music_stream(
     for k, span in enumerate(spans):
         start, span_end, start_at = resolve_span(span, total, music_duration)
         end = total if span_end is None else min(span_end, total)
-        length = max(end - start, 0.0)
-        pre = ["-stream_loop", "-1"] if music.loop else []
+        # a entrada atrasada até a batida da grade: a janela ganha o atraso e perde o mesmo tanto no fim
+        entry = grid.entry_delay(start, start_at) if grid else 0.0
+        length = max(end - start - entry, 0.0)
+        in_grid_loop = grid is not None and music.loop and music_duration is not None
+        pre = ["-stream_loop", "-1"] if music.loop and not in_grid_loop else []
         idx = inputs.add(music_path, *pre)
+        if in_grid_loop:
+            assert grid is not None and music_duration is not None
+            head = [
+                f"[{idx}:a]aresample=48000",
+                "aformat=sample_fmts=fltp:channel_layouts=stereo",
+                *_whole_beat_loop(grid, music_duration),
+                f"atrim=start={start_at:.3f}:duration={length:.3f}",
+                "asetpts=PTS-STARTPTS",
+            ]
+        else:
+            head = [
+                f"[{idx}:a]atrim=start={start_at:.3f}:duration={length:.3f}",
+                "asetpts=PTS-STARTPTS",
+                "aresample=48000",
+                "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            ]
         chain = [
-            f"[{idx}:a]atrim=start={start_at:.3f}:duration={length:.3f}",
-            "asetpts=PTS-STARTPTS",
-            "aresample=48000",
-            "aformat=sample_fmts=fltp:channel_layouts=stereo",
+            *head,
             f"volume={music.volume:.3f}",
             *([balance] if (balance := pan_filter(music.pan)) else []),
         ]
@@ -389,8 +412,8 @@ def music_stream(
             chain.append(f"afade=t=in:st=0:d={span.fade_in:.3f}")
         if span.fade_out:
             chain.append(f"afade=t=out:st={max(length - span.fade_out, 0):.3f}:d={span.fade_out:.3f}")
-        if start > 0:
-            chain.append(f"adelay={int(round(start * 1000))}:all=1")
+        if start + entry > 0:
+            chain.append(f"adelay={int(round((start + entry) * 1000))}:all=1")
         label = f"[mus{k}]"
         lines.append(",".join(chain) + label)
         labels.append(label)
@@ -400,3 +423,19 @@ def music_stream(
         "".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0[mus]"
     )
     return "[mus]"
+
+
+def _whole_beat_loop(grid: MusicGrid, stretched_duration: float) -> list[str]:
+    """Os filtros que repetem a música esticada em tempos inteiros: o arquivo é aparado (ou completado com silêncio) até o
+    número inteiro de tempos mais perto e repetido sem fim pelo `aloop`, que guarda um loop inteiro na memória (uns
+    poucos segundos de áudio). Quando foi preciso aparar ou completar, a emenda leva um fade curto nas duas pontas."""
+    length = grid.loop_length(stretched_duration)
+    samples = int(round(length * 48000))
+    filters = [f"atrim=duration={length:.6f}", f"apad=whole_dur={length:.6f}"]
+    if grid.needs_seam_fade(stretched_duration):
+        filters += [
+            f"afade=t=in:d={SEAM_FADE_SECONDS:g}",
+            f"afade=t=out:st={max(length - SEAM_FADE_SECONDS, 0):.6f}:d={SEAM_FADE_SECONDS:g}",
+        ]
+    filters.append(f"aloop=loop=-1:size={samples}:start=0")
+    return filters

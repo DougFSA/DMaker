@@ -1,6 +1,21 @@
 /* Tipos da análise de áudio (POST /api/projects/{nome}/audio-analysis, ui/audio_analysis_routes.py), com os nomes de
    campo do backend. A interface usa só o Espectro de Frequência, para desenhar o gráfico com o cursor. */
 
+/** O andamento sugerido para a música (POST /api/projects/{nome}/audio-tempo/detect). A rota só lê e sugere: quem grava é o
+ *  Salvar do editor. */
+export interface TempoDetection {
+  /** O arquivo analisado. */
+  source: string
+  bpm: number
+  /** Onde cai o primeiro tempo dentro do arquivo, em segundos. */
+  beat_offset: number
+  /** De 0 a 1: quanto da energia dos ataques se repete nesse andamento. */
+  confidence: number
+  /** A metade e o dobro, para quando o ouvido marca outro tempo. */
+  alternatives: number[]
+  warnings: string[]
+}
+
 export type SpectrumAlgorithm = 'spectrum' | 'autocorrelation' | 'enhanced_autocorrelation' | 'cepstrum'
 
 export type SpectrumWindow =

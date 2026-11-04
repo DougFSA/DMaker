@@ -111,6 +111,18 @@ export interface TimelineSource {
 }
 
 /** POST /api/projects/{nome}/timeline e o campo `timeline` da resposta de editar. */
+/** O andamento do projeto (`audio.tempo`) como a vista o entrega: a base da régua em compassos e do encaixe nos tempos. */
+export interface TimelineTempo {
+  bpm: number
+  /** A fórmula de compasso, como `4/4`. */
+  time_signature: string
+  beats_per_bar: number
+  /** Onde cai o tempo 1, em segundos do vídeo final. */
+  offset: number
+  /** Quanto dura um tempo, em segundos. */
+  period: number
+}
+
 export interface TimelineView {
   total: number
   fps: number
@@ -119,6 +131,8 @@ export interface TimelineView {
   tracks: TimelineTrack[]
   sources: Record<string, TimelineSource>
   warnings: string[]
+  /** Só quando o projeto tem andamento. */
+  tempo?: TimelineTempo
 }
 
 /* ---------- caixas das sobreposições ---------- */

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..config import FONTS_DIR
 from ..domain.audio_effects import active_effects
+from ..domain.music_tempo import music_grid
 from ..domain.spec import Transition
 from ..filtergraph.audio import AudioTaps, StemTaps, audio_graph, loudnorm_measure_graph, silent_base
 from ..filtergraph.audio_effects import Measure, level_measure_lines, parse_level_measure, span_samples
@@ -53,9 +54,12 @@ def _finite(value: object) -> float | None:
 
 
 def _music_duration(ctx: RenderContext, music_path: Path | None) -> float | None:
-    """Duração da música, só quando algum span usa `tail` (evita uma sondagem desnecessária)."""
+    """Duração da música (já esticada, quando é o caso), só quando algum span usa `tail` ou o loop da música no andamento
+    precisa dela (evita uma sondagem desnecessária)."""
     music = ctx.project.audio.music
-    if music_path is None or music is None or not any(span.tail for span in music.spans):
+    if music_path is None or music is None:
+        return None
+    if not any(span.tail for span in music.spans) and not (music.loop and music_grid(ctx.project.audio)):
         return None
     return ctx.prober(music_path).duration
 

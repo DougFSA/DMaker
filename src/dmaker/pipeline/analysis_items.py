@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.audio_effects import EffectBase
+from ..domain.audio_effects import EffectBase, chain_duration
+from ..domain.music_tempo import music_chain
 from ..domain.spec import ClipSegment, Project, VideoOverlay
 from ..filtergraph.audio import resolve_span
 from ..filtergraph.mezzanine import uses_camera_audio
@@ -255,12 +256,15 @@ def _music(project, layout, prober) -> ItemAudio:
         if music.loop:
             notes = ("a música está em loop; a análise vale para a primeira volta do arquivo.",)
     until = layout.total if end is None else min(end, layout.total)
+    chain = music_chain(project.audio)
+    # o arquivo depois da cadeia (o esticamento até o andamento do projeto muda o quanto ele toca)
+    playable = chain_duration(chain, info.duration)
     return ItemAudio(
         label=f"Música ({path.name})",
         path=path,
         offset=start_at,
-        duration=max(min(info.duration - start_at, until - start), 0.0),
-        effects=tuple(music.effects),
+        duration=max(min(playable - start_at, until - start), 0.0),
+        effects=chain,
         gain=music.volume,
         clock=ItemClock(start),
         whole_file=True,

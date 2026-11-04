@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..domain.audio_effects import chain_duration
+from ..domain.music_tempo import music_chain
 from ..domain.spec import Project
 from .context import Prober
 from .voicefiles import voice_file_playtimes
@@ -57,4 +58,4 @@ def _music_alone(project: Project, prober: Prober) -> float:
         return 0.0
     first = music.spans[0].start_at if music.spans else music.start_at
     # o arquivo depois dos efeitos que mudam o tempo (o Mudar Andamento o encurta, o Paulstretch o alonga)
-    return max(chain_duration(music.effects, prober(path).duration) - first, 0.0)
+    return max(chain_duration(music_chain(project.audio), prober(path).duration) - first, 0.0)

@@ -2,8 +2,9 @@
 
 Por padrão só PROPÕE e devolve a lista (nada é gravado). Com `apply`, cada fronteira anda pelas operações de apara que o
 editor já tem: a saída do clipe que termina e a entrada do que começa andam o mesmo tanto, então a duração do vídeo não
-muda, e os marcadores acompanham pelo mapa de tempo de cada apara. As batidas vêm do Achar Batidas sobre a música (ou
-de um grupo de marcadores que a pessoa já tem).
+muda, e os marcadores acompanham pelo mapa de tempo de cada apara. As batidas vêm do Achar Batidas sobre a música, de um
+grupo de marcadores que a pessoa já tem ou, com a fonte `grid`, dos tempos (ou compassos) do andamento do projeto
+(`audio.tempo`): aí o corte cai exatamente na grade, a mesma que a régua em compassos e o encaixe da interface usam.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import Any
 
 from ..analysis.rhythm import BoundaryProposal, propose_beat_cuts
 from ..domain.spec import ClipSegment, Project
+from ..domain.tempo_grid import TempoError, grid_bars, grid_beats
 from .analysis_items import TargetError
 from .audio_analysis import AnalysisRequest, AudioAnalysisService
 from .edit_history import EditHistory
@@ -25,6 +27,7 @@ from .projects import load_project, project_path, save_project
 
 DEFAULT_TOLERANCE = 0.2  # 200 ms: mais que isso o corte já mudaria o que a pessoa escolheu mostrar
 DEFAULT_BEAT_GROUP = "batidas"
+GRID_SOURCE = "grid"  # as batidas são os tempos do andamento do projeto, e não as medidas na música
 
 
 @dataclass
@@ -69,10 +72,33 @@ def _boundaries(
     return boundaries, skipped
 
 
+def _grid_instants(
+    project: Project, service: AudioAnalysisService, params: dict
+) -> tuple[list[float], float]:
+    """Os tempos da grade do projeto (ou os inícios de compasso, com `level: "bar"` nos parâmetros) até o fim do vídeo."""
+    tempo = project.audio.tempo
+    if tempo is None:
+        raise TargetError(
+            "a fonte grid precisa do andamento do projeto (audio.tempo): defina-o com a operação tempo_set"
+        )
+    level = params.get("level", "beat")
+    if level not in ("beat", "bar"):
+        raise ValueError(f"`level` é beat ou bar, não {level!r}")
+    total = service.layout(project).total
+    try:
+        times = grid_bars(tempo, 0.0, total) if level == "bar" else grid_beats(tempo, 0.0, total)
+    except TempoError as exc:
+        raise ValueError(str(exc)) from exc
+    return times, tempo.bpm
+
+
 def _beat_instants(
     project: Project, service: AudioAnalysisService, source: str, group: str | None, params: dict
 ) -> tuple[list[float], float | None]:
-    """As batidas no tempo do projeto: as do grupo de marcadores pedido, ou as do Achar Batidas sobre `source`."""
+    """As batidas no tempo do projeto: os tempos da grade (fonte `grid`), as do grupo de marcadores pedido, ou as do Achar
+    Batidas sobre `source`."""
+    if source == GRID_SOURCE:
+        return _grid_instants(project, service, params)
     if group is not None:
         marked = sorted(marker.begin for marker in project.markers if marker.group == group)
         if marked:

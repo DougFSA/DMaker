@@ -28,7 +28,7 @@ _OP_ONLY = ("type", "index", "region", "end")
 
 def _instant(project: Project, value: Any, name: str) -> float:
     try:
-        return resolve_instant(value, project.markers, name)
+        return resolve_instant(value, project.markers, name, project.audio.tempo)
     except MarkerError as exc:
         raise EditError(str(exc)) from exc
 

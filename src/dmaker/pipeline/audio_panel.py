@@ -154,7 +154,9 @@ class AudioPanelService:
     def _plan_item(self, target: str, item: ItemAudio) -> HeardPlan:
         processed = bool(active_effects(item.effects))
         if item.whole_file:
-            duration, origin = item.file_duration, item.offset
+            # o arquivo inteiro depois da cadeia: com o esticamento até o andamento do projeto (ou um Mudar Andamento) ele
+            # dura outra coisa, e o painel mostra o som que o render toca
+            duration, origin = chain_duration(item.effects, item.file_duration), item.offset
         else:
             duration, origin = chain_duration(item.effects, item.duration), 0.0
         rate = self.prober(item.path).sample_rate or 48000

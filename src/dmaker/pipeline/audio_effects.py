@@ -34,6 +34,7 @@ from ..domain.audio_effects import (
 )
 from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
+from ..domain.music_tempo import music_chain
 from ..domain.spec import ClipSegment
 from ..filtergraph.audio_effects import (
     SAMPLE_RATE,
@@ -396,11 +397,13 @@ def track_audio_overrides(ctx: RenderContext) -> tuple[Path | None, ...]:
 
 def processed_music(ctx: RenderContext, music_path: Path | None) -> Path | None:
     """O arquivo da música depois dos efeitos dela, ou o próprio arquivo quando não há efeito ligado. O item é a
-    música inteira: as janelas, o ponto de entrada e o loop recortam o arquivo já processado."""
+    música inteira: as janelas, o ponto de entrada e o loop recortam o arquivo já processado. Com `stretch_to_tempo`, a
+    cadeia começa pelo esticamento derivado até o andamento do projeto (`music_chain`)."""
     music = ctx.project.audio.music
-    if music_path is None or music is None or music.volume <= 0 or not active_effects(music.effects):
+    chain = music_chain(ctx.project.audio)
+    if music_path is None or music is None or music.volume <= 0 or not active_effects(chain):
         return music_path
-    item = AudioItem(music_path, ctx.prober(music_path).duration, tuple(music.effects))
+    item = AudioItem(music_path, ctx.prober(music_path).duration, chain)
     done = effect_processor(ctx).process(item)
     return done.path if done else music_path
 

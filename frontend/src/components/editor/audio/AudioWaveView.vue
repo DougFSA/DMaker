@@ -26,9 +26,11 @@ import {
   type EnvelopePoint,
 } from '@/lib/audioPanelOps'
 import { multiToolAt } from '@/lib/audioTools'
+import { barAxisTicks, snapAxisToGrid } from '@/lib/tempoGrid'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { useThemeStore } from '@/stores/theme'
+import { useTimelineStore } from '@/stores/timeline'
 import { useDrawTool } from '@/composables/useDrawTool'
 
 const props = defineProps<{ data: AudioWave | null }>()
@@ -37,6 +39,7 @@ const emit = defineEmits<{ size: [width: number]; scrub: [time: number]; 'scrub-
 const panel = useAudioPanelStore()
 const editor = useEditorStore()
 const theme = useThemeStore()
+const timeline = useTimelineStore()
 
 const RULER_HEIGHT = 36
 /** O ponteiro a até estes pixels de um ponto do envelope ou das bordas da seleção o pega. */
@@ -85,7 +88,11 @@ function paint(): void {
   const palette = colors()
   const ruler = sizeCanvas(rulerCanvas.value, width.value, RULER_HEIGHT)
   if (ruler) {
-    const time = timeTicks(panel.view, width.value)
+    // em compassos a régua usa a grade do projeto pelo relógio do item; o item sem lugar na linha do tempo fica em segundos
+    const time =
+      timeline.rulerMode === 'bars' && timeline.tempo && panel.clock
+        ? barAxisTicks(panel.view, width.value, timeline.tempo, panel.clock)
+        : timeTicks(panel.view, width.value)
     const samples = showsSampleRuler(panel.view, width.value, panel.rate) ? sampleTicks(panel.view, width.value, panel.rate) : []
     drawRuler(ruler, width.value, RULER_HEIGHT, time, samples, palette)
   }
@@ -134,7 +141,18 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.data, panel.view.start, panel.view.end, width.value, height.value, panel.channels, theme.theme] as const,
+  () =>
+    [
+      props.data,
+      panel.view.start,
+      panel.view.end,
+      width.value,
+      height.value,
+      panel.channels,
+      theme.theme,
+      timeline.rulerMode,
+      timeline.tempo,
+    ] as const,
   schedulePaint,
 )
 
@@ -155,6 +173,13 @@ function timeAtClient(clientX: number): number {
 }
 
 const xOf = (time: number): number => timeToX(time, panel.view, width.value)
+
+/** Com o encaixe ligado e o andamento definido, o instante cai exatamente no tempo mais perto (a seleção e o cursor). */
+function gridSnapped(time: number): number {
+  const tempo = timeline.tempo
+  if (!timeline.snapEnabled || !tempo || !panel.clock) return time
+  return snapAxisToGrid(time, panel.clock, tempo, (panel.view.end - panel.view.start) / Math.max(width.value, 1))
+}
 
 /* ---------- envelope ---------- */
 
@@ -326,7 +351,7 @@ function onDragMove(event: MouseEvent): void {
   const x = localX(event.clientX)
   if (!current.moved && Math.abs(event.clientX - current.startX) < DRAG_PX) return
   current.moved = true
-  const time = timeAtClient(event.clientX)
+  const time = current.kind === 'zoom' ? timeAtClient(event.clientX) : gridSnapped(timeAtClient(event.clientX))
   if (current.kind === 'zoom') {
     current.current = time
     zoomBand.value = { start: Math.min(current.anchor, time), end: Math.max(current.anchor, time) }
@@ -364,7 +389,7 @@ function onAreaDown(event: MouseEvent): void {
   root.value?.focus({ preventScroll: true })
   const x = localX(event.clientX)
   const y = localY(event.clientY)
-  const time = snapToSample(timeAtClient(event.clientX), panel.rate)
+  const time = snapToSample(gridSnapped(timeAtClient(event.clientX)), panel.rate)
   const tool =
     panel.tool === 'multi'
       ? multiToolAt({ canDraw: canDraw(panel.view, width.value, panel.rate), overEnvelope: overEnvelopeLine(x, y) || hitPoint(x, y) >= 0 })

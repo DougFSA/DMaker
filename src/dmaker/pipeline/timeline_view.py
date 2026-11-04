@@ -84,9 +84,12 @@ class TimelineView:
     tracks: list[Track] = field(default_factory=list)
     sources: dict[str, dict] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # o andamento do projeto (`audio.tempo`), com o que a régua em compassos e o encaixe precisam; fora da vista quando o
+    # projeto não tem andamento, então a vista de um projeto antigo não ganha nenhuma chave
+    tempo: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "total": self.total,
             "fps": self.fps,
             "width": self.width,
@@ -110,6 +113,24 @@ class TimelineView:
             "sources": self.sources,
             "warnings": self.warnings,
         }
+        if self.tempo is not None:
+            data["tempo"] = self.tempo
+        return data
+
+
+def tempo_view(project: Project) -> dict | None:
+    """O andamento do projeto como a interface o lê: batidas por minuto, fórmula de compasso, tempos por compasso, onde cai
+    o tempo 1 e quanto dura um tempo."""
+    tempo = project.audio.tempo
+    if tempo is None:
+        return None
+    return {
+        "bpm": tempo.bpm,
+        "time_signature": tempo.time_signature,
+        "beats_per_bar": tempo.beats_per_bar,
+        "offset": tempo.offset,
+        "period": tempo.period,
+    }
 
 
 def stack_lanes(items: list[TrackItem]) -> list[list[TrackItem]]:
@@ -665,6 +686,9 @@ def _music_track(
                 **_mix_extra(0.0, music.pan, music.effects),
                 # quanto dura o arquivo da música depois dos efeitos que mudam o tempo (a janela na linha do tempo não muda)
                 **({"duration": music_duration} if music_duration is not None else {}),
+                # o andamento da música e o esticamento até o do projeto, só quando a pessoa os definiu
+                **({"bpm": music.bpm, "beat_offset": music.beat_offset} if music.bpm is not None else {}),
+                **({"stretch_to_tempo": True} if music.stretch_to_tempo else {}),
                 # com regra do Auto Duck para a música, ela substitui o `music.ducking` antigo: a vista diz quem a abaixa
                 **({"ducked_by": ducked_by} if ducked_by else {}),
             },
@@ -901,4 +925,5 @@ def build_timeline_view(
         tracks=tracks,
         sources=sources,
         warnings=[f"Fonte não encontrada: {path}" for path in sorted(missing.paths, key=str)],
+        tempo=tempo_view(project),
     )

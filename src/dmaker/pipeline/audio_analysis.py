@@ -19,7 +19,7 @@ from ..analysis import AnalysisResult, MarkerProposal, Signal, analyzer_class, p
 from ..analysis.analyzers.spectrum import SpectrumResult
 from ..analysis.plot import png_bytes, spectrum_image
 from ..domain.audio_effects import active_effects, chain_duration
-from ..domain.markers import MarkerError, is_marker_ref, marker_instant
+from ..domain.markers import MarkerError, is_time_ref, resolve_instant
 from ..domain.spec import Project
 from ..media.decode import decode_to_wav
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
@@ -237,13 +237,13 @@ class AudioAnalysisService:
 
     @staticmethod
     def _instant(value: float | str, clock: ItemClock | None, project: Project | None, name: str) -> float:
-        if isinstance(value, str) and is_marker_ref(value):
+        if isinstance(value, str) and is_time_ref(value):
             if clock is None or project is None:
                 raise TargetError(
-                    f"{name}: marker:<texto> só vale para um item preso à linha do tempo do projeto"
+                    f"{name}: marker:<texto>, beat:<n> e bar:<n> só valem para um item preso à linha do tempo do projeto"
                 )
             try:
-                return clock.to_item(marker_instant(project.markers, value))
+                return clock.to_item(resolve_instant(value, project.markers, name, project.audio.tempo))
             except MarkerError as exc:
                 raise TargetError(str(exc)) from exc
         try:
@@ -262,7 +262,7 @@ class AudioAnalysisService:
         parse_analyzer(
             request.analyzer,
             {
-                key: 0.0 if isinstance(value, str) and is_marker_ref(value) else value
+                key: 0.0 if isinstance(value, str) and is_time_ref(value) else value
                 for key, value in request.params.items()
             },
         )
@@ -291,7 +291,7 @@ class AudioAnalysisService:
         )
 
     def _param_instant(self, project: Project, value: str, loaded: LoadedSignal) -> Any:
-        if not is_marker_ref(value):
+        if not is_time_ref(value):
             return value
         return self._instant(value, loaded.clock, project, "parâmetro") - loaded.offset
 

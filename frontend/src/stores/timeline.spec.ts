@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { RULER_MODE_KEY } from '@/lib/tempoGrid'
+import { projectSpec, timelineView } from '@/test/editorFixtures'
 import { openEditor } from '@/test/editorMount'
 import { MAX_PX_PER_SEC, MIN_PX_PER_SEC, TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { useTimelineStore, WINDOW_CHUNK_PX } from './timeline'
@@ -81,6 +83,57 @@ describe('encaixe e rótulo de ripple', () => {
     expect(timeline.rippleAlways).toBe(false)
     expect(timeline.toggleRipple()).toBe(true)
     expect(timeline.toggleRipple()).toBe(false)
+  })
+})
+
+const TEMPO = { bpm: 120, time_signature: '4/4', beats_per_bar: 4, offset: 0, period: 0.5 }
+
+async function openWithTempo() {
+  const view = { ...timelineView(), tempo: TEMPO }
+  const opened = await openEditor(projectSpec(), { 'POST /api/projects/demo/timeline': () => view })
+  return { ...opened, timeline: useTimelineStore() }
+}
+
+describe('régua em compassos e encaixe nos tempos', () => {
+  it('sem andamento no projeto a régua é de segundos, o botão não alterna e a grade não atrai', async () => {
+    const { timeline } = await openTimeline()
+    expect(timeline.tempo).toBeNull()
+    expect(timeline.toggleRuler()).toBe('seconds')
+    expect(timeline.rulerMode).toBe('seconds')
+    expect(timeline.gridPoints).toEqual([])
+    expect(window.localStorage.getItem(RULER_MODE_KEY)).toBeNull()
+  })
+
+  it('com andamento a régua alterna entre segundos e compassos e a escolha fica no navegador', async () => {
+    const { timeline } = await openWithTempo()
+    expect(timeline.tempo).toEqual(TEMPO)
+    expect(timeline.rulerMode).toBe('seconds')
+    expect(timeline.toggleRuler()).toBe('bars')
+    expect(timeline.rulerMode).toBe('bars')
+    expect(window.localStorage.getItem(RULER_MODE_KEY)).toBe('bars')
+    expect(timeline.toggleRuler()).toBe('seconds')
+    expect(window.localStorage.getItem(RULER_MODE_KEY)).toBe('seconds')
+  })
+
+  it('lembra a régua escolhida ao abrir de novo, mas sem andamento volta a segundos', async () => {
+    window.localStorage.setItem(RULER_MODE_KEY, 'bars')
+    const { timeline } = await openWithTempo()
+    expect(timeline.rulerMode).toBe('bars')
+    const plain = await openTimeline()
+    expect(plain.timeline.rulerMode).toBe('seconds')
+  })
+
+  it('os tempos entram como alvos do encaixe enquanto o Snap está ligado', async () => {
+    const { timeline } = await openWithTempo()
+    expect(timeline.gridPoints.slice(0, 4)).toEqual([0, 0.5, 1, 1.5]) // 30 px por tempo no zoom padrão
+    expect(timeline.gridPoints.at(-1)).toBe(6)
+    timeline.toggleSnap()
+    expect(timeline.gridPoints).toEqual([])
+    timeline.toggleSnap()
+    timeline.setZoom(10) // 5 px por tempo: só os compassos, a 20 px, ainda não cabem
+    expect(timeline.gridPoints).toEqual([])
+    timeline.setZoom(15) // 7,5 px por tempo, 30 px por compasso
+    expect(timeline.gridPoints).toEqual([0, 2, 4, 6])
   })
 })
 
