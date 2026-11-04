@@ -1320,7 +1320,7 @@ def clean(
     ] = False,
 ) -> None:
     """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
-    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com
+    onda (cache/waveform), os espectrogramas (cache/spectrogram), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com
     efeitos aplicados (cache/audio-fx) e os quadros que o editor pede ao pipeline (cache/frames)."""
     import shutil
 
@@ -1329,6 +1329,7 @@ def clean(
         config.MEZ_DIR,
         config.PROXY_DIR,
         config.WAVEFORM_DIR,
+        config.SPECTROGRAM_DIR,
         config.PREVIEW_AUDIO_DIR,
         config.AUDIO_FX_DIR,
         config.FRAMES_DIR,
@@ -2725,9 +2726,16 @@ def audio_effect_add(
     end: Annotated[float | None, typer.Option(help="Fim do intervalo, em segundos do item.")] = None,
     position: Annotated[int | None, typer.Option(help="Posição na cadeia (padrão: no fim).")] = None,
     disabled: Annotated[bool, typer.Option(help="Adiciona já desligado.")] = False,
+    region: Annotated[
+        str | None,
+        typer.Option(
+            help="Uma região de marcador (marker:<texto>) no lugar de --start e --end; se o marcador for "
+            "espectral, traz também low_hz e high_hz (o intervalo vem em segundos da linha do tempo)."
+        ),
+    ] = None,
 ) -> None:
     """Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify
-    -p gain_db=6)."""
+    -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim")."""
     data: dict = {"type": effect, **_parse_effect_params(param)}
     if start is not None:
         data["start"] = start
@@ -2738,6 +2746,8 @@ def audio_effect_add(
     op: dict = {"action": "add", "target": target, "effect": data}
     if position is not None:
         op["index"] = position
+    if region is not None:
+        op["region"] = region
     _apply_effect_op(spec, op)
 
 

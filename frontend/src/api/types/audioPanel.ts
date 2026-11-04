@@ -72,3 +72,32 @@ export interface AudioWindow {
   /** Só na prévia: por que ela é aproximada. */
   note: string
 }
+
+/** O pedido do espectrograma (POST .../audio-panel/spectrogram): o trecho, o tamanho da imagem e os parâmetros dela. */
+export interface SpectrogramRequest {
+  target: string
+  start: number
+  end: number | null
+  columns: number
+  rows: number
+  scale: string
+  window: string
+  window_size: number
+  gain_db: number
+  range_db: number
+  min_hz: number
+  max_hz: number
+}
+
+/** A imagem do espectrograma (PNG em tons de cinza) e o trecho de verdade que ela cobre: o servidor encaixa o pedido numa
+ *  grade de colunas, então a tela posiciona a imagem pelo `start` e pelo `end` daqui, não pelos que pediu. */
+export interface SpectrogramImage {
+  blob: Blob
+  start: number
+  end: number
+  columns: number
+  rows: number
+  minHz: number
+  maxHz: number
+  cached: boolean
+}

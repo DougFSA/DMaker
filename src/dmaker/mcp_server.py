@@ -246,7 +246,10 @@ def validate_project(name_or_path: str) -> dict:
         'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove '
         "(marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, "
         'enable, disable, set ou preset (uma cadeia pronta do catálogo: `preset` é o id, ex. podcast_voice); ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
-        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). Edição de onda, sobre o som de um '
+        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). Os efeitos espectrais (spectral_delete, '
+        "spectral_multi_tool, spectral_eq, spectral_shelves) agem num retângulo de tempo e frequência: `start`, `end`, "
+        '`low_hz` e `high_hz` no efeito, ou `region: "marker:<texto>"` no pedido, que traz o intervalo e a faixa de '
+        "um marcador espectral. Edição de onda, sobre o som de um "
         "item (`target`: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.tracks.N, audio.music "
         "ou audio.master; `start`/`end` em segundos da linha do tempo): audio_silence, audio_cut, audio_envelope "
         "(`points`: [{at, db}]), audio_channels (`mode`: mono, swap, left, right), audio_paste (`at`, e "

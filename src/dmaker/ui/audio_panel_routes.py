@@ -6,18 +6,22 @@ efeitos de áudio (`timeline.2`, `audio.voiceover.0`, `audio.music`...). Nenhuma
 
 - `wave`: os mínimos e máximos das colunas de uma janela (a pirâmide de picos, construída em segundo plano na primeira
   vez e guardada em `cache/waveform`), ou as amostras de verdade no zoom máximo;
+- `spectrogram`: o espectrograma de um trecho, um PNG em tons de cinza (a cor é do cliente), guardado em
+  `cache/spectrogram`; o trecho de verdade (encaixado numa grade de colunas) vem nos cabeçalhos `X-Spectrogram-*`;
 - `window`: um trecho do som, como ele soa, em WAV de 16 bits, para tocar sem baixar o áudio inteiro;
 - `preview`: o mesmo trecho com um efeito proposto ao fim da cadeia, sem gravar, para a prévia e o antes e depois.
 """
 
 from __future__ import annotations
 
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config
+from ..analysis.spectrogram import DEFAULT_GAIN_DB, DEFAULT_RANGE_DB, SpectrogramParams
 from ..domain.spec import Project
 from ..media.ffmpeg import FFmpegError, FFmpegRunner
 from ..media.probe import probe
@@ -30,10 +34,12 @@ from ..pipeline.audio_panel import (
     PlanCache,
     wave_payload,
 )
+from ..pipeline.spectrogram import MAX_COLUMNS, SpectrogramRequest, render_spectrogram
 from .voice_routes import Services, VoiceServices
 
 # quanto a rota espera uma construção de picos terminar antes de responder com o que já há: o áudio curto e o WAV de
 # uma hora ficam prontos dentro disto e a primeira resposta já traz a onda; o resto responde com o andamento
+DEFAULT_ROWS = 256
 DEFAULT_WAIT_S = 2.5
 MAX_WAIT_S = 10.0
 
@@ -50,6 +56,20 @@ class WaveBody(PanelBody):
     end: float | None = Field(None, ge=0, allow_inf_nan=False)  # vazio: até o fim do áudio
     columns: int = Field(1024, ge=1, le=4096)
     wait: float = Field(DEFAULT_WAIT_S, ge=0, le=MAX_WAIT_S, allow_inf_nan=False)
+
+
+class SpectrogramBody(PanelBody):
+    start: float = Field(0.0, ge=0, allow_inf_nan=False)
+    end: float | None = Field(None, ge=0, allow_inf_nan=False)  # vazio: até o fim do áudio
+    columns: int = Field(1024, ge=1, le=MAX_COLUMNS)
+    rows: int = Field(DEFAULT_ROWS, ge=16, le=2048)
+    scale: Literal["linear", "log", "mel", "bark", "erb"] = "linear"
+    window: str = "hann"
+    window_size: int = Field(2048, ge=128, le=65536)
+    gain_db: float = Field(DEFAULT_GAIN_DB, ge=-100, le=100, allow_inf_nan=False)
+    range_db: float = Field(DEFAULT_RANGE_DB, ge=1, le=200, allow_inf_nan=False)
+    min_hz: float = Field(0.0, ge=0, allow_inf_nan=False)
+    max_hz: float = Field(24000.0, gt=0, allow_inf_nan=False)
 
 
 class WindowBody(PanelBody):
@@ -111,6 +131,48 @@ def build_audio_panel_router() -> APIRouter:
             return wave_payload(plan, build, reader, body.start, end, body.columns)
         except (TargetError, AudioPanelError, ValueError, FileNotFoundError, FFmpegError) as exc:
             raise failing(exc) from exc
+
+    @router.post("/spectrogram")
+    def spectrogram(name: str, body: SpectrogramBody, services: Services) -> Response:
+        project = _project(name, body.spec)
+        svc = service(services)
+        try:
+            plan = plan_of(project, body.target, svc)
+            reader = plans.reader(plan, lambda: svc.reader(plan, create=False))
+            if (
+                reader is None
+            ):  # os efeitos do item ainda estão sendo aplicados (a onda os prepara em segundo plano)
+                return Response(status_code=202, headers={"Retry-After": "1"})
+            end = plan.duration if body.end is None else min(body.end, plan.duration)
+            params = SpectrogramParams(
+                body.rows,
+                body.scale,
+                body.window,
+                body.window_size,
+                body.gain_db,
+                body.range_db,
+                body.min_hz,
+                body.max_hz,
+            )
+            image = render_spectrogram(
+                plan, reader, SpectrogramRequest(body.start, end, body.columns, params)
+            )
+        except (TargetError, AudioPanelError, ValueError, FileNotFoundError, FFmpegError) as exc:
+            raise failing(exc) from exc
+        return Response(
+            image.png,
+            media_type="image/png",
+            headers={
+                "X-Spectrogram-Start": f"{image.start:.6f}",
+                "X-Spectrogram-End": f"{image.end:.6f}",
+                "X-Spectrogram-Columns": str(image.columns),
+                "X-Spectrogram-Rows": str(image.rows),
+                "X-Spectrogram-Min-Hz": f"{image.min_hz:.3f}",
+                "X-Spectrogram-Max-Hz": f"{image.max_hz:.3f}",
+                "X-Spectrogram-Cached": "1" if image.cached else "0",
+                "Cache-Control": "no-store",
+            },
+        )
 
     @router.post("/window")
     def window(name: str, body: WindowBody, services: Services) -> Response:

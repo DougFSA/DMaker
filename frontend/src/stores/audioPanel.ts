@@ -23,6 +23,7 @@ import {
   type AxisView,
   type ItemClockInfo,
 } from '@/lib/audioWave'
+import { DEFAULT_SPECTROGRAM, type SpectrogramSettings } from '@/lib/spectrogram'
 import { analysisTargetOf } from '@/lib/spectrum'
 import {
   isVoiceTarget,
@@ -41,11 +42,24 @@ import { nextMarker } from '@/lib/markers'
 import { useEditorStore, type SelectedItem } from './editor'
 import { useToastsStore } from './toasts'
 
-/** As ferramentas do painel: selecionar, envelope, desenhar amostra, zoom e a multiferramenta (que escolhe pelo que está sob o mouse). */
-export type PanelTool = 'select' | 'envelope' | 'draw' | 'zoom' | 'multi'
+/** As ferramentas do painel: selecionar, envelope, desenhar amostra, zoom, a multiferramenta (que escolhe pelo que está sob o mouse)
+ *  e o retângulo espectral (tempo e frequência, no espectrograma). */
+export type PanelTool = 'select' | 'envelope' | 'draw' | 'zoom' | 'multi' | 'spectral'
 
 /** A velocidade da reprodução: de um quarto a quatro vezes, em passos que o ouvido reconhece. */
 export const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4] as const
+
+const SPECTROGRAM_KEY = 'dmaker.audio.spectrogram'
+
+function loadSpectrogram(): SpectrogramSettings {
+  try {
+    const raw = window.localStorage.getItem(SPECTROGRAM_KEY)
+    if (raw) return { ...DEFAULT_SPECTROGRAM, ...(JSON.parse(raw) as Partial<SpectrogramSettings>) }
+  } catch {
+    // sem armazenamento (janela privada) ou valor quebrado: vale o padrão
+  }
+  return { ...DEFAULT_SPECTROGRAM }
+}
 
 export const useAudioPanelStore = defineStore('audioPanel', () => {
   const editor = useEditorStore()
@@ -65,6 +79,8 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
   const tool = ref<PanelTool>('select')
   /** A vista mostrada (`AUDIO_VIEWS`): a onda, e as que outros cards acrescentarem, como o espectrograma. */
   const viewId = ref('wave')
+  /** Os ajustes do espectrograma (escala, cores, janela, faixa, ganho e alcance), lembrados entre sessões. */
+  const spectrogram = ref<SpectrogramSettings>(loadSpectrogram())
   const loop = ref(false)
   const speed = ref(1)
   const playing = ref(false)
@@ -195,6 +211,28 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     selection.value = normalizeSelection(snapToSample(start, rate.value), snapToSample(end, rate.value), duration.value, rate.value)
   }
 
+  /** O retângulo do espectrograma: tempo e frequência (Hz). Selecionar não muda a spec; os efeitos espectrais e o marcador
+   *  levam a faixa daqui. Uma faixa de altura zero vira só tempo. */
+  function selectSpectral(start: number, end: number, lowHz: number, highHz: number): void {
+    const times = normalizeSelection(snapToSample(start, rate.value), snapToSample(end, rate.value), duration.value, rate.value)
+    const low = Math.min(lowHz, highHz)
+    const high = Math.max(lowHz, highHz)
+    if (!times) {
+      selection.value = null
+      return
+    }
+    selection.value = high - low >= 1 ? { ...times, low_hz: Math.round(low * 10) / 10, high_hz: Math.round(high * 10) / 10 } : times
+  }
+
+  function setSpectrogram(changes: Partial<SpectrogramSettings>): void {
+    spectrogram.value = { ...spectrogram.value, ...changes }
+    try {
+      window.localStorage.setItem(SPECTROGRAM_KEY, JSON.stringify(spectrogram.value))
+    } catch {
+      // o ajuste vale nesta sessão mesmo sem poder ser lembrado
+    }
+  }
+
   function clearSelection(): void {
     selection.value = null
   }
@@ -293,6 +331,7 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     cursor,
     tool,
     viewId,
+    spectrogram,
     loop,
     speed,
     playing,
@@ -320,6 +359,8 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     reveal,
     setCursor,
     select,
+    selectSpectral,
+    setSpectrogram,
     clearSelection,
     selectAll,
     extendTo,

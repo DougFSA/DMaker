@@ -11,6 +11,9 @@ import { roundSeconds } from './timeline'
 
 const fail = (message: string): Plan => ({ ok: false, message })
 
+/** Os efeitos espectrais (Apagar, Multiferramenta, EQ e Prateleiras) têm o tipo começando assim e levam `low_hz` e `high_hz`. */
+export const SPECTRAL_PREFIX = 'spectral_'
+
 /** Os segundos da seleção que a prévia de um efeito toca: o suficiente para ouvi-lo sem esperar um trecho longo ser processado. */
 export const PREVIEW_SECONDS = 10
 
@@ -79,7 +82,9 @@ export function planLabel(clock: ItemClockInfo | null, selection: AxisSelection 
   if (selection) {
     const span = interval(clock, selection)
     if (typeof span === 'string') return fail(span)
-    return { ok: true, ops: [{ type: 'marker_add', start: span.start, end: span.end, text: '' }] }
+    // o marcador de uma seleção espectral guarda a faixa de frequência (o formato de troca com o Audacity a leva)
+    const band = selection.low_hz !== undefined && selection.high_hz !== undefined ? { low_hz: selection.low_hz, high_hz: selection.high_hz } : {}
+    return { ok: true, ops: [{ type: 'marker_add', start: span.start, end: span.end, text: '', ...band }] }
   }
   const at = toProjectTime(clock, cursor)
   if (at === null) return fail(NO_CLOCK)
@@ -101,6 +106,8 @@ export function planEffect(
     effect.start = roundSeconds(selection.start)
     effect.end = roundSeconds(selection.end)
   }
+  if (selection?.low_hz !== undefined && effect.low_hz === undefined && type.startsWith(SPECTRAL_PREFIX)) effect.low_hz = selection.low_hz
+  if (selection?.high_hz !== undefined && effect.high_hz === undefined && type.startsWith(SPECTRAL_PREFIX)) effect.high_hz = selection.high_hz
   return { ok: true, ops: [{ type: 'audio_effect', action: 'add', target, effect }] }
 }
 

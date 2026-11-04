@@ -1,7 +1,7 @@
 /* Os pontos de extensão do painel Áudio. O painel não conhece nenhuma vista nem nenhum botão extra pelo nome: ele percorre
    estas listas.
 
-   - **Vista nova** (o espectrograma do DMK-63): acrescente uma entrada em `AUDIO_VIEWS` com o componente dela. O painel
+   - **Vista nova** (o espectrograma do DMK-63 entrou assim, com a multivista): acrescente uma entrada em `AUDIO_VIEWS` com o componente dela. O painel
      mostra um seletor "Vista" quando há mais de uma, e o componente recebe a mesma `data` (a resposta da onda) e emite os
      mesmos eventos (`size` com a largura em pixels, `scrub` e `scrub-end`) que a vista da onda. Ele lê o resto, a janela
      de tempo, a seleção, o cursor e a posição de reprodução, do `useAudioPanelStore`, então as vistas dividem o mesmo
@@ -11,6 +11,8 @@
      precisa do mouse sobre a onda entra também em `PanelTool` (`stores/audioPanel.ts`) e no `onAreaDown` da vista. */
 import type { Component } from 'vue'
 import AudioWaveView from './AudioWaveView.vue'
+import SpectrogramView from './SpectrogramView.vue'
+import WaveSpectrumView from './WaveSpectrumView.vue'
 
 export interface AudioViewDef {
   id: string
@@ -24,7 +26,11 @@ export interface AudioToolbarExtra {
 }
 
 /** As vistas do painel; a primeira é a padrão. */
-export const AUDIO_VIEWS: AudioViewDef[] = [{ id: 'wave', title: 'Onda', component: AudioWaveView }]
+export const AUDIO_VIEWS: AudioViewDef[] = [
+  { id: 'wave', title: 'Onda', component: AudioWaveView },
+  { id: 'spectrogram', title: 'Espectrograma', component: SpectrogramView },
+  { id: 'both', title: 'Onda e espectro', component: WaveSpectrumView },
+]
 
 /** Os botões e controles a mais da barra de reprodução, na ordem. */
 export const AUDIO_TOOLBAR_EXTRAS: AudioToolbarExtra[] = []
