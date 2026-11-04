@@ -15,6 +15,7 @@ import {
 import { waveformEligible } from '@/lib/waveform'
 import TimelineItemBlock from './TimelineItemBlock.vue'
 import TimelineMarkerBlock from './TimelineMarkerBlock.vue'
+import TimelineTrackMix from './TimelineTrackMix.vue'
 
 const props = defineProps<{
   track: TimelineTrack
@@ -26,7 +27,11 @@ const props = defineProps<{
   selected: ReadonlySet<string>
 }>()
 
-const emit = defineEmits<{ toggle: [trackId: string, field: TrackToggle] }>()
+const emit = defineEmits<{
+  toggle: [trackId: string, field: TrackToggle]
+  /** Solo, ganho ou pan da trilha de áudio (a operação `track_set`). */
+  'track-set': [trackId: string, changes: { solo?: boolean; gain_db?: number; pan?: number }]
+}>()
 
 const visibleItems = computed(() => props.track.items.filter((item) => item.end >= props.windowStart && item.start <= props.windowEnd))
 const hatches = computed(() =>
@@ -35,6 +40,8 @@ const hatches = computed(() =>
     : [],
 )
 const buttons = computed(() => headerButtons(props.track))
+/** As trilhas de áudio que têm solo, ganho e pan (os ids da mixagem do servidor). */
+const mixable = computed(() => props.track.kind === 'audio' && /^(A\d+|MUS|NAR|VO|SFX)$/.test(props.track.id))
 const width = computed(() => `${laneWidth(props.total, props.pxPerSec)}px`)
 
 function pressed(field: TrackToggle): boolean {
@@ -49,7 +56,7 @@ function buttonTitle(field: TrackToggle): string {
 
 <template>
   <div
-    :class="['row', { 'row--muted': track.muted, 'row--hidden': track.hidden, 'row--locked': track.locked }]"
+    :class="['row', { 'row--muted': track.muted || track.silenced, 'row--hidden': track.hidden, 'row--locked': track.locked }]"
     :data-track-id="track.id"
   >
     <div class="row__header" :title="trackTitle(track)">
@@ -68,6 +75,20 @@ function buttonTitle(field: TrackToggle): string {
         >
           {{ TOGGLE_LABEL[field].letter }}
         </button>
+        <template v-if="mixable">
+          <button
+            type="button"
+            :class="['row__button', { 'row__button--on': track.solo }]"
+            data-track-action="solo"
+            :aria-pressed="!!track.solo"
+            :aria-label="`Solo (${track.id})`"
+            :title="track.solo ? `Solo: ligado. Clique para desligar.` : `Ouvir só a trilha ${track.id} (as outras de áudio calam)`"
+            @click.stop="emit('track-set', track.id, { solo: !track.solo })"
+          >
+            S
+          </button>
+          <TimelineTrackMix :track="track" @change="emit('track-set', track.id, $event)" />
+        </template>
       </span>
     </div>
     <div class="lane" :data-track-id="track.id" :style="{ width }">

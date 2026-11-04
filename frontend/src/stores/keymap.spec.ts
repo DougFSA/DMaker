@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { KEYMAP_STORAGE_KEY } from '@/lib/keymap'
+import { ALL_SHORTCUTS, KEYMAP_STORAGE_KEY } from '@/lib/keymap'
 import { useKeymapStore } from './keymap'
 
 beforeEach(() => {
@@ -9,13 +9,18 @@ beforeEach(() => {
 })
 
 describe('a tabela em uso', () => {
-  it('sem trocas salvas, é o padrão de 37 atalhos', () => {
+  it('sem trocas salvas, é o padrão: os 37 atalhos do editor e os do painel Áudio', () => {
     const keymap = useKeymapStore()
-    expect(keymap.entries).toHaveLength(37)
+    expect(keymap.entries).toHaveLength(ALL_SHORTCUTS.length)
+    expect(keymap.entries.filter((entry) => entry.category !== 'audio')).toHaveLength(37)
     expect(keymap.customCount).toBe(0)
     expect(keymap.labelFor('split')).toBe('S')
     expect(keymap.labelFor('remove_ripple')).toBe('X ou Del')
     expect(keymap.byCombo.get('Ctrl+z')).toEqual(['undo'])
+    // a mesma tecla no painel Áudio é outra ação, de outra tabela: só vale com o foco nele
+    expect(keymap.audioByCombo.get('Ctrl+z')).toEqual(['audio_undo'])
+    expect(keymap.conflictFor('Ctrl+z', 'audio_redo')?.id).toBe('audio_undo')
+    expect(keymap.conflictFor('Ctrl+l', 'audio_redo')?.id).toBe('audio_silence')
   })
 
   it('lê as trocas que a interface clássica já salvou, na mesma chave e no mesmo formato', () => {

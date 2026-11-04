@@ -5,6 +5,7 @@ Existe para que o núcleo de voz não dependa do `soundfile` (que só o extra `v
 
 from __future__ import annotations
 
+import io
 import struct
 import wave
 from pathlib import Path
@@ -27,6 +28,22 @@ def write_wav_channels(path: Path, samples: np.ndarray, sample_rate: int) -> Pat
         handle.setframerate(sample_rate)
         handle.writeframes(pcm.tobytes())
     return path
+
+
+def wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
+    """Amostras float (-1..1) de forma (quadros, canais) como o conteúdo de um WAV de 16 bits, sem passar por arquivo.
+    É o que a interface baixa para tocar uma janela do áudio; o que passa da faixa é limitado."""
+    frames = np.asarray(samples, dtype=np.float32)
+    if frames.ndim != 2:
+        raise ValueError("as amostras precisam ter a forma (quadros, canais)")
+    pcm = np.round(np.clip(frames, -1.0, 1.0) * INT16_MAX).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as handle:
+        handle.setnchannels(frames.shape[1])
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(pcm.tobytes())
+    return buffer.getvalue()
 
 
 def read_wav_channels(path: Path) -> tuple[np.ndarray, int]:

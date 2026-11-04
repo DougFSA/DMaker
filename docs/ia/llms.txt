@@ -51,6 +51,7 @@
 - [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](reparar-o-som.md): Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo.
 - [Copiar, colar, dividir e juntar trechos de áudio](colar-trechos-de-audio.md): Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo.
 - [Desfazer e refazer uma edição](desfazer-edicao.md): Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto.
+- [Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar](editar-na-onda.md): Abre um item de áudio numa onda grande, como o Audacity: seleciona com o mouse, toca em loop, aplica um efeito com prévia e comparação do antes e depois, desenha o envelope e as amostras, e desfaz com Ctrl+Z.
 - [Analisar o áudio: estouro, nível, contraste, espectro e sons](analisar-audio.md): Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
 - [Cortar os clipes no ritmo da música](cortar-no-ritmo.md): Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
 

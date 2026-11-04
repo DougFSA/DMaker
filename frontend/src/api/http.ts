@@ -105,7 +105,34 @@ async function postForBlob(path: string, body: unknown): Promise<Blob> {
   return response.blob()
 }
 
+/** POST que devolve um arquivo e deixa quem chama ler também os cabeçalhos da resposta (a prévia do efeito diz nos
+ * cabeçalhos se é exata). O erro sai igual ao das outras chamadas. */
+async function postForResponse(path: string, body: unknown): Promise<Response> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(0, 'Não foi possível falar com o servidor do DMaker. Ele está rodando?')
+  }
+  if (!response.ok) {
+    let data: unknown
+    try {
+      data = JSON.parse(await response.text())
+    } catch {
+      data = null
+    }
+    const detail = data && typeof data === 'object' && 'detail' in data ? (data as { detail: unknown }).detail : data
+    throw new ApiError(response.status, messageFromDetail(detail, `Erro ${response.status} ao chamar ${path}`), data)
+  }
+  return response
+}
+
 export const http = {
+  postResponse: postForResponse,
   postBlob: postForBlob,
   /** Envio de arquivo (multipart): clonar voz, roteiro da fila e arquivo da aba Voz. */
   postForm: <T>(path: string, form: FormData) => request<T>('POST', path, form),
