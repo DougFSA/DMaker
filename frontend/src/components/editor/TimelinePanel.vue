@@ -308,13 +308,15 @@ function beginFadeDrag(event: MouseEvent, track: TimelineTrack, itemElement: HTM
 }
 
 /** Duplo clique na alça troca a curva do fade pela seguinte (linear, logarítmica, exponencial, seno, quadrática). */
-function cycleFadeCurve(track: TimelineTrack, itemId: string, side: FadeSide): void {
+async function cycleFadeCurve(track: TimelineTrack, itemId: string, side: FadeSide): Promise<void> {
   const item = track.items.find((candidate) => candidate.id === itemId)
   const target = item ? fadeTarget(track.id, item) : null
   const fade = item ? itemFades(item)[side] : undefined
   if (!item || !target || !fade) return
   const next = FADE_CURVES[(FADE_CURVES.indexOf(fade.curve) + 1) % FADE_CURVES.length]
-  void editor.applyOp(fadeOperation(target, side, fade.duration, next))
+  // como o arrasto, o gesto direto grava na hora
+  const done = await editor.applyOp(fadeOperation(target, side, fade.duration, next))
+  if (done && editor.dirty) await editor.save({ quiet: true })
 }
 
 function lockedWarning(trackId: string): void {
@@ -376,7 +378,7 @@ function onDoubleClick(event: MouseEvent): void {
   const fadeSide = event.target.closest<HTMLElement>('[data-fade]')?.dataset.fade
   if (item?.dataset.itemId && (fadeSide === 'in' || fadeSide === 'out')) {
     const track = tracks.value.find((candidate) => candidate.id === item.dataset.trackId)
-    if (track && !track.locked) cycleFadeCurve(track, item.dataset.itemId, fadeSide)
+    if (track && !track.locked) void cycleFadeCurve(track, item.dataset.itemId, fadeSide)
     return
   }
   if (item?.dataset.trackId && AUDIO_TRACK.test(item.dataset.trackId) && item.dataset.itemId) {
@@ -516,6 +518,7 @@ onBeforeUnmount(() => {
             :window-start="windowStart"
             :window-end="windowEnd"
             :selected="selected"
+            :fade-preview="timeline.fadePreview"
             @toggle="onTrackToggle"
             @track-set="onTrackSet"
           />

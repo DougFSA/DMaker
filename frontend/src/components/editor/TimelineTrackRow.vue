@@ -25,6 +25,8 @@ const props = defineProps<{
   windowStart: number
   windowEnd: number
   selected: ReadonlySet<string>
+  /** O fade em arrasto na alça de um item de áudio, se houver (o painel guarda). */
+  fadePreview?: { itemId: string; side: 'in' | 'out'; duration: number } | null
 }>()
 
 const emit = defineEmits<{
@@ -118,6 +120,7 @@ function buttonTitle(field: TrackToggle): string {
           :px-per-sec="pxPerSec"
           :selected="selected.has(item.id)"
           :waveform="waveformEligible(track, item)"
+          :fade-preview="fadePreview"
         />
       </template>
     </div>

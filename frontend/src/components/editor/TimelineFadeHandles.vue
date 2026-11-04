@@ -5,11 +5,14 @@
 import { computed } from 'vue'
 import type { TimelineItem } from '@/api'
 import { fadeShadePoints, fadeTarget, itemFades, itemSpeed, type FadeSide } from '@/lib/audioFades'
-import { useTimelineStore } from '@/stores/timeline'
 
-const props = defineProps<{ item: TimelineItem; trackId: string; pxPerSec: number }>()
-
-const timeline = useTimelineStore()
+const props = defineProps<{
+  item: TimelineItem
+  trackId: string
+  pxPerSec: number
+  /** O fade que a alça arrastada mostra enquanto o gesto não termina (o painel o guarda no store da linha do tempo). */
+  preview?: { itemId: string; side: FadeSide; duration: number } | null
+}>()
 
 const target = computed(() => fadeTarget(props.trackId, props.item))
 const fades = computed(() => itemFades(props.item))
@@ -25,7 +28,7 @@ interface Shown {
 }
 
 function shownFade(side: FadeSide): Shown {
-  const preview = timeline.fadePreview
+  const preview = props.preview
   const live = preview && preview.itemId === props.item.id && preview.side === side ? preview.duration : null
   const edge = fades.value[side]
   const duration = live ?? edge?.duration ?? 0
