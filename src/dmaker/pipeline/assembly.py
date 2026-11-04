@@ -27,6 +27,7 @@ from ..filtergraph.provenance import inherited_provenance_args
 from ..filtergraph.sfx import SfxInput
 from ..filtergraph.timeline import timeline_graph
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_encoder
+from .audio_effects import prepare_impulse_responses
 from .context import RenderContext
 from .segments import PreparedSegment
 from .textlayer import TextLayer
@@ -293,6 +294,9 @@ def plan_master_effects(
     ctx.master_measures.clear()
     if ctx.options.dry_run:
         return
+    prepare_impulse_responses(
+        ctx.project.audio.master_effects
+    )  # o Reverb do master lê a resposta ao impulso do cache
     for index, effect in active_effects(ctx.project.audio.master_effects):
         if not effect.needs_measure():
             continue

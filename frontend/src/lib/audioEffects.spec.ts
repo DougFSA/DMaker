@@ -15,6 +15,7 @@ import {
   effectsFor,
   freeProfileName,
   intervalProblem,
+  isCarrier,
   isEnabled,
   isListParam,
   isParamShown,
@@ -222,6 +223,28 @@ describe('o efeito novo', () => {
   it('parâmetro sem padrão fica de fora', () => {
     const open = { ...info('amplify'), parameters: [{ ...info('amplify').parameters[0]!, default: null }] }
     expect(newEffect(open)).toEqual({ type: 'amplify' })
+  })
+})
+
+describe('a portadora do Vocoder', () => {
+  const carrier = { generator: 'tone', params: { waveform: 'sawtooth', frequency_hz: 110 } }
+  const param = { name: 'carrier', kind: 'carrier' as const, default: carrier }
+
+  it('o efeito novo leva uma cópia da portadora padrão, não o objeto do catálogo', () => {
+    const vocoder = { ...info('amplify'), type: 'vocoder', parameters: [{ ...info('amplify').parameters[0]!, ...param }] }
+    const created = newEffect(vocoder)
+    expect(created).toEqual({ type: 'vocoder', carrier })
+    expect(created.carrier).not.toBe(carrier)
+  })
+
+  it('lê a portadora da spec, cai no padrão e recusa o que não é uma portadora', () => {
+    const custom = { generator: 'tone', params: { waveform: 'square', frequency_hz: 140 } }
+    expect(paramValue({ type: 'vocoder', carrier: custom }, param)).toEqual(custom)
+    expect(paramValue({ type: 'vocoder' }, param)).toEqual(carrier)
+    expect(paramValue({ type: 'vocoder', carrier: 'serra' }, param)).toEqual(carrier)
+    expect(isCarrier(custom)).toBe(true)
+    expect(isCarrier([custom])).toBe(false)
+    expect(isCarrier(null)).toBe(false)
   })
 })
 

@@ -49,6 +49,9 @@ AUDIO_FX_DIR = (
 GENERATED_DIR = (
     CACHE_DIR / "generated"
 )  # sons sintetizados (Tom, Ruído, Bipe...) de `audio.generated`, por hash do gerador, dos parâmetros e da duração
+REVERB_IR_DIR = (
+    CACHE_DIR / "reverb-ir"
+)  # respostas ao impulso do Reverb (WAV float), uma por conjunto de parâmetros da sala
 FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 SPECTROGRAM_DIR = (
@@ -97,6 +100,7 @@ def ensure_dirs() -> None:
         PREVIEW_AUDIO_DIR,
         AUDIO_FX_DIR,
         GENERATED_DIR,
+        REVERB_IR_DIR,
         FRAMES_DIR,
         WAVEFORM_DIR,
         SPECTROGRAM_DIR,
