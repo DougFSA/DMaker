@@ -9,6 +9,7 @@ Uma operação que tira ou põe tempo na linha do tempo também faz os marcadore
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ..domain.duck_edits import RULE_FIELDS, add_duck, remove_duck, set_duck
 from ..domain.edits import (
@@ -35,11 +36,15 @@ from .audio_edit_ops import AUDIO_OPERATIONS, effect_op_with_region
 from .context import Prober
 from .edit_outcome import EditOutcome, EditReport
 from .edit_time import EDIT_TIME_MAPS, EditChange, owned_intervals
+from .generated_ops import GENERATED_OPERATIONS
 from .layout import OriginAggregate, aggregate_by_origin, project_layout
 from .missing import MissingMedia
 from .restoration_ops import RESTORATION_OPERATIONS
 from .sample_reader import FFmpegSampleReader, SampleReader
 from .sync import OffsetFinder
+
+if TYPE_CHECKING:
+    from .censor import WordSource
 
 __all__ = ["EDIT_OPERATIONS", "EditOutcome", "EditReport", "apply_edit", "apply_edit_report"]
 
@@ -192,6 +197,8 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     # limpeza e reparo (perfil de ruído, Truncar Silêncio): leem o som, então usam o leitor de amostras da edição; o
     # Truncar Silêncio no clipe corta a imagem junto e declara o tempo que tirou
     **RESTORATION_OPERATIONS,
+    # sons gerados (acrescentar, mudar, tirar) e o bipe de censura: mexem só em `audio.generated` e no silêncio do item
+    **GENERATED_OPERATIONS,
 }
 
 
@@ -201,6 +208,7 @@ def apply_edit_report(
     prober: Prober = probe,
     offset_finder: OffsetFinder | None = None,
     sample_reader: SampleReader | None = None,
+    words: WordSource | None = None,
 ) -> EditReport:
     """Calcula o layout atual do projeto e aplica a operação `op["type"]` sobre a spec, devolvendo o projeto novo
     com os marcadores já acompanhando a edição, mais os avisos (um marcador que estava num trecho cortado some).
@@ -217,6 +225,7 @@ def apply_edit_report(
         project, project_layout(project, prober, offset_finder, MissingMedia.scan(project))
     )
     layout.reader = sample_reader or FFmpegSampleReader(SubprocessRunner(quiet=True))
+    layout.words = words
     try:
         result = handler(project, op, layout)
     except EditError:

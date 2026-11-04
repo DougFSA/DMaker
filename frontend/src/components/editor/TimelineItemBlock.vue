@@ -155,6 +155,9 @@ const classes = computed(() => [
 .item--voiceover {
   background: var(--tl-voiceover);
 }
+.item--generated {
+  background: var(--tl-generated);
+}
 .item--captions {
   background: var(--tl-captions);
 }

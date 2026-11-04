@@ -299,6 +299,8 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "noise_profile": "pega o perfil de ruído e devolve o nível por banda; o modelo pequeno guarda o mesmo perfil por edit_project (noise_profile_set) e aplica a Redução de ruído por audio_effect, e a pessoa vê o nível por `dmaker audio noise-profile add`",
     "audio_effect_response": "devolve duas listas de números para o gráfico da interface; o modelo pequeno põe o filtro com audio_effect e confere o som pelo qa_report, e a pessoa vê a curva por `dmaker audio effect response`",
     "audio_effect_presets": "guarda cadeias de efeitos com nome no arquivo da pessoa; é uma biblioteca pessoal que se gerencia por `dmaker audio preset`, e o modelo pequeno põe a cadeia que quer direto por edit_project",
+    "audio_generators": "lista os geradores de som; o modelo pequeno põe o som no projeto por edit_project (generated_add) e a pessoa vê o catálogo por `dmaker audio generators`",
+    "audio_generate": "grava um WAV solto fora do projeto; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno põe o som no projeto por edit_project (generated_add); a pessoa usa `dmaker audio generate`",
     "audio_effect_action": "sugere o limiar do Noise Gate a partir do ruído; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno põe o gate com o limiar do manual por edit_project; a pessoa usa `dmaker audio effect action`",
     "cut_on_beat": "com apply anda vários cortes de uma vez; o modelo pequeno confere as batidas com audio_analyze e corta por edit_project, e a pessoa pede o resto por `dmaker audio analyze cut-on-beat`",
 }

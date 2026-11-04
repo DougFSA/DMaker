@@ -27,6 +27,7 @@ import { DEFAULT_SPECTROGRAM, type SpectrogramSettings } from '@/lib/spectrogram
 import { analysisTargetOf } from '@/lib/spectrum'
 import {
   isVoiceTarget,
+  planCensorBeep,
   planCut,
   planEffect,
   planEnvelope,
@@ -292,6 +293,9 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     return done
   }
 
+  /** Bipar a seleção: o item é silenciado no trecho e um Tom de 1 kHz soa no lugar, num passo só. */
+  const censor = (): Promise<boolean> => (target.value ? run(planCensorBeep(target.value, clock.value, selection.value)) : Promise.resolve(false))
+
   const split = (): Promise<boolean> => (target.value ? run(planSplitAt(target.value, clock.value, cursor.value)) : Promise.resolve(false))
 
   const label = (): Promise<boolean> => run(planLabel(clock.value, selection.value, cursor.value))
@@ -367,6 +371,7 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
     selectToMarker,
     silence,
     cut,
+    censor,
     split,
     label,
     applyEffect,

@@ -66,7 +66,11 @@ def spec_stem_tracks(project: Project) -> list[str]:
     from ..domain.audio_export import available_stems
 
     audio = project.audio
-    plays_sfx = bool(audio.sfx) or any(getattr(overlay, "sound", None) for overlay in project.overlays)
+    plays_sfx = (
+        bool(audio.sfx)
+        or any(sound.volume > 0 for sound in audio.generated)
+        or any(getattr(overlay, "sound", None) for overlay in project.overlays)
+    )
     return available_stems(
         has_clips=bool(project.timeline) and not audio.mute_clips,
         narrations=sum(1 for item in audio.narration if item.volume > 0),

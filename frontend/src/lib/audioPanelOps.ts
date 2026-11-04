@@ -57,6 +57,13 @@ export function planSilence(target: string, clock: ItemClockInfo | null, selecti
   return { ok: true, ops: [{ type: 'audio_silence', target, start: span.start, end: span.end }] }
 }
 
+/** Bipar a seleção: silencia o trecho no item e põe um Tom de 1 kHz sobre ele (a operação `censor_beep`, um passo só do desfazer). */
+export function planCensorBeep(target: string, clock: ItemClockInfo | null, selection: AxisSelection | null): Plan {
+  const span = interval(clock, selection)
+  if (typeof span === 'string') return fail(span)
+  return { ok: true, ops: [{ type: 'censor_beep', target, start: span.start, end: span.end }] }
+}
+
 /** Cortar a seleção (Delete): na voz gravada o item encolhe e os seguintes recuam; nos presos à imagem o fim completa com silêncio. */
 export function planCut(target: string, clock: ItemClockInfo | null, selection: AxisSelection | null): Plan {
   if (isTrackTarget(target)) {

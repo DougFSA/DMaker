@@ -2,7 +2,7 @@
 
 Num projeto de vídeo, o último trecho decide o fim e o áudio que passa dele é cortado. Sem trechos (a saída é um
 arquivo de som), o fim é o do item de áudio que termina por último: narração, voz gravada e a janela de música
-com fim declarado. A música sem janela (que se repete para cobrir o vídeo) não decide nada quando há voz; sozinha,
+com fim declarado, e o som gerado (que termina em `start + duration`). A música sem janela (que se repete para cobrir o vídeo) não decide nada quando há voz; sozinha,
 vale uma passada dela inteira, porque repetir para sempre não é uma duração.
 """
 
@@ -18,7 +18,7 @@ from .voiceover import estimate_narration_duration
 
 NOTHING_TO_PLAY = (
     "o projeto não tem trechos de vídeo nem nenhum áudio que dê duração: ponha uma narração (audio.narration), "
-    "uma voz gravada (audio.voiceover) ou uma música (audio.music) para ele ter o que tocar"
+    "uma voz gravada (audio.voiceover), um som gerado (audio.generated) ou uma música (audio.music) para ele ter o que tocar"
 )
 
 
@@ -38,6 +38,7 @@ def audio_extent(project: Project, prober: Prober, narration_durations: Sequence
     for clip, playtime in zip(audio.voiceover, voice_file_playtimes(project, prober), strict=True):
         if clip.volume > 0 and playtime:
             ends.append(clip.start + playtime)
+    ends.extend(sound.start + sound.duration for sound in audio.generated if sound.volume > 0)
     music = audio.music
     if music is not None and music.volume > 0:
         ends.extend(span.end for span in music.spans if span.end is not None and not span.from_end)

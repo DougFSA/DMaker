@@ -59,6 +59,7 @@
 - [Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch](equalizar-som.md): Muda o timbre de um item de áudio ou da mistura: graves e agudos, EQ por bandas ou por uma curva, corte do ronco e do zumbido, e predefinições suas.
 - [Analisar o áudio: estouro, nível, contraste, espectro e sons](analisar-audio.md): Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
 - [Cortar os clipes no ritmo da música](cortar-no-ritmo.md): Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
+- [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](gerar-sons.md): Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la.
 
 ## Tarefas de dublagem e modelos
 

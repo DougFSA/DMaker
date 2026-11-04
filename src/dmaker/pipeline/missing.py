@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..domain.generators import parse_generator
 from ..domain.spec import ClipSegment, ImageOverlay, ImageSegment, Project, VideoOverlay
 from ..media.probe import MediaInfo
 
@@ -82,4 +83,6 @@ def media_references(project: Project) -> list[tuple[str, float | None]]:
     if project.audio.music is not None:
         found.append((project.audio.music.src, None))
     found.extend((clip.src, None) for clip in project.audio.voiceover)
+    for sound in project.audio.generated:  # os textos que o Importar Amostras lê
+        found.extend((name, None) for name in parse_generator(sound.generator, sound.params).files())
     return found

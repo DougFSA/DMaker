@@ -10,6 +10,7 @@ que a spec original. `origin[j]` é o índice, na timeline original, de que o tr
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from ..domain.brand import Theme, load_theme
 from ..domain.outputs import OutputPreset, frame_preset, resolve_output
@@ -24,6 +25,9 @@ from .missing import MissingMedia
 from .sample_reader import SampleReader
 from .sources import Source, expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
+
+if TYPE_CHECKING:
+    from .censor import WordSource
 
 
 @dataclass
@@ -104,6 +108,8 @@ class OriginAggregate:
     physical: ProjectLayout | None = None
     # quem lê as amostras do som para as edições que medem (perfil de ruído, Truncar Silêncio); `apply_edit_report` o põe
     reader: SampleReader | None = None
+    # quem diz as palavras ditas num item, para o bipe de censura por palavra; `apply_edit_report` o põe (sem ele vale o Whisper local)
+    words: WordSource | None = None
 
 
 def aggregate_by_origin(project: Project, layout: ProjectLayout) -> OriginAggregate:

@@ -35,9 +35,9 @@ export function isExternalTrack(id: string): boolean {
   return /^A([2-9]|\d{2,})$/.test(id)
 }
 
-/** As trilhas de áudio que podem ser o fundo de uma regra (a SFX não aparece na linha do tempo). */
+/** As trilhas de áudio que podem ser o fundo de uma regra (a SFX aparece quando o projeto tem sons gerados). */
 export function isDuckTrack(id: string): boolean {
-  return id === 'A1' || isExternalTrack(id) || id === 'MUS' || id === 'NAR' || id === 'VO'
+  return id === 'A1' || isExternalTrack(id) || id === 'MUS' || id === 'NAR' || id === 'VO' || id === 'SFX'
 }
 
 /** Quais trilhas podem comandar o fundo `background`: as combinações que o servidor aceita. A faixa externa só abaixa sob

@@ -266,6 +266,12 @@ FIELD_NOTES: dict[str, str] = {
     "*.pan": "Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele.",
     "AudioSettings.sfx_gain_db": "Ganho em dB do barramento dos efeitos sonoros (a trilha SFX); fica no padrão na spec e é o que `tracks.SFX` vira no render.",
     "AudioSettings.sfx_pan": "Equilíbrio do barramento dos efeitos sonoros, de -1 a 1.",
+    "AudioSettings.generated": "Sons sintetizados (tom, ruído, bipe, metrônomo...) no barramento dos efeitos sonoros (trilha SFX): soma depois do ducking e antes da normalização, sem abaixar a música. `dmaker audio generators` lista os geradores.",
+    "GeneratedSound.generator": "O tipo do gerador: tone, chirp, noise, dtmf, silence, pluck, risset_drum, rhythm_track ou sample_data.",
+    "GeneratedSound.params": "Os parâmetros do gerador (frequência, amplitude em dBFS, andamento...); os que faltam ficam no padrão e a spec guarda todos.",
+    "GeneratedSound.start": "Instante do vídeo final em que o som começa, em segundos.",
+    "GeneratedSound.duration": "Quanto o som dura, em segundos (até 600): o gerador enche exatamente esse tempo.",
+    "GeneratedSound.volume": "Ganho linear do item sobre o nível do gerador (1 é o nível dele); não se nivela contra a voz.",
     "AudioSettings.master_effects": "Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima.",
     # audiograma, áudio como voz e texto atrás da pessoa
     "AudioSettings.voiceover": "Arquivos de áudio (corte de podcast, áudio de WhatsApp) que viram a voz do vídeo, sem trecho de vídeo.",

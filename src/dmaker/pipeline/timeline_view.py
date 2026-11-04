@@ -6,7 +6,7 @@ faixa por grupo de itens que não se sobrepõem no tempo), "TX" (texto), "GR" (i
 e composição HTML), "V1" (trechos da linha do tempo, com a sobreposição das transições), "A1" (áudio de cada
 clipe de V1), "A2", "A3"... (uma por faixa de `audio.tracks`, fatiada por clipe como no render), "NAR"
 (narrações por texto), "VO" (arquivos de voz gravada, com a duração depois dos efeitos), "MUS" (música),
-"CC" (legendas) e, por último, uma trilha de marcadores por grupo ("MK" para o grupo padrão, "MK:<grupo>" para
+"SFX" (sons gerados), "CC" (legendas) e, por último, uma trilha de marcadores por grupo ("MK" para o grupo padrão, "MK:<grupo>" para
 os nomeados)."""
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..domain.generators import parse_generator
 from ..domain.markers import marker_groups, marker_track_id
 from ..domain.spec import (
     ClipSegment,
@@ -581,6 +582,43 @@ def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -
     return Track(id="VO", kind="audio", label="VO", items=items, muted=muted, hidden=hidden, locked=locked)
 
 
+def _sfx_track(project: Project) -> Track | None:
+    """Um item por som gerado (`audio.generated`), na trilha `SFX`: o barramento dos efeitos sonoros, com o mudo, o solo, o
+    ganho e o Auto Duck dele. O bloco dura o que o item diz (`duration`), porque o gerador enche exatamente esse tempo."""
+    if not project.audio.generated:
+        return None
+    muted, hidden, locked = _track_state(project, "SFX")
+    items = []
+    for i, sound in enumerate(project.audio.generated):
+        generator = parse_generator(sound.generator, sound.params)
+        files = generator.files()
+        items.append(
+            TrackItem(
+                id=_item_id("SFX", i),
+                kind="generated",
+                index=i,
+                label=generator.describe(),
+                start=sound.start,
+                end=sound.start + sound.duration,
+                in_point=0.0,
+                out_point=None,
+                src=None,
+                source=None,
+                transition=None,
+                muted=sound.volume <= 0 or muted,
+                extra={
+                    "generator": sound.generator,
+                    "params": sound.params,
+                    "volume": sound.volume,
+                    "duration": sound.duration,
+                    **_mix_extra(0.0, sound.pan, sound.effects),
+                },
+                path=str(project.resolve(files[0])) if files else None,
+            )
+        )
+    return Track(id="SFX", kind="audio", label="SFX", items=items, muted=muted, hidden=hidden, locked=locked)
+
+
 def _music_track(
     project: Project, layout: ProjectLayout, music_duration: float | None = None
 ) -> Track | None:
@@ -815,6 +853,10 @@ def build_timeline_view(
     music_track = _music_track(project, layout, music_duration)
     if music_track is not None:
         tracks.append(music_track)
+
+    sfx_track = _sfx_track(project)
+    if sfx_track is not None:
+        tracks.append(sfx_track)
 
     captions_track = _captions_track(project, layout)
     if captions_track is not None:

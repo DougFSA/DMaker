@@ -237,6 +237,12 @@ export type EditOperation =
       params?: Record<string, unknown>
     }
   | { type: 'audio_silence'; target: string; start: number; end: number }
+  /** Os sons gerados (`audio.generated`): o início e a duração são da linha do tempo; `params` se soma aos que o som já tem. */
+  | { type: 'generated_add'; generator: string; params?: Record<string, unknown>; start?: number; duration?: number; volume?: number; pan?: number }
+  | { type: 'generated_set'; index: number; generator?: string; params?: Record<string, unknown>; start?: number; duration?: number; volume?: number; pan?: number }
+  | { type: 'generated_remove'; index: number }
+  /** O bipe de censura: silencia o item `target` no intervalo e põe um Tom de 1 kHz no mesmo lugar, num passo do desfazer. */
+  | { type: 'censor_beep'; target: string; start?: number; end?: number; word?: string; occurrence?: number; margin?: number }
   | { type: 'audio_cut'; target: string; start: number; end: number }
   | { type: 'audio_split'; target: string; at: number }
   | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
