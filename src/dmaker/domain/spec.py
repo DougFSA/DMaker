@@ -821,6 +821,25 @@ class Narration(EffectsOwner):
         return self
 
 
+class Take(Strict):
+    """Uma versão alternativa do trecho de uma voz gravada (o punch-in guarda a gravação antiga aqui): o mesmo recorte
+    `offset`..`end` de um arquivo, com a mesma duração do trecho que o item toca. Trocar o take ativo (`voiceover_take_set`)
+    põe estes campos no item e leva os dele para cá, então a lista só tem os que NÃO estão tocando."""
+
+    src: str = Field(min_length=1)
+    offset: float = Field(0.0, ge=0)
+    end: float = Field(gt=0)
+    label: str = ""
+
+    @model_validator(mode="after")
+    def _range(self) -> Take:
+        if self.end <= self.offset:
+            raise ValueError(
+                f"take {self.src}: end ({self.end}) precisa ser maior que offset ({self.offset})"
+            )
+        return self
+
+
 class VoiceoverClip(EffectsOwner):
     """Arquivo de áudio gravado (corte de podcast, entrevista, áudio de WhatsApp) posto na linha do tempo como
     voz do vídeo, sem precisar de um trecho de vídeo nem de uma fonte sincronizada. Entra no mesmo barramento
@@ -836,10 +855,14 @@ class VoiceoverClip(EffectsOwner):
     volume: float = Field(1.0, ge=0, le=4)
     pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
     effects: list[AudioEffect] = []  # cadeia de efeitos no trecho do arquivo (de `offset` a `end`), em ordem
+    takes: list[
+        Take
+    ] = []  # os outros takes deste trecho (o punch-in guarda o antigo); fora do dump quando vazio
+    take_label: str = ""  # como o take que toca agora aparece na lista; fora do dump quando vazio
 
     effects_place: ClassVar[str] = "voz gravada (audio.voiceover)"
     effects_may_grow: ClassVar[bool] = True
-    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0, "takes": [], "take_label": ""}
 
     @model_validator(mode="after")
     def _range(self) -> VoiceoverClip:

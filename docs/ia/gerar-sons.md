@@ -55,3 +55,5 @@ Medido no WAV: o tom de 1 kHz a -6 dBFS tem pico de -6,000 dBFS e 1000,00 Hz; o 
 - **"frequency_hz"** (ou outro campo fora da faixa): `audio_generators` mostra a faixa.
 - **"há valores fora de -1 a 1"**: ligue `normalize` no Importar Amostras.
 - **"já existe; use overwrite"**: escolha outro destino ou use `overwrite`.
+
+---

@@ -9,6 +9,7 @@ import type { ShortcutId } from '@/lib/keymap'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
+import { useRecordingStore } from '@/stores/recording'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useTimelineStore } from '@/stores/timeline'
 
@@ -18,6 +19,7 @@ const keymap = useKeymapStore()
 const layout = useScreenLayoutStore()
 const actions = useEditorActions()
 const audioPanel = useAudioPanelStore()
+const recording = useRecordingStore()
 
 const ready = computed(() => !!editor.view)
 /** O último item selecionado: o que o painel Áudio abre. */
@@ -65,6 +67,15 @@ function hint(text: string, id: ShortcutId): string {
         @click="audioPanel.openFor(primary)"
       >
         Editar áudio
+      </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!ready"
+        title="Gravar uma narração do microfone sobre o vídeo, com a latência compensada"
+        data-record-narration
+        @click="recording.openDialog()"
+      >
+        Gravar narração
       </AppButton>
     </div>
 

@@ -274,7 +274,11 @@ def validate_project(name_or_path: str) -> dict:
         "generated_remove (por `index`; `params` se soma aos que o som já tem) e censor_beep (o bipe de censura: silencia o "
         "item `target` e põe um Tom de 1 kHz no mesmo intervalo, num passo só; diga o intervalo por `word` (a palavra, "
         "achada na transcrição do item) com `occurrence` e `search_from`/`search_to`, por `region` ou por `start` e `end`; "
-        "`margin` alarga o bipe, `frequency_hz` e `amplitude_db` o ajustam). `op` é um "
+        "`margin` alarga o bipe, `frequency_hz` e `amplitude_db` o ajustam). Gravação do microfone (ver "
+        "`audio_recordings`): audio_record_add (põe uma gravação como voz gravada: `src`, `start`, `duration`), "
+        "audio_punch (regrava o intervalo `start`/`end` de uma voz gravada `target` com a gravação `src` que começou em "
+        "`recorded_at` e dura `duration`; o trecho antigo fica na lista de takes e as emendas levam fade de 10 ms) e "
+        "voiceover_take_set (troca o take que toca: `target`, `take`, a posição na lista). `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
         "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
         '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
@@ -1334,6 +1338,40 @@ def audio_analyzers(type: str | None = None) -> dict:
         return analyzer_catalog(type)
     except ValueError as exc:
         raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "As gravações do microfone de um projeto (a interface grava pelo navegador e manda o som em pedaços de um segundo "
+        "para `projects/<nome>/recordings/<id>/`). `action` list lista todas (com `unfinished=true`, só as que a aba deixou "
+        "abertas, com a duração que chegou e os pedaços que faltam); recover finaliza uma aberta com o que chegou ao disco "
+        "e a põe como voz gravada na linha do tempo, num passo do histórico (`id` omitido vale se há uma só aberta); "
+        "punch aplica uma gravação aberta para regravar um trecho (`id`). O punch-in com o intervalo direto é a operação "
+        "audio_punch do `edit_project`."
+    )
+)
+def audio_recordings(
+    name: str, action: str = "list", id: str | None = None, unfinished: bool = False
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.projects import summarize
+    from .pipeline.recording_attach import attach_recording, listing
+    from .pipeline.recordings import RecordingError
+
+    if action not in ("list", "recover", "punch"):
+        raise ToolError("`action` é list, recover ou punch")
+    try:
+        if action == "list":
+            return {"recordings": listing(name, unfinished)}
+        status, report = attach_recording(name, id, punch=action == "punch")
+    except (RecordingError, EditError, FileNotFoundError) as exc:
+        raise ToolError(str(exc)) from exc
+    result = {"recording": status.to_dict(), **_summary_dict(summarize(report.project))}
+    if report.warnings:
+        result["edit_warnings"] = report.warnings
+    return result
 
 
 @server.tool(

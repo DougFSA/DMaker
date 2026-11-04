@@ -524,6 +524,29 @@ def test_clone_with_upload_converts_reference_and_uses_given_text(voice_client, 
     assert [v["id"] for v in _stored_voices(voice_client)] == ["ana-julia"]
 
 
+def test_the_record_to_clone_shortcut_sends_the_wav_straight_to_the_clone_without_a_manual_file(
+    voice_client, studio
+):
+    """O atalho de 15 s da janela Gravar: o WAV mono de 16 bits que o navegador monta vai direto para `/clone`, com o
+    texto da folha de gravação como transcrição (o Whisper não é chamado) e a voz nasce na biblioteca (falsa aqui)."""
+    from dmaker.media.wavio import wav_bytes
+
+    reference = wav_bytes(np.zeros((15 * 48000, 1), dtype=np.float32), 48000)
+    script = "Olá, estou gravando a minha voz para o DMaker."
+    resp = voice_client.post(
+        "/api/voices/clone",
+        data={"name": "Minha voz", "reference_text": script, "language": "pt"},
+        files={"audio": ("gravacao.wav", reference, "audio/wav")},
+    )
+    assert resp.status_code == 200, resp.text
+    voice = resp.json()
+    assert voice["id"] == "minha-voz" and voice["kind"] == "clone" and voice["reference_text"] == script
+    assert studio.transcriber.calls == []
+    assert any(arg.endswith("referencia.wav") for arg in studio.runner.commands[0])
+    assert (studio.library.root / "minha-voz" / "reference.wav").exists()
+    assert [v["id"] for v in _stored_voices(voice_client)] == ["minha-voz"]
+
+
 def test_clone_without_text_transcribes_the_reference(voice_client, studio):
     resp = voice_client.post(
         "/api/voices/clone",

@@ -133,7 +133,7 @@ describe('os pontos de extensão (espectrograma e gravação)', () => {
 
   it('um comando novo entra por AUDIO_TOOLBAR_EXTRAS, no fim da barra de reprodução', async () => {
     const Record = defineComponent({ setup: () => () => h('button', { 'data-fake-record': '' }, 'Gravar') })
-    AUDIO_TOOLBAR_EXTRAS.push({ id: 'record', component: Record })
+    AUDIO_TOOLBAR_EXTRAS.push({ id: 'fake-extra', component: Record })
     try {
       await mountPanel()
       expect(wrapper?.find('[data-fake-record]').exists()).toBe(true)

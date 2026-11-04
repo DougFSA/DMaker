@@ -301,6 +301,7 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "audio_effect_presets": "guarda e lista macros (cadeias de efeitos com nome) nas pastas da pessoa; é uma biblioteca pessoal que se gerencia por `dmaker audio macro`, e o modelo pequeno põe a cadeia que quer direto por edit_project",
     "audio_generators": "lista os geradores de som; o modelo pequeno põe o som no projeto por edit_project (generated_add) e a pessoa vê o catálogo por `dmaker audio generators`",
     "audio_generate": "grava um WAV solto fora do projeto; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno põe o som no projeto por edit_project (generated_add); a pessoa usa `dmaker audio generate`",
+    "audio_recordings": "recupera gravações do microfone que a aba deixou abertas; a gravação é feita pela interface, o kit de edição está no teto de 25 ferramentas e a pessoa usa `dmaker audio recordings`",
     "apply_macro": "trata uma pasta inteira de arquivos de áudio com uma macro, num trabalho longo que grava dezenas de arquivos; se pede por `dmaker audio macro run`, e o modelo pequeno põe a macro num item por edit_project (ação preset)",
     "audio_effect_action": "sugere o limiar do Noise Gate a partir do ruído; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno põe o gate com o limiar do manual por edit_project; a pessoa usa `dmaker audio effect action`",
     "cut_on_beat": "com apply anda vários cortes de uma vez; o modelo pequeno confere as batidas com audio_analyze e corta por edit_project, e a pessoa pede o resto por `dmaker audio analyze cut-on-beat`",
