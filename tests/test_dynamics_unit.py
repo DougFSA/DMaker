@@ -60,7 +60,8 @@ def test_the_new_effects_are_in_the_catalog_with_their_actions_and_presets():
     assert [action["id"] for action in types["noise_gate"]["actions"]] == ["analyze_noise"]
     assert types["noise_gate"]["actions"][0]["fills"] == ["threshold_db"]
     assert types["compressor"]["actions"] == []
-    assert {preset["id"] for preset in payload["presets"]} == {"podcast_voice", "reels_voice", "hold_peaks"}
+    # as outras famílias registram as suas predefinições no mesmo catálogo (os fades do DMK-53, por exemplo)
+    assert {"podcast_voice", "reels_voice", "hold_peaks"} <= {preset["id"] for preset in payload["presets"]}
     knee = next(p for p in types["compressor"]["parameters"] if p["name"] == "knee_db")
     assert (knee["minimum"], knee["maximum"]) == (0.0, 18.0)  # a faixa do joelho do acompressor, em dB
 
