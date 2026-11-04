@@ -38,6 +38,7 @@ from .assembly import (
     plan_loudness,
     plan_master_effects,
 )
+from .audio_crossfade import CutNeighbors, clip_crossfades, crossfade_key_parts
 from .audio_effects import (
     clip_camera_audio,
     effect_processor,
@@ -106,6 +107,7 @@ def piece_recipe(segment: Segment) -> dict:
                 "effects",
                 "audio_offset",
                 "pan",
+                "audio_crossfade",  # o serializador tira o campo quando vazio: a receita antiga não muda
             },
         )
     return {"type": segment.type, "duration": getattr(segment, "duration", None)}
@@ -349,6 +351,7 @@ class PreviewAudioBuilder:
         """Um WAV por trecho, do cache ou recém-gerado. O que a spec pede e o disco não tem vira silêncio."""
         prepared = []
         count = len(layout.project.timeline)
+        ctx.cut_neighbors = self._neighbors(ctx, layout, missing)
         for index, (segment, source, duration) in enumerate(
             zip(layout.project.timeline, layout.sources, layout.durations, strict=True)
         ):
@@ -372,6 +375,28 @@ class PreviewAudioBuilder:
             prepared.append(PreparedSegment(index, segment, duration, out, None, None))
         return prepared
 
+    @staticmethod
+    def _neighbors(ctx: RenderContext, layout: ProjectLayout, missing: MissingMedia) -> CutNeighbors | None:
+        """A linha do tempo como o crossfade de som entre clipes lê: as mesmas fontes e durações do render, e as fatias de
+        faixa externa sem as que sumiram do disco. None quando nenhum clipe pede crossfade."""
+        timeline = layout.project.timeline
+        if not any(isinstance(seg, ClipSegment) and seg.audio_crossfade for seg in timeline):
+            return None
+
+        def slices_of(i: int) -> tuple:
+            segment = timeline[i]
+            if not (isinstance(segment, ClipSegment) and segment.source):
+                return ()
+            return tuple(
+                piece
+                for piece in track_slices(
+                    ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx)
+                )
+                if not missing.covers(piece.path)
+            )
+
+        return CutNeighbors(timeline, layout.sources, layout.durations, slices_of)
+
     def _clip_piece(
         self, ctx, index, segment, source, duration, missing
     ) -> tuple[Path, FFmpegCommand | None]:
@@ -391,6 +416,9 @@ class PreviewAudioBuilder:
                 if not missing.covers(piece.path)
             )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        crossfades = (
+            clip_crossfades(index, ctx.cut_neighbors, ctx.warn) if ctx.cut_neighbors is not None else None
+        )
         key = cache_key(
             PREVIEW_AUDIO_VERSION,
             piece_recipe(segment),
@@ -413,6 +441,7 @@ class PreviewAudioBuilder:
             ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
             *noise_profile_parts(ctx, segment.effects),  # o perfil de ruído nomeado (vazio sem ele)
+            *crossfade_key_parts(crossfades),  # o som emprestado dos vizinhos no crossfade (vazio sem ele)
         )
         out = ctx.cache_dir / f"{key}.wav"
         if out.exists():
@@ -439,6 +468,7 @@ class PreviewAudioBuilder:
             audio_stream=source.audio_stream,
             camera_audio=camera_path,
             camera_lead=camera_lead,
+            crossfades=crossfades,
         )
         if any(
             piece.duck for piece in tracks

@@ -80,6 +80,9 @@ class RenderContext:
     master_measures: dict[int, Measure] = field(default_factory=dict)
     # o plano do Auto Duck (ver `pipeline/auto_duck.py`); None quando o projeto não tem regra
     duck_plan: DuckPlan | None = None
+    # a linha do tempo vista pelo crossfade de som entre clipes vizinhos (`pipeline.audio_crossfade.CutNeighbors`): o
+    # preparador de um trecho precisa das fontes e das durações dos vizinhos. O construtor do mezanino a preenche
+    cut_neighbors: Any = None
 
     @property
     def width(self) -> int:
@@ -99,5 +102,9 @@ class RenderContext:
         return self.theme.key != "default"
 
     def warn(self, message: str) -> None:
+        if (
+            message in self.warnings
+        ):  # o mesmo aviso do `lint` e do preparador (o crossfade de som) aparece uma vez
+            return
         self.warnings.append(message)
         self.log(f"aviso: {message}")

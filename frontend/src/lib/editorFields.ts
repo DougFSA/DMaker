@@ -148,6 +148,18 @@ export const TRANSITION_DURATION_FIELD: FieldDef = num('Transition', 'transition
   fallback: 0.5,
 })
 
+/** O crossfade do som no corte de entrada de um clipe (J-cut e L-cut): quanto dura e a curva (soma de amplitude ou de potência). */
+export const AUDIO_CROSSFADE_DURATION_FIELD: FieldDef = num('AudioCrossfade', 'audio_crossfade.duration', 'Duração (s)', {
+  prop: 'duration',
+  fallback: 0.5,
+  max: 5,
+})
+export const AUDIO_CROSSFADE_TYPE_FIELD: FieldDef = select('AudioCrossfade', 'audio_crossfade.curve', 'Tipo', {
+  prop: 'curve',
+  fallback: 'constant_power_1',
+  hint: 'Potência constante (1 e 2) para sons diferentes; ganho constante para o mesmo som dos dois lados.',
+})
+
 export const REFRAME_MODE_FIELD: FieldDef = select('Reframe', 'reframe.mode', 'Modo', { prop: 'mode', fallback: 'auto' })
 
 /** O foco só vale no modo "cortar": diz de onde o corte se aproxima. */

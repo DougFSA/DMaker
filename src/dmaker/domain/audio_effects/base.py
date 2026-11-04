@@ -136,10 +136,11 @@ class EffectBase(BaseModel):
         parâmetro (completar com silêncio mantém a duração, não completar encurta), por isso a conta é por instância."""
         return self.changes_duration
 
-    def rebased(self, origin: float, length: float) -> EffectBase | None:
+    def rebased(self, origin: float, length: float, total: float | None = None) -> EffectBase | None:
         """O mesmo efeito para um pedaço do item que começa em `origin` (segundos do item) e dura `length`: o
         intervalo anda junto com o som, e o que cai fora do pedaço some (devolve None quando nada sobra). É o que
-        divide, apara e cola um trecho sem deixar um silêncio ou um corte no lugar errado."""
+        divide, apara e cola um trecho sem deixar um silêncio ou um corte no lugar errado. `total` é a duração do
+        item inteiro, quando quem divide a sabe: só os fades presos à borda do item (que fecha) precisam dela."""
         if self.start is None and self.end is None:
             return self
         first = 0.0 if self.start is None else self.start - origin

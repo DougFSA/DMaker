@@ -80,7 +80,7 @@ class Draw(EffectBase):
             update={"values": kept, "start": start, "end": round(start + len(kept) / EFFECT_SAMPLE_RATE, 6)}
         )
 
-    def rebased(self, origin: float, length: float) -> Draw | None:
+    def rebased(self, origin: float, length: float, total: float | None = None) -> Draw | None:
         """O desenho para um pedaço do item que começa em `origin` e dura `length`: as amostras de dentro andam junto, e
         as de fora saem."""
         if length <= EPSILON:
