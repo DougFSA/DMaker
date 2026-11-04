@@ -34,7 +34,7 @@ from ..domain.audio_effects import (
 )
 from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
-from ..domain.spec import ClipSegment
+from ..domain.spec import ClipSegment, GeneratedSound
 from ..filtergraph.audio_effects import (
     SAMPLE_RATE,
     Measure,
@@ -52,7 +52,9 @@ from ..filtergraph.common import Inputs
 from ..filtergraph.mezzanine import uses_camera_audio
 from ..filtergraph.pip import ResolvedVideoOverlay, pip_audio_window
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner
+from ..media.reverb import ensure_impulse
 from ..media.spectral import NoiseSpectrum, noise_spectrum, quiet_pause_window
+from ..media.wavio import read_wav_float
 from .cache_key import cache_key
 from .context import RenderContext
 from .noise_profiles import AUTO_PROFILE_SECONDS, ProfileLocator, measure_profile
@@ -209,6 +211,7 @@ class EffectProcessor:
 
     def _render(self, item: AudioItem, out: Path) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
+        prepare_impulse_responses(item.effects)
         token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
         staging = out.with_name(f"{out.stem}.tmp-{token}{out.suffix}")
         scratch = out.with_name(f"{out.stem}.stages-{token}")
@@ -288,8 +291,24 @@ class EffectProcessor:
                 shutil.copyfile(entering, target)
                 return
             measure = Measure(noise=spectrum)
-        result = apply_sample_effect(SampleRequest(effect, entering_samples, SAMPLE_RATE, measure))
+        side = self._carrier(effect, len(entering_samples))
+        result = apply_sample_effect(SampleRequest(effect, entering_samples, SAMPLE_RATE, measure, side))
         np.asarray(result, dtype="<f4").tofile(target)
+
+    def _carrier(self, effect: EffectBase, frames: int) -> np.ndarray | None:
+        """A segunda entrada de um efeito de amostras que pede uma (a portadora do Vocoder): o gerador de som dele, na duração do
+        sinal que entra, `(quadros, 2)` na taxa da mistura. Passa pelo mesmo cache dos sons gerados (`cache/generated`), então a
+        prévia e o render dividem o arquivo. None quando o efeito não usa segunda entrada."""
+        found = effect.carrier_sound()
+        if found is None:
+            return None
+        from .generated_sounds import GeneratedSoundRenderer  # import tardio: aquele módulo importa este
+
+        generator, params = found
+        sound = GeneratedSound(generator=generator, params=params, duration=frames / SAMPLE_RATE)
+        path = GeneratedSoundRenderer(self.runner).render(sound, lambda name: Path(name))
+        samples, _ = read_wav_float(path)
+        return _fitted(samples, frames)
 
     def _measures(
         self, inputs: Inputs, ingress: str, stage: Stage, duration: float, item_stream: int = 0
@@ -315,6 +334,22 @@ class EffectProcessor:
             if measure is not None:
                 measures[index] = measure
         return measures
+
+
+def prepare_impulse_responses(effects: Sequence[EffectBase]) -> None:
+    """Cria (se faltam) as respostas ao impulso que os efeitos ligados da cadeia leem: o grafo do Reverb as lê do cache por um
+    `amovie`, então o arquivo precisa existir antes do comando."""
+    for _, effect in active_effects(effects):
+        settings = effect.impulse_settings()
+        if settings is not None:
+            ensure_impulse(settings, SAMPLE_RATE)
+
+
+def _fitted(samples: np.ndarray, frames: int) -> np.ndarray:
+    """`samples` com exatamente `frames` quadros: o que sobra é cortado e o que falta (arredondamento da duração) vira silêncio."""
+    if len(samples) >= frames:
+        return samples[:frames]
+    return np.vstack([samples, np.zeros((frames - len(samples), samples.shape[1]), dtype=samples.dtype)])
 
 
 # ---------- os caminhos do som ----------

@@ -4,7 +4,7 @@
    gravam na hora, cada uma num passo. Número fora da faixa do catálogo é limitado antes de ir para a spec. As listas do EQ
    (os 31 controles do EQ Gráfico e os pontos do EQ por Curva) têm o controle próprio com o gráfico, e gravam ao soltar. */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { AudioEffectParam, AudioEffectSettings, CurvePoint } from '@/api'
+import type { AudioEffectParam, AudioEffectSettings, CarrierValue, CurvePoint } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -14,6 +14,7 @@ import {
   choiceValue,
   clampParam,
   effectPath,
+  isCarrier,
   isListParam,
   isParamShown,
   paramValue,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/audioEffects'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
+import CarrierControl from './audio/CarrierControl.vue'
 import EqParamControl from './audio/EqParamControl.vue'
 
 /** A espera do número digitado: cada tecla reinicia, e a spec só muda quando a pessoa para (a mesma do painel Filtros). */
@@ -104,7 +106,7 @@ function onNumber(value: number | null): void {
   timer = value === null && !props.optional ? null : setTimeout(commit, EFFECT_DEBOUNCE_MS)
 }
 
-function onDiscrete(value: boolean | string | number | number[] | CurvePoint[]): void {
+function onDiscrete(value: boolean | string | number | number[] | CurvePoint[] | CarrierValue): void {
   commit()
   editor.flushPendingEdits()
   const { listPath, index } = props
@@ -177,6 +179,16 @@ onBeforeUnmount(() => {
     :data-effect-param="param.name"
     @update:model-value="onDiscrete"
   />
+  <!-- a portadora do Vocoder: a onda e a frequência do Tom, na linha inteira -->
+  <div v-else-if="param.kind === 'carrier'" class="list-cell" :data-effect-param="param.name">
+    <CarrierControl
+      v-if="isCarrier(stored)"
+      :model-value="stored"
+      :label="param.label"
+      :hint="param.hint || undefined"
+      @commit="onDiscrete"
+    />
+  </div>
   <!-- as listas do EQ ocupam a linha inteira: 31 controles e um gráfico não cabem numa coluna de número -->
   <div v-else-if="isListParam(param)" class="list-cell" :data-effect-param="param.name">
     <EqParamControl :param="param" :effect="effect" :name="effectName" :model-value="listValue" @commit="onDiscrete" />

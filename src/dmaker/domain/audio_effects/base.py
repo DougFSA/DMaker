@@ -13,6 +13,8 @@ from typing import Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ..reverb import ReverbSettings
+
 # todo efeito registrado, pelo nome do tipo; `AudioEffect` (a união da spec) sai desta tabela
 EFFECT_CLASSES: dict[str, type[EffectBase]] = {}
 
@@ -137,6 +139,16 @@ class EffectBase(BaseModel):
     def noise_profile(self) -> str | None:
         """A referência de perfil de ruído que o efeito pede (`auto` ou o nome de um perfil do projeto), ou None quando
         ele não usa perfil. O processador mede o espectro dela antes de aplicar o efeito."""
+        return None
+
+    def impulse_settings(self) -> ReverbSettings | None:
+        """A sala de uma resposta ao impulso que o efeito pede (o Reverb), ou None quando ele não usa resposta. Quem monta o
+        grafo a lê de um arquivo em cache (`media.reverb.ensure_impulse`), criado antes do comando."""
+        return None
+
+    def carrier_sound(self) -> tuple[str, dict[str, Any]] | None:
+        """O gerador de som (`generator`, `params`) que o efeito pede como segunda entrada, ou None. O Vocoder usa o dele como
+        portadora: o processador o gera na duração do sinal que entra e o entrega em `SampleRequest.side`."""
         return None
 
     def alters_duration(self) -> bool:
