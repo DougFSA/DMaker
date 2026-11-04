@@ -148,3 +148,46 @@ def build_samples(request: SampleRequest) -> np.ndarray:
     except KeyError:
         raise ValueError(f"Efeito de áudio sem construtor de amostras registrado: {name}") from None
     return builder(request)
+
+
+# ---------- a resposta de frequência ----------
+#
+# Um efeito de equalização tem, além do construtor do filtro, uma conta pura da resposta dele: o ganho em dB em cada
+# frequência. A interface desenha o gráfico com ela, sem rodar o ffmpeg. A conta parte dos MESMOS dados que o construtor
+# usa (as seções do filtro, a curva amostrada), então o gráfico e o som do render só podem diferir pela precisão do filtro.
+
+
+class ResponseFunction(Protocol):
+    """O ganho em dB do efeito nas frequências `hz`, na taxa `rate`. Função pura: não executa nem toca disco."""
+
+    def __call__(self, effect: EffectBase, hz: np.ndarray, rate: int) -> np.ndarray: ...
+
+
+_RESPONSES: dict[str, ResponseFunction] = {}
+
+
+def register_response(*names: str) -> Callable[[ResponseFunction], ResponseFunction]:
+    """Registra a conta da resposta de frequência sob o `type` de um ou mais efeitos."""
+
+    def decorator(function: ResponseFunction) -> ResponseFunction:
+        for name in names:
+            if name in _RESPONSES:
+                raise ValueError(f"Resposta de frequência já registrada: {name}")
+            _RESPONSES[name] = function
+        return function
+
+    return decorator
+
+
+def response_types() -> set[str]:
+    return set(_RESPONSES)
+
+
+def frequency_response(effect: EffectBase, hz: np.ndarray, rate: int = SAMPLE_RATE) -> np.ndarray:
+    """O ganho em dB do efeito em cada frequência de `hz`. Um efeito sem conta registrada é erro com o motivo."""
+    try:
+        function = _RESPONSES[effect.type]
+    except KeyError:
+        known = ", ".join(sorted(_RESPONSES))
+        raise ValueError(f"o efeito {effect.type!r} não tem resposta de frequência. Têm: {known}") from None
+    return function(effect, np.asarray(hz, dtype=float), rate)

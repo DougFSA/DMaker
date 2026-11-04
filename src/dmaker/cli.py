@@ -3263,6 +3263,123 @@ def audio_effect_action_command(
         console.print(f"  {name} = {value}", highlight=False)
 
 
+RESPONSE_TABLE_ROWS = 24
+
+
+@audio_effect_app.command("response")
+def audio_effect_response_command(
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito de equalização (por exemplo highpass).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do efeito, nome=valor (repetível).")
+    ] = None,
+    points: Annotated[int, typer.Option(help="Quantas frequências, de 20 Hz a 20 kHz em oitavas.")] = 256,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Saída em JSON {hz, db}, como a ferramenta MCP.")
+    ] = False,
+) -> None:
+    """Mostra a resposta de frequência de um efeito de equalização (o ganho em dB por frequência), a mesma curva que o
+    gráfico da interface desenha, por exemplo: audio effect response highpass -p frequency_hz=80 -p slope_db=24."""
+    from .pipeline.effect_response import effect_frequency_response
+
+    try:
+        response = effect_frequency_response({"type": effect, **_parse_effect_params(param)}, points)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(response, ensure_ascii=False))
+        return
+    step = max(1, len(response["hz"]) // RESPONSE_TABLE_ROWS)
+    table = Table(Column("Hz", justify="right"), Column("dB", justify="right"), title=f"Resposta de {effect}")
+    for hz, db in list(zip(response["hz"], response["db"], strict=True))[::step]:
+        table.add_row(f"{hz:g}", f"{db:+.2f}")
+    console.print(table)
+
+
+audio_preset_app = typer.Typer(
+    help="Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeitos já ajustada) para pôr em outros "
+    "itens com `dmaker audio effect preset`.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_preset_app, name="preset")
+
+
+@audio_preset_app.command("list")
+def audio_preset_list(
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista as predefinições que você salvou (as embutidas aparecem em `dmaker audio effects --json`)."""
+    from .domain.audio_effects import list_user_presets
+
+    try:
+        presets = [preset.to_dict() for preset in list_user_presets()]
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps({"presets": presets}, ensure_ascii=False, indent=2))
+        return
+    if not presets:
+        console.print("Nenhuma predefinição salva. Salve uma com `dmaker audio preset save`.")
+        return
+    table = Table(Column("id", no_wrap=True), "nome", "efeitos", title="Predefinições salvas")
+    for preset in presets:
+        table.add_row(
+            preset["id"], preset["label"], ", ".join(effect["type"] for effect in preset["effects"])
+        )
+    console.print(table)
+
+
+@audio_preset_app.command("save")
+def audio_preset_save(
+    name: Annotated[
+        str, typer.Argument(help="O nome da predefinição (salvar de novo com o mesmo nome a troca).")
+    ],
+    effect: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--effect",
+            "-e",
+            help='Um efeito em JSON, por exemplo \'{"type": "highpass", "frequency_hz": 80}\' (repetível).',
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option("--file", help="Um arquivo JSON com a lista de efeitos da cadeia.")
+    ] = None,
+    summary: Annotated[str, typer.Option(help="Uma frase do que a predefinição faz.")] = "",
+) -> None:
+    """Salva uma cadeia de efeitos com um nome, na pasta de dados (effect-presets.json). O intervalo e o bypass de cada
+    efeito não entram: a predefinição vale para qualquer item."""
+    from .domain.audio_effects import save_user_preset
+
+    effects: list = []
+    try:
+        for text in effect or []:
+            effects.append(json.loads(text))
+        if file is not None:
+            loaded = json.loads(file.read_text(encoding="utf-8"))
+            effects.extend(loaded if isinstance(loaded, list) else [loaded])
+    except (OSError, ValueError) as exc:
+        _fail(f"Não consegui ler os efeitos: {exc}")
+    try:
+        preset = save_user_preset(name, effects, summary)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Predefinição salva:[/green] {preset.label} (id {preset.id})", highlight=False)
+
+
+@audio_preset_app.command("remove")
+def audio_preset_remove(
+    preset_id: Annotated[str, typer.Argument(help="O id da predefinição (veja `dmaker audio preset list`).")],
+) -> None:
+    """Apaga uma predefinição salva. As embutidas não se apagam."""
+    from .domain.audio_effects import remove_user_preset
+
+    try:
+        preset = remove_user_preset(preset_id)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Predefinição removida:[/green] {preset.label}", highlight=False)
+
+
 duck_app = typer.Typer(
     help="Auto Duck: abaixa uma trilha enquanto outra fala (a música sob a voz, o DJ sob o celebrante).",
     no_args_is_help=True,

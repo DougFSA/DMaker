@@ -1,13 +1,17 @@
 <script setup lang="ts">
 /* O formulário dos parâmetros de um efeito do catálogo na janela do painel Áudio. Os controles saem do `kind` de cada
    parâmetro (número, inteiro, caixa de marcar, escolha), com a faixa, a unidade e a dica do servidor; os valores ficam num
-   rascunho do pai, que só vai para a spec quando a pessoa aplica. O intervalo (início e fim) não aparece: é o da seleção. */
+   rascunho do pai, que só vai para a spec quando a pessoa aplica. O intervalo (início e fim) não aparece: é o da seleção.
+   Nos efeitos de equalização o formulário mostra também o gráfico da resposta de frequência (e, nas listas do EQ Gráfico e do
+   EQ por Curva, os controles deslizantes e os pontos arrastáveis), que se redesenha a cada mudança. */
 import { computed } from 'vue'
-import type { AudioEffectInfo, AudioEffectParam, AudioEffectValue } from '@/api'
+import type { AudioEffectInfo, AudioEffectParam, AudioEffectSettings, AudioEffectValue, CurvePoint } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
-import { clampParam } from '@/lib/audioEffects'
+import { choiceText, choiceValue, clampParam, isListParam } from '@/lib/audioEffects'
+import EffectResponsePanel from './EffectResponsePanel.vue'
+import EqParamControl from './EqParamControl.vue'
 
 const props = defineProps<{ info: AudioEffectInfo }>()
 const values = defineModel<Record<string, AudioEffectValue>>({ required: true })
@@ -35,9 +39,27 @@ function setNumber(param: AudioEffectParam, value: number | null): void {
   values.value = next
 }
 
-function setDiscrete(param: AudioEffectParam, value: boolean | string): void {
+function setDiscrete(param: AudioEffectParam, value: boolean | string | number): void {
   values.value = { ...values.value, [param.name]: value }
 }
+
+/** A escolha vira o tipo que a spec guarda: número se as opções são números (a inclinação em dB por oitava). */
+const setChoice = (param: AudioEffectParam, text: string) => setDiscrete(param, choiceValue(param, text))
+
+function listOf(param: AudioEffectParam): number[] | CurvePoint[] {
+  const value = values.value[param.name]
+  return Array.isArray(value) ? (value as number[] | CurvePoint[]) : ((param.default ?? []) as number[] | CurvePoint[])
+}
+
+function setList(param: AudioEffectParam, value: number[] | CurvePoint[]): void {
+  values.value = { ...values.value, [param.name]: value }
+}
+
+/** O efeito como o rascunho o descreve: é o que o gráfico pede ao servidor. */
+const draftEffect = computed<AudioEffectSettings>(() => ({ type: props.info.type, ...values.value }))
+
+/** O gráfico simples (sem controle de curva próprio): os efeitos de equalização que não têm uma lista do EQ. */
+const showPlainChart = computed(() => props.info.has_response === true && !props.info.parameters.some(isListParam))
 </script>
 
 <template>
@@ -59,12 +81,21 @@ function setDiscrete(param: AudioEffectParam, value: boolean | string): void {
       <AppSelect
         v-else-if="param.kind === 'choice'"
         :label="param.label"
-        :model-value="typeof values[param.name] === 'string' ? (values[param.name] as string) : ''"
+        :model-value="choiceText(values[param.name])"
         :options="param.options.map((option) => ({ value: option, label: option }))"
         :hint="param.hint || undefined"
         :data-effect-param="param.name"
-        @update:model-value="setDiscrete(param, $event)"
+        @update:model-value="setChoice(param, $event)"
       />
+      <div v-else-if="isListParam(param)" class="effect-form__wide" :data-effect-param="param.name">
+        <EqParamControl
+          :param="param"
+          :effect="draftEffect"
+          :name="info.label"
+          :model-value="listOf(param)"
+          @update:model-value="setList(param, $event)"
+        />
+      </div>
       <div v-else-if="param.kind === 'boolean'" class="effect-form__wide" :data-effect-param="param.name">
         <AppCheckbox
           :label="param.label"
@@ -74,6 +105,7 @@ function setDiscrete(param: AudioEffectParam, value: boolean | string): void {
         />
       </div>
     </template>
+    <EffectResponsePanel v-if="showPlainChart" class="effect-form__wide" :effect="draftEffect" :name="info.label" />
     <p v-if="fields.length === 0" class="effect-form__none">Este efeito não tem parâmetros.</p>
   </div>
 </template>

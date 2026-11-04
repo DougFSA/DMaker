@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { AudioEffectSettings, TimelineItem } from '@/api'
 import { audioEffectCatalog } from '@/test/audioEffectsFixtures'
 import { timelineItem, timelineTrack } from '@/test/editorFixtures'
+import { eqEffects } from '@/test/eqFixtures'
 import {
   addEffectIn,
   AUTO_PROFILE,
   chainOf,
+  choiceText,
+  choiceValue,
   clampParam,
   effectContextFor,
   effectPath,
@@ -13,6 +16,7 @@ import {
   freeProfileName,
   intervalProblem,
   isEnabled,
+  isListParam,
   MASTER_LIST_PATH,
   MASTER_TITLE,
   moveEffectIn,
@@ -381,5 +385,45 @@ describe('mudar a cadeia na spec', () => {
 
   it('o caminho de um campo do efeito', () => {
     expect(effectPath('timeline.2.effects', 1, 'gain_db')).toBe('timeline.2.effects.1.gain_db')
+  })
+})
+
+describe('os parâmetros do EQ', () => {
+  const eq = eqEffects()
+  const find = (type: string, name: string) => eq.find((info) => info.type === type)!.parameters.find((param) => param.name === name)!
+
+  it('a escolha de opções numéricas guarda o número e compara pelo texto', () => {
+    const slope = find('highpass', 'slope_db')
+    expect(choiceValue(slope, '24')).toBe(24)
+    expect(choiceText(24)).toBe('24')
+    expect(choiceText('24')).toBe('24')
+    expect(choiceText(undefined)).toBe('')
+    expect(paramValue({ type: 'highpass', slope_db: 24 }, slope)).toBe(24)
+    expect(paramValue({ type: 'highpass' }, slope)).toBe(6)
+    const interpolation = find('graphic_eq', 'interpolation')
+    expect(choiceValue(interpolation, 'cubic')).toBe('cubic') // a escolha de texto continua texto
+    expect(paramValue({ type: 'graphic_eq', interpolation: 'cosine' }, interpolation)).toBe('cosine')
+  })
+
+  it('as listas do EQ são reconhecidas e lidas da spec, ou do padrão do catálogo', () => {
+    const gains = find('graphic_eq', 'gains_db')
+    const points = find('filter_curve_eq', 'points')
+    expect(isListParam(gains) && isListParam(points)).toBe(true)
+    expect(isListParam(find('highpass', 'frequency_hz'))).toBe(false)
+    expect(paramValue({ type: 'graphic_eq', gains_db: [1, 2] }, gains)).toEqual([1, 2])
+    expect(paramValue({ type: 'graphic_eq' }, gains)).toHaveLength(31)
+    expect(paramValue({ type: 'filter_curve_eq' }, points)).toEqual([
+      { hz: 20, db: 0 },
+      { hz: 20000, db: 0 },
+    ])
+  })
+
+  it('o efeito novo leva uma cópia da lista, não a do catálogo', () => {
+    const info = eq.find((candidate) => candidate.type === 'graphic_eq')!
+    const effect = newEffect(info)
+    expect(effect.gains_db).toEqual(info.parameters[0]!.default)
+    expect(effect.gains_db).not.toBe(info.parameters[0]!.default)
+    ;(effect.gains_db as number[])[3] = 9
+    expect((info.parameters[0]!.default as unknown as number[])[3]).toBe(0)
   })
 })

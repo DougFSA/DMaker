@@ -4,7 +4,7 @@
    troca o que se escuta sem interromper nem deslocar o som. Aplicar grava o efeito na spec com o intervalo da seleção. */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { errorMessage } from '@/api'
-import type { AudioEffectInfo, AudioEffectValue } from '@/api'
+import type { AudioEffectInfo, AudioEffectSettings, AudioEffectValue } from '@/api'
 import { fetchEffectPreview, fetchWindow } from '@/api/audioPanel'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
@@ -20,6 +20,7 @@ import { pruneEmpty } from '@/lib/editorPaths'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
+import SavePresetButton from '../SavePresetButton.vue'
 import AudioEffectForm from './AudioEffectForm.vue'
 
 const emit = defineEmits<{ 'preview-start': [] }>()
@@ -82,6 +83,8 @@ function resetValues(): void {
   if (chosen) {
     for (const [key, value] of Object.entries(newEffect(chosen))) {
       if (key !== 'type' && (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string')) draft[key] = value
+      // as listas do EQ (31 ganhos, pontos da curva) vão por cópia: mexer no rascunho não mexe no catálogo
+      else if (key !== 'type' && Array.isArray(value)) draft[key] = JSON.parse(JSON.stringify(value))
     }
   }
   // a faixa de frequência do retângulo preenche os campos dos efeitos espectrais; dá para ajustar à mão
@@ -140,7 +143,7 @@ function stopPreview(): void {
   status.value = 'idle'
 }
 
-function proposedEffect(): Record<string, unknown> {
+function proposedEffect(): AudioEffectSettings {
   const selection = panel.selection
   return {
     type: type.value,
@@ -228,6 +231,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
     <template #footer>
+      <SavePresetButton v-if="info" class="dialog-footer__preset" :effect="proposedEffect()" :suggestion="info.label" />
       <AppButton @click="open = false">Cancelar</AppButton>
       <AppButton variant="primary" :disabled="!info || panel.busy" data-effect-apply @click="apply">Aplicar</AppButton>
     </template>
@@ -235,6 +239,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* a predefinição fica à esquerda do rodapé; Cancelar e Aplicar seguem à direita */
+.dialog-footer__preset {
+  margin-right: auto;
+}
+
 .dialog-body {
   display: flex;
   flex-direction: column;

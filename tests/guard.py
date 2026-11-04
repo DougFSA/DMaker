@@ -48,7 +48,11 @@ class Guard:
             _key(root / "conversations"),
             _key(root / "assets" / "voices"),
         ]
-        self.protected_files = [_key(root / "assets" / LEXICON_NAME), _key(root / "layouts.json")]
+        self.protected_files = [
+            _key(root / "assets" / LEXICON_NAME),
+            _key(root / "layouts.json"),
+            _key(root / "effect-presets.json"),
+        ]
         self.brands_dir = _key(root / "assets" / "brands")
         # com DMAKER_VOICE_SMOKE=1 os modelos de verdade baixam para cá, e isso é esperado
         self.allowed_dirs = [_key(root / "cache" / "models")] if models_are_real else []
