@@ -65,4 +65,26 @@ describe('AudioSection', () => {
     await button(wrapper, 'Remover a faixa 1')?.trigger('click')
     expect(opened.store.get('audio.tracks')).toEqual([])
   })
+
+  it('define o andamento do projeto com 120 BPM em 4/4 e o tira, sem deixar rastro na spec', async () => {
+    const opened = await openEditor()
+    const wrapper = await mountEditorPart(AudioSection, opened)
+    expect(wrapper.text()).toContain('Andamento do projeto')
+    expect(wrapper.text()).not.toContain('Tempo 1 cai em')
+    await check(wrapper, 'Definir o andamento (BPM e compasso)')?.setValue(true)
+    expect(opened.store.get('audio.tempo')).toEqual({ bpm: 120, time_signature: '4/4', offset: 0 })
+    expect(wrapper.text()).toContain('Tempo 1 cai em')
+    await check(wrapper, 'Definir o andamento (BPM e compasso)')?.setValue(false)
+    expect(opened.store.get('audio.tempo')).toBeUndefined()
+  })
+
+  it('a música tem os campos do andamento dela e o botão Detectar BPM', async () => {
+    const spec = { ...projectSpec(), audio: { music: { src: 'loop.wav', volume: 0.3 } } }
+    const opened = await openEditor(spec)
+    const wrapper = await mountEditorPart(AudioSection, opened)
+    expect(wrapper.text()).toContain('Andamento da música (BPM)')
+    expect(wrapper.text()).toContain('Primeiro tempo no arquivo (s)')
+    expect(check(wrapper, 'Esticar para o andamento do projeto')).toBeDefined()
+    expect(button(wrapper, 'Detectar BPM')).toBeDefined()
+  })
 })

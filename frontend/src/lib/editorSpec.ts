@@ -334,6 +334,21 @@ export function setMusicEnabled(spec: SpecDocument, enabled: boolean): void {
   audio.music = enabled ? ((audio.music as Item | null) ?? { src: '' }) : null
 }
 
+/** Liga o andamento do projeto (120 BPM em 4/4, com o tempo 1 no começo) ou o desliga: sem ele não há régua em compassos. */
+export function setTempoEnabled(spec: SpecDocument, enabled: boolean): void {
+  const audio = (spec.audio ??= {}) as Item
+  if (!enabled) delete audio.tempo
+  else audio.tempo ??= { bpm: 120, time_signature: '4/4', offset: 0 }
+}
+
+/** Grava na música o andamento detectado (ou o que a pessoa escolheu entre as outras leituras) e onde cai o primeiro tempo. */
+export function setMusicTempo(spec: SpecDocument, bpm: number, beatOffset: number | null): void {
+  const music = (spec.audio as Item | undefined)?.music as Item | null | undefined
+  if (!music) return
+  music.bpm = bpm
+  if (beatOffset !== null) music.beat_offset = beatOffset
+}
+
 export function addAudioTrack(spec: SpecDocument): boolean {
   const names = sourceNames(spec)
   if (names.length === 0) return false

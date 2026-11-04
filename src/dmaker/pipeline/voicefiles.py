@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain.audio_effects import active_effects, chain_duration, chain_refusal
+from ..domain.music_tempo import music_chain
 from ..domain.spec import Project, VoiceoverClip
 from .audio_effects import AudioItem, EffectProcessor
 from .context import Prober
@@ -96,7 +97,7 @@ def music_file_playtime(project: Project, prober: Prober) -> float | None:
     if music is None:
         return None
     length = _file_length(project.resolve(music.src), prober)
-    return None if length is None else chain_duration(music.effects, length)
+    return None if length is None else chain_duration(music_chain(project.audio), length)
 
 
 def _file_length(path: Path, prober: Prober) -> float | None:
@@ -117,9 +118,9 @@ def effect_refusal_warnings(project: Project, prober: Prober) -> list[str]:
         if reason:
             warnings.append(f"audio.voiceover[{index}]: {reason}")
     music = project.audio.music
-    if music is not None and active_effects(music.effects):
+    if music is not None and active_effects(music_chain(project.audio)):
         length = _file_length(project.resolve(music.src), prober)
-        reason = None if length is None else chain_refusal(music.effects, length)
+        reason = None if length is None else chain_refusal(music_chain(project.audio), length)
         if reason:
             warnings.append(f"audio.music: {reason}")
     return warnings
@@ -129,7 +130,9 @@ def music_playtime_warnings(project: Project, prober: Prober) -> list[str]:
     """O aviso de que os efeitos mudaram quanto dura a música. Só olha o arquivo (e só o sonda) quando a música tem um
     efeito que muda a duração; sem ele a música segue como sempre."""
     music = project.audio.music
-    if music is None or not any(effect.alters_duration() for _, effect in active_effects(music.effects)):
+    if music is None or not any(
+        effect.alters_duration() for _, effect in active_effects(music_chain(project.audio))
+    ):
         return []
     playtime = music_file_playtime(project, prober)
     if playtime is None:

@@ -304,6 +304,7 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "audio_recordings": "recupera gravações do microfone que a aba deixou abertas; a gravação é feita pela interface, o kit de edição está no teto de 25 ferramentas e a pessoa usa `dmaker audio recordings`",
     "apply_macro": "trata uma pasta inteira de arquivos de áudio com uma macro, num trabalho longo que grava dezenas de arquivos; se pede por `dmaker audio macro run`, e o modelo pequeno põe a macro num item por edit_project (ação preset)",
     "audio_effect_action": "sugere o limiar do Noise Gate a partir do ruído; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno põe o gate com o limiar do manual por edit_project; a pessoa usa `dmaker audio effect action`",
+    "audio_tempo": "mostra e detecta o andamento (BPM) da música e lista a grade de tempos; o kit de edição está no teto de 25 ferramentas, e o modelo pequeno define o andamento por edit_project (tempo_set, music_tempo_set); a pessoa usa `dmaker audio tempo`",
     "cut_on_beat": "com apply anda vários cortes de uma vez; o modelo pequeno confere as batidas com audio_analyze e corta por edit_project, e a pessoa pede o resto por `dmaker audio analyze cut-on-beat`",
 }
 

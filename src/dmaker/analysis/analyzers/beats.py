@@ -2,7 +2,9 @@
 
 A batida é um pico da envoltória do som (a energia suavizada) que passa de uma fração do pico mais alto, e duas
 batidas ficam sempre a pelo menos `min_distance` uma da outra: entre dois picos colados vale o mais forte. O
-resultado traz também o andamento estimado (a mediana do intervalo entre batidas), que o card de andamento usa.
+resultado traz também o andamento (batidas por minuto) e onde cai o primeiro tempo, que o card de andamento usa: o
+andamento sai da autocorrelação dos ataques (`analysis/tempo.py`), porque a mediana dos intervalos entre os picos achados
+só vê os tempos fortes de um compasso e erra por um múltiplo.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import numpy as np
 
 from ..registry import AnalysisResult, AnalyzerBase, MarkerProposal, param, register_analyzer
 from ..signal import Signal
+from ..tempo import estimate_tempo
 
 # A envoltória é calculada de 5 em 5 ms: o bastante para a batida cair a poucos milissegundos do instante real
 # (a tolerância de corte de vídeo é de um quadro, 33 ms) sem pesar numa música de minutos.
@@ -25,6 +28,9 @@ class BeatsResult(AnalysisResult):
     beats: list[float]
     bpm: float | None
     intervals: list[float]
+    beat_offset: float | None  # onde cai o primeiro tempo (segundos desde o começo do trecho)
+    bpm_confidence: float | None  # 0 a 1: quanto da energia dos ataques se repete nesse andamento
+    bpm_alternatives: list[float]  # a metade e o dobro, quando a música é ouvida em outro tempo
     threshold_percent: float
     min_distance: float
     label: str
@@ -129,7 +135,11 @@ class BeatFinder(AnalyzerBase):
         # o bloco `i` cobre [i·hop, (i+1)·hop): o centro dele é o instante do pico
         beats = [round((index + 0.5) * hop / signal.sample_rate, 6) for index in indices]
         intervals = [round(b - a, 6) for a, b in zip(beats, beats[1:], strict=False)]
-        bpm = round(60.0 / float(np.median(intervals)), 2) if intervals else None
+        estimate = estimate_tempo(signal.mono(), signal.sample_rate)
+        if estimate is not None:
+            bpm = estimate.bpm
+        else:
+            bpm = round(60.0 / float(np.median(intervals)), 2) if intervals else None
         if beats:
             summary = f"{len(beats)} batida(s); a primeira em {beats[0]:.3f} s" + (
                 f", cerca de {bpm:g} batidas por minuto." if bpm else "."
@@ -142,6 +152,9 @@ class BeatFinder(AnalyzerBase):
             beats=beats,
             bpm=bpm,
             intervals=intervals,
+            beat_offset=None if estimate is None else estimate.beat_offset,
+            bpm_confidence=None if estimate is None else estimate.confidence,
+            bpm_alternatives=[] if estimate is None else list(estimate.alternatives),
             threshold_percent=self.threshold_percent,
             min_distance=self.min_distance,
             label=self.text.strip() or "Batida",

@@ -73,10 +73,16 @@ export function roundSeconds(seconds: number): number {
 
 /**
  * Os pontos em que o arrasto encaixa: o começo, o fim, o cursor e as bordas de todos os itens (menos o que se
- * arrasta). Ao arrastar o próprio cursor, `playhead` é nulo: ele não encaixa em si mesmo.
+ * arrasta). Ao arrastar o próprio cursor, `playhead` é nulo: ele não encaixa em si mesmo. `grid` são os tempos do andamento
+ * do projeto (`gridSnapPoints`), que entram como mais um alvo do mesmo encaixe.
  */
-export function snapPoints(view: TimelineView, playhead: number | null, excludeId: string | null): number[] {
-  const points = new Set<number>([0, view.total])
+export function snapPoints(
+  view: TimelineView,
+  playhead: number | null,
+  excludeId: string | null,
+  grid: readonly number[] = [],
+): number[] {
+  const points = new Set<number>([0, view.total, ...grid])
   if (playhead !== null) points.add(playhead)
   for (const track of view.tracks) {
     for (const item of track.items) {

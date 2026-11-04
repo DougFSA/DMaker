@@ -278,10 +278,14 @@ def validate_project(name_or_path: str) -> dict:
         "`audio_recordings`): audio_record_add (põe uma gravação como voz gravada: `src`, `start`, `duration`), "
         "audio_punch (regrava o intervalo `start`/`end` de uma voz gravada `target` com a gravação `src` que começou em "
         "`recorded_at` e dura `duration`; o trecho antigo fica na lista de takes e as emendas levam fade de 10 ms) e "
-        "voiceover_take_set (troca o take que toca: `target`, `take`, a posição na lista). `op` é um "
+        "voiceover_take_set (troca o take que toca: `target`, `take`, a posição na lista). Andamento (ver `audio_tempo`): "
+        "tempo_set (o andamento do projeto: `bpm`, `time_signature` como 4/4, `offset` do tempo 1 em segundos), "
+        "tempo_remove e music_tempo_set (o andamento da música: `bpm`, `beat_offset` e `stretch_to_tempo`, que a estica "
+        "até o andamento do projeto sem mudar o tom); com o andamento, `beat:<n>` e `bar:<n>` valem como instante. `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
         "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
-        '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
+        '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"), e "beat:<n>" ou '
+        '"bar:<n>", o n-ésimo tempo ou compasso da grade do andamento do projeto; no split, sem '
         "`index`, corta o trecho que contém o marcador. Cortar, remover, aparar ou mover trechos desloca os "
         "marcadores junto; um marcador que estava num trecho removido some, e o aviso vem em `edit_warnings`. "
         "Toda edição entra no histórico do projeto: desfaça com `undo_edit` e refaça com `redo_edit`."
@@ -1468,7 +1472,9 @@ def _analysis_runner() -> Any:
         "`tolerance` segundos) e diz quanto o corte andaria. Por padrão só PROPÕE e devolve a lista (nada é "
         "gravado); com apply=true, cada fronteira anda por duas aparas (a saída de um clipe e a entrada do "
         "outro, o mesmo tanto, sem mudar a duração) e os marcadores acompanham. As batidas vêm do Achar Batidas "
-        "sobre `source` (a música, por padrão) com `params`, ou de um grupo de marcadores `group` que já existe."
+        "sobre `source` (a música, por padrão) com `params`, ou de um grupo de marcadores `group` que já existe. Com "
+        'source="grid" as batidas são os tempos do andamento do projeto (audio.tempo; `params` {"level": "bar"} usa só '
+        "os inícios de compasso): o corte cai exatamente na grade."
     )
 )
 def cut_on_beat(
@@ -1496,6 +1502,49 @@ def cut_on_beat(
     except (ValueError, FileNotFoundError, FFmpegError) as exc:
         raise _audio_tool_error(exc) from exc
     return outcome.to_dict()
+
+
+@server.tool(
+    description=(
+        "O andamento (BPM) do projeto e da música. `action`: show devolve o andamento do projeto (audio.tempo: bpm, "
+        "fórmula de compasso, onde cai o tempo 1) e o da música (audio.music.bpm, beat_offset, stretch_to_tempo); detect "
+        "sugere o BPM e o primeiro tempo do ARQUIVO da música (com a confiança e a metade e o dobro como outras leituras) e, "
+        "com apply=true, grava os dois na música num passo do histórico; grid lista os tempos (level=beat) ou os inícios de "
+        "compasso (level=bar) entre `start` e `end` (padrão: o vídeo inteiro). Definir o andamento do projeto é a operação "
+        'tempo_set do `edit_project` ({"type": "tempo_set", "bpm": 120, "time_signature": "4/4", '
+        '"offset": 0}); a música no andamento é music_tempo_set ({"bpm": 100, "beat_offset": 0.12, '
+        '"stretch_to_tempo": true}), que estica a música sem mudar o tom. Com o andamento definido, `beat:<n>` e '
+        "`bar:<n>` (a partir de 1) valem onde `marker:<texto>` vale."
+    )
+)
+def audio_tempo(
+    name: str,
+    action: str = "show",
+    apply: bool = False,
+    start: float | None = None,
+    end: float | None = None,
+    level: str = "beat",
+) -> dict:
+    from .domain.edits import EditError
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AudioAnalysisService
+    from .pipeline.projects import load_project
+    from .pipeline.tempo_detect import detect_music_tempo, grid_listing, tempo_summary
+    from .pipeline.timeline_service import project_timeline_view
+
+    if action not in ("show", "detect", "grid"):
+        raise _audio_tool_error(ValueError("`action` é show, detect ou grid"))
+    try:
+        project = load_project(name)
+        if action == "show":
+            return tempo_summary(project)
+        if action == "detect":
+            outcome = detect_music_tempo(name, apply=apply, service=AudioAnalysisService(_analysis_runner()))
+            return outcome.to_dict()
+        total = project_timeline_view(project).total
+        return grid_listing(project, 0.0 if start is None else start, total if end is None else end, level)
+    except (ValueError, EditError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
 
 
 @server.tool(

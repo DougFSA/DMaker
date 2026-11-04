@@ -236,6 +236,16 @@ export const MUSIC_FIELDS: FieldDef[] = [
   num('Music', 'music.fade_out', 'Fade out (s)', { prop: 'fade_out' }),
   num('Music', 'music.start_at', 'Começar em (s)', { prop: 'start_at' }),
   check('Music', 'music.loop', 'Repetir em loop', { prop: 'loop' }),
+  num('Music', 'music.bpm', 'Andamento da música (BPM)', { prop: 'bpm', step: 0.01, optional: true }),
+  num('Music', 'music.beat_offset', 'Primeiro tempo no arquivo (s)', { prop: 'beat_offset', step: 0.001 }),
+  check('Music', 'music.stretch_to_tempo', 'Esticar para o andamento do projeto', { prop: 'stretch_to_tempo' }),
+]
+
+/** O andamento do projeto (`audio.tempo`): a grade da régua em compassos, do encaixe e das referências beat: e bar:. */
+export const TEMPO_FIELDS: FieldDef[] = [
+  num('Tempo', 'tempo.bpm', 'Andamento (BPM)', { prop: 'bpm', step: 0.01 }),
+  text('Tempo', 'tempo.time_signature', 'Compasso (ex.: 4/4)', { prop: 'time_signature', fallback: '4/4' }),
+  num('Tempo', 'tempo.offset', 'Tempo 1 cai em (s)', { prop: 'offset', step: 0.001, min: 0 }),
 ]
 
 export const AUDIO_FIELDS: FieldDef[] = [

@@ -33,7 +33,7 @@ dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --tolerance 0.
 dmaker audio analyze cut-on-beat projects\clipe-musical\spec.json --apply
 ```
 
-`--group` usa as batidas de um grupo de marcadores que já existe, no lugar da análise.
+`--group` usa as batidas de um grupo de marcadores que já existe, no lugar da análise. `--source grid` usa os tempos do andamento do projeto (`audio.tempo`) no lugar das batidas medidas: o corte cai exatamente na grade (ver "Pôr a música no andamento do projeto").
 
 ## Como conferir
 

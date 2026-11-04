@@ -19,6 +19,7 @@ from typing import Literal
 
 from .markers import MarkerError, find_marker, is_marker_ref, resolve_instant
 from .spec import Marker
+from .tempo_grid import Tempo
 
 ExportMode = Literal["mix", "regions", "stems", "selection"]
 EXPORT_MODES: tuple[ExportMode, ...] = ("mix", "regions", "stems", "selection")
@@ -137,13 +138,17 @@ def _pause_files(regions: Sequence[Marker], digits: int) -> list[ExportFile]:
 
 
 def selection_file(
-    markers: Sequence[Marker], start: float | str | None, end: float | str | None
+    markers: Sequence[Marker],
+    start: float | str | None,
+    end: float | str | None,
+    tempo: Tempo | None = None,
 ) -> ExportFile:
-    """O intervalo `[início, fim)` pedido. Cada ponta é um número de segundos ou `marker:<texto>`; no `marker:` de uma
+    """O intervalo `[início, fim)` pedido. Cada ponta é um número de segundos, `marker:<texto>` ou `beat:<n>`/`bar:<n>` (a
+    grade do `tempo` do projeto); no `marker:` de uma
     região, o início vale o começo dela e o fim vale o fim dela, então `start="marker:Introdução"` e
     `end="marker:Introdução"` exportam exatamente aquela região."""
-    first = 0.0 if start is None else _instant(markers, start, "start", at_end=False)
-    last = None if end is None else _instant(markers, end, "end", at_end=True)
+    first = 0.0 if start is None else _instant(markers, start, "start", at_end=False, tempo=tempo)
+    last = None if end is None else _instant(markers, end, "end", at_end=True, tempo=tempo)
     if first < 0:
         raise MarkerError(f"start da seleção não pode ser negativo (veio {first:g} s)")
     if last is not None and last <= first:
@@ -151,12 +156,14 @@ def selection_file(
     return ExportFile("selecao", first, last, kind="selection")
 
 
-def _instant(markers: Sequence[Marker], value: float | str, what: str, *, at_end: bool) -> float:
+def _instant(
+    markers: Sequence[Marker], value: float | str, what: str, *, at_end: bool, tempo: Tempo | None = None
+) -> float:
     """Segundos, ou o instante de um `marker:`. Num `marker:` de região, o fim da seleção é o fim da região."""
     if is_marker_ref(value):
         marker = markers[find_marker(markers, str(value))]
         return marker.finish if at_end else marker.begin
-    return resolve_instant(value, markers, what)
+    return resolve_instant(value, markers, what, tempo)
 
 
 def stem_files(available: Sequence[str], wanted: Sequence[str] = ()) -> list[ExportFile]:

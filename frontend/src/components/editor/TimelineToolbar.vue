@@ -97,6 +97,20 @@ function hint(text: string, id: ShortcutId): string {
       >
         {{ timeline.rippleAlways ? 'Ripple: V1 (sempre)' : 'Ripple: V1' }}
       </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!timeline.tempo"
+        :aria-pressed="timeline.rulerMode === 'bars'"
+        :title="
+          timeline.tempo
+            ? 'Alterna a régua entre segundos e compassos (compasso.tempo). O Snap também atrai para os tempos.'
+            : 'Defina o andamento do projeto (Áudio, Andamento) para ter a régua em compassos e o encaixe nos tempos.'
+        "
+        data-ruler-mode
+        @click="timeline.toggleRuler()"
+      >
+        {{ timeline.rulerMode === 'bars' ? 'Régua: compassos' : 'Régua: segundos' }}
+      </AppButton>
     </div>
 
     <div class="bar__group" role="group" aria-label="Zoom">

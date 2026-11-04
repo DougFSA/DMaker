@@ -2868,12 +2868,12 @@ def _analysis_request(
     from .pipeline.audio_analysis import AnalysisRequest
 
     def instant(value: str | None) -> float | str | None:
-        if value is None or value.strip().lower().startswith("marker:"):
+        if value is None or value.strip().lower().startswith(("marker:", "beat:", "bar:")):
             return value
         try:
             return float(value)
         except ValueError:
-            _fail(f"Instante inválido: {value!r}. Use segundos (12.5) ou marker:<texto>.")
+            _fail(f"Instante inválido: {value!r}. Use segundos (12.5), marker:<texto>, beat:<n> ou bar:<n>.")
 
     return AnalysisRequest(
         analyzer,
@@ -2967,7 +2967,12 @@ def audio_analyze_run(
 @audio_analyze_app.command("cut-on-beat")
 def audio_cut_on_beat(
     spec: Annotated[Path, typer.Argument(help="Caminho do spec.json.")],
-    source: Annotated[str, typer.Option(help="De onde vêm as batidas (padrão: a música).")] = "audio.music",
+    source: Annotated[
+        str,
+        typer.Option(
+            help="De onde vêm as batidas: a música (padrão, audio.music) ou grid, os tempos do andamento do projeto."
+        ),
+    ] = "audio.music",
     tolerance: Annotated[
         float, typer.Option(help="Quanto, em segundos, um corte pode andar para cair numa batida.")
     ] = 0.2,
@@ -3213,6 +3218,159 @@ def noise_profile_remove(
 ) -> None:
     """Apaga um perfil de ruído (recusa se algum efeito ainda o usa)."""
     _run_wave_edit(spec, {"type": "noise_profile_remove", "name": name}, f"Perfil {name} apagado.")
+
+
+tempo_app = typer.Typer(
+    help="Andamento do projeto (BPM e compasso) e da música: a grade, a detecção do BPM e a música esticada até ela.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(tempo_app, name="tempo")
+
+
+@tempo_app.command("show")
+def tempo_show(
+    spec: _WAVE_SPEC, as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False
+) -> None:
+    """Mostra o andamento do projeto e o da música."""
+    from .pipeline.tempo_detect import tempo_summary
+
+    summary = tempo_summary(_load(spec))
+    if as_json:
+        typer.echo(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    tempo, music = summary["tempo"], summary["music"]
+    if tempo is None:
+        console.print("O projeto não tem andamento (defina com `dmaker audio tempo set`).")
+    else:
+        console.print(
+            f"Projeto: {tempo['bpm']:g} BPM, compasso {tempo['time_signature']}, tempo 1 em {tempo['offset']:g} s "
+            f"(um tempo dura {tempo['beat_seconds']:.4f} s, um compasso {tempo['bar_seconds']:.4f} s).",
+            highlight=False,
+        )
+    if music is not None:
+        bpm = "sem andamento definido" if music["bpm"] is None else f"{music['bpm']:g} BPM"
+        stretch = "esticada até o andamento do projeto" if music["stretch_to_tempo"] else "não esticada"
+        console.print(
+            f"Música: {bpm}, primeiro tempo em {music['beat_offset']:g} s do arquivo, {stretch}.",
+            highlight=False,
+        )
+
+
+@tempo_app.command("set")
+def tempo_set(
+    spec: _WAVE_SPEC,
+    bpm: Annotated[float | None, typer.Option(help="Batidas por minuto (de 20 a 400).")] = None,
+    time_signature: Annotated[
+        str | None, typer.Option("--time-signature", help="Fórmula de compasso: 4/4, 3/4, 6/8...")
+    ] = None,
+    offset: Annotated[
+        str | None,
+        typer.Option(help="Onde cai o tempo 1, em segundos do vídeo final (ou marker:<texto>)."),
+    ] = None,
+) -> None:
+    """Define o andamento do projeto (ou muda só os campos dados). Com ele valem `beat:<n>` e `bar:<n>` onde vale
+    `marker:<texto>`, a régua em compassos e o encaixe da interface."""
+    op = {
+        "type": "tempo_set",
+        "bpm": bpm,
+        "time_signature": time_signature,
+        "offset": _instant_arg(offset),
+    }
+    _run_wave_edit(
+        spec, {key: value for key, value in op.items() if value is not None}, "Andamento definido."
+    )
+
+
+@tempo_app.command("clear")
+def tempo_clear(spec: _WAVE_SPEC) -> None:
+    """Tira o andamento do projeto (a régua em compassos e as referências beat:/bar: deixam de existir)."""
+    _run_wave_edit(spec, {"type": "tempo_remove"}, "Andamento removido.")
+
+
+@tempo_app.command("music")
+def tempo_music(
+    spec: _WAVE_SPEC,
+    bpm: Annotated[float | None, typer.Option(help="O andamento da música, em batidas por minuto.")] = None,
+    beat_offset: Annotated[
+        float | None, typer.Option("--beat-offset", help="Onde cai o primeiro tempo dentro do arquivo (s).")
+    ] = None,
+    stretch: Annotated[
+        bool | None,
+        typer.Option(
+            "--stretch/--no-stretch",
+            help="Estica a música, sem mudar o tom, até o andamento do projeto.",
+        ),
+    ] = None,
+) -> None:
+    """Define o andamento da música e se ela é esticada até o do projeto."""
+    op = {"type": "music_tempo_set", "bpm": bpm, "beat_offset": beat_offset, "stretch_to_tempo": stretch}
+    _run_wave_edit(spec, {key: value for key, value in op.items() if value is not None}, "Música ajustada.")
+
+
+@tempo_app.command("detect")
+def tempo_detect(
+    spec: _WAVE_SPEC,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Grava o BPM e o primeiro tempo na música (por padrão só sugere)."),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Sugere o BPM e o primeiro tempo do arquivo da música (e, com --apply, os grava num passo do histórico)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.tempo_detect import detect_music_tempo
+
+    try:
+        detection = detect_music_tempo(spec, apply=apply)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(detection.to_dict(), ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"{escape(detection.source)}: {detection.bpm:g} BPM, primeiro tempo em {detection.beat_offset:.3f} s "
+        f"(confiança {detection.confidence:.2f}).",
+        highlight=False,
+    )
+    if detection.alternatives:
+        others = ", ".join(f"{value:g}" for value in detection.alternatives)
+        console.print(f"Se o seu ouvido marca outro tempo: {others} BPM.", highlight=False)
+    for warning in detection.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+    console.print(
+        "[green]Gravado na música (desfaça com `dmaker undo`).[/green]"
+        if detection.applied
+        else "Nada foi gravado: use --apply, ou `dmaker audio tempo music --bpm ...`."
+    )
+
+
+@tempo_app.command("grid")
+def tempo_grid(
+    spec: _WAVE_SPEC,
+    start: Annotated[float, typer.Option(help="Do instante (s).")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Até o instante (s); padrão: o fim do vídeo.")] = None,
+    level: Annotated[str, typer.Option(help="beat (cada tempo) ou bar (cada início de compasso).")] = "beat",
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Lista os instantes da grade do andamento do projeto."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.tempo_detect import grid_listing
+    from .pipeline.timeline_service import project_timeline_view
+
+    project = _load(spec)
+    try:
+        listing = grid_listing(
+            project, start, project_timeline_view(project).total if end is None else end, level
+        )
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(listing, ensure_ascii=False, indent=2))
+        return
+    table = Table("Número", "Instante (s)", title=f"Grade ({'compassos' if level == 'bar' else 'tempos'})")
+    for point in listing["points"]:
+        table.add_row(str(point["number"]), f"{point['at']:.3f}")
+    console.print(table)
 
 
 @audio_effect_app.command("preset")

@@ -87,6 +87,9 @@ OPERATION_LABELS = {
     "audio_fade": "Fade na borda",
     "audio_crossfade_tracks": "Crossfade de trilhas",
     "audio_crossfade_clips": "Crossfade de som entre clipes",
+    "tempo_set": "Andamento do projeto",
+    "tempo_remove": "Remover andamento",
+    "music_tempo_set": "Andamento da música",
 }
 _DETAIL_KEYS = (
     "name",

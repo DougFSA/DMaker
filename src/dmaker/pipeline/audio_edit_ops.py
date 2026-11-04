@@ -37,6 +37,7 @@ from ..domain.audio_targets import AudioTarget
 from ..domain.crossfade_edits import check_crossfade_kind, crossfade_pair, set_clip_crossfade
 from ..domain.edits import EditError
 from ..domain.markers import MarkerError, find_marker, is_marker_ref, resolve_instant
+from ..domain.music_tempo import music_grid
 from ..domain.spec import ClipSegment, Project, VideoOverlay
 from ..domain.tracks import known_track_ids
 from .audio_targets import resolve_audio_target
@@ -58,7 +59,7 @@ def _required(op: Mapping, name: str) -> Any:
 
 def _instant(project: Project, value: Any, name: str) -> float:
     try:
-        return resolve_instant(value, project.markers, name)
+        return resolve_instant(value, project.markers, name, project.audio.tempo)
     except MarkerError as exc:
         raise EditError(str(exc)) from exc
 
@@ -263,6 +264,11 @@ def _copy(
         music = project.audio.music
         assert music is not None
         require_file_time(music.effects, target.path)
+        if music_grid(project.audio) is not None:
+            raise EditError(
+                f"{target.path}: a música está esticada para o andamento do projeto e o tempo dela já não é o do arquivo. "
+                "Desligue o esticamento antes (music_tempo_set com stretch_to_tempo false)"
+            )
         data = {"src": music.src, "offset": a, "end": b, "volume": music.volume}
         return _finished(data, rebase_effects(music.effects, a, b - a), music.pan), 0.0
     if kind == "clip":

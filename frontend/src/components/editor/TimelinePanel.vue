@@ -35,6 +35,7 @@ import {
   fadeTarget,
   itemFades,
   itemSpeed,
+  snapFadeSeconds,
   type FadeSide,
 } from '@/lib/audioFades'
 import { trackSetOp } from '@/lib/audioPanelOps'
@@ -164,7 +165,7 @@ let stopSeek: (() => void) | null = null
 function beginSeek(event: MouseEvent): void {
   if (!view.value) return
   stopSeek?.()
-  const points = snapPoints(view.value, null, null)
+  const points = snapPoints(view.value, null, null, timeline.gridPoints)
   const seekTo = (clientX: number) => player.seek(snapTime(timeAt(clientX), points, timeline.snapTolerance))
   seekTo(event.clientX)
   const move = (moveEvent: MouseEvent) => seekTo(moveEvent.clientX)
@@ -230,7 +231,7 @@ function beginDrag(event: MouseEvent, track: TimelineTrack, itemId: string, side
     start: { mode, trackId: track.id, item, side, original: { start: item.start, end: item.end } },
     track,
     startX: event.clientX,
-    points: snapPoints(view.value, editor.playhead, item.id),
+    points: snapPoints(view.value, editor.playhead, item.id, timeline.gridPoints),
     moved: false,
   }
   document.addEventListener('mousemove', onDragMove)
@@ -245,6 +246,8 @@ interface FadeDrag {
   side: FadeSide
   /** A borda do item na tela quando o gesto começou, e a duração dele (segundos da tela) e a velocidade. */
   edgeX: number
+  /** A borda do item na linha do tempo, em segundos: o começo para o fade de entrada, o fim para o de saída. */
+  edgeSeconds: number
   lengthSeconds: number
   speed: number
   startX: number
@@ -260,10 +263,12 @@ function onFadeMove(event: MouseEvent): void {
   if (!drag.moved) editor.beginGesture()
   drag.moved = true
   const pixels = drag.side === 'in' ? event.clientX - drag.edgeX : drag.edgeX - event.clientX
+  // a ponta do fade (onde ele termina) cai exatamente no tempo mais perto, quando o encaixe e o andamento estão ligados
+  const seconds = snapFadeSeconds(drag.side, drag.edgeSeconds, pixels / timeline.pxPerSec, timeline.gridPoints, timeline.snapTolerance)
   timeline.fadePreview = {
     itemId: drag.itemId,
     side: drag.side,
-    duration: draggedFadeDuration(pixels / timeline.pxPerSec, drag.lengthSeconds, drag.speed),
+    duration: draggedFadeDuration(seconds, drag.lengthSeconds, drag.speed),
   }
 }
 
@@ -298,6 +303,7 @@ function beginFadeDrag(event: MouseEvent, track: TimelineTrack, itemElement: HTM
     target,
     side,
     edgeX: side === 'in' ? rect.left : rect.right,
+    edgeSeconds: side === 'in' ? item.start : item.end,
     lengthSeconds: item.end - item.start,
     speed: itemSpeed(item),
     startX: event.clientX,
@@ -418,7 +424,7 @@ function onDrop(event: DragEvent): void {
   if (!handler || !payload || !view.value) return
   event.preventDefault()
   const trackId = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>('[data-track-id]')?.dataset.trackId ?? null) : null
-  const points = snapPoints(view.value, editor.playhead, null)
+  const points = snapPoints(view.value, editor.playhead, null, timeline.gridPoints)
   handler(payload, { trackId, time: snapTime(timeAt(event.clientX), points, timeline.snapTolerance) })
 }
 
@@ -508,6 +514,7 @@ onBeforeUnmount(() => {
             :px-per-sec="timeline.pxPerSec"
             :window-start="windowStart"
             :window-end="windowEnd"
+            :tempo="timeline.rulerMode === 'bars' ? timeline.tempo : null"
           />
           <TimelineTrackRow
             v-for="track in tracks"

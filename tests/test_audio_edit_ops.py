@@ -595,3 +595,19 @@ def test_the_wave_edits_work_in_a_project_that_has_no_picture_at_all(folder):
     assert enveloped.audio.music.effects[0].type == "envelope"
     mono = edit(project, type="audio_channels", target="audio.voiceover.0", mode="mono")
     assert mono.audio.voiceover[0].effects[0].mode == "mono"
+
+
+def test_copying_a_piece_of_a_music_stretched_to_the_project_tempo_is_refused(folder):
+    """O tempo da música esticada já não é o do arquivo: copiar o trecho leria o lugar errado dele."""
+    project = make(
+        folder,
+        audio={
+            "music": {"src": "musica.wav", "bpm": 100, "stretch_to_tempo": True},
+            "tempo": {"bpm": 120},
+        },
+    )
+    with pytest.raises(EditError, match="esticada para o andamento"):
+        edit(project, type="audio_paste", target="audio.music", start=1, end=3, at=5)
+    plain = make(folder, audio={"music": {"src": "musica.wav", "bpm": 100}, "tempo": {"bpm": 120}})
+    pasted = edit(plain, type="audio_paste", target="audio.music", start=1, end=3, at=5)
+    assert pasted.audio.voiceover[0].src == "musica.wav"  # sem esticar a música é copiada como sempre

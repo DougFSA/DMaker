@@ -8,6 +8,7 @@ from pathlib import Path
 from .. import config
 from ..domain.atomic_file import content_revision, read_bytes_retrying
 from ..domain.brand import Theme
+from ..domain.music_tempo import tempo_warnings
 from ..domain.outputs import OutputPreset, resolve_output
 from ..domain.spec import (
     AudioSettings,
@@ -143,6 +144,7 @@ def summarize(
         voiceover_playtimes=voice_file_playtimes(project, prober),
     )
     warnings += music_playtime_warnings(project, prober)
+    warnings += tempo_warnings(project.audio)
     warnings += effect_refusal_warnings(project, prober)
     warnings += html_warnings(project, browser_problem)
     warnings += audio_output_warnings(project, presentation.total)

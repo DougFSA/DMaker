@@ -27,7 +27,7 @@ from ..domain.edits import (
 )
 from ..domain.effect_edits import apply_effect_op
 from ..domain.marker_edits import add_marker, marker_index, remove_marker, set_group_markers, set_marker
-from ..domain.markers import MarkerError, is_marker_ref, resolve_instant
+from ..domain.markers import MarkerError, is_time_ref, resolve_instant
 from ..domain.spec import ClipSegment, Project
 from ..domain.time_map import shift_markers
 from ..media.ffmpeg import FFmpegError, SubprocessRunner
@@ -42,6 +42,7 @@ from .missing import MissingMedia
 from .restoration_ops import RESTORATION_OPERATIONS
 from .sample_reader import FFmpegSampleReader, SampleReader
 from .sync import OffsetFinder
+from .tempo_ops import TEMPO_OPERATIONS
 
 if TYPE_CHECKING:
     from .censor import WordSource
@@ -65,7 +66,7 @@ def _locate_marker(project: Project, op: dict, layout: OriginAggregate) -> tuple
     """O trecho e o ponto, desde o começo dele, em que o marcador citado em `at` cai. Sem `index` na operação, o
     trecho é o que contém o marcador; com `index`, o marcador precisa estar dentro dele."""
     try:
-        instant = resolve_instant(op["at"], project.markers, "at")
+        instant = resolve_instant(op["at"], project.markers, "at", project.audio.tempo)
     except MarkerError as exc:
         raise EditError(str(exc)) from exc
     owned = owned_intervals(layout.spans)
@@ -82,7 +83,7 @@ def _locate_marker(project: Project, op: dict, layout: OriginAggregate) -> tuple
 
 
 def _op_split(project: Project, op: dict, layout: OriginAggregate) -> Project:
-    if is_marker_ref(op["at"]):
+    if is_time_ref(op["at"]):
         index, at = _locate_marker(project, op, layout)
         return split_segment(project, index, at, layout.durations)
     return split_segment(project, op["index"], op["at"], layout.durations)
@@ -112,9 +113,9 @@ def _op_insert(project: Project, op: dict, layout: OriginAggregate) -> Project:
 
 def _op_overlay_span(project: Project, op: dict, layout: OriginAggregate) -> Project:
     try:
-        start = resolve_instant(op["start"], project.markers, "start")
+        start = resolve_instant(op["start"], project.markers, "start", project.audio.tempo)
         end = op.get("end")
-        end = None if end is None else resolve_instant(end, project.markers, "end")
+        end = None if end is None else resolve_instant(end, project.markers, "end", project.audio.tempo)
     except MarkerError as exc:
         raise EditError(str(exc)) from exc
     return set_overlay_span(project, op["index"], start, end)
@@ -199,6 +200,8 @@ EDIT_OPERATIONS: dict[str, Operation] = {
     **RESTORATION_OPERATIONS,
     # sons gerados (acrescentar, mudar, tirar) e o bipe de censura: mexem só em `audio.generated` e no silêncio do item
     **GENERATED_OPERATIONS,
+    # andamento do projeto e da música (tempo_set, tempo_remove, music_tempo_set): só dados da grade, sem mexer na imagem
+    **TEMPO_OPERATIONS,
 }
 
 
