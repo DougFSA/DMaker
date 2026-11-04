@@ -142,9 +142,9 @@ export function isInstantMarker(item: Partial<Pick<TimelineItem, 'extra'>>): boo
   return item.extra?.instant === true
 }
 
-/** O item se arrasta: trecho da V1, sobreposição, marcador, ou fala da narração (que só se desloca). */
+/** O item se arrasta: trecho da V1, sobreposição, marcador, som gerado da SFX, ou fala da narração (que só se desloca). */
 export function isDraggable(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
-  return trackId === 'V1' || trackId === 'NAR' || isMarkerTrack(trackId) || isOverlayTrack(trackId, item)
+  return trackId === 'V1' || trackId === 'NAR' || trackId === 'SFX' || isMarkerTrack(trackId) || isOverlayTrack(trackId, item)
 }
 
 /** As alças de aparar só existem onde aparar faz sentido: a fala da narração tem a duração que a voz levou, e um
@@ -178,6 +178,7 @@ const TRACK_NAMES: Record<string, string> = {
   NAR: 'Narração',
   VO: 'Voz gravada',
   MUS: 'Música',
+  SFX: 'Sons gerados (efeitos sonoros)',
   CC: 'Legendas automáticas',
 }
 

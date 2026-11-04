@@ -96,6 +96,17 @@ def build_audio_effects_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @router.get("/api/audio-generators")
+    def list_audio_generators(type: str | None = None) -> dict:
+        """O catálogo dos geradores de som (Tom, Ruído, DTMF...), o mesmo do MCP `audio_generators`: a interface monta o
+        formulário de cada um a partir dele."""
+        from ..domain.generators import catalog_payload as generator_catalog
+
+        try:
+            return generator_catalog(type)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @router.post("/api/audio-effects/response")
     def effect_response(body: EffectResponseBody) -> dict[str, list[float]]:
         """O gráfico de resposta de frequência de um efeito de equalização: conta pura, sem ffmpeg."""

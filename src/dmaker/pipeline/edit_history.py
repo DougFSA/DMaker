@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..domain.atomic_file import content_revision, read_bytes_retrying, write_bytes_atomic
 from ..domain.spec import Project
@@ -26,6 +27,9 @@ from .edits import apply_edit_report
 from .projects import load_project, project_path, save_project
 from .sample_reader import SampleReader
 from .sync import OffsetFinder
+
+if TYPE_CHECKING:
+    from .censor import WordSource
 
 HISTORY_DIR = "history"
 HISTORY_LIMIT = 50  # passos que ficam em cada pilha: o bastante para uma sessão, sem encher o disco de specs
@@ -58,6 +62,10 @@ OPERATION_LABELS = {
     "marker_set": "Editar marcador",
     "marker_remove": "Remover marcador",
     "marker_group_set": "Marcadores da análise de áudio",
+    "generated_add": "Som gerado",
+    "generated_set": "Ajustar som gerado",
+    "generated_remove": "Remover som gerado",
+    "censor_beep": "Bipe de censura",
     "audio_silence": "Silenciar",
     "audio_cut": "Cortar som",
     "audio_envelope": "Envelope de volume",
@@ -313,12 +321,13 @@ def edit_and_record(
     prober: Prober = probe,
     offset_finder: OffsetFinder | None = None,
     sample_reader: SampleReader | None = None,
+    words: WordSource | None = None,
 ) -> tuple[EditReport, Path]:
     """Aplica a operação à spec do projeto, guarda o estado de antes no histórico e grava a spec nova. Só a edição que
     deu certo entra no histórico, e ele é gravado antes da spec, para uma falha no meio nunca deixar a spec nova sem o
     passo que a desfaz."""
     project = load_project(name_or_path)
-    report = apply_edit_report(project, op, prober, offset_finder, sample_reader)
+    report = apply_edit_report(project, op, prober, offset_finder, sample_reader, words)
     _history_for(project, name_or_path).record(project, report.project, edit_label(op))
     path = save_project(report.project, project.base_dir)
     return report, path

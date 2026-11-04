@@ -68,9 +68,12 @@ def leveled_effects(
     A voz é medida sozinha (barato, só áudio) e só quando há efeitos; na simulação não se mede nada. É a mesma
     conta para o render e para a prévia da linha do tempo.
     """
+    from .generated_sounds import generated_tracks  # import tardio: o módulo importa `SfxTrack` daqui
+
+    generated = generated_tracks(ctx)
     items = plan_sfx(ctx.project, spans)
     if not items:
-        return []
+        return generated
     resolved = resolve_files(ctx.project, items)
     reference = None
     if not ctx.options.dry_run:
@@ -89,4 +92,5 @@ def leveled_effects(
             else " (sem voz medida)"
         )
     )
-    return level_tracks(resolved, reference, ctx.project.audio.sfx_gain_db, ctx.project.audio.sfx_pan)
+    leveled = level_tracks(resolved, reference, ctx.project.audio.sfx_gain_db, ctx.project.audio.sfx_pan)
+    return sorted([*leveled, *generated], key=lambda track: track.at) if generated else leveled

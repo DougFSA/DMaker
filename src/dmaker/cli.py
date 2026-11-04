@@ -1321,7 +1321,7 @@ def clean(
 ) -> None:
     """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
     onda (cache/waveform), os espectrogramas (cache/spectrogram), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com
-    efeitos aplicados (cache/audio-fx) e os quadros que o editor pede ao pipeline (cache/frames)."""
+    efeitos aplicados (cache/audio-fx), os sons gerados (cache/generated) e os quadros que o editor pede ao pipeline (cache/frames)."""
     import shutil
 
     n = 0
@@ -1332,6 +1332,7 @@ def clean(
         config.SPECTROGRAM_DIR,
         config.PREVIEW_AUDIO_DIR,
         config.AUDIO_FX_DIR,
+        config.GENERATED_DIR,
         config.FRAMES_DIR,
     ):
         if d.exists():
@@ -4353,6 +4354,233 @@ def audio_import_raw_command(
     )
     if imported.created_project:
         console.print("Projeto novo, só de áudio (saída audio/wav).")
+
+
+# ---------- sons gerados ----------
+
+
+@audio_app.command("generators")
+def audio_generators_list(
+    generator: Annotated[
+        str | None, typer.Argument(help="Tipo de um gerador, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os geradores de som (o menu Gerar do Audacity): Tom, Chirp, Ruído, DTMF, Silêncio, Pluck, Tambor de Risset,
+    Faixa de ritmo e Importar amostras, com os parâmetros, as unidades, as faixas e os padrões."""
+    from .domain.generators import catalog_payload
+
+    try:
+        payload = catalog_payload(generator)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Geradores de som",
+    )
+    for info in payload["generators"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["generators"]:
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}", highlight=False)
+    console.print(
+        "No projeto, todo som gerado tem `start`, `duration`, `volume`, `pan` e `effects`; "
+        "ponha um com `dmaker audio generated add`."
+    )
+
+
+@audio_app.command("generate")
+def audio_generate_command(
+    generator: Annotated[str, typer.Argument(help="Tipo do gerador (veja `dmaker audio generators`).")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="O arquivo .wav de destino.")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do gerador, nome=valor (repetível).")
+    ] = None,
+    duration: Annotated[
+        float | None,
+        typer.Option("--duration", help="Segundos de som (padrão: a duração que o gerador pede, ou 1)."),
+    ] = None,
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Troca o arquivo se ele já existir.")
+    ] = False,
+) -> None:
+    """Gera um som solto num WAV, sem projeto (por exemplo: audio generate tone -p frequency_hz=1000 -p amplitude_db=-6
+    --duration 2 --out tom.wav). O arquivo é estéreo, de ponto flutuante de 32 bits."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.generated_sounds import generate_sound_file
+
+    try:
+        made = generate_sound_file(generator, _parse_effect_params(param), duration, out, overwrite=overwrite)
+    except (ValueError, FileExistsError, FileNotFoundError, FFmpegError) as exc:
+        _fail(str(exc))
+    peak = "mudo" if made.peak_db == float("-inf") else f"pico {made.peak_db:.2f} dBFS"
+    console.print(
+        f"[green]Pronto:[/green] {made.path}  ({made.duration:.2f}s, {peak})", highlight=False, soft_wrap=True
+    )
+
+
+generated_app = typer.Typer(
+    help="Sons gerados no projeto (audio.generated): acrescentar, listar, mudar e tirar. Entram no barramento dos efeitos "
+    "sonoros (trilha SFX) e aceitam a cadeia de efeitos (`audio effect add <spec> audio.generated.N ...`).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(generated_app, name="generated")
+
+
+@generated_app.command("add")
+def generated_add(
+    spec: _WAVE_SPEC,
+    generator: Annotated[str, typer.Argument(help="Tipo do gerador (veja `dmaker audio generators`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do gerador, nome=valor (repetível).")
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    duration: Annotated[
+        float | None, typer.Option("--duration", help="Segundos de som (padrão: a que o gerador pede).")
+    ] = None,
+    region: _WAVE_REGION = None,
+    volume: Annotated[float | None, typer.Option("--volume", help="Ganho linear do item (padrão 1).")] = None,
+    pan: Annotated[
+        float | None, typer.Option("--pan", help="Equilíbrio de -1 (esquerda) a 1 (direita).")
+    ] = None,
+) -> None:
+    """Põe um som gerado no projeto (por exemplo: audio generated add spec.json tone -p frequency_hz=1000 --start 4
+    --duration 0.5)."""
+    op = _wave_op(
+        "generated_add",
+        None,
+        generator=generator,
+        params=_parse_effect_params(param) or None,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        duration=duration,
+        region=region,
+        volume=volume,
+        pan=pan,
+    )
+    _run_wave_edit(spec, op, "Som gerado acrescentado.")
+
+
+@generated_app.command("set")
+def generated_set(
+    spec: _WAVE_SPEC,
+    index: Annotated[int, typer.Argument(help="A posição do som (veja `dmaker audio generated list`).")],
+    generator: Annotated[
+        str | None, typer.Option("--generator", help="Troca o gerador (os parâmetros voltam aos padrões).")
+    ] = None,
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Parâmetro do gerador a mudar, nome=valor (os outros ficam)."),
+    ] = None,
+    start: _WAVE_START = None,
+    duration: Annotated[float | None, typer.Option("--duration", help="Segundos de som.")] = None,
+    volume: Annotated[float | None, typer.Option("--volume", help="Ganho linear do item.")] = None,
+    pan: Annotated[float | None, typer.Option("--pan", help="Equilíbrio de -1 a 1.")] = None,
+) -> None:
+    """Muda campos de um som gerado (os que não forem citados ficam como estão)."""
+    op = _wave_op(
+        "generated_set",
+        None,
+        index=index,
+        generator=generator,
+        params=_parse_effect_params(param) or None,
+        start=_instant_arg(start),
+        duration=duration,
+        volume=volume,
+        pan=pan,
+    )
+    _run_wave_edit(spec, op, "Som gerado mudado.")
+
+
+@generated_app.command("remove")
+def generated_remove(
+    spec: _WAVE_SPEC, index: Annotated[int, typer.Argument(help="A posição do som.")]
+) -> None:
+    """Tira um som gerado do projeto."""
+    _run_wave_edit(spec, {"type": "generated_remove", "index": index}, "Som gerado removido.")
+
+
+@generated_app.command("list")
+def generated_list(spec: _WAVE_SPEC) -> None:
+    """Lista os sons gerados do projeto."""
+    from .domain.generators import parse_generator
+
+    project = _load(spec)
+    if not project.audio.generated:
+        console.print("O projeto não tem som gerado. Ponha um com `dmaker audio generated add`.")
+        return
+    table = Table("#", Column("Som", no_wrap=True), "Início (s)", "Duração (s)", "Volume", "Pan", "Efeitos")
+    for position, sound in enumerate(project.audio.generated):
+        table.add_row(
+            str(position),
+            parse_generator(sound.generator, sound.params).describe(),
+            f"{sound.start:g}",
+            f"{sound.duration:g}",
+            f"{sound.volume:g}",
+            f"{sound.pan:g}",
+            str(len(sound.effects)),
+        )
+    console.print(table)
+
+
+@audio_app.command("censor")
+def audio_censor_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    word: Annotated[
+        str | None,
+        typer.Option("--word", help="A palavra a bipar, achada na transcrição do item (Whisper local)."),
+    ] = None,
+    occurrence: Annotated[
+        int | None, typer.Option("--occurrence", help="Qual das vezes que a palavra aparece (1, 2...).")
+    ] = None,
+    search_from: Annotated[
+        str | None,
+        typer.Option("--search-from", help="Onde começar a procurar a palavra (segundos ou marker:<texto>)."),
+    ] = None,
+    search_to: Annotated[
+        str | None, typer.Option("--search-to", help="Onde parar de procurar a palavra.")
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+    margin: Annotated[
+        float | None, typer.Option("--margin", help="Folga, em segundos, que alarga o bipe dos dois lados.")
+    ] = None,
+    frequency_hz: Annotated[
+        float | None, typer.Option("--frequency", help="Frequência do bipe (padrão 1000 Hz).")
+    ] = None,
+    amplitude_db: Annotated[
+        float | None, typer.Option("--amplitude-db", help="Pico do bipe em dBFS (padrão -12).")
+    ] = None,
+    language: Annotated[str | None, typer.Option("--language", help="Idioma da fala (padrão pt).")] = None,
+) -> None:
+    """Bipa uma palavra (ou um intervalo): silencia o item e põe um Tom de 1 kHz no mesmo lugar, num passo só que o
+    `dmaker undo` desfaz. Por palavra, o item é transcrito pelo Whisper local (sem rede)."""
+    op = _wave_op(
+        "censor_beep",
+        target,
+        word=word,
+        occurrence=occurrence,
+        search_from=_instant_arg(search_from),
+        search_to=_instant_arg(search_to),
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+        margin=margin,
+        frequency_hz=frequency_hz,
+        amplitude_db=amplitude_db,
+        language=language,
+    )
+    _run_wave_edit(spec, op, "Bipe posto.")
 
 
 # ---------- modelos ----------

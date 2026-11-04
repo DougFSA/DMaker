@@ -6,6 +6,7 @@ from collections.abc import Collection, Sequence
 
 from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
+from ..domain.generators import parse_generator
 from ..domain.infographics import infographic_warnings
 from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
@@ -102,6 +103,7 @@ def lint(
     warnings += _audiogram_warnings(project, infos)
     warnings += _behind_person_warnings(project, total, durations)
     warnings += _sfx_warnings(project, total)
+    warnings += _generated_warnings(project, total)
     warnings += _marker_warnings(project, total)
     warnings += crossfade_warnings(project, durations, infos, offsets)
     if project.tracks:
@@ -186,6 +188,24 @@ def _sfx_warnings(project: Project, total: float) -> list[str]:
             warnings.append(f"audio.sfx[{i}]: toca em {cue.at:g}s, depois do fim do vídeo ({total:.1f}s).")
         elif cue.volume <= 0:
             warnings.append(f"audio.sfx[{i}]: volume 0, o efeito não toca.")
+    return warnings
+
+
+def _generated_warnings(project: Project, total: float) -> list[str]:
+    """Som gerado que começa depois do fim do vídeo, que passa do fim (a mixagem o corta), que nunca soaria (sem volume) ou
+    cujo texto de amostras não existe."""
+    warnings = []
+    for i, sound in enumerate(project.audio.generated):
+        where = f"audio.generated[{i}]"
+        if sound.start >= total:
+            warnings.append(f"{where}: toca em {sound.start:g}s, depois do fim do vídeo ({total:.1f}s).")
+        elif sound.start + sound.duration > total + 0.05:
+            warnings.append(f"{where}: passa do fim do vídeo ({total:.1f}s) e a mixagem corta o resto.")
+        if sound.volume <= 0:
+            warnings.append(f"{where}: volume 0, o som não toca.")
+        for name in parse_generator(sound.generator, sound.params).files():
+            if not project.resolve(name).exists():
+                warnings.append(f"{where}: arquivo de amostras não encontrado: {name}")
     return warnings
 
 

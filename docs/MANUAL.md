@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 55 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 56 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -90,6 +90,7 @@ São 55 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta](#tratar-vários-áudios-com-uma-macro-salvar-aplicar-a-um-item-e-a-uma-pasta) | Guarda uma cadeia de efeitos com nome (uma macro), põe a macro num item e a aplica a uma pasta de arquivos de áudio, num trabalho em segundo plano que retoma de onde parou. | ainda não: `audio_effect_presets`, `apply_macro` |
 | [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
 | [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
+| [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](#gerar-sons-tom-ruído-tons-de-discagem-metrônomo-e-bipe-de-censura) | Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la. | ainda não: `audio_generators`, `audio_generate` |
 
 **Tarefas de dublagem e modelos**
 
@@ -2687,6 +2688,18 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Efeito > Paulstretch | `{"type": "paulstretch", "stretch_factor": 8, "time_resolution": 0.25}`: estica o som por um fator grande sem mudar o tom, até virar uma textura contínua (o algoritmo público de Paul Nasca, em numpy, com a fase sorteada por uma semente fixa para o resultado ser o mesmo a cada render). 8x de 5 s dão 40 s. A saída vai até 20 minutos; acima disso o efeito é recusado. Muda a duração: só vale em voz gravada e em música, e não no `audio.master_effects` | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 | Os campos de cada unidade (semitons, nota, porcentagem; BPM, duração; RPM) | Na interface o seletor **Unidade** do efeito mostra só os campos do modo escolhido (a condição `shown_when` do catálogo); o valor do outro modo continua na spec, só a tela o esconde | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 | A duração nova do item depois do efeito | A linha do tempo (`timeline_view`), o `validate` e a duração de um projeto só de áudio mostram o item com o tempo que ele passa a ter: o fim da voz gravada, e o campo `duration` do item **MUS** com o tamanho do arquivo da música | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Generate > Tone (Tom) | `generated_add` com `"generator": "tone"` (`dmaker audio generated add`; solto em arquivo, `dmaker audio generate tone`). `waveform` `sine`, `square`, `sawtooth` ou `square_bandlimited` (a "Square, no alias" do Audacity, sem aliasing), `frequency_hz` (440, de 1 a 20000) e `amplitude_db` (o pico em dBFS; o 0,8 linear do Audacity é -1,9 dB, e o padrão aqui é -2). Um tom de 1 kHz a -6 dBFS mede pico de -6,000 dBFS e 1000,00 Hz na FFT | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Chirp | `"generator": "chirp"`: `waveform`, `start_hz` (440) e `end_hz` (1320), `start_db` e `end_db` (a reta em dB entre as duas) e `interpolation` `linear` ou `logarithmic`. A varredura dura o item inteiro; no log, o meio de 200 a 3200 Hz fica em 800 Hz (a média geométrica) | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Noise (Ruído) | `"generator": "noise"`: `noise_type` `white`, `pink` ou `brown`, `amplitude_db` e `seed` (a mesma semente dá o mesmo ruído a cada render). O rosa mede -2,99 dB por oitava (de 100 Hz a 10 kHz) e o branco, 0,01; o marrom do ffmpeg chega aos -5,8 dB por oitava acima de uns 400 Hz e achata abaixo disso | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > DTMF Tones (Tons DTMF) | `"generator": "dtmf"`: `sequence` com 0-9, `*`, `#` e A-D, `amplitude_db` e `tone_percent` (55, a proporção de tom contra silêncio de cada tecla). A duração do item se divide por igual entre as teclas; um decodificador Goertzel lê "123" e as 16 teclas dígito a dígito | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Silence (Silêncio) | `"generator": "silence"`: um trecho mudo com a duração do item, que abre espaço numa trilha de efeitos sonoros | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Pluck (Corda dedilhada) | `"generator": "pluck"`: `midi_note` (60, de 0 a 127; a nota 69 mede 440,00 Hz), `fade` `gradual` (a nota morre até o fim do item) ou `abrupt` (corta seco) e `amplitude_db` | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Risset Drum (Tambor de Risset) | `"generator": "risset_drum"`: `frequency_hz` (100), `decay_s` (2, o tempo para perder 60 dB), `noise_center_hz` (500), `noise_width_hz` (1), `noise_percent` (80, quanto da mistura é a faixa de ruído) e `amplitude_db` | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Generate > Rhythm Track (Faixa de Ritmo) | `"generator": "rhythm_track"`: `tempo_bpm` (120, de 30 a 300), `beats_per_measure` (4), `beats` (16, o número de batidas), `beat_sound` `metronome`, `ping`, `cowbell`, `noise_click` ou `drip` e `accent_first` (o primeiro tempo do compasso soa 6 dB mais forte e uma quinta mais agudo). A 120 BPM a batida cai a cada 0,500 s, e a conta parte do começo, então não deriva em andamentos que não dividem a taxa | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Tools > Sample Data Import (Importar Amostras) | `"generator": "sample_data"`: `src` (um texto com um valor por linha, relativo à pasta do projeto, aceitando comentários com `#` e vírgula decimal), `sample_rate` (44100) e `normalize`. Valor fora de -1 a 1 é recusado dizendo o maior, a menos que `normalize` esteja ligado | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Gerar um som solto, fora de um projeto | `audio_generate` (`dmaker audio generate <tipo> --param nome=valor --duration s --out arquivo.wav`): grava um WAV estéreo de ponto flutuante de 32 bits e devolve o pico medido; só troca um arquivo que existe com `overwrite`. `audio_generators` (`dmaker audio generators`) lista os geradores com as faixas | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Um som gerado na linha do tempo | `audio.generated` na spec, com `start`, `duration`, `volume`, `pan` e `effects`: a trilha **SFX** do editor (arrastar muda o início, a borda muda a duração), com mudo, solo, ganho e Auto Duck da trilha. Soma depois do ducking e antes da normalização, sem abaixar a música, e o nível é o do próprio gerador (não se nivela contra a voz). A cadeia de efeitos vale nele (`audio.generated.N`) | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
+| Bipe de censura (Silence + Tone sobre a palavra) | `censor_beep` do `edit_project` (`dmaker audio censor`; no editor, **Bipar a seleção** do painel Áudio): silencia o item no intervalo e põe um Tom de 1 kHz no mesmo lugar, num passo só do desfazer. O intervalo vem de `word` (a palavra, achada na transcrição do item pelo Whisper local; `occurrence` escolhe entre repetidas), de `region` ou de `start` e `end`; `margin` alarga o bipe dos dois lados | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -3759,6 +3772,72 @@ Numa faixa de 120 BPM há uma batida a cada 0,5 s (±20 ms). Depois de `--apply`
 
 ---
 
+### Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura
+<!-- tarefa: gerar-sons -->
+Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la.
+
+#### Quando usar
+
+Bipe de censura sobre um palavrão, tom de teste para calibrar o volume, ruído rosa de fundo, metrônomo para editar no ritmo, toque de telefone num vídeo de humor, silêncio para abrir espaço numa trilha.
+
+**Pedidos que levam a esta tarefa:**
+- "Bipa a palavra 'droga' na entrevista"
+- "Gera um tom de 1 kHz a -6 dB de 2 segundos para eu calibrar"
+- "Põe um metrônomo a 120 BPM por 30 segundos no começo do vídeo"
+
+#### Antes de começar
+
+- Para **bipar**: o projeto e o item onde a palavra foi dita (`target`: `timeline.N`, `overlays.N`, `audio.voiceover.N` ou `audio.narration.N`). A palavra sai da transcrição local (Whisper, sem rede); item com mais de 15 minutos pede `search_from` e `search_to`, e palavra repetida pede `occurrence`.
+- Para **gerar**: o tipo (`audio_generators` lista os nove) e os parâmetros; o que faltar fica no padrão. Sem `duration` vale a que o gerador pede, ou 1 s; o teto é de 10 minutos por som.
+- O nível é o `amplitude_db` do gerador mais o `volume` do item: não se nivela contra a voz como os sons da biblioteca. O bipe nasce a -12 dBFS. Se um pedaço da palavra escapar, use `margin` (0.03).
+- Numa narração sintetizada o silêncio do bipe apaga a marca d'água inaudível do trecho; ela não é reaplicada (decisão de 03/11).
+
+#### Pela IA
+
+A IA lista os geradores com `audio_generators`, põe o som no projeto por `edit_project` (`generated_add`, `generated_set`, `generated_remove`) e bipa com `censor_beep`. Um arquivo solto sai por `audio_generate`. `undo_edit` desfaz o bipe inteiro (silêncio e tom) de uma vez.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_generators", "arguments": {"type": "rhythm_track"}, "para": "ver os parâmetros e as faixas de um gerador"},
+  {"tool": "audio_generate", "arguments": {"generator": "tone", "params": {"frequency_hz": 1000, "amplitude_db": -6}, "duration": 2, "out": "output/tom-1khz.wav"}, "para": "um tom de teste solto, em arquivo"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "generated_add", "generator": "rhythm_track", "params": {"tempo_bpm": 120, "beats": 60}, "start": 0}}, "para": "um metrônomo de 30 s no projeto"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "censor_beep", "target": "audio.voiceover.0", "word": "droga"}}, "para": "bipar a palavra, achada na transcrição do item"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "censor_beep", "target": "audio.voiceover.0", "start": 12.4, "end": 12.9}}, "para": "bipar um intervalo conhecido, sem transcrever"},
+  {"tool": "undo_edit", "arguments": {"name": "entrevista"}, "para": "desfazer o bipe"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, bloco **Sons gerados**: **Gerar som** abre o menu por família e põe o som no cursor. Cada som é um cartão com início, duração, volume e os parâmetros do gerador, e aparece na trilha **SFX** da linha do tempo: arraste o bloco para mudar o início e a borda para mudar a duração; selecionado, aceita efeitos e Auto Duck.
+
+Para bipar: no painel **Áudio** do item (duplo clique), selecione a palavra na onda e clique em **Bipar a seleção**. A interface não lista as palavras; `word` vale pela IA e pela CLI.
+
+#### Pela CLI
+
+```powershell
+dmaker audio generators
+dmaker audio generate tone --param frequency_hz=1000 --param amplitude_db=-6 --duration 2 --out output/tom-1khz.wav
+dmaker audio generated add projects/entrevista/spec.json rhythm_track --param tempo_bpm=120 --param beats=60 --start 0
+dmaker audio censor projects/entrevista/spec.json audio.voiceover.0 --word droga
+dmaker undo projects/entrevista/spec.json
+```
+
+#### Como conferir
+
+Medido no WAV: o tom de 1 kHz a -6 dBFS tem pico de -6,000 dBFS e 1000,00 Hz; o ruído rosa, -2,99 dB por oitava; o DTMF "123" é lido por Goertzel; a 120 BPM há uma batida a cada 0,500 s. No bipe, o item fica a -96,6 dBFS no intervalo da palavra, a fala em volta é idêntica à original e o Whisper não a transcreve mais.
+
+#### Se der errado
+
+- **"Não achei ... na transcrição"**: veja os trechos parecidos que a mensagem lista, ou diga `start` e `end`.
+- **"aparece N vezes"**: diga `occurrence` (1, 2...).
+- **"diga o que bipar"**: faltou `word`, `region` ou `start` e `end`.
+- **"frequency_hz"** (ou outro campo fora da faixa): `audio_generators` mostra a faixa.
+- **"há valores fora de -1 a 1"**: ligue `normalize` no Importar Amostras.
+- **"já existe; use overwrite"**: escolha outro destino ou use `overwrite`.
+
 ## Tarefas de dublagem e modelos
 
 A dublagem troca a fala de um vídeo ou áudio por outro idioma, mantendo a música e o ruído de fundo. Ela junta várias peças que também existem sozinhas: separar a voz do fundo, transcrever, traduzir com o Ollama local, clonar a voz de quem fala e sintetizar. Precisa do extra `voice`, do Ollama no ar com o modelo de tradução (`gpt-oss:20b` por padrão; `DMAKER_TRANSLATE_MODEL` troca) e de bastante paciência na CPU: conte cerca de 20 s por segundo de fala sintetizada, mais a separação (3 a 6 vezes a duração, uma vez) e a tradução (minutos). Fora do escopo: sincronia labial.
@@ -4114,6 +4193,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-53 | Fades e crossfades: Fade In e Fade Out com cinco curvas (linear, logarítmica, exponencial, seno e quadrática), Fade Ajustável (ganho inicial e final em % ou dB, a forma, o ajuste do meio e as predefinições do Audacity, com o fade parcial de 100% a 40%), Studio Fade Out (o volume fecha enquanto um passa-baixa desce), o crossfade de trilhas com os quatro tipos do Audacity, o crossfade do som entre dois clipes vizinhos (J-cut e L-cut) com a imagem trocando no quadro exato, e a alça de fade arrastável na linha do tempo; `audio_fade`, `audio_crossfade_tracks`, `audio_crossfade_clips`, `dmaker audio fade`, `crossfade-tracks` e `crossfade-clips` | "Fazer fades: curva, fade parcial e fade de estúdio"; "Cruzar o som de dois clipes ou de duas trilhas (crossfade)" |
 | DMK-56 | Tempo e afinação: os efeitos Mudar Tom (semitons e centavos, de nota para nota ou em porcentagem, com a opção de preservar os formantes da voz, sem mudar a duração), Mudar Velocidade e Tom (o "vinil", por porcentagem ou de RPM para RPM), Mudar Andamento (por porcentagem, de BPM para BPM ou de uma duração para outra, sem mudar o tom), Esticar Gradualmente (andamento e tom variando do início ao fim do trecho) e Paulstretch (esticar por um fator grande, até 20 minutos de saída, para a abertura etérea); o catálogo ganha a condição de exibição `shown_when`, e os campos de cada unidade só aparecem na tela no modo dela; a vista da linha do tempo, o `validate` e a duração do projeto só de áudio mostram a duração nova do item depois de esticar; `audio_effect` (`dmaker audio effect add ... change_tempo --param mode=bpm`) | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 | DMK-66 | Macros de áudio: a cadeia de efeitos com nome, para repetir. Quatro embutidas (**Limpar narração**, **Limpar gravação de celular**, **MP3 para o padrão** e **Fade nas pontas**) e as suas, uma por arquivo em `assets/macros` (globais) ou `assets/brands/<marca>/macros` (da marca); o **Salvar a cadeia como macro** do bloco de efeitos guarda a cadeia de um item, e o menu **+ Efeito** (grupo **Predefinições e macros**) põe uma macro num item. `apply_macro` e `dmaker audio macro run` aplicam a macro a uma pasta de arquivos de áudio, no formato escolhido, num trabalho em segundo plano que retoma de onde parou (`--resume`); as predefinições do `effect-presets.json` viraram macros e o arquivo ganhou o nome `.importado` | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
+| DMK-58 | Sons gerados: os nove geradores do Audacity (Tom em quatro ondas, Chirp linear ou log, Ruído branco, rosa e marrom, Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de Ritmo e Importar Amostras) em `audio.generated`, na trilha **SFX** da linha do tempo (arrastar muda o início e a duração, com efeitos, mudo, solo, ganho e Auto Duck), ou soltos num WAV com `dmaker audio generate` e `audio_generate`; o bipe de censura (`censor_beep`, `dmaker audio censor`, **Bipar a seleção** no painel Áudio) silencia a palavra achada pelo Whisper local e põe um Tom de 1 kHz no mesmo intervalo, num passo do desfazer | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -4127,7 +4207,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 131 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 138 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -4163,7 +4243,7 @@ São 131 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a v
   - `--preset` TEXTO: (padrão instagram/reels)
   - `--variant` TEXTO: light | dark
   - `--out` CAMINHO
-- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform), os espectrogramas (cache/spectrogram), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com efeitos aplicados (cache/audio-fx) e os quadros que o editor pede ao pipeline (cache/frames).
+- **`dmaker clean`**: Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de onda (cache/waveform), os espectrogramas (cache/spectrogram), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com efeitos aplicados (cache/audio-fx), os sons gerados (cache/generated) e os quadros que o editor pede ao pipeline (cache/frames).
   - `--jobs` / `--no-jobs`: Apaga também cache/jobs (grafos, ASS, áudio de transcrição).
 - **`dmaker cuts NAME`**: Lista o que o autocut removeu do projeto (tempo na gravação original e motivo).
 - **`dmaker doctor`**: Verifica FFmpeg, fontes, marcas e dependências opcionais; com --offline, o que falta para usar sem internet.
@@ -4259,6 +4339,18 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
 
 Áudio: exportar o projeto como WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF (inteiro, por região, por trilha ou só um trecho), importar áudio bruto, isolar a voz (voz de um lado, música e ruído do outro) com o modelo local Demucs, a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, Repetir) e a edição de onda como no Audacity (silenciar, cortar, envelope, canais, colar, dividir, juntar, aparar, deslocar no tempo e o ganho e o pan da trilha).
 
+- **`dmaker audio censor SPEC TARGET`**: Bipa uma palavra (ou um intervalo): silencia o item e põe um Tom de 1 kHz no mesmo lugar, num passo só que o `dmaker undo` desfaz. Por palavra, o item é transcrito pelo Whisper local (sem rede).
+  - `--word` TEXTO: A palavra a bipar, achada na transcrição do item (Whisper local).
+  - `--occurrence` NÚMERO: Qual das vezes que a palavra aparece (1, 2...).
+  - `--search-from` TEXTO: Onde começar a procurar a palavra (segundos ou marker:<texto>).
+  - `--search-to` TEXTO: Onde parar de procurar a palavra.
+  - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
+  - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
+  - `--region` TEXTO: Uma região de marcador (marker:<texto>), no lugar de --start e --end.
+  - `--margin` NÚMERO: Folga, em segundos, que alarga o bipe dos dois lados.
+  - `--frequency` NÚMERO: Frequência do bipe (padrão 1000 Hz).
+  - `--amplitude-db` NÚMERO: Pico do bipe em dBFS (padrão -12).
+  - `--language` TEXTO: Idioma da fala (padrão pt).
 - **`dmaker audio channels SPEC TARGET MODE`**: Mexe nos canais do som de um item (estéreo para mono, trocar canais, usar só um lado: o caso da lapela).
   - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
   - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
@@ -4302,6 +4394,13 @@ Agente local: opera o DMaker por conversa com um modelo que roda na sua máquina
   - `--quality` NÚMERO: Qualidade do modo VBR (MP3: 0 a 9; OGG: -1 a 10).
 - **`dmaker audio fade SPEC TARGET SIDE DURATION`**: Põe, muda ou tira o fade da borda de um item de áudio, com a curva escolhida (o Fade In e o Fade Out do Audacity). É o fade que a alça da linha do tempo mexe; para um fade em um trecho marcado, use `audio effect add`.
   - `--curve` TEXTO: linear (padrão), logarithmic, exponential, sine (S) ou quadratic. Sem ela, mantém a que o fade já tem.
+- **`dmaker audio generate GENERATOR`**: Gera um som solto num WAV, sem projeto (por exemplo: audio generate tone -p frequency_hz=1000 -p amplitude_db=-6 --duration 2 --out tom.wav). O arquivo é estéreo, de ponto flutuante de 32 bits.
+  - `--out` / `-o` CAMINHO: O arquivo .wav de destino. (obrigatória)
+  - `--param` / `-p` TEXTO: Parâmetro do gerador, nome=valor (repetível). (pode repetir)
+  - `--duration` NÚMERO: Segundos de som (padrão: a duração que o gerador pede, ou 1).
+  - `--overwrite`: Troca o arquivo se ele já existir.
+- **`dmaker audio generators [GENERATOR]`**: Lista os geradores de som (o menu Gerar do Audacity): Tom, Chirp, Ruído, DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de ritmo e Importar amostras, com os parâmetros, as unidades, as faixas e os padrões.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
 - **`dmaker audio import-raw SPEC RAW`**: Importa áudio bruto como voz gravada do projeto: converte para um WAV na pasta dele (o arquivo original não muda).
   - `--encoding` TEXTO: s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw. (padrão s16)
   - `--byte-order` TEXTO: little ou big. (padrão little)
@@ -4420,6 +4519,28 @@ Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, deslig
   - `--json`: Saída em JSON {hz, db}, como a ferramenta MCP.
 - **`dmaker audio effect set SPEC TARGET INDEX`**: Muda os parâmetros do efeito da posição `index` (os que não forem citados ficam como estão).
   - `--param` / `-p` TEXTO: Parâmetro a mudar, nome=valor (repetível). (pode repetir)
+
+#### dmaker audio generated
+
+Sons gerados no projeto (audio.generated): acrescentar, listar, mudar e tirar. Entram no barramento dos efeitos sonoros (trilha SFX) e aceitam a cadeia de efeitos (`audio effect add <spec> audio.generated.N ...`).
+
+- **`dmaker audio generated add SPEC GENERATOR`**: Põe um som gerado no projeto (por exemplo: audio generated add spec.json tone -p frequency_hz=1000 --start 4 --duration 0.5).
+  - `--param` / `-p` TEXTO: Parâmetro do gerador, nome=valor (repetível). (pode repetir)
+  - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
+  - `--end` TEXTO: Fim, em segundos do vídeo final (ou marker:<texto>).
+  - `--duration` NÚMERO: Segundos de som (padrão: a que o gerador pede).
+  - `--region` TEXTO: Uma região de marcador (marker:<texto>), no lugar de --start e --end.
+  - `--volume` NÚMERO: Ganho linear do item (padrão 1).
+  - `--pan` NÚMERO: Equilíbrio de -1 (esquerda) a 1 (direita).
+- **`dmaker audio generated list SPEC`**: Lista os sons gerados do projeto.
+- **`dmaker audio generated remove SPEC INDEX`**: Tira um som gerado do projeto.
+- **`dmaker audio generated set SPEC INDEX`**: Muda campos de um som gerado (os que não forem citados ficam como estão).
+  - `--generator` TEXTO: Troca o gerador (os parâmetros voltam aos padrões).
+  - `--param` / `-p` TEXTO: Parâmetro do gerador a mudar, nome=valor (os outros ficam). (pode repetir)
+  - `--start` TEXTO: Início, em segundos do vídeo final (ou marker:<texto>).
+  - `--duration` NÚMERO: Segundos de som.
+  - `--volume` NÚMERO: Ganho linear do item.
+  - `--pan` NÚMERO: Equilíbrio de -1 a 1.
 
 #### dmaker audio macro
 
@@ -4768,7 +4889,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 82 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -4852,6 +4973,10 @@ São 82 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name`\* (texto), `src`\* (texto), `encoding` ("s8" ou "u8" ou "s16" ou "u16" ou "s24" ou "s32" ou "f32" ou "f64" ou "ulaw" ou "alaw", padrão s16), `byte_order` ("little" ou "big", padrão little), `channels` (inteiro, padrão 1), `sample_rate` (inteiro, padrão 44100), `offset_bytes` (inteiro, padrão 0), `percent` (número, padrão 100.0), `start` (número, padrão 0.0), `volume` (número, padrão 1.0), `wav_name` (texto), `overwrite` (sim ou não, padrão não).
 - **`audio_analyzers`**: O catálogo dos analisadores de áudio (as funções Analyze do Audacity): Contraste (fala contra fundo, critério de 20 dB), Achar Clipping, Medir RMS, Espectro de Frequência (espectro, autocorrelação, cepstro; CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras.
   Parâmetros: `type` (texto).
+- **`audio_generators`**: O catálogo dos geradores de som (o menu Gerar do Audacity): Tom (senoidal, quadrada, dente de serra, quadrada sem aliasing), Chirp (varredura linear ou log), Ruído (branco, rosa, marrom), Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de ritmo e Importar amostras (um texto com um valor por linha).
+  Parâmetros: `type` (texto).
+- **`audio_generate`**: Gera um som solto e o grava num WAV (estéreo, ponto flutuante de 32 bits): `generator` é o tipo (veja `audio_generators`), `params` os parâmetros dele (os que faltam ficam no padrão), `duration` os segundos (sem ela vale a que o gerador pede) e `out` o arquivo .wav de destino.
+  Parâmetros: `generator`\* (texto), `out`\* (texto), `params` (objeto), `duration` (número), `overwrite` (sim ou não, padrão não).
 - **`audio_analyze`**: Analisa o áudio de um projeto sem mudar o som e devolve o resultado estruturado.
   Parâmetros: `name`\* (texto), `analyzer`\* (texto), `target` (texto), `file` (texto), `start` (número ou texto), `end` (número ou texto), `params` (objeto), `mark` (sim ou não), `group` (texto), `out` (texto).
 - **`cut_on_beat`**: Cortar no ritmo: para cada fronteira entre dois clipes, acha a batida da música mais perto (dentro de `tolerance` segundos) e diz quanto o corte andaria.
@@ -4941,7 +5066,7 @@ São 82 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 81 blocos e 659 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 82 blocos e 667 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -4969,7 +5094,7 @@ A raiz do `spec.json`.
 
 #### AdjustableFade
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -4985,7 +5110,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Amplify
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5052,6 +5177,7 @@ Usado em `Project.audio`.
 | `sfx_pan` | número, de -1 a 1 | 0.0 | Equilíbrio do barramento dos efeitos sonoros, de -1 a 1. |
 | `noise_profiles` | mapa de `NoiseProfile` | vazio |  |
 | `ducks` | lista de `AutoDuck` | vazio |  |
+| `generated` | lista de `GeneratedSound` | vazio | Sons sintetizados (tom, ruído, bipe, metrônomo...) no barramento dos efeitos sonoros (trilha SFX): soma depois do ducking e antes da normalização, sem abaixar a música. `dmaker audio generators` lista os geradores. |
 
 #### AudioTrack
 
@@ -5105,7 +5231,7 @@ Usado em `AudioSettings.ducks`.
 
 #### BassTreble
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5196,7 +5322,7 @@ Usado em `Project.timeline`.
 
 #### ChangePitch
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5216,7 +5342,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### ChangeSpeed
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5231,7 +5357,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### ChangeTempo
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5248,7 +5374,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Channels
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5260,7 +5386,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### ClassicFilter
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5277,7 +5403,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### ClickRemoval
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5290,7 +5416,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### ClipFix
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5352,7 +5478,7 @@ Usado em `CardSegment.color`, `ClipSegment.color`, `ImageSegment.color`.
 
 #### Compressor
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5379,7 +5505,7 @@ Usado em `FilterCurveEq.points`.
 
 #### Cut
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5391,7 +5517,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Draw
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5414,7 +5540,7 @@ Usado em `HtmlOverlay.sound`, `ImageOverlay.sound`, `TextOverlay.sound`, `Transi
 
 #### Envelope
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5435,7 +5561,7 @@ Usado em `Envelope.points`.
 
 #### FadeIn
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5448,7 +5574,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### FadeOut
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5461,7 +5587,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### FilterCurveEq
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5474,9 +5600,23 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `interpolation` | `"cubic"` ou `"cosine"` ou `"linear"` | `cubic` |  |
 | `length` | inteiro, de 21 a 8191 | 8191 |  |
 
+#### GeneratedSound
+
+Usado em `AudioSettings.generated`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `generator` | texto | obrigatório | O tipo do gerador: tone, chirp, noise, dtmf, silence, pluck, risset_drum, rhythm_track ou sample_data. |
+| `params` | objeto | vazio | Os parâmetros do gerador (frequência, amplitude em dBFS, andamento...); os que faltam ficam no padrão e a spec guarda todos. |
+| `start` | número, mínimo 0 | 0.0 | Instante do vídeo final em que o som começa, em segundos. |
+| `duration` | número, maior que 0, até 600 | obrigatório | Quanto o som dura, em segundos (até 600): o gerador enche exatamente esse tempo. |
+| `volume` | número, de 0 a 4 | 1.0 | Ganho linear do item sobre o nível do gerador (1 é o nível dele); não se nivela contra a voz. |
+| `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+
 #### GraphicEq
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5490,7 +5630,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### HighShelf
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5504,7 +5644,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Highpass
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5582,7 +5722,7 @@ Usado em `Project.timeline`.
 
 #### Invert
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5593,7 +5733,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Limiter
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5609,7 +5749,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### LoudnessNormalize
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5623,7 +5763,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### LowShelf
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5637,7 +5777,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Lowpass
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5756,7 +5896,7 @@ Usado em `AudioSettings.narration`.
 
 #### NoiseGate
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5783,7 +5923,7 @@ Usado em `AudioSettings.noise_profiles`.
 
 #### NoiseReduction
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5798,7 +5938,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Normalize
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5812,7 +5952,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Notch
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5841,7 +5981,7 @@ Usado em `Project.output`.
 
 #### Paulstretch
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5904,7 +6044,7 @@ Usado em `Project.regions`.
 
 #### Repair
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5915,7 +6055,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Repeat
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5927,7 +6067,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### Reverse
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5948,7 +6088,7 @@ Usado em `AudioSettings.sfx`.
 
 #### Silence
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5959,7 +6099,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### SlidingStretch
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -5987,7 +6127,7 @@ Usado em `Project.sources`.
 
 #### SpectralDelete
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6000,7 +6140,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### SpectralMultiTool
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6013,7 +6153,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### SpectralParametricEq
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6027,7 +6167,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### SpectralShelves
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6041,7 +6181,7 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 
 #### StudioFadeOut
 
-Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |

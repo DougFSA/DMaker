@@ -13,6 +13,8 @@ export type AudioEffectParamKind =
   | 'profile'
   | 'band_gains'
   | 'freq_points'
+  /** Texto livre (os dígitos do DTMF, o arquivo do Importar Amostras): só os geradores usam. */
+  | 'text'
 
 /** Um ponto da curva do EQ por Curva: a frequência (Hz) e o ganho nela (dB). */
 export interface CurvePoint {

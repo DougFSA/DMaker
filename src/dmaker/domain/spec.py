@@ -37,6 +37,7 @@ from .audio_presets import (
 )
 from .auto_duck import AutoDuck
 from .curves import Curve
+from .generators import normalized_params
 from .transitions import all_transition_names
 
 
@@ -847,6 +848,39 @@ class VoiceoverClip(EffectsOwner):
         return self
 
 
+# Teto da duração de um som gerado: dez minutos. O som nasce inteiro em memória (float, estéreo, 48 kHz: uns 23 MB por
+# minuto) antes de ir para o cache, e um gerador de teste ou de efeito não pede mais que isso.
+GENERATED_MAX_SECONDS = 600.0
+
+
+class GeneratedSound(EffectsOwner):
+    """Som sintetizado posto na linha do tempo (item de `audio.generated`): um tom, um ruído, um bipe, um metrônomo.
+
+    `generator` é o tipo registrado (`domain/generators`) e `params` os parâmetros dele, completados com os padrões na hora
+    de carregar (dois pedidos iguais dão a mesma spec). `start` e `duration` são do vídeo final. Entra no barramento dos
+    efeitos sonoros (`SFX`): soma depois do ducking e antes do loudnorm, sem abaixar a música. O nível é o do gerador
+    (`amplitude_db`) vezes o `volume`, sem nivelar contra a voz como os sons da biblioteca; a cadeia de efeitos vale nele."""
+
+    generator: str = Field(min_length=1)
+    params: dict[str, Any] = {}
+    start: float = Field(0.0, ge=0)
+    duration: float = Field(gt=0, le=GENERATED_MAX_SECONDS)
+    volume: float = Field(1.0, ge=0, le=4)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[AudioEffect] = []  # cadeia de efeitos no som já gerado
+
+    effects_place: ClassVar[str] = "som gerado (audio.generated)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
+
+    @model_validator(mode="after")
+    def _params_fit_generator(self) -> GeneratedSound:
+        try:
+            self.params = normalized_params(self.generator, self.params)
+        except ValueError as exc:
+            raise ValueError(f"audio.generated: {exc}") from exc
+        return self
+
+
 class NoiseProfile(Strict):
     """Um trecho que só tem o chiado de fundo, guardado com um nome para a Redução de ruído (`noise_reduction`) usar.
     `target` é o item de onde o trecho vem (`audio.voiceover.0`, `timeline.2`...), como em `edit_project`; `start` e
@@ -892,6 +926,9 @@ class AudioSettings(EffectsOwner):
     # regras do Auto Duck (ver `AutoDuck`): uma trilha abaixa enquanto OUTRA soa. A regra da música (`background: "MUS"`)
     # substitui o `music.ducking` antigo. Vazio fica fora do dump, pelo mesmo motivo dos perfis de ruído
     ducks: list[AutoDuck] = []
+    # sons sintetizados (tom, ruído, bipe, metrônomo...), no barramento dos efeitos sonoros (SFX). Vazio fica fora do
+    # dump, então um projeto sem som gerado mantém os mesmos bytes e o mesmo hash
+    generated: list[GeneratedSound] = []
 
     effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
     effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
@@ -900,6 +937,7 @@ class AudioSettings(EffectsOwner):
         "sfx_pan": 0.0,
         "noise_profiles": {},
         "ducks": [],
+        "generated": [],
     }
 
     @model_validator(mode="after")

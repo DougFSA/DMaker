@@ -60,6 +60,7 @@
 - [Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta](macros-de-audio.md): Guarda uma cadeia de efeitos com nome (uma macro), põe a macro num item e a aplica a uma pasta de arquivos de áudio, num trabalho em segundo plano que retoma de onde parou.
 - [Analisar o áudio: estouro, nível, contraste, espectro e sons](analisar-audio.md): Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
 - [Cortar os clipes no ritmo da música](cortar-no-ritmo.md): Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
+- [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](gerar-sons.md): Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la.
 
 ## Tarefas de dublagem e modelos
 
