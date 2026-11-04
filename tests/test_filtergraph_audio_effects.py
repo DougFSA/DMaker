@@ -23,6 +23,7 @@ from dmaker.filtergraph.audio_effects import (
     ingress_line,
     measure_lines,
     parse_astats,
+    sample_builder_types,
     span_samples,
 )
 from dmaker.filtergraph.common import Inputs
@@ -42,16 +43,21 @@ def request(effect, measure=None, duration=3.0) -> EffectRequest:
 
 
 def test_every_registered_effect_class_has_a_builder_and_the_other_way_around():
-    """O catálogo (as classes) e o registro de construtores precisam listar os mesmos tipos."""
-    assert set(EFFECT_CLASSES) == builder_types()
+    """O catálogo (as classes) e os dois registros de construtores (filtro e amostras) listam os mesmos tipos, e um tipo
+    não está nos dois: o estágio de amostras e o de filtro são mundos separados."""
+    assert set(EFFECT_CLASSES) == builder_types() | sample_builder_types()
+    assert not builder_types() & sample_builder_types()
+    assert {name for name, cls in EFFECT_CLASSES.items() if cls.sample_stage} == sample_builder_types()
 
 
 # os efeitos que só existem com um intervalo (o Cortar tira "do instante tal ao instante tal")
-REQUIRED_FIELDS = {"cut": {"start": 1.0, "end": 2.0}}
+REQUIRED_FIELDS = {"cut": {"start": 1.0, "end": 2.0}, "repair": {"start": 1.0, "end": 1.001}}
 
 
 def test_every_effect_builds_a_graph_that_runs_from_the_input_to_the_output_label():
     for name, cls in EFFECT_CLASSES.items():
+        if cls.sample_stage:  # esses não têm grafo: são contas em numpy (test_audio_restoration.py)
+            continue
         lines = build_effect(
             request(cls(**REQUIRED_FIELDS.get(name, {})), measure=Measure((levels(0.5), levels(0.5))))
         )

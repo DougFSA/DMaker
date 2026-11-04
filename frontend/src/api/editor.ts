@@ -10,7 +10,10 @@ import type {
   CardPreviewParams,
   EditOperation,
   EditResponse,
+  EffectCompareRequest,
+  EffectCompareResponse,
   InstantFrame,
+  NoiseProfileReport,
   PreviewAudioStatus,
   ProbeEntry,
   ProjectTheme,
@@ -65,6 +68,12 @@ export const editorApi = {
   /** Aplica uma operação de edição à spec dada e devolve a nova spec com a vista dela. Não grava nada. */
   edit: (name: string, spec: SpecDocument, op: EditOperation) =>
     http.post<EditResponse>(`${project(name)}/edit`, { spec, op }),
+  /** Mede o perfil de ruído `profile` da spec na tela: o nível do ruído por banda de um terço de oitava. */
+  noiseProfile: (name: string, spec: SpecDocument, profile: string) =>
+    http.post<NoiseProfileReport>(`${project(name)}/noise-profile`, { spec, profile }),
+  /** Um trecho de um item de áudio com um efeito da cadeia desligado e ligado, para ouvir a diferença sem gravar. */
+  effectCompare: (name: string, spec: SpecDocument, body: EffectCompareRequest) =>
+    http.post<EffectCompareResponse>(`${project(name)}/effect-compare`, { spec, ...body }),
   previewAudio: {
     /** Pede a mixagem de áudio da prévia (a mesma do render, num arquivo leve) para a edição dada; já pronta no
      * cache volta com a URL, senão começa em segundo plano. Sem `spec`, vale a do arquivo do projeto. */

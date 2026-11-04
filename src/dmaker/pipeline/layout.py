@@ -21,6 +21,7 @@ from ..media.probe import probe
 from .audio_duration import audio_extent
 from .context import Prober
 from .missing import MissingMedia
+from .sample_reader import SampleReader
 from .sources import Source, expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 
@@ -101,6 +102,8 @@ class OriginAggregate:
     media_limits: list[float | None]
     # o layout físico de onde esta visão saiu: as edições de áudio precisam da sessão (faixas externas) e da sonda
     physical: ProjectLayout | None = None
+    # quem lê as amostras do som para as edições que medem (perfil de ruído, Truncar Silêncio); `apply_edit_report` o põe
+    reader: SampleReader | None = None
 
 
 def aggregate_by_origin(project: Project, layout: ProjectLayout) -> OriginAggregate:

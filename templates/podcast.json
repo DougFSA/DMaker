@@ -1,5 +1,5 @@
 {
-  "description": "Episódio de podcast só de áudio: música de abertura, a voz gravada e música de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio (artista, título, álbum, faixa, ano, gênero, comentário). Sem imagem. A limpeza da voz entra quando o editor de áudio a oferecer.",
+  "description": "Episódio de podcast só de áudio: música de abertura, a voz gravada e música de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio (artista, título, álbum, faixa, ano, gênero, comentário). Sem imagem. A voz passa por uma Redução de ruído automática moderada (desligue com limpeza=false).",
   "prepare": "podcast",
   "params": {
     "voz": {
@@ -64,6 +64,11 @@
       "default": "",
       "type": "text"
     },
+    "limpeza": {
+      "description": "Limpa a voz com uma Redução de ruído automática moderada (8 dB): o perfil é o trecho mais quieto da gravação, e sem uma pausa só de ruído nada é tirado. false deixa a voz como foi gravada",
+      "default": true,
+      "type": "bool"
+    },
     "loudness": {
       "description": "Alvo de loudness em LUFS: -16 é o padrão de podcast; -14 para redes e -23 para broadcast",
       "default": -16,
@@ -85,7 +90,15 @@
   "brand": "{{marca}}",
   "timeline": [],
   "audio": {
-    "voiceover": [{ "src": "{{voz}}", "start": "{{abertura}}" }],
+    "voiceover": [
+      {
+        "src": "{{voz}}",
+        "start": "{{abertura}}",
+        "effects": [
+          { "$if": "{{limpeza}}", "type": "noise_reduction", "reduction_db": 8, "sensitivity": 6, "smoothing_bands": 3, "profile": "auto" }
+        ]
+      }
+    ],
     "music": {
       "src": "{{trilha}}",
       "volume": 0.5,

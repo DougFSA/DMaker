@@ -11,8 +11,9 @@ from pydantic_core import to_jsonable_python
 
 from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 
-# "points" é uma lista de pontos `{at, db}` (a curva do envelope): a interface a desenha, não a escreve em um campo
-ParamKind = Literal["number", "integer", "boolean", "choice", "points"]
+# "points" é uma lista de pontos `{at, db}` (a curva do envelope): a interface a desenha, não a escreve em um campo;
+# "profile" é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou "auto": a interface o escolhe numa lista
+ParamKind = Literal["number", "integer", "boolean", "choice", "points", "profile"]
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,8 @@ class EffectInfo:
     parameters: tuple[ParamInfo, ...]
     # só existe com uma seleção ou uma curva (Cortar, Envelope): o menu genérico da interface não o oferece
     needs_selection: bool = False
+    # trabalha sobre as amostras (Redução de ruído, Reparar): não vale no áudio mestre, que roda num grafo ao vivo
+    sample_stage: bool = False
 
     def to_dict(self) -> dict:
         return _plain(asdict(self))
@@ -56,7 +59,9 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _kind(annotation: Any) -> ParamKind:
+def _kind(annotation: Any, declared: str = "") -> ParamKind:
+    if declared:
+        return declared  # type: ignore[return-value]
     if get_origin(annotation) is list:
         return "points"
     if is_literal(annotation):
@@ -87,7 +92,7 @@ def param_info(name: str, cls: type[BaseModel]) -> ParamInfo:
     return ParamInfo(
         name=name,
         label=str(extra.get("label", name)),
-        kind=_kind(annotation),
+        kind=_kind(annotation, str(extra.get("kind", ""))),
         unit=str(extra.get("unit", "")),
         default=to_jsonable_python(field.get_default(call_default_factory=True)),
         minimum=low,
@@ -107,6 +112,7 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         changes_duration=cls.changes_duration,
         parameters=tuple(param_info(name, cls) for name in own),
         needs_selection=cls.needs_selection,
+        sample_stage=cls.sample_stage,
     )
 
 

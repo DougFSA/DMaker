@@ -1,10 +1,26 @@
-"""Avisos de um projeto cuja saída é um arquivo de áudio (ou que tem opções de áudio onde elas não valem)."""
+"""Avisos de áudio de um projeto: a saída em arquivo de áudio (ou opções de áudio onde elas não valem) e os perfis de
+ruído que a Redução de ruído usa."""
 
 from __future__ import annotations
 
+from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_presets import is_audio_preset
+from ..domain.noise_profile_edits import referenced_profiles
 from ..domain.spec import Project
 from .audio_duration import NOTHING_TO_PLAY
+
+
+def noise_profile_warnings(project: Project) -> list[str]:
+    """Os efeitos de Redução de ruído que apontam para um perfil que não existe: o render falharia nele."""
+    known = project.audio.noise_profiles
+    missing = sorted(
+        {name for name in referenced_profiles(project) if name != AUTO_PROFILE and name not in known}
+    )
+    return [
+        f"a Redução de ruído aponta para o perfil {name!r}, que não existe em audio.noise_profiles "
+        f"(perfis: {', '.join(sorted(known)) or 'nenhum'}). Crie com `noise_profile` ou use {AUTO_PROFILE!r}."
+        for name in missing
+    ]
 
 
 def audio_output_warnings(project: Project, total: float) -> list[str]:

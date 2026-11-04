@@ -9,6 +9,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { intervalProblem, isEnabled } from '@/lib/audioEffects'
 import { formatSeconds } from '@/lib/speech'
 import AudioEffectField from './AudioEffectField.vue'
+import NoiseProfileTools from './NoiseProfileTools.vue'
 
 const props = defineProps<{
   effect: AudioEffectSettings
@@ -158,6 +159,13 @@ function onDragStart(event: DragEvent): void {
         />
       </div>
       <p v-else class="effect__plain">Este efeito não tem parâmetros.</p>
+
+      <NoiseProfileTools
+        v-if="effect.type === 'noise_reduction'"
+        :list-path="listPath"
+        :index="index"
+        :profile="typeof effect.profile === 'string' ? effect.profile : 'auto'"
+      />
 
       <details v-if="startParam && endParam" class="effect__interval" :open="intervalOpen" data-effect-interval @toggle="onDetailsToggle">
         <summary class="effect__interval-title">
