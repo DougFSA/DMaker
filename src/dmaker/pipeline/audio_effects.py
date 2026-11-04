@@ -313,10 +313,15 @@ def effect_processor(ctx: RenderContext) -> EffectProcessor:
     return ctx.audio_fx
 
 
+def uses_named_profile(effects: Sequence[EffectBase]) -> bool:
+    """Se a cadeia tem uma Redução de ruído ligada que aponta para um perfil guardado no projeto (e não para o `auto`)."""
+    return any(effect.noise_profile() not in (None, AUTO_PROFILE) for _, effect in active_effects(effects))
+
+
 def noise_profile_parts(ctx: RenderContext, effects: Sequence[EffectBase]) -> list:
     """A parte da chave de cache de um item (o mezanino do clipe, o pedaço da prévia) que muda quando um perfil de ruído
     nomeado que a cadeia usa muda. Vazia sem perfil nomeado: a chave de um projeto antigo é a de sempre."""
-    if not any(effect.noise_profile() not in (None, AUTO_PROFILE) for _, effect in active_effects(effects)):
+    if not uses_named_profile(effects):
         return []  # a maioria dos itens: nem cria o processador
     return effect_processor(ctx).profile_parts(effects)
 

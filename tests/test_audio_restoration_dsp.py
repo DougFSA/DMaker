@@ -44,7 +44,9 @@ def voice(seconds: float) -> np.ndarray:
     """Uma "fala": três tons (180, 540 e 1210 Hz) sob uma envoltória silábica de 4 Hz, com amplitude de ~0,3."""
     t = np.arange(round(seconds * RATE)) / RATE
     tones = (
-        np.sin(2 * np.pi * 180 * t) + 0.6 * np.sin(2 * np.pi * 540 * t + 0.7) + 0.3 * np.sin(2 * np.pi * 1210 * t)
+        np.sin(2 * np.pi * 180 * t)
+        + 0.6 * np.sin(2 * np.pi * 540 * t + 0.7)
+        + 0.3 * np.sin(2 * np.pi * 1210 * t)
     )
     envelope = 0.55 + 0.45 * np.sin(2 * np.pi * 4 * t) ** 2
     return (0.17 * tones * envelope).astype(np.float32)
@@ -61,7 +63,9 @@ def test_the_profile_of_white_noise_reports_the_level_per_third_octave_band():
     noise = white_noise(1.0, -45.0)
     spectrum = noise_spectrum(stereo(noise), RATE)
     levels = dict(band_levels(spectrum))
-    assert min(levels) == 100.0 and max(levels) == 16000.0  # as bandas de 100 Hz a 16 kHz, todas abaixo de Nyquist
+    assert (
+        min(levels) == 100.0 and max(levels) == 16000.0
+    )  # as bandas de 100 Hz a 16 kHz, todas abaixo de Nyquist
     # ruído branco: a banda de um terço de oitava carrega a fração da potência que cabe nela (largura de 23% da frequência)
     expected = -45.0 + 10 * math.log10((2 ** (1 / 6) - 2 ** (-1 / 6)) * 1000 / (RATE / 2))
     assert levels[1000.0] == pytest.approx(expected, abs=1.0)
@@ -124,7 +128,9 @@ def test_no_reduction_gives_the_signal_back_untouched_and_the_input_never_change
 def test_the_channels_open_together_so_the_stereo_image_of_a_voice_does_not_move():
     speech = voice(3.0)
     noisy = np.stack([speech + white_noise(3.0, -45.0, 1), 0.5 * speech + white_noise(3.0, -45.0, 2)], axis=1)
-    profile = noise_spectrum(noisy[:RATE // 2], RATE)  # o começo é fala também: o que importa é a relação entre canais
+    profile = noise_spectrum(
+        noisy[: RATE // 2], RATE
+    )  # o começo é fala também: o que importa é a relação entre canais
     cleaned = reduce_noise(noisy, profile, reduction_db=12.0)
     ratio_in = rms(noisy[:, 1]) / rms(noisy[:, 0])
     ratio_out = rms(cleaned[:, 1]) / rms(cleaned[:, 0])
@@ -175,7 +181,9 @@ def test_the_repair_effect_owns_its_interval_and_refuses_a_stretch_longer_than_1
     broken[20000:20064] = 0.9
     effect = parse_effect({"type": "repair", "start": 20000 / RATE, "end": 20064 / RATE})
     fixed = apply_sample_effect(SampleRequest(effect, stereo(broken), RATE))
-    assert rms(fixed[20000:20064, 0] - tone[20000:20064]) < 0.01 * rms(broken[20000:20064] - tone[20000:20064])
+    assert rms(fixed[20000:20064, 0] - tone[20000:20064]) < 0.01 * rms(
+        broken[20000:20064] - tone[20000:20064]
+    )
     assert np.array_equal(fixed[:20000, 0], broken[:20000])  # fora do trecho, nada muda
     with pytest.raises(ValueError, match="no máximo 128"):
         parse_effect({"type": "repair", "start": 1.0, "end": 1.01})
@@ -189,7 +197,9 @@ def test_the_repair_effect_owns_its_interval_and_refuses_a_stretch_longer_than_1
 def test_repair_rebuilds_a_gap_from_the_wave_around_it_much_better_than_a_straight_line():
     t = np.arange(RATE) / RATE
     tone = (
-        0.4 * np.sin(2 * np.pi * 180 * t) + 0.25 * np.sin(2 * np.pi * 540 * t + 0.7) + 0.1 * np.sin(2 * np.pi * 1210 * t)
+        0.4 * np.sin(2 * np.pi * 180 * t)
+        + 0.25 * np.sin(2 * np.pi * 540 * t + 0.7)
+        + 0.1 * np.sin(2 * np.pi * 1210 * t)
     ).astype(np.float32)
     for width in (16, 64, 128):
         broken = tone.copy()
@@ -198,7 +208,9 @@ def test_repair_rebuilds_a_gap_from_the_wave_around_it_much_better_than_a_straig
         gap = slice(20000, 20000 + width)
         line = np.linspace(broken[19999], broken[20000 + width], width)
         assert rms(fixed[gap] - tone[gap]) < 0.2 * rms(line - tone[gap])
-        assert np.array_equal(fixed[:20000], tone[:20000]) and np.array_equal(fixed[20000 + width :], tone[20000 + width :])
+        assert np.array_equal(fixed[:20000], tone[:20000]) and np.array_equal(
+            fixed[20000 + width :], tone[20000 + width :]
+        )
         assert broken[gap].std() > 0.1  # a entrada não foi mexida
 
 
@@ -240,13 +252,17 @@ def test_truncating_two_second_pauses_to_half_a_second_removes_the_middle_of_eac
     for (start, end), (silence_start, silence_end) in zip(removed, silences, strict=True):
         assert end - start == pytest.approx(1.5, abs=0.01)  # 2 s - 0,5 s
         assert silence_start + 0.2 < start < end < silence_end - 0.2  # sobra um respiro de cada lado
-    assert signal.size / rate - sum(end - start for start, end in removed) == pytest.approx(7.0 - 3.0, abs=0.02)
+    assert signal.size / rate - sum(end - start for start, end in removed) == pytest.approx(
+        7.0 - 3.0, abs=0.02
+    )
 
 
 def test_the_two_modes_keep_the_time_the_audacity_manual_describes():
     assert kept_length(2.0, "truncate", 0.5, 0.5, 50.0) == 0.5
     assert kept_length(0.4, "truncate", 0.3, 1.0, 50.0) == 0.4  # nunca mais que a própria pausa
-    assert kept_length(2.0, "compress", 0.5, 0.5, 50.0) == pytest.approx(0.5 + 1.5 * 0.5)  # a mínima + metade do excesso
+    assert kept_length(2.0, "compress", 0.5, 0.5, 50.0) == pytest.approx(
+        0.5 + 1.5 * 0.5
+    )  # a mínima + metade do excesso
     assert kept_length(2.0, "compress", 0.5, 0.5, 0.0) == 0.5  # 0%: o mesmo que truncar para a mínima
     assert kept_length(2.0, "compress", 0.5, 0.5, 100.0) == 2.0  # 100%: não muda nada
 
@@ -254,9 +270,13 @@ def test_the_two_modes_keep_the_time_the_audacity_manual_describes():
 def test_with_a_frame_grid_what_is_kept_before_each_cut_is_a_whole_number_of_frames():
     rate = 16000
     tone = 0.3 * np.sin(2 * np.pi * 440 * np.arange(round(1.37 * rate)) / rate)
-    signal = np.concatenate([tone, np.zeros(2 * rate), tone, np.zeros(round(1.8 * rate)), tone]).astype(np.float32)
+    signal = np.concatenate([tone, np.zeros(2 * rate), tone, np.zeros(round(1.8 * rate)), tone]).astype(
+        np.float32
+    )
     grid = 1 / 30
-    removed = plan_truncation(signal, rate, find_silences(signal, rate, -40.0, 0.5), "truncate", 0.5, 0.5, 50.0, grid)
+    removed = plan_truncation(
+        signal, rate, find_silences(signal, rate, -40.0, 0.5), "truncate", 0.5, 0.5, 50.0, grid
+    )
     cursor = 0.0
     for start, end in removed:
         frames = (start - cursor) / grid
@@ -266,11 +286,19 @@ def test_with_a_frame_grid_what_is_kept_before_each_cut_is_a_whole_number_of_fra
 
 def test_the_cut_points_land_on_the_quietest_sample_so_the_seam_does_not_click():
     rate = 16000
-    noise = (np.random.default_rng(3).standard_normal(3 * rate) * 0.01).astype(np.float32)  # chiado a -40 dBFS
-    signal = np.concatenate([0.3 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate), noise]).astype(np.float32)
+    noise = (np.random.default_rng(3).standard_normal(3 * rate) * 0.01).astype(
+        np.float32
+    )  # chiado a -40 dBFS
+    signal = np.concatenate([0.3 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate), noise]).astype(
+        np.float32
+    )
     # o limiar é de pico (como o do Audacity): o chiado de -40 dB RMS chega a -28 dB de pico, então -20 dB é o limiar certo
-    removed = plan_truncation(signal, rate, find_silences(signal, rate, -20.0, 0.5), "truncate", 0.5, 0.5, 50.0)
+    removed = plan_truncation(
+        signal, rate, find_silences(signal, rate, -20.0, 0.5), "truncate", 0.5, 0.5, 50.0
+    )
     ((start, end),) = removed
     for instant in (start, end):
         around = np.abs(signal[round(instant * rate) - 40 : round(instant * rate) + 40])
-        assert abs(signal[round(instant * rate)]) <= np.sort(around)[3]  # entre as 4 menores amostras num raio de 2,5 ms
+        assert (
+            abs(signal[round(instant * rate)]) <= np.sort(around)[3]
+        )  # entre as 4 menores amostras num raio de 2,5 ms

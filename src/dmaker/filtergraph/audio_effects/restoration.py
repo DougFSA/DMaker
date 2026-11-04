@@ -31,9 +31,10 @@ PREROLL_SECONDS = 0.1
 # digital de verdade, que nunca chega a 1,0 exato
 CLIP_LEVEL_TOLERANCE = 0.001
 # A janela de análise do `adeclick`: com a padrão (55 ms), cliques de 2 amostras passaram sem ser vistos (2 de 6 numa
-# fala sintética), porque o limiar é relativo ao erro de predição da janela inteira; com 40 ms, junto de `t=1` e `b=10`,
-# os 6 e também 24 cliques de 1 a 30 amostras foram apagados (a contagem de picos isolados foi a zero)
-ADECLICK_WINDOW_MS = 40
+# fala sintética), porque o limiar é relativo ao erro de predição da janela inteira; com 30 ms e `t=1` os cliques de 1
+# a 5 amostras de uma voz sintetizada pelo próprio DMaker (Kokoro) foram apagados (erro de 0,5 para 0,004 no ponto do
+# clique) e o nível da fala mudou -0,05 dB
+ADECLICK_WINDOW_MS = 30
 # Os extremos que o `adeclick` aceita: `t` (limiar) vai de 1 a 100 e `b` (fusão de rajadas) de 0 a 10
 ADECLICK_MIN_THRESHOLD = 1.0
 ADECLICK_MAX_BURST = 10.0
@@ -41,9 +42,10 @@ ADECLICK_MAX_BURST = 10.0
 # mais cliques. O padrão do Audacity cai na sensibilidade máxima do ffmpeg, a que apagou os cliques do teste; por isso
 # `t = limiar / 200`, e abaixo de 200 o detector já está no limite
 ADECLICK_THRESHOLD_SCALE = 200.0
-# A largura máxima do pico do Audacity (amostras) decide até onde o `adeclick` funde detecções vizinhas: um clique de
-# 20 amostras só some inteiro com `b` perto de 10, então `b = largura / 2`
-ADECLICK_BURST_PER_SAMPLE = 0.5
+# A largura máxima do pico do Audacity (amostras) decide até onde o `adeclick` funde detecções vizinhas (`b`). Quanto
+# maior a fusão, mais ele interpola, e numa fala de verdade as consoantes (fricativas) parecem rajadas de cliques: com
+# `b=5` o nível da fala caiu 0,4 dB e com `b=10`, 1,5 dB. A largura padrão (20) vira o `b=2` do ffmpeg; a máxima (40) vira 4
+ADECLICK_BURST_PER_SAMPLE = 0.1
 
 
 def declick_parameters(threshold: int, max_spike_width: int) -> tuple[float, float]:

@@ -401,7 +401,9 @@ def noise_profile(
         saved = load_project(name).audio.noise_profiles
         return {"profiles": {key: value.model_dump() for key, value in saved.items()}}
     if target is None:
-        raise ToolError("informe o `target`, o item de onde vem o trecho de ruído (por exemplo audio.voiceover.0)")
+        raise ToolError(
+            "informe o `target`, o item de onde vem o trecho de ruído (por exemplo audio.voiceover.0)"
+        )
     try:
         return capture_noise_profile(name, profile, target, start, end)
     except (EditError, ValueError) as exc:

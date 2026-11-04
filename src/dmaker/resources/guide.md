@@ -219,7 +219,10 @@ Qualquer item com som tem uma lista ordenada `effects`: o clipe (`timeline[i].ef
 inteira tem `audio.master_effects` (depois de música, voz e efeitos sonoros e antes da normalização final). O
 catálogo (tipos, parâmetros, unidades e faixas, nos nomes do Audacity) vem da ferramenta `audio_effects`; hoje:
 `amplify` (`gain_db`, `prevent_clipping`), `normalize` (`peak_db`, `remove_dc`, `stereo_independent`), `invert`,
-`reverse`, `repeat` (`times`, as passagens no total: 2 dobra) e os de edição de onda `silence`, `cut`, `envelope` (`points`: `at` e `db`) e `channels` (`mode`). Todo efeito tem `enabled` (liga e desliga sem
+`reverse`, `repeat` (`times`, as passagens no total: 2 dobra), os de edição de onda `silence`, `cut`, `envelope` (`points`: `at` e `db`) e `channels` (`mode`), e os de limpeza e reparo `noise_reduction` (`reduction_db` 12,
+`sensitivity` 6, `smoothing_bands` 3 e `profile`: `auto` ou o nome de um perfil de `audio.noise_profiles`),
+`click_removal` (`threshold` 200, `max_spike_width` 20), `clip_fix` (`threshold_percent`, `reduce_db`) e `repair`
+(`start` e `end`, no máximo 128 amostras). Todo efeito tem `enabled` (liga e desliga sem
 apagar) e `start`/`end` (intervalo em segundos do item; fora dele o som passa intacto, com emenda de 10 ms).
 O arquivo original nunca muda: o item tratado fica em cache e o render e a prévia usam o mesmo.
 
@@ -229,6 +232,13 @@ O arquivo original nunca muda: o item tratado fica em cache e o render e a prév
   `audio.music` ou `audio.master`). A ordem conta: normalizar depois de amplificar mede o som já amplificado.
 - `repeat` muda a duração e só vale em voz gravada e em música; nos outros a spec o recusa dizendo onde vale.
   Com ele, a vista da linha do tempo (trilha `VO`) e o `validate_project` mostram a duração nova.
+- Tirar chiado é em dois passos: `noise_profile` (`name`, `profile`, `target`, `start`, `end`, o trecho que só tem
+  ruído; sem `start` e `end`, o mais quieto do item) guarda o perfil em `audio.noise_profiles` e devolve o nível por
+  banda; depois o efeito `noise_reduction` com `profile` apontando o nome. `profile: "auto"` usa o trecho mais quieto,
+  mas só se for uma pausa de verdade. `noise_reduction` e `repair` trabalham sobre as amostras do item e não valem no
+  master. `audio_truncate_silence` (`target`: clipe ou voz gravada; `threshold_db` -20, `min_duration` 0.5, `mode`
+  `truncate` ou `compress`, `truncate_to` 0.5, `compress_percent` 50) encurta as pausas: no clipe corta a imagem junto
+  (a boca continua sincronizada e os marcadores acompanham), na voz gravada é um `cut` por pausa.
 
 ### Edição de onda, ganho e pan por trilha, desfazer e refazer
 

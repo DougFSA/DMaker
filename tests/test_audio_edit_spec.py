@@ -36,7 +36,11 @@ def project(**parts) -> Project:
 
 
 def test_the_new_effects_have_a_builder_each_and_the_catalog_tells_the_interface_which_need_a_selection():
-    assert {"silence", "cut", "envelope", "channels"} <= set(EFFECT_CLASSES) == builder_types() | sample_builder_types()
+    assert (
+        {"silence", "cut", "envelope", "channels"}
+        <= set(EFFECT_CLASSES)
+        == builder_types() | sample_builder_types()
+    )
     payload = catalog_payload()
     json.dumps(payload)  # serializável: a rota da API e o MCP devolvem isto
     by_type = {effect["type"]: effect for effect in payload["effects"]}

@@ -26,12 +26,13 @@ from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..media.wavio import read_wav_float
 from .analysis_items import ItemAudio, ItemClock, TargetError, resolve_item
-from .audio_effects import AudioItem, EffectProcessor
+from .audio_effects import AudioItem, EffectProcessor, uses_named_profile
 from .context import Prober
 from .edit_history import edit_and_record
 from .final_output import latest_final_output
 from .layout import ProjectLayout, project_layout, to_presentation
 from .missing import MissingMedia
+from .noise_profiles import ProfileLocator
 from .projects import load_project
 from .sync import OffsetFinder
 
@@ -164,7 +165,7 @@ class AudioAnalysisService:
         start, end = self._interval(request, item.clock, playable, project)
         length = end - start
         if active_effects(item.effects):
-            signal = self._processed(item, start, length)
+            signal = self._processed(item, start, length, project)
         else:
             info = self.prober(item.path)
             signal = self._decode(item.path, item.offset + start, length, item.stream, info)
@@ -172,9 +173,15 @@ class AudioAnalysisService:
             signal = Signal((signal.samples * item.gain).astype(signal.samples.dtype), signal.sample_rate)
         return LoadedSignal(signal, item.label, start, item.clock, item.notes)
 
-    def _processed(self, item: ItemAudio, start: float, length: float) -> Signal:
-        """O trecho do item depois da cadeia de efeitos: o arquivo processado do `EffectProcessor` (o do render)."""
-        processor = EffectProcessor(self.runner)
+    def _processed(self, item: ItemAudio, start: float, length: float, project: Project) -> Signal:
+        """O trecho do item depois da cadeia de efeitos: o arquivo processado do `EffectProcessor` (o do render). Uma
+        Redução de ruído com perfil guardado precisa dos perfis do projeto, que só o `ProfileLocator` sabe achar."""
+        profiles = (
+            ProfileLocator(project, self.layout(project).session)
+            if uses_named_profile(item.effects)
+            else None
+        )
+        processor = EffectProcessor(self.runner, profiles=profiles)
         if item.whole_file:
             done = processor.process(AudioItem(item.path, item.file_duration, item.effects, 0.0, item.stream))
             base = item.offset

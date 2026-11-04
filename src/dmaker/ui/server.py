@@ -185,7 +185,9 @@ class EffectCompareRequest(BaseModel):
     target: str  # o item, como em `edit_project` (audio.voiceover.0, timeline.2...)
     index: int = Field(ge=0)  # a posição do efeito na cadeia do item
     start: float = Field(0.0, ge=0, allow_inf_nan=False)  # segundos do item
-    at: float | None = Field(None, ge=0, allow_inf_nan=False)  # segundos da linha do tempo (o cursor); vale no lugar de start
+    at: float | None = Field(
+        None, ge=0, allow_inf_nan=False
+    )  # segundos da linha do tempo (o cursor); vale no lugar de start
     duration: float = Field(6.0, gt=0, le=30, allow_inf_nan=False)
 
 

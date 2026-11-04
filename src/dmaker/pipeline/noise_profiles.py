@@ -58,6 +58,7 @@ def locate_target_audio(project: Project, session: Mapping[str, Source], target:
         return _pip_audio(project, session, target, index)
     if kind == "voiceover":
         assert index is not None
+        _check_index(index, len(project.audio.voiceover), "voz gravada")
         clip = project.audio.voiceover[index]
         require_file_time(clip.effects, target)
         return TargetAudio(project.resolve(clip.src), clip.offset)
@@ -69,6 +70,7 @@ def locate_target_audio(project: Project, session: Mapping[str, Source], target:
         return TargetAudio(project.resolve(music.src), 0.0)
     if kind == "track":
         assert index is not None
+        _check_index(index, len(project.audio.tracks), "faixa externa")
         track = project.audio.tracks[index]
         found = _session_source(session, track.source, target)
         return TargetAudio(found.path, 0.0, found.audio_stream)  # type: ignore[arg-type]
@@ -77,6 +79,11 @@ def locate_target_audio(project: Project, session: Mapping[str, Source], target:
         "master": "a mistura não é um arquivo: pegue o perfil de um item (um clipe, uma voz gravada...)",
     }
     raise EditError(f"{target}: {reasons[kind]}")
+
+
+def _check_index(index: int, count: int, what: str) -> None:
+    if not 0 <= index < count:
+        raise EditError(f"índice de {what} fora do intervalo: {index} (0 a {count - 1})")
 
 
 def _session_source(session: Mapping[str, Source], name: str, target: str) -> Source:
@@ -207,7 +214,9 @@ def measure_saved_profile(
     layout = project_layout(project, prober or probe, None, MissingMedia.scan(project))
     locator = ProfileLocator(project, layout.session)
     profile = locator.profile(name)
-    spectrum = measure_profile(reader or FFmpegSampleReader(SubprocessRunner(quiet=True)), locator.slice(name))
+    spectrum = measure_profile(
+        reader or FFmpegSampleReader(SubprocessRunner(quiet=True)), locator.slice(name)
+    )
     bands = band_report(spectrum)
     total = 10 * math.log10(sum(10 ** (band["db"] / 10) for band in bands))
     return {
