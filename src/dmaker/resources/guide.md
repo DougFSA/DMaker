@@ -264,6 +264,11 @@ na `timeline_view`; em qualquer um vale `marker:<texto>` (e `region: "marker:<te
 - `audio_split_stereo`: o item vira dois, `left` e `right` (na faixa externa, duas trilhas com pan duro).
 - `track_set` (`track`: `A1`, `A2`..., `MUS`, `NAR`, `VO`, `SFX`; `gain_db`, `pan` de -1 a 1, `muted`, `solo`): fica em
   `tracks` da spec e vale na prévia e no render. Com alguma trilha de áudio em solo, as outras ficam mudas.
+- Gravação do microfone (feita pelo navegador, em pedaços de um segundo para `projects/<nome>/recordings/<id>/`):
+  `audio_record_add` (`src`, `start`, `duration`) põe a gravação como voz gravada; `audio_punch` (`target` de uma voz
+  gravada, `start`/`end`, `src`, `recorded_at`, `duration`) regrava o trecho e guarda o antigo em `takes` do item, com
+  fade de 10 ms nas emendas; `voiceover_take_set` (`target`, `take`) troca o take que toca. A ferramenta
+  `audio_recordings` lista as gravações e recupera a que a aba deixou aberta.
 
 Toda edição do `edit_project` (e as de marcadores) entra no histórico do projeto, na pasta `history`: `undo_edit`
 desfaz a última e devolve a spec **byte a byte** como estava, `redo_edit` refaz (uma edição nova esvazia o refazer)

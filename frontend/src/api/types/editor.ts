@@ -244,6 +244,12 @@ export type EditOperation =
   /** O bipe de censura: silencia o item `target` no intervalo e põe um Tom de 1 kHz no mesmo lugar, num passo do desfazer. */
   | { type: 'censor_beep'; target: string; start?: number; end?: number; word?: string; occurrence?: number; margin?: number }
   | { type: 'audio_cut'; target: string; start: number; end: number }
+  /** A gravação do microfone como voz gravada em `start` (a latência já compensada); `duration` é a do arquivo. */
+  | { type: 'audio_record_add'; src: string; start: number; duration: number; volume?: number }
+  /** O punch-in: regrava `start`..`end` da voz `target` com a gravação `src`, que começou em `recorded_at`; o trecho antigo vira take. */
+  | { type: 'audio_punch'; target: string; start: number; end: number; src: string; recorded_at: number; duration: number; label?: string }
+  /** Troca o take que toca na voz gravada pelo `take` da lista (a posição, de 0). */
+  | { type: 'voiceover_take_set'; target: string; take: number }
   | { type: 'audio_split'; target: string; at: number }
   | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
   /** O Fade In (`in`) ou Fade Out (`out`) preso à borda do item; duração 0 tira o fade e sem `curve` mantém a que ele tinha. */

@@ -17,11 +17,14 @@ from ..domain.audio_edits import (
     add_envelope,
     append_voiceover,
     join_voiceovers,
+    punch_voiceover,
     rebase_effects,
+    record_voiceover,
     require_file_time,
     set_audio_offset,
     set_edge_fade,
     set_track_state,
+    set_voiceover_take,
     shift_later_voiceovers,
     shift_music,
     shift_start,
@@ -390,6 +393,75 @@ def _op_join(project: Project, op: dict, layout: OriginAggregate) -> Project:
     return join_voiceovers(project, target.index, second)  # type: ignore[arg-type]
 
 
+# ---------- gravar, punch-in e takes ----------
+
+
+def _number(op: Mapping, name: str, minimum: float | None = None) -> float:
+    value = _required(op, name)
+    if not isinstance(value, int | float) or isinstance(value, bool) or value != value:
+        raise EditError(f"`{name}` é um número em segundos")
+    if minimum is not None and value < minimum:
+        raise EditError(f"`{name}` não pode ser menor que {minimum:g}")
+    return float(value)
+
+
+def _recording_source(op: Mapping) -> str:
+    src = _required(op, "src")
+    if not isinstance(src, str) or not src.strip():
+        raise EditError("`src` é o arquivo da gravação, relativo à pasta do projeto")
+    return src
+
+
+def _op_record_add(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    """A gravação do microfone vira voz gravada em `start` (já com a latência compensada pelo cliente). É o que o
+    `finish` da gravação devolve para a interface aplicar, e o que a CLI e o MCP usam para recuperar uma gravação."""
+    start = _number(op, "start")
+    duration = _number(op, "duration", 0.0)
+    volume = float(op.get("volume", 1.0))
+    return record_voiceover(project, _recording_source(op), start, duration, volume)
+
+
+def _op_punch(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    """Regrava o trecho `start`..`end` (linha do tempo) de uma voz gravada com uma gravação nova (`src`), que começou em
+    `recorded_at` na linha do tempo e dura `duration`. Se a gravação parou antes de `end`, só o que ela cobre é trocado."""
+    target = _voice_target(project, op, layout, "o punch-in")
+    if target.length is None:
+        raise EditError(f"{target.path}: o arquivo de áudio não foi encontrado, não dá para medir a voz")
+    start, end = _interval(project, op)
+    recorded_at = _number(op, "recorded_at")
+    duration = _number(op, "duration", 0.0)
+    begin, finish = max(start, recorded_at), min(end, recorded_at + duration)
+    if finish - begin < TIME_TOLERANCE * 10:
+        raise EditError(
+            f"a gravação cobre de {recorded_at:g} a {recorded_at + duration:g} s e o punch-in pede de {start:g} a "
+            f"{end:g} s: não há som gravado no trecho"
+        )
+    a, b = target.single_interval(begin, finish)
+    clip = project.audio.voiceover[target.index]  # type: ignore[index]
+    take_offset = clip.start + a - recorded_at
+    label = str(op["label"]) if op.get("label") else ""
+    return punch_voiceover(
+        project,
+        target.index,
+        a,
+        b,
+        target.length,
+        _recording_source(op),
+        take_offset,
+        label,  # type: ignore[arg-type]
+    )
+
+
+def _op_take_set(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    target = _voice_target(project, op, layout, "trocar o take")
+    if target.length is None:
+        raise EditError(f"{target.path}: o arquivo de áudio não foi encontrado, não dá para medir a voz")
+    take = _required(op, "take")
+    if not isinstance(take, int) or isinstance(take, bool):
+        raise EditError("`take` é a posição do take na lista (0 é o primeiro)")
+    return set_voiceover_take(project, target.index, take, target.length)  # type: ignore[arg-type]
+
+
 # ---------- deslocar, dividir o estéreo, estado da trilha ----------
 
 
@@ -469,6 +541,9 @@ AUDIO_OPERATIONS: dict[str, AudioOperation] = {
     "audio_duplicate": _op_duplicate,
     "audio_split": _op_split,
     "audio_join": _op_join,
+    "audio_record_add": _op_record_add,
+    "audio_punch": _op_punch,
+    "voiceover_take_set": _op_take_set,
     "audio_shift": _op_shift,
     "audio_split_stereo": _op_split_stereo,
     "track_set": _op_track_set,

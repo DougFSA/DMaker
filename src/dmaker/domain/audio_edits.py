@@ -19,7 +19,7 @@ from .audio_effects.base import EPSILON
 from .audio_effects.editing import EnvelopePoint
 from .edits import EditError, _check_index, _clone
 from .effect_edits import _effect_list
-from .spec import MAX_AUDIO_OFFSET, Project, TrackState
+from .spec import MAX_AUDIO_OFFSET, Project, Take, TrackState
 
 # um deslocamento ou um corte de 1 ms é arredondamento da conta de tempo, não uma edição
 TIME_TOLERANCE = 0.001
@@ -275,6 +275,145 @@ def trim_voiceover(project: Project, index: int, start_at: float, end_at: float,
         item["offset"] = round(clip.offset + start_at, 6)
         item["end"] = round(clip.offset + end_at, 6)
         item["effects"] = _dump(rebase_effects(clip.effects, start_at, end_at - start_at, length))
+
+    return _readable(project, mutate)
+
+
+# ---------- gravar: item novo, punch-in e takes ----------
+
+# A emenda de um punch-in leva uma rampa curta para o take novo entrar e o antigo sair sem estalo (o mesmo tamanho da
+# rampa que o corte de intervalo usa nas emendas).
+PUNCH_SEAM_FADE = 0.01
+
+
+def record_voiceover(
+    project: Project, src: str, start: float, duration: float, volume: float = 1.0
+) -> Project:
+    """Põe uma gravação nova como voz gravada em `start` (instante do vídeo final). Se a compensação de latência levou o
+    começo para antes do zero, o que sobra do arquivo antes do vídeo é aparado (`offset`) e o item começa em 0."""
+    if duration <= TIME_TOLERANCE:
+        raise EditError("a gravação está vazia: não há som para pôr na linha do tempo")
+    lead = max(-start, 0.0)
+    if lead >= duration - TIME_TOLERANCE:
+        raise EditError("a gravação inteira caiu antes do começo do vídeo")
+    clip: dict[str, Any] = {"src": src, "start": round(start + lead, 6), "volume": volume}
+    if lead > 0:
+        clip["offset"] = round(lead, 6)
+    return append_voiceover(project, clip)
+
+
+def _fade_edge(chain: list[dict], side: str) -> None:
+    """Põe (ou alonga, se já havia) o fade curto da emenda na borda da cadeia."""
+    kind = f"fade_{side}"
+    for entry in chain:
+        if entry.get("type") == kind and entry.get("start") is None and entry.get("end") is None:
+            if entry.get("duration", 0.0) < PUNCH_SEAM_FADE:
+                entry["duration"] = PUNCH_SEAM_FADE
+            return
+    chain.append(_parse({"type": kind, "duration": PUNCH_SEAM_FADE, "enabled": True}))
+
+
+def punch_voiceover(
+    project: Project,
+    index: int,
+    a: float,
+    b: float,
+    length: float,
+    take_src: str,
+    take_offset: float,
+    label: str = "",
+) -> Project:
+    """Regrava o trecho `a`..`b` (tempo do item) da voz gravada `index` com o arquivo `take_src`, a partir de `take_offset`.
+
+    A voz se divide em até três itens (antes, o trecho, depois); o do meio passa a tocar o take novo e guarda o antigo em
+    `takes`, então nada se apaga. As emendas ganham um fade de 10 ms nos dois lados, para a troca não estalar. O trecho
+    mantém a duração de antes: a linha do tempo não anda."""
+    _check_index(len(project.audio.voiceover), index, "voz gravada")
+    clip = project.audio.voiceover[index]
+    require_file_time(clip.effects, f"audio.voiceover.{index}")
+    if not 0 <= a < b <= length + TIME_TOLERANCE or b - a < TIME_TOLERANCE:
+        raise EditError(f"o punch-in precisa ficar dentro da voz gravada (de 0 a {length:g} s do item)")
+    b = min(b, length)
+    has_before = a > TIME_TOLERANCE
+    has_after = b < length - TIME_TOLERANCE
+
+    def mutate(data: dict) -> None:
+        voices = data["audio"]["voiceover"]
+        original = voices[index]
+        pieces: list[dict] = []
+        if has_before:
+            first = dict(original)
+            first.pop("takes", None)
+            first.pop("take_label", None)
+            first["end"] = round(clip.offset + a, 6)
+            first["effects"] = _dump(rebase_effects(clip.effects, 0.0, a, length))
+            _fade_edge(first["effects"], "out")
+            pieces.append(first)
+        middle = dict(original)
+        middle["start"] = round(clip.start + a, 6)
+        middle["src"] = take_src
+        middle["offset"] = round(take_offset, 6)
+        middle["end"] = round(take_offset + (b - a), 6)
+        middle["effects"] = _dump(rebase_effects(clip.effects, a, b - a, length))
+        kept = [
+            Take(
+                src=clip.src,
+                offset=round(clip.offset + a, 6),
+                end=round(clip.offset + b, 6),
+                label=clip.take_label or "Original",
+            ).model_dump()
+        ]
+        for other in clip.takes:  # os takes de antes valem o mesmo trecho
+            kept.append(
+                Take(
+                    src=other.src,
+                    offset=round(other.offset + a, 6),
+                    end=round(other.offset + b, 6),
+                    label=other.label,
+                ).model_dump()
+            )
+        middle["takes"] = kept
+        middle["take_label"] = label or f"Take {len(kept) + 1}"
+        if has_before:
+            _fade_edge(middle["effects"], "in")
+        if has_after:
+            _fade_edge(middle["effects"], "out")
+        pieces.append(middle)
+        if has_after:
+            last = dict(original)
+            last.pop("takes", None)
+            last.pop("take_label", None)
+            last["start"] = round(clip.start + b, 6)
+            last["offset"] = round(clip.offset + b, 6)
+            last["effects"] = _dump(rebase_effects(clip.effects, b, length - b, length))
+            _fade_edge(last["effects"], "in")
+            pieces.append(last)
+        voices[index : index + 1] = pieces
+
+    return _readable(project, mutate)
+
+
+def set_voiceover_take(project: Project, index: int, take: int, length: float) -> Project:
+    """Troca o take que toca na voz gravada `index` pelo `take` da lista (a posição começa em 0): o que tocava vai para o
+    lugar dele na lista, com o nome, e o resto do item (volume, efeitos, posição) fica como está."""
+    _check_index(len(project.audio.voiceover), index, "voz gravada")
+    clip = project.audio.voiceover[index]
+    if not clip.takes:
+        raise EditError(f"audio.voiceover.{index}: esta voz não tem takes alternativos")
+    if not 0 <= take < len(clip.takes):
+        raise EditError(
+            f"take {take} não existe em audio.voiceover.{index}: a lista tem {len(clip.takes)} (de 0 a {len(clip.takes) - 1})"
+        )
+    playing_end = clip.end if clip.end is not None else clip.offset + length
+
+    def mutate(data: dict) -> None:
+        item = data["audio"]["voiceover"][index]
+        chosen = item["takes"][take]
+        item["takes"][take] = Take(
+            src=clip.src, offset=clip.offset, end=playing_end, label=clip.take_label or ""
+        ).model_dump()
+        item["src"], item["offset"], item["end"] = chosen["src"], chosen["offset"], chosen["end"]
+        item["take_label"] = chosen.get("label", "")
 
     return _readable(project, mutate)
 

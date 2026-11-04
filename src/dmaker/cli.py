@@ -4364,6 +4364,118 @@ def audio_censor_command(
     _run_wave_edit(spec, op, "Bipe posto.")
 
 
+recordings_app = typer.Typer(
+    help="Gravações do microfone no projeto: as que a aba deixou abertas, recuperar e pôr na linha do tempo.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(recordings_app, name="recordings")
+
+
+@recordings_app.command("list")
+def audio_recordings_list_command(
+    spec: _WAVE_SPEC,
+    unfinished: Annotated[
+        bool, typer.Option("--unfinished", help="Só as abertas (a aba fechou antes de parar).")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Lista as gravações do projeto, com a duração que chegou ao disco e os pedaços que faltam."""
+    from .pipeline.recording_attach import listing
+
+    items = listing(spec, unfinished)
+    if as_json:
+        console.print_json(json.dumps({"recordings": items}))
+        return
+    if not items:
+        console.print("Nenhuma gravação.")
+        return
+    for item in items:
+        state = "aberta" if item["state"] == "open" else "finalizada"
+        gaps = f", faltam os pedaços {item['gaps']}" if item["gaps"] else ""
+        console.print(
+            f"{item['id']}  {state}  {item['duration']:.1f} s  {item['rate']} Hz, {item['channels']} canal(is){gaps}",
+            highlight=False,
+        )
+
+
+@recordings_app.command("recover")
+def audio_recordings_recover_command(
+    spec: _WAVE_SPEC,
+    recording: Annotated[
+        str | None, typer.Option("--id", help="A gravação (padrão: a única que está aberta).")
+    ] = None,
+    punch: Annotated[
+        bool,
+        typer.Option("--punch", help="Aplica como punch-in, se a gravação abriu para regravar um trecho."),
+    ] = False,
+) -> None:
+    """Finaliza uma gravação com o que chegou ao disco e a põe na linha do tempo (um passo do `dmaker undo`)."""
+    from .domain.edits import EditError
+    from .pipeline.recording_attach import attach_recording
+    from .pipeline.recordings import RecordingError
+
+    try:
+        status, report = attach_recording(spec, recording, punch)
+    except (RecordingError, EditError) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Gravação {status.id} posta na linha do tempo[/green] ({status.duration:.1f} s; "
+        "desfaça com `dmaker undo`)",
+        highlight=False,
+    )
+    for warning in report.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("take")
+def audio_take_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    take: Annotated[int, typer.Argument(help="A posição do take na lista da voz (0 é o primeiro).")],
+) -> None:
+    """Troca o take que toca numa voz gravada regravada por punch-in; o que tocava vai para a lista."""
+    _run_wave_edit(spec, _wave_op("voiceover_take_set", target, take=take), "Take trocado.")
+
+
+@audio_app.command("punch")
+def audio_punch_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    recording: Annotated[
+        str, typer.Argument(help="A gravação finalizada (veja `dmaker audio recordings list`).")
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    recorded_at: Annotated[
+        float | None,
+        typer.Option(
+            "--recorded-at", help="Onde a gravação começa na linha do tempo (padrão: o que ela guardou)."
+        ),
+    ] = None,
+) -> None:
+    """Regrava o trecho --start..--end da voz com uma gravação já finalizada: o trecho passa a tocar o take novo, o
+    antigo fica na lista de takes e as emendas levam um fade de 10 ms."""
+    from .pipeline.recording_attach import store_of
+    from .pipeline.recordings import RecordingError
+
+    try:
+        status = store_of(spec).status(recording)
+    except RecordingError as exc:
+        _fail(str(exc))
+    if status.state != "finished" or status.src is None:
+        _fail("a gravação ainda não foi finalizada: use `dmaker audio recordings recover`")
+    op = _wave_op(
+        "audio_punch",
+        target,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        src=status.src,
+        recorded_at=status.start if recorded_at is None else recorded_at,
+        duration=round(status.duration, 6),
+    )
+    _run_wave_edit(spec, op, "Punch-in feito.")
+
+
 # ---------- modelos ----------
 
 models_app = typer.Typer(

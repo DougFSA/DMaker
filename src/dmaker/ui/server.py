@@ -48,6 +48,7 @@ from .look_routes import build_looks_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
+from .recording_routes import build_recording_router
 from .speech_routes import build_speech_router
 from .transition_routes import build_transitions_router
 from .voice_routes import Services, VoiceServices, build_voice_router
@@ -86,6 +87,7 @@ app.include_router(build_transitions_router())
 app.include_router(build_audio_effects_router())
 app.include_router(build_audio_analysis_router())
 app.include_router(build_audio_panel_router())
+app.include_router(build_recording_router())
 app.include_router(build_looks_router())
 app.include_router(build_infographics_router())
 app.include_router(build_agent_router(jobs))

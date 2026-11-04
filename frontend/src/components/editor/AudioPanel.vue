@@ -20,6 +20,8 @@ import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
 import AudioEffectDialog from './audio/AudioEffectDialog.vue'
 import AudioMeter from './audio/AudioMeter.vue'
+import RecordingRecovery from './audio/RecordingRecovery.vue'
+import VoiceTakes from './audio/VoiceTakes.vue'
 import { AUDIO_TOOLBAR_EXTRAS, AUDIO_VIEWS } from './audio/views'
 import TransportIcon from './TransportIcon.vue'
 
@@ -208,6 +210,8 @@ function onSpeed(value: string): void {
       />
     </div>
 
+    <RecordingRecovery />
+    <VoiceTakes />
     <p v-if="error" class="audio__error" role="alert" data-audio-error>{{ error }}</p>
     <ul v-if="wave?.notes?.length" class="audio__notes">
       <li v-for="note in wave.notes" :key="note">{{ note }}</li>
