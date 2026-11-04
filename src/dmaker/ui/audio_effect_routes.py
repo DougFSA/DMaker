@@ -1,4 +1,5 @@
-"""Rotas dos efeitos de áudio da interface: o catálogo, as ações de um efeito e o nível de um item.
+"""Rotas dos efeitos de áudio da interface: o catálogo, a resposta de frequência, as predefinições salvas, as ações de um
+efeito e o nível de um item.
 
 Adaptador fino sobre `domain.audio_effects.catalog_payload` (o mesmo que a ferramenta MCP `audio_effects` e o comando
 `dmaker audio effects` entregam), `pipeline.effect_actions` (o que a ferramenta `audio_effect_action` e `dmaker audio
@@ -16,7 +17,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from .. import config
-from ..domain.audio_effects import catalog_payload
+from ..domain.audio_effects import (
+    catalog_payload,
+    list_user_presets,
+    remove_user_preset,
+    save_user_preset,
+)
 from ..domain.edits import EditError
 from ..domain.spec import Project
 from ..media.ffmpeg import FFmpegError
@@ -32,6 +38,21 @@ class EffectActionBody(BaseModel):
     profile: str | None = None
     start: float | str | None = None
     end: float | str | None = None
+
+
+class EffectResponseBody(BaseModel):
+    """Um efeito de equalização (como a spec o escreve) e quantos pontos o gráfico tem."""
+
+    effect: dict
+    points: int = 256
+
+
+class PresetBody(BaseModel):
+    """Uma predefinição a salvar: o nome, os efeitos da cadeia e, se quiser, uma frase do que faz."""
+
+    label: str
+    effects: list[dict]
+    summary: str = ""
 
 
 class ItemLevelBody(BaseModel):
@@ -57,6 +78,35 @@ def build_audio_effects_router() -> APIRouter:
     def list_audio_effects(type: str | None = None) -> dict:
         try:
             return catalog_payload(type)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/api/audio-effects/response")
+    def effect_response(body: EffectResponseBody) -> dict[str, list[float]]:
+        """O gráfico de resposta de frequência de um efeito de equalização: conta pura, sem ffmpeg."""
+        from ..pipeline.effect_response import effect_frequency_response
+
+        try:
+            return effect_frequency_response(body.effect, body.points)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("/api/audio-effects/presets")
+    def saved_presets() -> dict[str, list[dict]]:
+        """As predefinições que a pessoa salvou (as embutidas vêm no catálogo)."""
+        return {"presets": [preset.to_dict() for preset in list_user_presets()]}
+
+    @router.post("/api/audio-effects/presets")
+    def save_preset(body: PresetBody) -> dict:
+        try:
+            return save_user_preset(body.label, body.effects, body.summary).to_dict()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.delete("/api/audio-effects/presets/{preset_id}")
+    def delete_preset(preset_id: str) -> dict:
+        try:
+            return remove_user_preset(preset_id).to_dict()
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

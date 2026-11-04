@@ -24,6 +24,8 @@ class EffectPreset:
     label: str
     summary: str
     effects: tuple[dict, ...]
+    # de onde vem: `builtin` (registrada no código) ou `user` (salva pela pessoa, em `user_presets`)
+    origin: str = "builtin"
 
     def to_dict(self) -> dict:
         return {
@@ -31,6 +33,7 @@ class EffectPreset:
             "label": self.label,
             "summary": self.summary,
             "effects": [dict(effect) for effect in self.effects],
+            "origin": self.origin,
         }
 
 
@@ -50,16 +53,25 @@ def register_effect_preset(preset: EffectPreset) -> EffectPreset:
 
 
 def get_effect_preset(preset_id: str) -> EffectPreset:
-    try:
+    """A predefinição de `id` dado: as embutidas primeiro e, não achando, as que a pessoa salvou."""
+    from .user_presets import load_user_presets
+
+    if preset_id in EFFECT_PRESETS:
         return EFFECT_PRESETS[preset_id]
-    except KeyError:
-        known = ", ".join(sorted(EFFECT_PRESETS))
-        raise ValueError(f"Predefinição desconhecida: {preset_id!r}. Use uma de: {known}") from None
+    for preset in load_user_presets():
+        if preset.id == preset_id:
+            return preset
+    known = ", ".join(sorted([*EFFECT_PRESETS, *(preset.id for preset in load_user_presets())]))
+    raise ValueError(f"Predefinição desconhecida: {preset_id!r}. Use uma de: {known}")
 
 
 def preset_catalog() -> list[dict]:
-    """As predefinições como o catálogo as entrega (`presets` de `catalog_payload`)."""
-    return [preset.to_dict() for preset in EFFECT_PRESETS.values()]
+    """As predefinições como o catálogo as entrega (`presets` de `catalog_payload`): as embutidas e, depois, as que a
+    pessoa salvou (`origin: "user"`). O arquivo é lido a cada chamada, então uma predefinição salva aparece na hora e
+    sobrevive a reiniciar o programa."""
+    from .user_presets import load_user_presets
+
+    return [preset.to_dict() for preset in [*EFFECT_PRESETS.values(), *load_user_presets()]]
 
 
 def check_preset_fits(preset: EffectPreset, sample_stage_allowed: bool, place: str) -> None:

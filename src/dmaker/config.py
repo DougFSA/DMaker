@@ -71,6 +71,9 @@ TEMPLATES_DIR = ROOT / "templates"
 # parâmetros; moram ao lado dos modelos de projeto, como os outros recursos versionados do clone.
 INFOGRAPHICS_DIR = TEMPLATES_DIR / "html"
 LAYOUTS_FILE = DATA_DIR / "layouts.json"
+# As predefinições de efeitos de áudio que a pessoa salvou (a cadeia de efeitos com um nome): dado de quem usa o editor,
+# irmão do layouts.json, fora do repositório
+EFFECT_PRESETS_FILE = DATA_DIR / "effect-presets.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 

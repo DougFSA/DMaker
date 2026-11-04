@@ -28,6 +28,8 @@ desktop.ini
 
 # layouts salvos da interface (dado da pessoa usando, não do repositório)
 layouts.json
+# predefinições de efeitos de áudio salvas pela pessoa (dado de quem usa o editor, não do repositório)
+effect-presets.json
 
 # vozes clonadas (referências são dados pessoais)
 assets/voices/

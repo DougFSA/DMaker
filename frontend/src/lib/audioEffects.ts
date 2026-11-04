@@ -1,7 +1,16 @@
 /* As contas do bloco "Efeitos de áudio" do painel Filtros, todas puras: qual cadeia a seleção da linha do tempo edita,
    o efeito novo com os padrões do catálogo, e adicionar, remover, mover e ligar sobre a lista da spec. Os efeitos, os
    parâmetros e as faixas vêm do catálogo do servidor (GET /api/audio-effects), nunca de uma cópia escrita aqui. */
-import type { AudioEffectInfo, AudioEffectParam, AudioEffectSettings, AudioEffectTarget, AudioEffectValue, TimelineItem, TimelineView } from '@/api'
+import type {
+  AudioEffectInfo,
+  AudioEffectParam,
+  AudioEffectSettings,
+  AudioEffectTarget,
+  AudioEffectValue,
+  CurvePoint,
+  TimelineItem,
+  TimelineView,
+} from '@/api'
 import { getPath, setPath } from './editorPaths'
 import { displayLabel } from './timeline'
 
@@ -109,7 +118,9 @@ export function freeProfileName(existing: readonly string[]): string {
 export function newEffect(info: AudioEffectInfo): AudioEffectSettings {
   const effect: AudioEffectSettings = { type: info.type }
   for (const param of info.parameters) {
-    if (param.default !== null && param.default !== undefined) effect[param.name] = param.default
+    if (param.default === null || param.default === undefined) continue
+    // a lista do EQ vai por cópia: o efeito da spec nunca compartilha o array do catálogo
+    effect[param.name] = Array.isArray(param.default) ? JSON.parse(JSON.stringify(param.default)) : param.default
   }
   return effect
 }
@@ -127,12 +138,20 @@ export function isEnabled(effect: Pick<AudioEffectSettings, 'enabled'>): boolean
   return effect.enabled !== false
 }
 
+/** Os parâmetros que são uma lista do EQ (os controles deslizantes e os pontos da curva), não um campo de formulário. */
+export function isListParam(param: Pick<AudioEffectParam, 'kind'>): boolean {
+  return param.kind === 'band_gains' || param.kind === 'freq_points'
+}
+
 /** O valor do parâmetro como o formulário o mostra: o da spec, ou o padrão do catálogo quando a spec não o tem. */
 export function paramValue(effect: AudioEffectSettings, param: Pick<AudioEffectParam, 'name' | 'kind' | 'default'>): AudioEffectValue | null {
   const stored = effect[param.name]
   if (param.kind === 'boolean') return typeof stored === 'boolean' ? stored : param.default === true
+  if (isListParam(param)) return Array.isArray(stored) ? (stored as number[] | CurvePoint[]) : Array.isArray(param.default) ? param.default : null
   if (param.kind === 'choice' || param.kind === 'profile') {
-    return typeof stored === 'string' ? stored : typeof param.default === 'string' ? param.default : null
+    // uma escolha pode ter opções numéricas (a inclinação do passa-alta, 6 a 48 dB por oitava): a spec guarda o número
+    if (typeof stored === 'string' || (param.kind === 'choice' && typeof stored === 'number')) return stored
+    return typeof param.default === 'string' || typeof param.default === 'number' ? param.default : null
   }
   if (typeof stored === 'number') return stored
   return typeof param.default === 'number' ? param.default : null
@@ -155,6 +174,16 @@ export function isParamShown(
     const fallback = siblings.find((sibling) => sibling.name === field)?.default
     return (stored === undefined || stored === null ? fallback : stored) === expected
   })
+}
+
+/** O texto da opção escolhida, que é o que o seletor compara (`6` e `"6"` são a mesma opção). */
+export function choiceText(value: AudioEffectValue | null | undefined): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+/** O valor que vai para a spec quando se escolhe uma opção: número se as opções do campo são números (o padrão é número). */
+export function choiceValue(param: Pick<AudioEffectParam, 'default'>, text: string): string | number {
+  return typeof param.default === 'number' ? Number(text) : text
 }
 
 /** O valor limitado à faixa do catálogo; o inteiro arredonda antes. Nunca sai valor fora da faixa para a spec. */

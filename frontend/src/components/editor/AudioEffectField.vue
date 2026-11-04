@@ -1,22 +1,28 @@
 <script setup lang="ts">
 /* Um parâmetro de um efeito de áudio, desenhado pelo que o catálogo diz dele (número, inteiro, caixa de marcar ou
    escolha). O número digitado espera 300 ms de silêncio e vale um passo do desfazer por campo; a caixa e a escolha
-   gravam na hora, cada uma num passo. Número fora da faixa do catálogo é limitado antes de ir para a spec. */
+   gravam na hora, cada uma num passo. Número fora da faixa do catálogo é limitado antes de ir para a spec. As listas do EQ
+   (os 31 controles do EQ Gráfico e os pontos do EQ por Curva) têm o controle próprio com o gráfico, e gravam ao soltar. */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { AudioEffectParam, AudioEffectSettings } from '@/api'
+import type { AudioEffectParam, AudioEffectSettings, CurvePoint } from '@/api'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppNumberInput from '@/components/ui/AppNumberInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import {
   AUTO_PROFILE,
+  choiceText,
+  choiceValue,
   clampParam,
   effectPath,
+  isListParam,
   isParamShown,
   paramValue,
   profileNames,
   setEffectFieldIn,
 } from '@/lib/audioEffects'
+import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
+import EqParamControl from './audio/EqParamControl.vue'
 
 /** A espera do número digitado: cada tecla reinicia, e a spec só muda quando a pessoa para (a mesma do painel Filtros). */
 const EFFECT_DEBOUNCE_MS = 300
@@ -36,6 +42,7 @@ const props = defineProps<{
 }>()
 
 const editor = useEditorStore()
+const catalog = useAudioEffectsStore()
 
 /** O campo de um modo de unidade só aparece no modo dele: sem `shown_when` aparece sempre. */
 const shown = computed(() => isParamShown(props.param, props.effect, props.siblings))
@@ -97,12 +104,19 @@ function onNumber(value: number | null): void {
   timer = value === null && !props.optional ? null : setTimeout(commit, EFFECT_DEBOUNCE_MS)
 }
 
-function onDiscrete(value: boolean | string): void {
+function onDiscrete(value: boolean | string | number | number[] | CurvePoint[]): void {
   commit()
   editor.flushPendingEdits()
   const { listPath, index } = props
   editor.mutate((draft) => setEffectFieldIn(draft, listPath, index, props.param.name, value))
 }
+
+/** A escolha vira o tipo que a spec guarda: número se as opções são números (a inclinação em dB por oitava). */
+const onChoice = (text: string) => onDiscrete(choiceValue(props.param, text))
+
+/** A lista do EQ como a spec a tem (ou o padrão do catálogo), e o nome do efeito para os rótulos do gráfico. */
+const listValue = computed(() => (paramValue(props.effect, props.param) ?? []) as number[] | CurvePoint[])
+const effectName = computed(() => catalog.infoOf(props.effect.type)?.label ?? props.effect.type)
 
 /** As opções do perfil de ruído: o automático e os que o projeto guarda; o que a spec cita sem existir fica marcado. */
 const profileOptions = computed(() => {
@@ -146,11 +160,11 @@ onBeforeUnmount(() => {
   <AppSelect
     v-else-if="param.kind === 'choice'"
     :label="param.label"
-    :model-value="typeof stored === 'string' ? stored : ''"
+    :model-value="choiceText(stored)"
     :options="param.options.map((option) => ({ value: option, label: option }))"
     :hint="param.hint || undefined"
     :data-effect-param="param.name"
-    @update:model-value="onDiscrete"
+    @update:model-value="onChoice"
   />
   <!-- o perfil de ruído: o automático ou um dos que o projeto guarda; um nome que a spec cita e não existe aparece marcado -->
   <AppSelect
@@ -163,6 +177,10 @@ onBeforeUnmount(() => {
     :data-effect-param="param.name"
     @update:model-value="onDiscrete"
   />
+  <!-- as listas do EQ ocupam a linha inteira: 31 controles e um gráfico não cabem numa coluna de número -->
+  <div v-else-if="isListParam(param)" class="list-cell" :data-effect-param="param.name">
+    <EqParamControl :param="param" :effect="effect" :name="effectName" :model-value="listValue" @commit="onDiscrete" />
+  </div>
   <!-- a caixa de marcar ocupa a linha inteira da grade: o rótulo e a dica são longos para a coluna do número -->
   <div v-else-if="param.kind === 'boolean'" class="check-cell" :data-effect-param="param.name">
     <AppCheckbox
@@ -175,7 +193,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.check-cell {
+.check-cell,
+.list-cell {
   grid-column: 1 / -1;
 }
 </style>

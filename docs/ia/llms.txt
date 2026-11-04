@@ -56,6 +56,7 @@
 - [Desfazer e refazer uma edição](desfazer-edicao.md): Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto.
 - [Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar](editar-na-onda.md): Abre um item de áudio numa onda grande, como o Audacity: seleciona com o mouse, toca em loop, aplica um efeito com prévia e comparação do antes e depois, desenha o envelope e as amostras, e desfaz com Ctrl+Z.
 - [Apagar um som pela frequência: espectrograma e edição espectral](apagar-pela-frequencia.md): Mostra o espectrograma do áudio e apaga um som só naquela faixa de frequência e naquele instante (um apito, o toque de um celular, um plim), sem cortar a fala em volta.
+- [Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch](equalizar-som.md): Muda o timbre de um item de áudio ou da mistura: graves e agudos, EQ por bandas ou por uma curva, corte do ronco e do zumbido, e predefinições suas.
 - [Analisar o áudio: estouro, nível, contraste, espectro e sons](analisar-audio.md): Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios.
 - [Cortar os clipes no ritmo da música](cortar-no-ritmo.md): Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo.
 

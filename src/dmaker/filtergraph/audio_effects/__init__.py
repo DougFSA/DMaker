@@ -17,6 +17,10 @@ importa cada módulo da pasta sozinho. Quatro pontos do contrato:
   na classe e registra uma função pura sobre arrays com `@register_sample_builder("<type>")`, que recebe um
   `SampleRequest` (`samples` de forma `(amostras, canais)`, `measure`) e devolve o sinal depois do efeito. O processador
   parte a cadeia em trechos de ffmpeg e estágios de amostras, e o intervalo e a emenda de 10 ms são os mesmos.
+- Resposta de frequência: um efeito de equalização com `has_response = True` na classe registra a conta pura do ganho em
+  dB por frequência com `@register_response("<type>")` (`frequency_response`), a partir dos mesmos dados que o construtor
+  usa; a interface desenha o gráfico com ela, sem rodar o ffmpeg. Um teste prende que as classes e as contas listam os
+  mesmos tipos.
 - Segunda entrada: um efeito que usa outra trilha (Vocoder) a recebe em `request.side`, um rótulo de entrada já
   posto no grafo por quem monta o comando (`pipeline.audio_effects`); hoje ninguém o preenche. O Auto Duck não usa
   isto: ele abaixa uma trilha pela hora em que OUTRA fala, e isso é `audio.ducks` (`domain/auto_duck.py`), não um efeito.
@@ -36,9 +40,12 @@ from .registry import (
     build_effect,
     build_samples,
     builder_types,
+    frequency_response,
     is_sample_effect,
     register_builder,
+    register_response,
     register_sample_builder,
+    response_types,
     sample_builder_types,
 )
 
@@ -83,6 +90,7 @@ __all__ = [
     "build_samples",
     "builder_types",
     "chain_lines",
+    "frequency_response",
     "ingress_line",
     "is_sample_effect",
     "level_measure_lines",
@@ -90,7 +98,9 @@ __all__ = [
     "parse_astats",
     "parse_level_measure",
     "register_builder",
+    "register_response",
     "register_sample_builder",
+    "response_types",
     "sample_builder_types",
     "span_samples",
     "split_stages",
