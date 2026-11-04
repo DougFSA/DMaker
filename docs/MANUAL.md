@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 56 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 57 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -87,6 +87,7 @@ São 56 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar](#editar-o-áudio-na-onda-selecionar-tocar-aplicar-efeito-e-desenhar) | Abre um item de áudio numa onda grande, como o Audacity: seleciona com o mouse, toca em loop, aplica um efeito com prévia e comparação do antes e depois, desenha o envelope e as amostras, e desfaz com Ctrl+Z. | sim |
 | [Apagar um som pela frequência: espectrograma e edição espectral](#apagar-um-som-pela-frequência-espectrograma-e-edição-espectral) | Mostra o espectrograma do áudio e apaga um som só naquela faixa de frequência e naquele instante (um apito, o toque de um celular, um plim), sem cortar a fala em volta. | sim |
 | [Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch](#equalizar-e-filtrar-o-som-graves-e-agudos-eq-gráfico-passa-alta-e-notch) | Muda o timbre de um item de áudio ou da mistura: graves e agudos, EQ por bandas ou por uma curva, corte do ronco e do zumbido, e predefinições suas. | ainda não: `audio_effect_response`, `audio_effect_presets` |
+| [Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta](#tratar-vários-áudios-com-uma-macro-salvar-aplicar-a-um-item-e-a-uma-pasta) | Guarda uma cadeia de efeitos com nome (uma macro), põe a macro num item e a aplica a uma pasta de arquivos de áudio, num trabalho em segundo plano que retoma de onde parou. | ainda não: `audio_effect_presets`, `apply_macro` |
 | [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
 | [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
 | [Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura](#gerar-sons-tom-ruído-tons-de-discagem-metrônomo-e-bipe-de-censura) | Cria um som do zero (tom, varredura, ruído, tons de telefone, metrônomo, corda, tambor ou amostras de um texto), solto em arquivo ou na linha do tempo, e bipa uma palavra para censurá-la. | ainda não: `audio_generators`, `audio_generate` |
@@ -2656,7 +2657,7 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Efeito > Noise Gate | `{"type": "noise_gate", "threshold_db": -40, "reduction_db": 24, "attack_ms": 10, "hold_ms": 50, "release_ms": 100, "stereo_link": true}`. O ataque abre o gate ANTES de o som passar do limiar, então o começo da palavra passa inteiro; o limiar é de **pico**. **Analisar ruído** (`audio_effect_action`, `dmaker audio effect action`, o botão no cartão) sugere o limiar a partir de um trecho sem fala. Não tem o "Gate frequencies above" do Audacity | "Controlar o volume: compressor, limitador, noise gate e loudness" |
 | Efeito > Loudness Normalization (Normalização de Loudness) | `{"type": "loudness_normalize", "mode": "lufs", "target_db": -16, "dual_mono": true}` ou `"mode": "rms"`. Um ganho único por item (sem limitar o pico: ponha o Limitador depois), só no intervalo. `dual_mono` ligado (padrão do Audacity) mede o arquivo mono como a mistura o toca, nos dois lados; desligado, o mono mede 3 LU abaixo e o ganho sobe 3 dB | "Controlar o volume: compressor, limitador, noise gate e loudness" |
 | Efeito > Auto Duck | `audio.ducks`: `{"background": "A2", "key": "A3", "amount_db": -12, "threshold_db": -30, "max_pause": 1, "outer_fade_down": 0.5, "inner_fade_down": 0, "inner_fade_up": 0, "outer_fade_up": 0.5}` (`auto_duck_add` no `edit_project`, `dmaker audio duck add`). Os ids são os da linha do tempo: `A1`, `A2...`, `MUS`, `NAR`, `VO`, `SFX`. **Limite:** uma faixa externa (A2, A3...) só abaixa sob outra faixa externa, e o `A1`, que já contém as faixas externas, não abaixa sob elas; as demais combinações valem. O ducking antigo da música (`music.ducking`) é o caso da música das regras: uma regra com `"background": "MUS"` o substitui | "Abaixar uma trilha enquanto outra fala (Auto Duck)" |
-| Predefinições de efeitos | `audio_effect` com `"action": "preset"` (`dmaker audio effect preset`, o grupo **Predefinições** do menu **+ Efeito**): `podcast_voice` (gate leve, compressor 3:1 a -18 dB, -16 LUFS e limitador a -1 dBTP), `reels_voice` (compressor 4:1 a -20 dB, -14 LUFS e limitador a -1 dBTP) e `hold_peaks` (limitador suave a -1 dBTP). Cada efeito entra separado e editável. No `audio.master` a predefinição com gate é recusada | "Controlar o volume: compressor, limitador, noise gate e loudness" |
+| Predefinições de efeitos | `audio_effect` com `"action": "preset"` (`dmaker audio effect preset`, o grupo **Predefinições e macros** do menu **+ Efeito**): `podcast_voice` (gate leve, compressor 3:1 a -18 dB, -16 LUFS e limitador a -1 dBTP), `reels_voice` (compressor 4:1 a -20 dB, -14 LUFS e limitador a -1 dBTP) e `hold_peaks` (limitador suave a -1 dBTP). Cada efeito entra separado e editável. No `audio.master` a predefinição com gate é recusada | "Controlar o volume: compressor, limitador, noise gate e loudness" |
 | Analyze > Measure RMS, com o LUFS | O bloco **Nível do item** do painel Filtros mede, sob demanda (**Medir**), o RMS, o pico e o LUFS integrado do item como ele soa | "Controlar o volume: compressor, limitador, noise gate e loudness" |
 | Effect > Bass and Treble (Graves e Agudos) | `{"type": "bass_treble", "bass_db": 6, "treble_db": -3, "volume_db": 0}`: duas prateleiras, os graves abaixo de 250 Hz e os agudos acima de 4 kHz (as frequências do Audacity), cada uma de -30 a +30 dB, e o volume depois delas, também de -30 a +30 dB | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | Effect > Graphic EQ (EQ Gráfico) | `{"type": "graphic_eq", "gains_db": [0, 0, ..., 6, ...]}` com as 31 bandas de terço de oitava de 20 Hz a 20 kHz, cada uma de -20 a +20 dB (a 23ª é a de 3,15 kHz). `interpolation` é `bands` (padrão: cada banda mantém o ganho dela dentro do seu terço de oitava, e +6 dB em 3,15 kHz mede +6 dB nessa banda) ou `cubic`, `cosine` e `linear` (uma curva liga os controles, como no Audacity). `length` é o tamanho do filtro, de 21 a 8191 amostras (padrão 8191). Na interface são os 31 controles deslizantes, com o gráfico da resposta ao vivo | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
@@ -2667,9 +2668,14 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Prateleira de graves e de agudos (Shelf) | `{"type": "low_shelf", "frequency_hz": 200, "gain_db": -9, "slope": 1}` e `{"type": "high_shelf", "frequency_hz": 4000, "gain_db": 6}`: mudam em `gain_db` (-40 a +40) tudo abaixo ou acima de `frequency_hz`. `slope` de 0,1 a 1 abre a transição (1 é a mais firme sem ondulação) | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | Effect > Classic Filters (Filtros Clássicos) | `{"type": "classic_filter", "family": "chebyshev1", "mode": "lowpass", "order": 6, "frequency_hz": 2000, "ripple_db": 1, "stopband_db": 30}`: `family` é `butterworth`, `chebyshev1` (ondulação de `ripple_db` na banda passante; o corte é onde ela termina) ou `chebyshev2` (rejeição mínima de `stopband_db`; o corte é onde a rejeição começa); `mode` é `lowpass` ou `highpass`; `order` de 1 a 10 | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | Desenho da resposta de frequência do efeito | `audio_effect_response` (`dmaker audio effect response`, a rota `POST /api/audio-effects/response`): o ganho em dB de 20 Hz a 20 kHz em oitavas, por conta pura, sem ffmpeg. É a curva do gráfico do cartão do efeito e da janela **Efeito...**, calculada das MESMAS seções de filtro (ou da MESMA curva) que o render aplica: medida em ruído rosa, difere do som renderizado no máximo 0,1 dB nos filtros e no máximo 0,6 dB no EQ por pontos (o pior caso é um EQ Gráfico com saltos de 24 dB entre bandas vizinhas) | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
-| Predefinições de equalização do Audacity (Bass Boost, Bass Cut, Treble Boost, Treble Cut, Telephone, AM Radio, 100Hz Rumble) | `audio_effect` com `"action": "preset"` (o grupo **Predefinições** do menu **+ Efeito**): `bass_boost`, `bass_cut`, `treble_boost`, `treble_cut`, `telephone` (EQ por curva de 300 Hz a 3,4 kHz), `am_radio` (EQ por curva de faixa estreita) e `rumble_100hz` (passa-alta de 100 Hz a 24 dB). Cada uma é um efeito só, que se ajusta depois | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
+| Predefinições de equalização do Audacity (Bass Boost, Bass Cut, Treble Boost, Treble Cut, Telephone, AM Radio, 100Hz Rumble) | `audio_effect` com `"action": "preset"` (o grupo **Predefinições e macros** do menu **+ Efeito**): `bass_boost`, `bass_cut`, `treble_boost`, `treble_cut`, `telephone` (EQ por curva de 300 Hz a 3,4 kHz), `am_radio` (EQ por curva de faixa estreita) e `rumble_100hz` (passa-alta de 100 Hz a 24 dB). Cada uma é um efeito só, que se ajusta depois | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | Zumbido da rede elétrica e harmônicos | Predefinições `hum_60hz` (notches em 60, 120, 180, 240 e 300 Hz) e `hum_50hz` (50, 100, 150, 200 e 250 Hz), cada notch com Q 30: no teste, o tom de 60 Hz cai 51 dB, o de 120 Hz 70 dB e o de 180 Hz 67 dB, e a voz muda menos de 0,2 dB | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
-| Salvar e gerenciar as suas predefinições | O botão **Salvar predefinição** do cartão do efeito e da janela **Efeito...** guarda o efeito com os valores que tem, por nome, no arquivo `effect-presets.json` da pasta de dados (o intervalo e o bypass não entram). Ela aparece em **Predefinições**, no menu **+ Efeito**, com a lixeira para apagar, e continua lá depois de reiniciar o DMaker. `audio_effect_presets` (`list`, `save`, `remove`), `dmaker audio preset save`, `list` e `remove` e a rota `/api/audio-effects/presets` fazem o mesmo; no catálogo (`audio_effects`) elas têm `origin: "user"` | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
+| Salvar e gerenciar as suas predefinições (Manage, User Presets) | O botão **Salvar predefinição** do cartão do efeito e da janela **Efeito...** guarda o efeito com os valores que tem, por nome, como uma macro de um efeito só, num arquivo da pasta `assets/macros` (o intervalo e o bypass não entram). Ela aparece em **Predefinições e macros**, no menu **+ Efeito**, com a lixeira para apagar, e continua lá depois de reiniciar o DMaker. `audio_effect_presets` (`list`, `show`, `save`, `remove`), `dmaker audio preset save`, `list` e `remove` e a rota `/api/audio-effects/presets` fazem o mesmo; no catálogo (`audio_effects`) elas têm `origin: "user"`. As que você salvou antes do DMK-66, no `effect-presets.json`, viraram macros no primeiro uso e o arquivo foi renomeado para `effect-presets.json.importado` | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
+| Tools > Macros > Manage (as macros que você tem) | As macros embutidas (`clean_narration`, `clean_phone_recording`, `mp3_standard` e `ends_fade`, além das predefinições de voz, de equalização e de fade) e as suas, uma por arquivo, em `assets/macros` (globais) e em `assets/brands/<marca>/macros` (da marca). `audio_effect_presets` (`list`, `show`, `save`, `remove`), `dmaker audio macro list`, `show`, `save` e `remove`, e o grupo **Predefinições e macros** do menu **+ Efeito** | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
+| Tools > Macros > Add (gravar os passos de uma macro) e Presets de um efeito | Salvar a cadeia de um item como macro: o botão **Salvar a cadeia como macro** do bloco **Efeitos de áudio** (nome e onde vale: todos os projetos ou só a marca do projeto), `audio_effect_presets` com `action: "save"`, `project` e `target`, ou `dmaker audio macro save NOME --from-project PROJETO --target audio.voiceover.0`. O intervalo e o bypass de cada efeito não entram, então a macro aplicada a outro item dá a mesma lista de efeitos. Um preset de um efeito só (o **Salvar predefinição** do cartão) é uma macro com um efeito | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
+| Apply Macro (aplicar a macro ao projeto aberto) | `edit_project` com a operação `audio_effect`, `"action": "preset"` e o id da macro (`dmaker audio effect preset`, ou clicar na macro no menu **+ Efeito**): a cadeia entra no fim da do item, cada efeito separado, editável e num passo só do **Desfazer**. A saída (`output`) da macro é ignorada: só vale ao aplicar a arquivos. As macros da marca do projeto valem como as globais | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
+| Apply Macro to Files (aplicar a uma pasta de arquivos) | `apply_macro` (MCP) e `dmaker audio macro run MACRO PASTA --out SAIDA --format mp3`: cada arquivo de áudio da pasta passa só pela cadeia da macro (sem a normalização final da mistura) e sai na pasta de saída, no formato pedido ou no da macro; o original não muda. É um trabalho em segundo plano (`job_status` no MCP) com o estado em `SAIDA/.dmaker-macro`: se o processo cair, `--resume` (ou `resume: true`) pula o que já saiu inteiro e refaz o que ficou pela metade. Cada arquivo é gravado como `nome.parcial.ext` e só ganha o nome final quando termina, e `relatorio.txt` lista o que saiu e o que falhou | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
+| Macros que acompanham o Audacity (MP3 Conversion, Fade Ends, Noise Removal) | `mp3_standard` (**MP3 para o padrão**: Normalizar a -1 dBFS e saída MP3), `ends_fade` (**Fade nas pontas**: entrada de 0,3 s e saída de 0,6 s) e `clean_narration` (**Limpar narração**: passa-alta de 80 Hz, Redução de ruído automática, compressor, loudness a -16 LUFS e limitador a -1 dBTP; num teste com chiado e ronco somados baixou o ruído de fundo 13,2 dB e entregou -16,0 LUFS). `clean_phone_recording` (**Limpar gravação de celular**) é a receita de áudio de WhatsApp: passa-alta, estalos, Redução de ruído, Noise Gate leve e normalização a -1 dBFS | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
 | Efeito > Fade In e Fade Out, com a curva | `{"type": "fade_in", "duration": 2, "curve": "sine"}` e `{"type": "fade_out", ...}`: a `duration` conta da borda do item; com `start` e `end` o fade ocupa o intervalo (a `duration` não conta). As curvas são `linear`, `logarithmic`, `exponential`, `sine` (S) e `quadratic`, as do filtro `afade` do ffmpeg. `audio_fade` (`dmaker audio fade`) põe, muda ou tira o fade da borda de um item de uma vez | "Fazer fades: curva, fade parcial e fade de estúdio" |
 | Alça de fade (como no Shotcut) | Na linha do tempo, o quadradinho no canto de cima de um item de áudio (o som do clipe, a voz gravada, a narração e a música) se arrasta para fazer o fade da borda; a curva é desenhada sobre a onda, solta grava (um passo do desfazer) e o duplo clique na alça troca a curva. Solte na borda para tirar o fade | "Fazer fades: curva, fade parcial e fade de estúdio" |
 | Efeito > Adjustable Fade (Fade Ajustável) | `{"type": "adjustable_fade", "start_gain": 100, "end_gain": 40}`: ganho inicial e final em `percent` ou `db` (`unit`), a forma (`up`, `down`, `s_up`, `s_down`, mais `sine_up` e `sine_down`) e o ajuste do meio (`mid_adjust`, de -100 a 100: positivo demora a abrir, negativo abre logo). Fade parcial é 100% a 40%, que termina 8 dB abaixo sem chegar ao silêncio. As predefinições (`fade_linear_in`, `fade_exponential_out`, `fade_cosine_in`, `fade_s_curve_out`, `fade_partial`...) entram por `audio_effect` com `action: "preset"` | "Fazer fades: curva, fade parcial e fade de estúdio" |
@@ -2936,7 +2942,7 @@ Diga: "Põe a voz de podcast na narração" ou "Iguala as duas falas em -16 LUFS
 
 Interface nova, **Editor**, painel **Filtros**:
 
-- **Efeitos de áudio**: selecione o item, **+ Efeito**, e escolha **Compressor**, **Limitador**, **Noise Gate** ou **Normalização de loudness**. O grupo **Predefinições** do mesmo menu põe uma cadeia pronta. No Noise Gate, o botão **Analisar ruído** preenche o limiar.
+- **Efeitos de áudio**: selecione o item, **+ Efeito**, e escolha **Compressor**, **Limitador**, **Noise Gate** ou **Normalização de loudness**. O grupo **Predefinições e macros** do mesmo menu põe uma cadeia pronta. No Noise Gate, o botão **Analisar ruído** preenche o limiar.
 - **Nível do item**: **Medir** mostra o RMS, o pico e o LUFS integrado do item como ele soa, só quando você pede.
 
 #### Pela CLI
@@ -3057,7 +3063,7 @@ Diga: "Faz um fade out de 3 segundos na música" ou "Abaixa a música para 40%".
 Interface nova, **Editor**:
 
 - **Alça de fade na linha do tempo**: nas trilhas A1 (som do clipe), VO, NAR e MUS, passe o mouse num item de áudio e arraste o quadradinho do canto de cima para dentro dele. A curva aparece desenhada sobre a onda (a parte escura é o som que o fade tira); soltar grava o fade (um passo do desfazer), soltar de volta na borda tira, e o duplo clique na alça troca a curva.
-- **Fade Ajustável, Studio Fade Out e fades de intervalo**: painel **Filtros**, **Efeitos de áudio**, **+ Efeito**. O grupo **Predefinições** traz as do Fade Ajustável.
+- **Fade Ajustável, Studio Fade Out e fades de intervalo**: painel **Filtros**, **Efeitos de áudio**, **+ Efeito**. O grupo **Predefinições e macros** traz as do Fade Ajustável.
 
 #### Pela CLI
 
@@ -3570,7 +3576,7 @@ Interface nova, **Editor**, painel **Filtros**, bloco **Efeitos de áudio**: sel
 - **EQ Gráfico:** 31 controles deslizantes (duplo clique zera um; **Zerar** zera todos).
 - **EQ por Curva:** arraste os pontos; clique duas vezes no fundo para acrescentar e num ponto para tirar. Soltar grava um passo do desfazer.
 - **Efeito...** no painel Áudio abre o mesmo formulário para a seleção, com **Prévia** que se refaz quando você para de mexer.
-- **Salvar predefinição** (no cartão e na janela) pede um nome e guarda o efeito. Ela aparece em **Predefinições**, no menu **+ Efeito**, com a lixeira para apagar, e sobrevive a reiniciar o DMaker.
+- **Salvar predefinição** (no cartão e na janela) pede um nome e guarda o efeito. Ela aparece em **Predefinições e macros**, no menu **+ Efeito**, com a lixeira para apagar, e sobrevive a reiniciar o DMaker.
 
 #### Pela CLI
 
@@ -3591,8 +3597,70 @@ No render pela CLI: o passa-alta de 80 Hz a 24 dB derruba o tom de 40 Hz em 24,1
 - **"slope_db"**: a inclinação é de 6 em 6 dB por oitava, de 6 a 48.
 - **"dois pontos na mesma frequência"**: arraste um dos pontos do EQ por Curva.
 - **"gains_db"**: o EQ Gráfico tem exatamente 31 ganhos, de -20 a +20 dB.
+- **"não consegui ler a macro"**: o arquivo dessa predefinição em `assets/macros` foi estragado à mão; corrija o JSON (o DMaker nunca o sobrescreve sozinho, e as outras seguem funcionando).
+
+### Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta
+<!-- tarefa: macros-de-audio -->
+Guarda uma cadeia de efeitos com nome (uma macro), põe a macro num item e a aplica a uma pasta de arquivos de áudio, num trabalho em segundo plano que retoma de onde parou.
+
+#### Quando usar
+
+Você trata sempre do mesmo jeito: as 8 narrações de uma série, os áudios de WhatsApp de uma pasta. É o Tools > Macros e o Apply Macro to Files do Audacity.
+
+**Pedidos que levam a esta tarefa:**
+- "Limpa todas as narrações dessa pasta do mesmo jeito e deixa em MP3"
+- "Salva essa cadeia de efeitos para usar nos próximos episódios"
+
+#### Antes de começar
+
+- **Macro e predefinição são a mesma coisa**: uma lista de efeitos com nome, que pode levar a saída (`output`, como `{"preset": "audio/mp3"}`), só usada ao aplicar a arquivos. Num item, vira só a cadeia, editável depois.
+- **Embutidas**: `clean_narration` (ronco, ruído, compressor, -16 LUFS e limitador), `clean_phone_recording` (a receita de áudio de celular), `mp3_standard` (pico a -1 dBFS, em MP3) e `ends_fade` (fades curtos nas pontas).
+- **As suas** ficam uma por arquivo em `assets/macros` (todos os projetos) ou em `assets/brands/<marca>/macros` (só a marca; vale por cima da global), fora do git. O `effect-presets.json` do DMK-54 vira macros no primeiro uso e passa a `effect-presets.json.importado`, nunca apagado.
+- Ao aplicar a arquivos, o original nunca muda. O formato vem de `--format` ou da macro. Só os efeitos da macro rodam, sem a normalização final da mistura.
+- A retirada de estalos é lenta: 29 s para 8 s de áudio nesta máquina. Numa narração sintetizada, os efeitos podem apagar a marca d'água inaudível da voz (decisão de 03/11).
+
+#### Pela IA
+
+`audio_effect_presets` lista, mostra, salva (também a cadeia de um item, com `project` e `target`) e remove macros; `edit_project` (`"action": "preset"`) põe uma num item; `apply_macro` a aplica a uma pasta e devolve o `job_id` para o `job_status`. Depois de uma queda, `resume: true` pula o que já saiu.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_effect_presets", "arguments": {"action": "show", "id": "clean_narration"}, "para": "ver a cadeia da macro embutida"},
+  {"tool": "edit_project", "arguments": {"name": "episodio-12", "op": {"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "clean_narration"}}, "para": "pôr a macro na voz gravada"},
+  {"tool": "audio_effect_presets", "arguments": {"action": "save", "label": "Voz da série", "project": "episodio-12", "target": "audio.voiceover.0", "output": {"preset": "audio/mp3"}}, "para": "guardar a cadeia ajustada como macro"},
+  {"tool": "apply_macro", "arguments": {"macro": "voz-da-serie", "inputs": ["D:/series/narracoes"], "out_dir": "D:/series/tratadas"}, "para": "tratar a pasta inteira"},
+  {"tool": "apply_macro", "arguments": {"macro": "voz-da-serie", "inputs": ["D:/series/narracoes"], "out_dir": "D:/series/tratadas", "resume": true}, "para": "retomar depois de uma queda"}
+]
+```
+
+#### Pela interface
+
+Painel **Filtros**, bloco **Efeitos de áudio**. No menu **+ Efeito**, o grupo **Predefinições e macros** põe a cadeia da macro no item, num passo do **Desfazer**. **Salvar a cadeia como macro** pede o nome e onde vale (todos os projetos ou só a marca do projeto). Aplicar a uma pasta é só pela CLI e pelo MCP.
+
+#### Pela CLI
+
+```powershell
+dmaker audio macro list
+dmaker audio macro save "Voz da série" --from-project episodio-12 --target audio.voiceover.0 --format mp3
+dmaker audio macro run clean_narration D:/series/narracoes --out D:/series/tratadas --format mp3
+dmaker audio macro run clean_narration D:/series/narracoes --out D:/series/tratadas --format mp3 --resume
+dmaker audio macro status D:/series/tratadas
+```
+
+O estado fica em `<saída>/.dmaker-macro`, e cada arquivo só ganha o nome final ao terminar. Sem `--resume` tudo é refeito; com ele, só o que falta, o que falhou e o que mudou. Sai com erro se algum arquivo falhou.
+
+#### Como conferir
+
+Com arquivos sintéticos: **Limpar narração** baixou o ruído de fundo 13,2 dB e entregou -16,0 LUFS; vinte arquivos de -31,8 a -11,3 LUFS saíram entre -16,20 e -16,00 LUFS; numa pasta de 6, a queda no quarto e o `--resume` refizeram só o 4º, o 5º e o 6º.
+
+#### Se der errado
+
+- **"não traz formato de saída"**: informe o formato (`--format mp3`).
+- **"o original não é sobrescrito"**: escolha outra pasta de saída ou outro formato.
+- **Um arquivo "falhou"**: o relatório diz o motivo e os outros seguem; corrija e use `--resume`. As subpastas da pasta de entrada não entram.
 - **"é o nome de uma predefinição embutida"**: escolha outro nome.
-- **"não consegui ler as predefinições salvas"**: o `effect-presets.json` da pasta de dados foi estragado à mão; corrija o JSON (o DMaker nunca o sobrescreve sozinho).
 
 ### Analisar o áudio: estouro, nível, contraste, espectro e sons
 <!-- tarefa: analisar-audio -->
@@ -4207,6 +4275,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-54 | Equalização e filtros: Graves e agudos, EQ Gráfico (31 bandas de terço de oitava, de -20 a +20 dB), EQ por Curva (pontos arrastáveis, escala linear ou log, interpolação e tamanho do filtro), passa-alta e passa-baixa de 6 a 48 dB por oitava, Notch, prateleiras de graves e de agudos e os filtros clássicos Butterworth, Chebyshev I e II; o **gráfico da resposta de frequência** de cada efeito, calculado sem ffmpeg e igual ao do render (`audio_effect_response`, `dmaker audio effect response`); predefinições embutidas (aumentar e cortar graves e agudos, telefone, rádio AM, ronco de 100 Hz, zumbido de 60 e de 50 Hz com os harmônicos) e as suas, salvas por nome (`audio_effect_presets`, `dmaker audio preset`, o botão **Salvar predefinição**) | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | DMK-53 | Fades e crossfades: Fade In e Fade Out com cinco curvas (linear, logarítmica, exponencial, seno e quadrática), Fade Ajustável (ganho inicial e final em % ou dB, a forma, o ajuste do meio e as predefinições do Audacity, com o fade parcial de 100% a 40%), Studio Fade Out (o volume fecha enquanto um passa-baixa desce), o crossfade de trilhas com os quatro tipos do Audacity, o crossfade do som entre dois clipes vizinhos (J-cut e L-cut) com a imagem trocando no quadro exato, e a alça de fade arrastável na linha do tempo; `audio_fade`, `audio_crossfade_tracks`, `audio_crossfade_clips`, `dmaker audio fade`, `crossfade-tracks` e `crossfade-clips` | "Fazer fades: curva, fade parcial e fade de estúdio"; "Cruzar o som de dois clipes ou de duas trilhas (crossfade)" |
 | DMK-56 | Tempo e afinação: os efeitos Mudar Tom (semitons e centavos, de nota para nota ou em porcentagem, com a opção de preservar os formantes da voz, sem mudar a duração), Mudar Velocidade e Tom (o "vinil", por porcentagem ou de RPM para RPM), Mudar Andamento (por porcentagem, de BPM para BPM ou de uma duração para outra, sem mudar o tom), Esticar Gradualmente (andamento e tom variando do início ao fim do trecho) e Paulstretch (esticar por um fator grande, até 20 minutos de saída, para a abertura etérea); o catálogo ganha a condição de exibição `shown_when`, e os campos de cada unidade só aparecem na tela no modo dela; a vista da linha do tempo, o `validate` e a duração do projeto só de áudio mostram a duração nova do item depois de esticar; `audio_effect` (`dmaker audio effect add ... change_tempo --param mode=bpm`) | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| DMK-66 | Macros de áudio: a cadeia de efeitos com nome, para repetir. Quatro embutidas (**Limpar narração**, **Limpar gravação de celular**, **MP3 para o padrão** e **Fade nas pontas**) e as suas, uma por arquivo em `assets/macros` (globais) ou `assets/brands/<marca>/macros` (da marca); o **Salvar a cadeia como macro** do bloco de efeitos guarda a cadeia de um item, e o menu **+ Efeito** (grupo **Predefinições e macros**) põe uma macro num item. `apply_macro` e `dmaker audio macro run` aplicam a macro a uma pasta de arquivos de áudio, no formato escolhido, num trabalho em segundo plano que retoma de onde parou (`--resume`); as predefinições do `effect-presets.json` viraram macros e o arquivo ganhou o nome `.importado` | "Tratar vários áudios com uma macro: salvar, aplicar a um item e a uma pasta" |
 | DMK-58 | Sons gerados: os nove geradores do Audacity (Tom em quatro ondas, Chirp linear ou log, Ruído branco, rosa e marrom, Tons DTMF, Silêncio, Pluck, Tambor de Risset, Faixa de Ritmo e Importar Amostras) em `audio.generated`, na trilha **SFX** da linha do tempo (arrastar muda o início e a duração, com efeitos, mudo, solo, ganho e Auto Duck), ou soltos num WAV com `dmaker audio generate` e `audio_generate`; o bipe de censura (`censor_beep`, `dmaker audio censor`, **Bipar a seleção** no painel Áudio) silencia a palavra achada pelo Whisper local e põe um Tom de 1 kHz no mesmo intervalo, num passo do desfazer | "Gerar sons: tom, ruído, tons de discagem, metrônomo e bipe de censura" |
 | DMK-65 | Gravar do microfone: a janela **Gravar** (botão no painel Áudio e **Gravar narração** na linha do tempo) capta o som cru, sem eco, ruído ou ganho automático, e manda um pedaço de um segundo por vez para `projects/<nome>/recordings`, então a aba que fecha no meio não perde o que já chegou (**Recuperar** ou **Descartar** ao abrir o projeto); medidor com clipping e monitoramento; gravar sobre o vídeo com a latência compensada e calibrada; punch-in que guarda o trecho antigo como take (`VoiceoverClip.takes`, `audio_punch`, `voiceover_take_set`); gravação com hora marcada e ativada por som; e o atalho de 15 s que clona a voz direto na biblioteca. `audio_recordings` no MCP e `dmaker audio recordings|punch|take` na CLI | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 
@@ -4222,7 +4291,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 136 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 142 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -4562,6 +4631,34 @@ Sons gerados no projeto (audio.generated): acrescentar, listar, mudar e tirar. E
   - `--volume` NÚMERO: Ganho linear do item.
   - `--pan` NÚMERO: Equilíbrio de -1 a 1.
 
+#### dmaker audio macro
+
+Macros de áudio: uma cadeia de efeitos salva com nome, que se põe num item (`dmaker audio effect preset`) ou se aplica a uma pasta inteira de arquivos (`dmaker audio macro run`). As embutidas e as suas.
+
+- **`dmaker audio macro list`**: Lista as macros: as embutidas e as que você salvou (globais e da marca).
+  - `--brand` TEXTO: Junta as macros desta marca às globais.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio macro remove MACRO`**: Apaga uma macro salva. As embutidas não se apagam.
+  - `--brand` TEXTO: Remove da pasta desta marca (sem isso, da global).
+- **`dmaker audio macro run MACRO INPUTS...`**: Aplica a macro a cada arquivo (o Apply Macro to Files do Audacity): a cadeia, e mais nada, sem normalização final do master. O original não muda. O estado fica em <pasta de saída>/.dmaker-macro. Ctrl+C interrompe; retome com --resume.
+  - `--out` CAMINHO: A pasta onde os arquivos tratados caem. (obrigatória)
+  - `--format` TEXTO: mp3, wav, flac, ogg, opus, m4a ou aiff (padrão: o formato que a macro traz).
+  - `--resume`: Retoma o que parou (queda, Ctrl+C): pula o que já saiu inteiro e refaz o que ficou pela metade.
+  - `--brand` TEXTO: Busca a macro também entre as desta marca.
+- **`dmaker audio macro save NAME`**: Salva uma cadeia de efeitos como macro em assets/macros (ou na pasta da marca). A cadeia vem de --effect/--file ou de um item de projeto (--from-project e --target). O intervalo e o bypass de cada efeito não entram.
+  - `--effect` / `-e` TEXTO: Um efeito em JSON, por exemplo '{"type": "highpass", "frequency_hz": 80}' (repetível). (pode repetir)
+  - `--file` CAMINHO: Um arquivo JSON com a lista de efeitos da cadeia.
+  - `--from-project` TEXTO: Salva a cadeia de um item deste projeto (nome ou caminho da spec).
+  - `--target` TEXTO: O item do projeto, como audio.voiceover.0, audio.narration.0 ou timeline.2.
+  - `--scope` TEXTO: `global` (padrão) ou `brand`: a marca do projeto de --from-project. (padrão global)
+  - `--brand` TEXTO: Guarda na pasta desta marca (quando não vem de um projeto).
+  - `--format` TEXTO: O formato que vale ao aplicar a arquivos (mp3, wav, flac, ogg, opus, m4a, aiff).
+  - `--summary` TEXTO: Uma frase do que a macro faz.
+- **`dmaker audio macro show MACRO`**: Mostra uma macro: a cadeia de efeitos, com os parâmetros, e a saída (formato) que ela traz.
+  - `--brand` TEXTO: Busca também entre as macros desta marca.
+  - `--json`: Saída em JSON.
+- **`dmaker audio macro status OUT`**: Mostra o andamento de um tratamento: o que saiu, o que falhou e o que falta (para o `--resume`).
+
 #### dmaker audio noise-profile
 
 Perfis de ruído do projeto, o primeiro passo da Redução de ruído (efeito noise_reduction).
@@ -4575,12 +4672,12 @@ Perfis de ruído do projeto, o primeiro passo da Redução de ruído (efeito noi
 
 #### dmaker audio preset
 
-Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeitos já ajustada) para pôr em outros itens com `dmaker audio effect preset`.
+Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeitos já ajustada) para pôr em outros itens com `dmaker audio effect preset`. São as mesmas macros de `dmaker audio macro` (guardadas em assets/macros).
 
 - **`dmaker audio preset list`**: Lista as predefinições que você salvou (as embutidas aparecem em `dmaker audio effects --json`).
   - `--json`: Saída em JSON, como a ferramenta MCP.
 - **`dmaker audio preset remove PRESET_ID`**: Apaga uma predefinição salva. As embutidas não se apagam.
-- **`dmaker audio preset save NAME`**: Salva uma cadeia de efeitos com um nome, na pasta de dados (effect-presets.json). O intervalo e o bypass de cada efeito não entram: a predefinição vale para qualquer item.
+- **`dmaker audio preset save NAME`**: Salva uma cadeia de efeitos com um nome, na pasta de macros (assets/macros). O intervalo e o bypass de cada efeito não entram: a predefinição vale para qualquer item.
   - `--effect` / `-e` TEXTO: Um efeito em JSON, por exemplo '{"type": "highpass", "frequency_hz": 80}' (repetível). (pode repetir)
   - `--file` CAMINHO: Um arquivo JSON com a lista de efeitos da cadeia.
   - `--summary` TEXTO: Uma frase do que a predefinição faz.
@@ -4892,7 +4989,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 85 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -4925,11 +5022,13 @@ São 84 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 - **`edit_history`**: A lista dos passos do histórico de edições do projeto, do mais recente para o mais antigo: o que `undo_edit` desfaria (`undo`) e o que `redo_edit` refaria (`redo`), com o nome e a hora de cada um.
   Parâmetros: `name`\* (texto).
 - **`audio_effects`**: O catálogo dos efeitos de áudio que qualquer item de áudio (clipe, voz gravada, narração, música, faixa externa, PiP) ou o master recebe em uma cadeia ordenada (`effects` na spec): para cada efeito, o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos.
-  Parâmetros: `type` (texto).
+  Parâmetros: `type` (texto), `brand` (texto).
 - **`audio_effect_response`**: A resposta de frequência de um efeito de equalização (`bass_treble`, `graphic_eq`, `filter_curve_eq`, `highpass`, `lowpass`, `notch`, `low_shelf`, `high_shelf` ou `classic_filter`, ver `audio_effects`): o ganho em dB em cada frequência, de 20 Hz a 20 kHz em oitavas, por conta pura, sem rodar o ffmpeg.
   Parâmetros: `effect`\* (objeto), `points` (inteiro, padrão 256).
-- **`audio_effect_presets`**: As predefinições de efeitos de áudio que a pessoa salvou por nome (ficam no arquivo effect-presets.json da pasta de dados e aparecem no catálogo `audio_effects` com `origin: user`, ao lado das embutidas).
-  Parâmetros: `action` (texto, padrão list), `label` (texto), `effects` (lista de objeto), `summary` (texto, padrão ), `id` (texto).
+- **`audio_effect_presets`**: As macros de áudio (predefinições de efeitos): cadeias de efeitos com nome, que a pessoa salva uma vez e repete.
+  Parâmetros: `action` (texto, padrão list), `label` (texto), `effects` (lista de objeto), `summary` (texto, padrão ), `id` (texto), `output` (objeto), `brand` (texto), `project` (texto), `target` (texto), `scope` (texto, padrão global).
+- **`apply_macro`**: Aplica uma macro de áudio (ver `audio_effect_presets`) a uma pasta de arquivos de áudio ou a uma lista de arquivos: cada um passa pela cadeia da macro e sai em `out_dir`, no formato `format` (mp3, wav, flac, ogg, opus, m4a ou aiff; omitido, vale o da macro).
+  Parâmetros: `macro`\* (texto), `inputs`\* (lista de texto), `out_dir`\* (texto), `format` (texto), `resume` (sim ou não, padrão não), `brand` (texto), `wait_seconds` (número, padrão 0).
 - **`noise_profile`**: Pega o perfil de ruído de um trecho de um item de áudio, o primeiro passo da Redução de ruído (efeito `noise_reduction`, ver `audio_effects`).
   Parâmetros: `name`\* (texto), `profile` (texto), `target` (texto), `start` (número ou texto), `end` (número ou texto).
 - **`audio_effect_action`**: Executa uma ação de um efeito de áudio (as que o catálogo `audio_effects` lista em `actions`): hoje `noise_gate` + `analyze_noise`, que mede o ruído de um trecho em que ninguém fala e sugere o limiar do gate (o nível do ruído mais 6 dB).

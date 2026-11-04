@@ -9,6 +9,8 @@ from ..domain.noise_profile_edits import referenced_profiles
 from ..domain.spec import Project
 from .audio_duration import NOTHING_TO_PLAY
 
+NORMALIZE_OFF_WARNING = "audio.normalize está desligado: o arquivo sai sem normalização de loudness."
+
 
 def noise_profile_warnings(project: Project) -> list[str]:
     """Os efeitos de Redução de ruído que apontam para um perfil que não existe: o render falharia nele."""
@@ -48,5 +50,5 @@ def audio_output_warnings(project: Project, total: float) -> list[str]:
             "a saída é só de áudio: sobreposições, legendas e acabamentos de imagem não entram no arquivo."
         )
     if project.audio.normalize == "off":
-        warnings.append("audio.normalize está desligado: o arquivo sai sem normalização de loudness.")
+        warnings.append(NORMALIZE_OFF_WARNING)
     return warnings

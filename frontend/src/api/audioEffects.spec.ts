@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { audioEffectCatalog } from '@/test/audioEffectsFixtures'
 import { stubFetch } from '@/test/fetch'
 import { ApiError } from './http'
-import { deleteUserPreset, fetchAudioEffects, fetchEffectResponse, fetchUserPresets, saveUserPreset } from './audioEffects'
+import { deleteUserPreset, fetchAudioEffects, fetchEffectResponse, fetchUserPresets, saveChainAsMacro, saveUserPreset } from './audioEffects'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -68,5 +68,36 @@ describe('cliente da resposta de frequência e das predefinições salvas', () =
 
     await deleteUserPreset('meu corte/x')
     expect(fetch.last()).toMatchObject({ url: '/api/audio-effects/presets/meu%20corte%2Fx', method: 'DELETE' })
+  })
+})
+
+describe('cliente das macros (a marca e salvar a cadeia de um item)', () => {
+  it('pede o catálogo e as macros salvas com a marca do projeto', async () => {
+    const fetch = stubFetch({ effects: [], common: [], targets: [], presets: [] })
+    await fetchAudioEffects(undefined, 'acme')
+    expect(fetch.last()).toMatchObject({ url: '/api/audio-effects?brand=acme', method: 'GET' })
+    await fetchUserPresets('acme')
+    expect(fetch.last().url).toBe('/api/audio-effects/presets?brand=acme')
+    await fetchUserPresets()
+    expect(fetch.last().url).toBe('/api/audio-effects/presets')
+  })
+
+  it('salva na pasta da marca e apaga de lá, só quando a marca é dita', async () => {
+    const fetch = stubFetch({ id: 'x', label: 'X', summary: '', effects: [], origin: 'user' })
+    await saveUserPreset('X', [{ type: 'notch' }], '', 'acme')
+    expect(fetch.last().body).toEqual({ label: 'X', effects: [{ type: 'notch' }], summary: '', brand: 'acme' })
+    await deleteUserPreset('x', 'acme')
+    expect(fetch.last()).toMatchObject({ url: '/api/audio-effects/presets/x?brand=acme', method: 'DELETE' })
+  })
+
+  it('salva a cadeia de um item com a spec da tela, o item e o escopo', async () => {
+    const fetch = stubFetch({ id: 'minha-cadeia', label: 'Minha cadeia', summary: '', effects: [], origin: 'user', scope: 'global' })
+    const saved = await saveChainAsMacro('meu projeto', { spec: { name: 'meu projeto' }, target: 'audio.voiceover.0', label: 'Minha cadeia', scope: 'global' })
+    expect(saved.scope).toBe('global')
+    expect(fetch.last()).toMatchObject({
+      url: '/api/projects/meu%20projeto/audio-macros',
+      method: 'POST',
+      body: { spec: { name: 'meu projeto' }, target: 'audio.voiceover.0', label: 'Minha cadeia', scope: 'global' },
+    })
   })
 })

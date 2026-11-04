@@ -455,9 +455,11 @@ def test_a_saved_preset_shows_in_the_catalog_with_origin_user_and_survives_a_res
         "Limpa o grave e o zumbido",
     )
     assert saved.id == "minha-voz-de-celular" and saved.origin == "user"
-    assert config.EFFECT_PRESETS_FILE.parent == config.DATA_DIR  # o arquivo mora na pasta de dados
-    on_disk = json.loads(config.EFFECT_PRESETS_FILE.read_text(encoding="utf-8"))
-    assert on_disk["presets"]["minha-voz-de-celular"]["label"] == "Minha voz de celular"
+    assert (
+        config.MACROS_DIR.parent.parent == config.DATA_DIR
+    )  # a macro mora na pasta de dados (assets/macros)
+    on_disk = json.loads((config.MACROS_DIR / "minha-voz-de-celular.json").read_text(encoding="utf-8"))
+    assert on_disk["label"] == "Minha voz de celular"
     # "reiniciar": nada fica em memória, o catálogo lê o arquivo de novo
     mine = [p for p in catalog_payload()["presets"] if p["origin"] == "user"]
     assert [p["id"] for p in mine] == ["minha-voz-de-celular"]
@@ -524,15 +526,18 @@ def test_saving_refuses_empty_names_builtin_names_bad_effects_and_removal_of_unk
         remove_user_preset("telephone")
     with pytest.raises(ValueError, match="desconhecida"):
         remove_user_preset("nao-existe")
-    assert not config.EFFECT_PRESETS_FILE.exists()  # nada recusado chegou ao disco
+    assert not list(config.MACROS_DIR.glob("*"))  # nada recusado chegou ao disco
 
 
-def test_a_broken_presets_file_hides_the_user_presets_but_is_never_overwritten():
-    config.EFFECT_PRESETS_FILE.write_text("{ isto não é json", encoding="utf-8")
-    assert [p["id"] for p in catalog_payload()["presets"] if p["origin"] == "user"] == []
-    with pytest.raises(ValueError, match="não consegui ler"):
-        save_user_preset("Nova", [{"type": "notch"}])
-    assert config.EFFECT_PRESETS_FILE.read_text(encoding="utf-8") == "{ isto não é json"
+def test_a_broken_macro_file_is_skipped_by_the_catalog_but_is_never_overwritten():
+    config.MACROS_DIR.mkdir(parents=True)
+    broken = config.MACROS_DIR / "quebrada.json"
+    broken.write_text("{ isto não é json", encoding="utf-8")
+    save_user_preset("Boa", [{"type": "notch"}])
+    assert [p["id"] for p in catalog_payload()["presets"] if p["origin"] == "user"] == ["boa"]
+    with pytest.raises(ValueError, match="não consegui ler a macro quebrada.json"):
+        list_user_presets()
+    assert broken.read_text(encoding="utf-8") == "{ isto não é json"
 
 
 def test_an_unknown_preset_id_lists_the_builtin_and_the_saved_ones():
@@ -658,4 +663,4 @@ def test_the_cli_saves_lists_and_removes_presets_and_prints_a_response():
 
 def test_the_preset_file_is_written_atomically_without_a_leftover_temp_file():
     save_user_preset("Atômica", [{"type": "notch"}])
-    assert sorted(path.name for path in config.DATA_DIR.glob("effect-presets*")) == ["effect-presets.json"]
+    assert sorted(path.name for path in config.MACROS_DIR.glob("*")) == ["atomica.json"]

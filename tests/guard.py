@@ -16,6 +16,7 @@ from pathlib import Path
 from dmaker import config
 
 LEXICON_NAME = "pronunciation.json"
+MACROS_FOLDER = "macros"
 _WRITE_MODE_CHARS = frozenset("wax+")
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 # eventos de auditoria que mexem no disco sem passar por `open`: (evento, posições dos caminhos afetados)
@@ -47,11 +48,13 @@ class Guard:
             _key(root / "projects"),
             _key(root / "conversations"),
             _key(root / "assets" / "voices"),
+            _key(root / "assets" / "macros"),
         ]
         self.protected_files = [
             _key(root / "assets" / LEXICON_NAME),
             _key(root / "layouts.json"),
             _key(root / "effect-presets.json"),
+            _key(root / "effect-presets.json.importado"),
         ]
         self.brands_dir = _key(root / "assets" / "brands")
         # com DMAKER_VOICE_SMOKE=1 os modelos de verdade baixam para cá, e isso é esperado
@@ -65,7 +68,11 @@ class Guard:
             return False
         if path in self.protected_files or any(_is_inside(path, d) for d in self.protected_dirs):
             return True
-        return _is_inside(path, self.brands_dir) and os.path.basename(path) == LEXICON_NAME
+        if not _is_inside(path, self.brands_dir):
+            return False
+        # o léxico de pronúncia de uma marca e a pasta de macros dela (brands/<marca>/macros)
+        relative = os.path.relpath(path, self.brands_dir).split(os.sep)
+        return os.path.basename(path) == LEXICON_NAME or (len(relative) > 1 and relative[1] == MACROS_FOLDER)
 
     def audit(self, event: str, args: tuple) -> None:
         paths: list[str | bytes | os.PathLike] = []

@@ -76,7 +76,13 @@ INFOGRAPHICS_DIR = TEMPLATES_DIR / "html"
 LAYOUTS_FILE = DATA_DIR / "layouts.json"
 # As predefinições de efeitos de áudio que a pessoa salvou (a cadeia de efeitos com um nome): dado de quem usa o editor,
 # irmão do layouts.json, fora do repositório
-EFFECT_PRESETS_FILE = DATA_DIR / "effect-presets.json"
+EFFECT_PRESETS_FILE = (
+    DATA_DIR / "effect-presets.json"
+)  # só o que veio do DMK-54: as entradas migram para MACROS_DIR
+# As macros de áudio que a pessoa salvou (um JSON por macro): as globais aqui e as de cada marca em
+# `BRAND_DATA_DIR/<marca>/macros`. É dado de quem usa o editor, por isso fica fora do repositório.
+MACROS_DIR = DATA_DIR / "assets" / "macros"
+BRAND_DATA_DIR = DATA_DIR / "assets" / "brands"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 

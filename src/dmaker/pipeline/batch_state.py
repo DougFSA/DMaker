@@ -79,6 +79,9 @@ class BatchRow:
     warnings: list[str] = field(default_factory=list)
     started_at: float | None = None
     finished_at: float | None = None
+    source: str | None = (
+        None  # o arquivo de entrada, quando a linha é um arquivo (macro de áudio) e não uma planilha
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,6 +103,7 @@ class Batch:
     rows: list[BatchRow] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
+    noun: str = "vídeo"  # o que cada linha produz; a macro aplicada a arquivos usa "arquivo" no relatório
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
