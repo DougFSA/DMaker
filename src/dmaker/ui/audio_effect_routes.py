@@ -48,11 +48,26 @@ class EffectResponseBody(BaseModel):
 
 
 class PresetBody(BaseModel):
-    """Uma predefinição a salvar: o nome, os efeitos da cadeia e, se quiser, uma frase do que faz."""
+    """Uma macro a salvar: o nome, os efeitos da cadeia e, se quiser, uma frase do que faz e a saída (formato do arquivo,
+    que só vale ao aplicar a arquivos). `brand` a guarda na pasta dessa marca; sem ele, é global."""
 
     label: str
     effects: list[dict]
     summary: str = ""
+    output: dict | None = None
+    brand: str | None = None
+
+
+class ChainMacroBody(BaseModel):
+    """Salvar a cadeia de efeitos de um item da spec da tela como macro: o item, o nome e o escopo (`global` ou `brand`,
+    a marca do projeto)."""
+
+    spec: dict
+    target: str
+    label: str
+    scope: str = "global"
+    summary: str = ""
+    output: dict | None = None
 
 
 class ItemLevelBody(BaseModel):
@@ -75,9 +90,9 @@ def build_audio_effects_router() -> APIRouter:
     router = APIRouter(tags=["efeitos de áudio"])
 
     @router.get("/api/audio-effects")
-    def list_audio_effects(type: str | None = None) -> dict:
+    def list_audio_effects(type: str | None = None, brand: str | None = None) -> dict:
         try:
-            return catalog_payload(type)
+            return catalog_payload(type, brand)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -103,21 +118,43 @@ def build_audio_effects_router() -> APIRouter:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get("/api/audio-effects/presets")
-    def saved_presets() -> dict[str, list[dict]]:
-        """As predefinições que a pessoa salvou (as embutidas vêm no catálogo)."""
-        return {"presets": [preset.to_dict() for preset in list_user_presets()]}
+    def saved_presets(brand: str | None = None) -> dict[str, list[dict]]:
+        """As macros que a pessoa salvou, as globais e, com `brand`, as da marca (as embutidas vêm no catálogo)."""
+        try:
+            return {"presets": [preset.to_dict() for preset in list_user_presets(brand)]}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.post("/api/audio-effects/presets")
     def save_preset(body: PresetBody) -> dict:
         try:
-            return save_user_preset(body.label, body.effects, body.summary).to_dict()
+            return save_user_preset(
+                body.label, body.effects, body.summary, output=body.output, brand=body.brand
+            ).to_dict()
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    @router.delete("/api/audio-effects/presets/{preset_id}")
-    def delete_preset(preset_id: str) -> dict:
+    @router.post("/api/projects/{name}/audio-macros")
+    def save_chain(name: str, body: ChainMacroBody) -> dict:
+        """ "Salvar a cadeia como macro": a cadeia de efeitos do item (da spec da tela, ainda não salva) vira uma macro."""
+        from ..pipeline.macros import save_chain_as_macro
+
         try:
-            return remove_user_preset(preset_id).to_dict()
+            return save_chain_as_macro(
+                _project(name, body.spec),
+                body.target,
+                body.label,
+                scope=body.scope,
+                summary=body.summary,
+                output=body.output,
+            ).to_dict()
+        except (EditError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.delete("/api/audio-effects/presets/{preset_id}")
+    def delete_preset(preset_id: str, brand: str | None = None) -> dict:
+        try:
+            return remove_user_preset(preset_id, brand).to_dict()
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

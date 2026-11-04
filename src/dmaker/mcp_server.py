@@ -376,16 +376,16 @@ def edit_history(name: str) -> dict:
         "o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e "
         "faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos. Ponha, "
         "mova, ligue ou desligue um efeito com `edit_project` (operação audio_effect). `type` restringe "
-        "a um efeito."
+        "a um efeito; `brand` traz também as macros salvas dessa marca (em `presets`)."
     )
 )
-def audio_effects(type: str | None = None) -> dict:
+def audio_effects(type: str | None = None, brand: str | None = None) -> dict:
     from mcp.server.mcpserver.exceptions import ToolError
 
     from .domain.audio_effects import catalog_payload
 
     try:
-        return catalog_payload(type)
+        return catalog_payload(type, brand)
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
 
@@ -413,12 +413,19 @@ def audio_effect_response(effect: dict, points: int = 256) -> dict:
 
 @server.tool(
     description=(
-        "As predefinições de efeitos de áudio que a pessoa salvou por nome (ficam no arquivo effect-presets.json da pasta "
-        "de dados e aparecem no catálogo `audio_effects` com `origin: user`, ao lado das embutidas). `action`: `list` "
-        "(as salvas), `save` (`label` é o nome, `effects` a cadeia, cada efeito como a spec o escreve, e `summary` uma "
-        "frase opcional; salvar com o mesmo nome troca a predefinição) ou `remove` (`id` é o id que `list` mostra). O "
-        "intervalo (`start`/`end`) e o bypass não entram na predefinição. Para pôr uma predefinição num item use "
-        '`edit_project`: {"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "<id>"}.'
+        "As macros de áudio (predefinições de efeitos): cadeias de efeitos com nome, que a pessoa salva uma vez e repete. "
+        "Ficam um JSON por macro em assets/macros (globais) e em assets/brands/<marca>/macros (da marca), e aparecem no "
+        "catálogo `audio_effects` com `origin: user`, ao lado das embutidas (as embutidas incluem `clean_narration`, "
+        "`clean_phone_recording`, `mp3_standard` e `ends_fade`). `action`: `list` (as salvas; `brand` junta as dessa "
+        "marca), `show` (uma macro pelo `id`, embutida ou salva, com os efeitos e a `output`), `save` (`label` é o nome; "
+        "a cadeia vem de `effects`, cada efeito como a spec o escreve, OU de `project` + `target`, a cadeia de um item "
+        "do projeto, como `audio.voiceover.0`; `summary` é uma frase opcional; `output` é o formato que vale ao aplicar a "
+        'arquivos, como {"preset": "audio/mp3", "bitrate_k": 192}; `scope` é `global` ou `brand`: com `project`, a '
+        "marca do projeto, e sem ele, a `brand` dada; salvar com o mesmo nome troca a macro) ou `remove` (`id` é o id "
+        "que `list` mostra; `brand` remove da pasta da marca). O intervalo (`start`/`end`) e o bypass não entram. Para "
+        "pôr a macro num item use `edit_project`: "
+        '{"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "<id>"}; para aplicá-la '
+        "a uma pasta de arquivos, `apply_macro`."
     )
 )
 def audio_effect_presets(
@@ -427,25 +434,93 @@ def audio_effect_presets(
     effects: list[dict] | None = None,
     summary: str = "",
     id: str | None = None,
+    output: dict | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    target: str | None = None,
+    scope: str = "global",
 ) -> dict:
     from mcp.server.mcpserver.exceptions import ToolError
 
-    from .domain.audio_effects import list_user_presets, remove_user_preset, save_user_preset
+    from .domain.audio_effects import (
+        get_effect_preset,
+        list_user_presets,
+        remove_user_preset,
+        save_user_preset,
+    )
 
     try:
         if action == "list":
-            return {"presets": [preset.to_dict() for preset in list_user_presets()]}
+            return {"presets": [preset.to_dict() for preset in list_user_presets(brand)]}
+        if action == "show":
+            if not id:
+                raise ToolError("para mostrar, informe o `id` da macro (veja `action: list`)")
+            return get_effect_preset(id, brand).to_dict()
         if action == "save":
-            if not label or not effects:
-                raise ToolError("para salvar, informe `label` (o nome) e `effects` (a lista de efeitos)")
-            return save_user_preset(label, effects, summary).to_dict()
+            if not label:
+                raise ToolError("para salvar, informe `label` (o nome)")
+            if project or target:
+                if not (project and target):
+                    raise ToolError("para salvar a cadeia de um item, informe `project` e `target`")
+                from .pipeline.macros import save_chain_as_macro
+                from .pipeline.projects import load_project
+
+                return save_chain_as_macro(
+                    load_project(project), target, label, scope=scope, summary=summary, output=output
+                ).to_dict()
+            if not effects:
+                raise ToolError("para salvar, informe `effects` (a lista de efeitos) ou `project` e `target`")
+            return save_user_preset(label, effects, summary, output=output, brand=brand).to_dict()
         if action == "remove":
             if not id:
-                raise ToolError("para remover, informe o `id` da predefinição (veja `action: list`)")
-            return remove_user_preset(id).to_dict()
-    except ValueError as exc:
+                raise ToolError("para remover, informe o `id` da macro (veja `action: list`)")
+            return remove_user_preset(id, brand).to_dict()
+    except (ValueError, FileNotFoundError) as exc:
         raise ToolError(str(exc)) from exc
-    raise ToolError(f"ação desconhecida: {action!r}. Use list, save ou remove")
+    raise ToolError(f"ação desconhecida: {action!r}. Use list, show, save ou remove")
+
+
+@server.tool(
+    description=(
+        "Aplica uma macro de áudio (ver `audio_effect_presets`) a uma pasta de arquivos de áudio ou a uma lista de "
+        "arquivos: cada um passa pela cadeia da macro e sai em `out_dir`, no formato `format` (mp3, wav, flac, ogg, opus, "
+        "m4a ou aiff; omitido, vale o da macro). É o Apply Macro to Files do Audacity. O arquivo de entrada nunca é "
+        "mudado, e a saída não pode cair em cima dele. Nada além da cadeia: sem normalização final do master, então um "
+        "arquivo sai no nível que os efeitos da macro deram. `inputs` são pastas (os arquivos de áudio dentro delas) "
+        "e/ou arquivos; `brand` busca a macro também entre as da marca. Roda em segundo plano: devolve `job_id`, que se "
+        "acompanha por `job_status` (progresso arquivo a arquivo e, ao fim, o relatório de cada um). O estado fica em "
+        "`out_dir/.dmaker-macro`: se o processo cair, `resume=true` retoma de onde parou, pula o que já saiu inteiro e "
+        "refaz o que ficou pela metade; sem `resume`, tudo é refeito."
+    )
+)
+def apply_macro(
+    macro: str,
+    inputs: list[str],
+    out_dir: str,
+    format: str | None = None,
+    resume: bool = False,
+    brand: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import get_effect_preset
+    from .pipeline.macro_run import MacroRunError, MacroRunService, plan_macro_run, run_in_job
+
+    try:
+        plan = plan_macro_run(get_effect_preset(macro, brand), inputs, out_dir, format)
+    except (MacroRunError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+    service = MacroRunService()
+    if service.active(plan.out_dir):
+        raise ToolError(f"já há um tratamento rodando em {plan.out_dir}; acompanhe com job_status")
+    job = jobs.start(
+        f"macro {plan.macro.id} ({len(plan.sources)} arquivo(s))",
+        lambda job: run_in_job(service, plan, job, resume=resume),
+        meta={"kind": "macro", "macro": plan.macro.id, "cancellable": True},
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "macro": plan.macro.id, "files": len(plan.sources), "result": job.result}
 
 
 @server.tool(
