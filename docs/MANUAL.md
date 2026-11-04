@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 44 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 45 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -77,6 +77,7 @@ São 44 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](#reparar-o-som-de-um-item-silenciar-cortar-envelope-canais-e-deslocar) | Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo. | sim |
 | [Copiar, colar, dividir e juntar trechos de áudio](#copiar-colar-dividir-e-juntar-trechos-de-áudio) | Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo. | sim |
 | [Desfazer e refazer uma edição](#desfazer-e-refazer-uma-edição) | Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto. | ainda não: `edit_history` |
+| [Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar](#editar-o-áudio-na-onda-selecionar-tocar-aplicar-efeito-e-desenhar) | Abre um item de áudio numa onda grande, como o Audacity: seleciona com o mouse, toca em loop, aplica um efeito com prévia e comparação do antes e depois, desenha o envelope e as amostras, e desfaz com Ctrl+Z. | sim |
 | [Analisar o áudio: estouro, nível, contraste, espectro e sons](#analisar-o-áudio-estouro-nível-contraste-espectro-e-sons) | Mede o som de um item ou da saída final sem mudar nada: acha o que estourou, confere se a fala se destaca da música, desenha o espectro e marca os sons e os silêncios. | ainda não: `audio_analyzers` |
 | [Cortar os clipes no ritmo da música](#cortar-os-clipes-no-ritmo-da-música) | Acha as batidas da música e anda o corte entre cada par de clipes para a batida mais perto, sem mudar a duração do vídeo. | ainda não: `cut_on_beat` |
 
@@ -2589,10 +2590,10 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Pôr um rótulo no ponto de reprodução e dividir em partes iguais | A tecla **M** no editor (ou `marker_add`) marca o cursor; `markers_regular` cria marcadores a cada N segundos ou em N partes | "Marcar instantes e trechos com marcadores" |
 | Edit > Remove Special > Silence Audio (Silenciar) | `audio_silence` (`dmaker audio silence`): zera o som do intervalo sem mudar a duração. É o efeito `silence`, com a emenda de 10 ms nas bordas; a imagem não muda. A forma "Split Delete" (o buraco fica onde estava) é esta | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
 | Edit > Delete (Cortar, com o resto recuando) | `audio_cut` (`dmaker audio cut`): tira o intervalo e o resto recua. Na voz gravada e na música o item encolhe (e a voz gravada seguinte recua junto); no clipe, no PiP e na narração a duração é presa, então o fim completa com silêncio | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
-| Ferramenta Envelope | `audio_envelope` (`dmaker audio envelope`): pontos (instante, ganho em dB) ligados por retas em dB, o efeito `envelope`. "Subir a música no fim" é um envelope em `audio.music` | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
+| Ferramenta Envelope | `audio_envelope` (`dmaker audio envelope`): pontos (instante, ganho em dB) ligados por retas em dB, o efeito `envelope`. Na interface, a ferramenta **Envelope** do painel Áudio põe e arrasta os pontos sobre a onda. "Subir a música no fim" é um envelope em `audio.music` | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
 | Ferramenta Time Shift (deslocar no tempo) | `audio_shift` (`dmaker audio shift`): `audio_offset` no clipe, no PiP e na faixa externa (positivo atrasa o som em relação à imagem, e o som pode vir de fora do `start` e `end` do clipe); na voz gravada e na narração, o `start` | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
-| Cabeçalho da trilha: ganho (Gain) e pan | `track_set` com `gain_db` e `pan` (de -1, tudo à esquerda, a 1, tudo à direita) em `A1`, `A2`..., `MUS`, `NAR`, `VO` ou `SFX` (`dmaker audio track`). Ficam em `tracks` da spec e valem na prévia e no render | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
-| Cabeçalho da trilha: Mute e Solo | `track_set` com `muted` e `solo`. Com alguma trilha de áudio em solo, as outras trilhas de áudio ficam mudas, na prévia e no render | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
+| Cabeçalho da trilha: ganho (Gain) e pan | `track_set` com `gain_db` e `pan` (de -1, tudo à esquerda, a 1, tudo à direita) em `A1`, `A2`..., `MUS`, `NAR`, `VO` ou `SFX` (`dmaker audio track`). Na interface, o botão **dB** do cabeçalho da trilha na linha do tempo abre o ganho (de -60 a +24 dB) e o pan. Ficam em `tracks` da spec e valem na prévia e no render | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
+| Cabeçalho da trilha: Mute e Solo | `track_set` com `muted` e `solo`; na interface, os botões **M** e **S** do cabeçalho. Com alguma trilha de áudio em solo, as outras trilhas de áudio ficam mudas, na prévia e no render | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
 | Tracks > Mix > Stereo Track to Mono | `audio_channels` com `mode` `mono` (`dmaker audio channels`): mistura os dois canais; é o efeito `channels` | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
 | Tracks > Swap Stereo Channels | `audio_channels` com `mode` `swap`: troca o canal esquerdo e o direito | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
 | Usar só o canal esquerdo ou direito (a lapela gravada de um lado só) | `audio_channels` com `mode` `left` ou `right`: o canal escolhido sai nos dois lados | "Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar" |
@@ -2617,6 +2618,13 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Analyze > Label Sounds (Marcar Sons) | `"analyzer": "sounds"`, com `mode` (`sounds` ou `silences`), `threshold_db`, `min_silence`, `min_sound` e `position` (`region`, `start` ou `end`: cobrindo o trecho, antes ou depois): grava os marcadores no grupo `sons`, e rodar de novo troca só esse grupo | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
 | Analyze > Beat Finder (Achar Batidas) | `"analyzer": "beats"`, com `threshold_percent` (65, como no Audacity), `min_distance` e `smoothing`: marca as batidas no grupo `batidas` e devolve o andamento estimado em BPM | "Cortar os clipes no ritmo da música" |
 | Tools > Sample Data Export (Exportar Amostras) | `"analyzer": "samples"`, com `limit` (100, como no Audacity) e `unit` (`linear` ou `db`): o número, o instante e o valor de cada amostra por canal; `--out` grava em `.csv` ou `.txt` (com tabulação) | "Analisar o áudio: estouro, nível, contraste, espectro e sons" |
+| Mostrar a onda, o zoom e a régua em tempo e em amostras | O painel **Áudio** do editor (duplo clique num item de áudio da linha do tempo, ou **Editar áudio**): a onda de cada canal, do áudio inteiro até a amostra, com os picos servidos por zoom e guardados em cache (uma hora de áudio abre em segundos); a régua mostra o tempo e, perto da amostra, o número delas | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Ferramenta de seleção, Shift para estender, selecionar tudo e selecionar até o rótulo | No painel Áudio: arrastar seleciona, Shift e clique estende a ponta mais perto, puxar a borda a muda, duplo clique seleciona tudo e **Até o marcador** (Alt, Shift e seta) vai do cursor ao marcador mais próximo | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Play, Loop Play (Shift+Espaço), Play Cut Preview (C), velocidade de reprodução e medidor | No painel Áudio: Espaço toca exatamente a seleção (sem seleção, do cursor ao fim), **Loop** repete sem emenda, **Prévia do corte** toca 2 s antes e 2 s depois pulando a seleção, a velocidade vai de 0,25x a 4x (muda o tom, como numa fita) e o medidor mostra o nível de cada canal, o pico segurado e o clipping | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Scrubbing (arrastar a agulha ouvindo) | Arrastar na régua do painel Áudio toca um pedaço curto do som onde o mouse passa | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Aplicar um efeito com Preview | Botão **Efeito...** do painel Áudio: o formulário sai do catálogo (`audio_effects`), **Prévia** toca os primeiros 10 s da seleção com o efeito sem gravar nada, **Antes** e **Depois** alternam sem interromper o som e **Aplicar** grava `audio_effect` com o `start` e o `end` da seleção. O render soa igual à prévia (a mesma cadeia, o mesmo cache) | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Ferramenta Desenhar (Draw Tool) | Ferramenta **Desenho** do painel Áudio (tecla 3), só no zoom máximo e a 48 kHz: arrastar desenha o valor das amostras e vira o efeito `draw` (até 512 amostras, com `channel` `both`, `left` ou `right`), sem mexer no arquivo | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
+| Atalhos de teclado do Audacity (Espaço, Ctrl+B, Ctrl+L, Ctrl+I, Ctrl+Z) | Valem com o foco dentro do painel Áudio e se trocam em **?**, na seção "Painel Áudio": Espaço toca, Ctrl+B põe um marcador na seleção, Ctrl+L silencia, Ctrl+I divide no cursor e Ctrl+Z desfaz. Fora do painel as teclas do editor seguem como sempre | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
 | Cortar o vídeo no ritmo da música (rótulos de batida) | `cut_on_beat` (`dmaker audio analyze cut-on-beat`): para cada fronteira entre clipes, a batida mais perto dentro de `tolerance`; só propõe a lista, e com `apply` os cortes andam por aparas, sem mudar a duração, com os marcadores acompanhando | "Cortar os clipes no ritmo da música" |
 
 ### Aplicar efeitos de áudio em um item ou no master
@@ -2728,7 +2736,7 @@ Diga: "Silencia a tosse do clipe 1 entre 12 e 14 segundos e faz a música subir 
 
 #### Pela interface
 
-Não existe ainda um painel de edição de onda. A linha do tempo já mostra o resultado: ganho, pan e solo das trilhas de áudio, o som deslocado e os efeitos de cada item.
+Interface nova, **Editor**. No cabeçalho de cada trilha de áudio da linha do tempo ficam o solo (**S**) e o ganho e o pan (**dB**); o **painel Áudio** (duplo clique num item de áudio) silencia (Ctrl+L), corta e desenha o envelope com o mouse sobre a onda. Veja "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar".
 
 #### Pela CLI
 
@@ -2796,7 +2804,7 @@ Diga: "Copia os 3 segundos que começam em 20 s da voz gravada e cola em 40 s." 
 
 #### Pela interface
 
-Não existe ainda um painel de edição de onda. A voz colada aparece como um item novo na trilha **VO** da linha do tempo.
+A voz colada aparece como um item novo na trilha **VO** da linha do tempo. O **painel Áudio** (duplo clique no item) divide a voz gravada no cursor (Ctrl+I); copiar e colar trechos continua pela IA e pela CLI.
 
 #### Pela CLI
 
@@ -2873,6 +2881,81 @@ Depois do `undo`, o `spec.json` é byte a byte o de antes da edição; o `redo` 
 
 - **"não há o que desfazer"**: o projeto não tem edição gravada pelo histórico (edições antigas ou feitas na interface não entram).
 - **"o projeto tinha mudado fora do histórico"**: alguém mexeu na spec pela interface ou à mão; o desfazer trocou pelo estado guardado e o estado de agora ficou no `redo_edit`.
+
+### Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar
+<!-- tarefa: editar-na-onda -->
+Abre um item de áudio numa onda grande, como o Audacity: seleciona com o mouse, toca em loop, aplica um efeito com prévia e comparação do antes e depois, desenha o envelope e as amostras, e desfaz com Ctrl+Z.
+
+#### Quando usar
+
+Você quer ver o som, ouvir só um trecho, silenciar uma tosse, normalizar uma frase ou consertar um estalo olhando a onda, em vez de escrever tempos. Tudo vira uma edição comum da spec (os efeitos e operações das outras tarefas desta seção), que o desfazer e o Salvar do editor conhecem.
+
+**Pedidos que levam a esta tarefa:**
+- "Quero ver a onda da voz gravada e ouvir só um trecho dela"
+- "Aplica o Normalizar só na segunda frase e me deixa ouvir antes e depois"
+- "Silencia essa tosse"
+- "Põe um marcador nesse trecho"
+
+#### Antes de começar
+
+- **Interface nova, Editor.** Duplo clique num item de áudio da linha do tempo (o som do clipe, a voz gravada, a narração, a música ou uma faixa externa), ou escolha o item e clique em **Editar áudio**. O painel **Áudio** abre **no lugar da linha do tempo**, e **Voltar à linha do tempo** a traz de volta. Ele não é um painel do layout, para não mexer nos layouts salvos nem na interface clássica (que não o tem).
+- Mostra o som **como ele soa**, com os efeitos e o volume do item (um som **mono** aparece nos dois canais, 3 dB abaixo, como na mixagem). Um áudio de **1 hora** abre em uns 2 s (WAV; os comprimidos mostram o andamento) e, com os picos em cache, em milésimos de segundo. O tempo da onda é o do **item**. Numa **faixa externa** valem os efeitos, mas não silenciar, cortar, dividir nem marcar.
+
+#### Pela IA
+
+A IA não vê a onda: faz as mesmas edições pelo `edit_project`. Diga: "Normaliza só de 7 a 9 segundos da voz gravada e silencia a tosse em 12 s."
+
+- **Efeito na seleção:** `audio_effect` com `action` `add`, `target` e `effect`, com `start` e `end` em segundos **do item**.
+- **Silenciar, cortar, envelope, marcador e trilha:** `audio_silence`, `audio_cut`, `audio_envelope` (tempos do vídeo final), `marker_add` e `track_set`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "normalize", "peak_db": -1, "start": 7.2, "end": 9.2}}}, "para": "normalizar só a seleção, como a janela de efeito do painel"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "audio_silence", "target": "audio.voiceover.0", "start": 12.5, "end": 14.5}}, "para": "silenciar a tosse (Ctrl+L no painel)"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "marker_add", "start": 20, "end": 24, "text": "frase"}}, "para": "pôr um marcador na região (Ctrl+B no painel)"},
+  {"tool": "edit_project", "arguments": {"name": "entrevista", "op": {"type": "track_set", "track": "VO", "solo": true}}, "para": "ouvir só a voz gravada (o botão S do cabeçalho da trilha)"},
+  {"tool": "undo_edit", "arguments": {"name": "entrevista"}, "para": "desfazer a última edição (Ctrl+Z no painel)"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, **Linha do tempo**. Abra o item.
+
+- **Onda e zoom.** Um canal por faixa, régua com o tempo e, perto da amostra, o número delas. Ctrl e roda aproximam em volta do ponteiro, a roda anda; **+**, **−**, **Seleção** e **Tudo** fazem o mesmo.
+- **Ferramentas** (teclas 1 a 5): **Seleção** (arrastar seleciona, Shift e clique estende, puxar a borda a muda, duplo clique seleciona tudo, **Até o marcador**), **Envelope**, **Desenho**, **Zoom** e **Multi** (escolhe pelo que está sob o mouse).
+- **Tocar.** **Espaço** toca a seleção (sem ela, do cursor ao fim); com **Loop** repete sem emenda; Shift e Espaço tocam em loop; **P** pausa e **S** para. **Prévia do corte** (C) toca 2 s antes e 2 s depois, pulando a seleção. A velocidade vai de 0,25x a 4x (muda o tom, como numa fita). O **medidor** mostra o nível de cada canal e acende quando o som clipa. Arrastar na régua faz o **scrub**: toca um pedaço curto onde o mouse passa.
+- **Efeito...** O formulário sai do catálogo. **Prévia** toca os primeiros 10 s da seleção com o efeito, em loop e sem gravar; **Antes** e **Depois** alternam sem interromper o som; **Aplicar** grava o efeito com o intervalo da seleção. Num item de mais de 2 minutos a prévia processa só um trecho em volta e avisa quando é **aproximada**.
+- **Silenciar** (Ctrl+L), **Cortar** (Delete), **Dividir** no cursor (Ctrl+I, só a voz gravada) e **Marcador** (Ctrl+B) são passos do desfazer e seguem o **Salvar**. Selecionar e dar zoom não mudam o projeto.
+- **Envelope.** Clique põe um ponto, arrastar o move, Alt e clique o tira. Soltar o mouse grava, como os outros gestos do editor.
+- **Desenho.** No zoom máximo, com as amostras como pontos, arrastar desenha o valor delas (Shift desenha nos dois canais; Esc cancela). Vira o efeito `draw`, de até 512 amostras, a 48 kHz, sem mexer no arquivo.
+- **Atalhos.** Valem com o foco no painel e se trocam em **?**, seção "Painel Áudio"; **Ctrl+Z** desfaz a última edição do painel.
+- **Cabeçalho da trilha de áudio.** **S** (solo: as outras trilhas de áudio calam) e **dB** (ganho de -60 a +24 dB e pan), um passo do desfazer cada.
+
+#### Pela CLI
+
+Não existe tela de onda na linha de comando: o painel faz a edição de sempre, e a CLI a oferece pelos mesmos comandos.
+
+```powershell
+dmaker audio effect add projects/entrevista/spec.json audio.voiceover.0 normalize --param peak_db=-1 --start 7.2 --end 9.2
+dmaker audio silence projects/entrevista/spec.json audio.voiceover.0 --start 12.5 --end 14.5
+dmaker audio track projects/entrevista/spec.json VO --solo
+dmaker markers add projects/entrevista/spec.json --start 20 --end 24 --text frase
+dmaker undo projects/entrevista/spec.json
+```
+
+#### Como conferir
+
+Medido: o **Normalizar** de uma seleção de 2 s leva o pico dela a -1,00 dBFS, e o render do mesmo projeto soa igual à prévia (diferença máxima de -84 dBFS). Espaço toca exatamente a seleção, e o loop volta ao começo na mesma amostra em que o fim chega.
+
+#### Se der errado
+
+- **"Selecione um trecho na onda"**: Silenciar, Cortar e o efeito com intervalo pedem uma seleção.
+- **"Dividir o som vale para a voz gravada"**: nos outros itens, a divisão é o corte da linha do tempo (S).
+- **"Prévia aproximada"**: o efeito mede o item inteiro e o item é longo; selecione um trecho e a prévia fica igual ao render.
+- **O Desenho não deixa desenhar**: aproxime o zoom até as amostras virarem pontos, e confira se o áudio está a 48 kHz.
 
 ### Analisar o áudio: estouro, nível, contraste, espectro e sons
 <!-- tarefa: analisar-audio -->
@@ -3341,6 +3424,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-51 | Edição de áudio: qualquer item de áudio (o som do clipe, a voz gravada, a narração, a música, uma faixa externa, o áudio de um PiP) ou o master recebe uma cadeia ordenada de efeitos (`effects`, `audio.master_effects`) com intervalo opcional e botão de ligar e desligar: Amplificar (com a opção de não clipar), Normalizar, Inverter, Reverter e Repetir; o catálogo `audio_effects`, a operação `audio_effect` do `edit_project`, `dmaker audio effects` e `dmaker audio effect`, o bloco **Efeitos de áudio** do painel Filtros e a trilha **VO** da linha do tempo | "Aplicar efeitos de áudio em um item ou no master" |
 | DMK-59 | Trilha de marcadores: `markers` na spec (instante ou região, com texto, cor e grupo), a trilha **MK** no editor (**M** cria no cursor, arrastar, duplo clique para renomear, vírgula e ponto para pular, tudo no **Desfazer**), importar e exportar o `.txt` de rótulos do Audacity (a ida e volta devolve o mesmo arquivo), marcadores regulares (a cada N segundos ou em N partes), `"at": "marker:texto"` no `edit_project` e marcadores que acompanham cortes e aparas (o que estava no trecho cortado some, com aviso); `dmaker markers`, `markers_import`, `markers_export` e `markers_regular` | "Marcar instantes e trechos com marcadores" |
 | DMK-64 | Projeto só de áudio e exportação: o `output.preset` pode ser `audio/wav`, `audio/mp3`, `audio/flac`, `audio/ogg`, `audio/opus`, `audio/m4a` ou `audio/aiff` (a `timeline` pode ficar vazia e a duração vem da voz, da narração e da música), com taxa de amostragem, canais, profundidade e taxa de bits (CBR, VBR, ABR), etiquetas do arquivo (`output.metadata`, com modelo por marca) e os alvos de loudness redes (-14), podcast (-16) e broadcast (-23); exportação por região de marcador (com pausas), por trilha (os stems, que somados reproduzem a mixagem) ou só um trecho; importar áudio bruto; o modelo `podcast`; `dmaker audio export`, `dmaker audio import-raw`, `dmaker audio presets`, `audio_export`, `audio_presets` e `import_raw_audio`; botão **Exportar áudio** e a trilha **VO** na interface | "Exportar o áudio de um projeto em WAV, MP3, FLAC e outros formatos", "Dividir um áudio em vários arquivos", "Importar áudio bruto" e "Fazer um episódio de podcast" |
+| DMK-62 | Editor de onda na interface nova: o painel **Áudio** (duplo clique num item de áudio da linha do tempo) abre a onda do item como ele soa, do áudio inteiro até a amostra (uma hora de áudio abre em segundos), com seleção, envelope e desenho de amostras, tocar a seleção em loop, scrub, velocidade, prévia do corte e medidor de nível, a janela de efeito com Prévia e Antes e Depois, os atalhos do Audacity e o solo, o ganho e o pan no cabeçalho das trilhas de áudio | "Editar o áudio na onda: selecionar, tocar, aplicar efeito e desenhar" |
 | DMK-60 | Analisadores de áudio: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras (`audio_analyzers`, `audio_analyze`, `dmaker audio analyze`), que medem o som de um item como ele soa, da saída final ou de um arquivo; os que marcam escrevem num grupo de marcadores próprio; duas conferências novas no `qa_report` (som estourado, com o instante, e contraste entre a fala e a música, com o critério de 20 dB); `cut_on_beat` para cortar os clipes nas batidas da música; e o gráfico do espectro no painel Filtros, com o cursor de frequência, nota e dB | "Analisar o áudio: estouro, nível, contraste, espectro e sons"; "Cortar os clipes no ritmo da música" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).

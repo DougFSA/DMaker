@@ -134,6 +134,15 @@ function onSpeed(value: string): void {
 
     <div class="audio__bar" role="toolbar" aria-label="Ferramentas e edição">
       <SegmentedControl :model-value="panel.tool" label="Ferramenta" :options="toolOptions" data-audio-tools @update:model-value="panel.setTool($event)" />
+      <AppButton
+        size="sm"
+        :disabled="!panel.clock"
+        :title="hint('Seleciona do cursor até o próximo marcador', 'audio_select_next_marker')"
+        data-audio-to-marker
+        @click="panel.selectToMarker(1)"
+      >
+        Até o marcador
+      </AppButton>
       <span class="audio__group" role="group" aria-label="Zoom">
         <AppButton size="sm" :title="hint('Aproximar', 'audio_zoom_in')" aria-label="Aproximar" data-audio-zoom-in @click="panel.zoomIn()">+</AppButton>
         <AppButton size="sm" :title="hint('Afastar', 'audio_zoom_out')" aria-label="Afastar" data-audio-zoom-out @click="panel.zoomOut()">−</AppButton>

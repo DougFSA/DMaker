@@ -102,7 +102,11 @@ def build_audio_panel_router() -> APIRouter:
             build = peaks.request(make, plan)
             if build.state == "building" and body.wait > 0:
                 build.done.wait(body.wait)
-            reader = svc.reader(plan, create=False) if build.state != "failed" else None
+            reader = (
+                plans.reader(plan, lambda: svc.reader(plan, create=False))
+                if build.state != "failed"
+                else None
+            )
             end = plan.duration if body.end is None else min(body.end, plan.duration)
             return wave_payload(plan, build, reader, body.start, end, body.columns)
         except (TargetError, AudioPanelError, ValueError, FileNotFoundError, FFmpegError) as exc:
@@ -114,7 +118,8 @@ def build_audio_panel_router() -> APIRouter:
         svc = service(services)
         try:
             plan = plan_of(project, body.target, svc)
-            data, seconds = svc.window_wav(plan, body.start, body.end)
+            reader = plans.reader(plan, lambda: svc.reader(plan))
+            data, seconds = svc.window_wav(plan, body.start, body.end, reader)
         except (TargetError, AudioPanelError, ValueError, FileNotFoundError, FFmpegError) as exc:
             raise failing(exc) from exc
         return Response(

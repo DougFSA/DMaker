@@ -205,7 +205,9 @@ class AudioPanelService:
 
     # ---------- tocar ----------
 
-    def window_wav(self, plan: HeardPlan, start: float, end: float) -> tuple[bytes, float]:
+    def window_wav(
+        self, plan: HeardPlan, start: float, end: float, reader: SampleReader | None = None
+    ) -> tuple[bytes, float]:
         """O trecho [start, end) do alvo como um WAV de 16 bits, com o ganho (volume) do item. Devolve também quantos
         segundos o WAV tem (o fim do áudio corta a janela)."""
         stop = min(end, plan.duration)
@@ -215,7 +217,7 @@ class AudioPanelService:
             )
         if stop - start > MAX_WINDOW_SECONDS:
             raise AudioPanelError(f"a janela passa de {MAX_WINDOW_SECONDS:g} s: peça pedaços menores")
-        reader = self.reader(plan)
+        reader = reader or self.reader(plan)
         assert reader is not None
         samples = reader.read(start, stop - start)
         if plan.item.gain != 1.0:
@@ -423,10 +425,13 @@ class PeakTasks:
     def _run(self, build: PyramidBuild, make_service: Callable[[FFmpegRunner], AudioPanelService]) -> None:
         with self._slot:
             try:
-                service = make_service(SubprocessRunner(sink=_StageSink(build)))
-                if build.plan.processed and service.processed_file(build.plan, create=False) is None:
+                # o andamento do ffmpeg só vale para a etapa de efeitos: a decodificação em pedaços da etapa seguinte
+                # roda vários comandos ao mesmo tempo e cada um zeraria o andamento da construção
+                staging = make_service(SubprocessRunner(sink=_StageSink(build)))
+                if build.plan.processed and staging.processed_file(build.plan, create=False) is None:
                     build.label = "Aplicando os efeitos"
-                reader = service.reader(build.plan)
+                    staging.processed_file(build.plan, create=True)
+                reader = make_service(SubprocessRunner(quiet=True)).reader(build.plan)
                 assert reader is not None
                 build.label = "Calculando a onda"
                 build.percent = 0
@@ -459,12 +464,30 @@ class PeakTasks:
 
 class PlanCache:
     """Os planos já resolvidos: abrir um alvo sonda os arquivos, e a tela pede a onda de novo a cada passo de zoom.
-    A chave é a spec inteira (editada ou não) mais o alvo, então editar o projeto sempre refaz o plano."""
+    A chave é a spec inteira (editada ou não) mais o alvo, então editar o projeto sempre refaz o plano. Guarda também
+    o leitor de cada som (abrir um arquivo comprimido consulta o ffprobe, e a tela faz dezenas de pedidos por segundo)."""
 
     def __init__(self, size: int = 16) -> None:
         self._plans: OrderedDict[tuple[str, str], HeardPlan] = OrderedDict()
+        self._readers: OrderedDict[str, SampleReader] = OrderedDict()
         self._lock = threading.Lock()
         self.size = size
+
+    def reader(self, plan: HeardPlan, make: Callable[[], SampleReader | None]) -> SampleReader | None:
+        """O leitor do som do plano: o guardado ou o que `make` abrir. Só guarda quando `make` devolve um (o arquivo
+        tratado de um item com efeitos pode ainda não existir)."""
+        with self._lock:
+            known = self._readers.get(plan.key)
+            if known is not None:
+                self._readers.move_to_end(plan.key)
+                return known
+        opened = make()
+        if opened is not None:
+            with self._lock:
+                self._readers[plan.key] = opened
+                while len(self._readers) > self.size * 2:
+                    self._readers.popitem(last=False)
+        return opened
 
     def get(self, project: Project, target: str, make: Callable[[], HeardPlan]) -> HeardPlan:
         digest = hashlib.sha1(project.model_dump_json(exclude_none=True).encode("utf-8")).hexdigest()

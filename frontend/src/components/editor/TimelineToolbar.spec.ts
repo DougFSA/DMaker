@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineView } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useKeymapStore } from '@/stores/keymap'
@@ -138,7 +139,8 @@ describe('encaixe, ripple e zoom', () => {
     expect(timeline.pxPerSec).toBeCloseTo(78, 9)
     await button('Afastar')?.trigger('click')
     expect(timeline.pxPerSec).toBeCloseTo(60, 9)
-    timeline.setScroll(0, 632)
+    // a largura visível menos o cabeçalho da trilha (que o DMK-62 alargou para o solo e o ganho) e a folga final: 500 px para 6 s
+    timeline.setScroll(0, TRACK_HEADER_WIDTH + 40 + 500)
     await button('Ajustar')?.trigger('click')
     expect(timeline.pxPerSec).toBeCloseTo(500 / 6, 9)
   })

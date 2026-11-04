@@ -130,6 +130,7 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   if (drawFrame) cancelAnimationFrame(drawFrame)
   stopDrag()
+  draw.cancel()
 })
 
 watch(
@@ -484,8 +485,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           />
         </template>
       </svg>
-      <svg v-if="draw.preview.value" class="wave__envelope" :width="width" :height="height" aria-hidden="true">
-        <polyline class="wave__curve wave__curve--draw" :points="draw.preview.value" />
+      <svg v-if="draw.preview.value.length > 0" class="wave__envelope" :width="width" :height="height" aria-hidden="true">
+        <polyline v-for="(line, index) in draw.preview.value" :key="index" class="wave__curve wave__curve--draw" :points="line" />
       </svg>
       <p v-if="!props.data" class="wave__empty">Lendo o áudio...</p>
     </div>

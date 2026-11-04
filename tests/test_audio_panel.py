@@ -413,6 +413,29 @@ def test_a_failed_build_keeps_the_reason_and_is_retried_on_the_next_request(tmp_
     assert again is not build
 
 
+def test_the_build_progress_only_moves_forward_and_ends_at_100(tmp_path, monkeypatch):
+    """O andamento é o dos segundos já lidos (e não o de cada comando do ffmpeg, que zeraria a conta)."""
+    monkeypatch.setattr("dmaker.media.waveform.PYRAMID_CHUNK_SECONDS", 0.5)
+    samples = ArrayReader(tone(220, 6.0, 0.4)[:, None])
+
+    class Fake(AudioPanelService):
+        def reader(self, plan, *, create=True):
+            return samples
+
+    plan = audio_panel.HeardPlan("audio.music", _item(tmp_path), 6.0, 0.0, False, "chave-andamento", RATE, 1)
+    tasks = PeakTasks(lambda: tmp_path / "picos")
+    build = tasks.request(lambda runner: Fake(runner), plan)
+    seen = []
+    while not build.done.is_set():
+        seen.append(build.percent)
+        time.sleep(0.001)
+    seen.append(build.percent)
+    assert build.state == "ready" and build.percent == 100
+    assert seen == sorted(seen)  # nunca anda para trás
+    pyramid = build.snapshot()
+    assert pyramid is not None and pyramid.complete and pyramid.frames == 6 * RATE
+
+
 def _item(folder: Path):
     from dmaker.pipeline.analysis_items import ItemAudio, ItemClock
 

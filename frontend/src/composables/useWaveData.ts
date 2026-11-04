@@ -59,11 +59,14 @@ export function useWaveData(width: Ref<number>) {
     const mine = ++ticket
     loading.value = true
     try {
+      // com a onda em construção a resposta sai já, com o que há: esperar a construção de novo a cada passo do zoom travaria a tela
+      const building = data.value?.state === 'building' && data.value.target === target
       const wave = await fetchWave(name, pruneEmpty(spec), {
         target,
         start: whole ? 0 : view.start,
         end: whole ? null : view.end,
         columns,
+        ...(building ? { wait: 0 } : {}),
       })
       if (mine !== ticket || target !== panel.target) return
       data.value = wave
