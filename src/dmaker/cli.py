@@ -2667,7 +2667,9 @@ def _effect_param_text(param: dict) -> str:
         if low is None and high is None
         else f" [{'' if low is None else f'{low:g}'}..{'' if high is None else f'{high:g}'}]"
     )
-    return f"{param['name']} ({param['label']}{unit}{span}, padrão {param['default']!r})"
+    when = param.get("shown_when")
+    only = f", só com {', '.join(f'{field}={value}' for field, value in when.items())}" if when else ""
+    return f"{param['name']} ({param['label']}{unit}{span}, padrão {param['default']!r}{only})"
 
 
 audio_effect_app = typer.Typer(

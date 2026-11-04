@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 53 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 54 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -80,6 +80,7 @@ São 53 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Abaixar uma trilha enquanto outra fala (Auto Duck)](#abaixar-uma-trilha-enquanto-outra-fala-auto-duck) | Abaixa o volume de uma trilha (a música, o DJ) enquanto outra (a voz, o celebrante) soa, como o Auto Duck do Audacity, sem mexer no arquivo original. | sim |
 | [Fazer fades: curva, fade parcial e fade de estúdio](#fazer-fades-curva-fade-parcial-e-fade-de-estúdio) | Abre e fecha o som de um item com a curva que você escolher, abaixa sem chegar ao silêncio e fecha como fim de música de rádio, sem mexer no arquivo original. | sim |
 | [Cruzar o som de dois clipes ou de duas trilhas (crossfade)](#cruzar-o-som-de-dois-clipes-ou-de-duas-trilhas-crossfade) | Cruza o som de dois clipes vizinhos sem trocar a imagem, que continua cortando seca (J-cut e L-cut), ou faz uma trilha sumir enquanto outra entra, sem mexer nos arquivos originais. | sim |
+| [Mudar o tom, a velocidade e o andamento, e esticar o som](#mudar-o-tom-a-velocidade-e-o-andamento-e-esticar-o-som) | Afina uma voz sem mudar a duração, encaixa uma música num tempo sem mudar o tom, faz o efeito de disco que perde a rotação e estica um som até virar uma textura etérea, sem mexer no arquivo original. | sim |
 | [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](#reparar-o-som-de-um-item-silenciar-cortar-envelope-canais-e-deslocar) | Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo. | sim |
 | [Copiar, colar, dividir e juntar trechos de áudio](#copiar-colar-dividir-e-juntar-trechos-de-áudio) | Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo. | sim |
 | [Desfazer e refazer uma edição](#desfazer-e-refazer-uma-edição) | Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto. | ainda não: `edit_history` |
@@ -2673,6 +2674,13 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Efeito > Studio Fade Out | `{"type": "studio_fade_out", "duration": 3, "final_cutoff": 200}`: o volume fecha em curva quadrática enquanto um passa-baixa desce, em oitavas iguais, de 20 kHz até o corte final. É o fim de música de rádio. Vale também no `audio.master_effects`, para fechar a mistura inteira | "Fazer fades: curva, fade parcial e fade de estúdio" |
 | Efeito > Crossfade Tracks (Cruzar Trilhas) | `audio_crossfade_tracks` (`dmaker audio crossfade-tracks`): `out_target`, `in_target`, `start`, `end` e `kind` (`constant_gain`, `constant_power_1`, `constant_power_2` ou `custom`, com `curve` e `mid_adjust`). Grava um Fade Ajustável em cada item, com as curvas casadas, num passo só do histórico; a mixagem não muda | "Cruzar o som de dois clipes ou de duas trilhas (crossfade)" |
 | Clip crossfade, o J-cut e o L-cut do vídeo | `audio_crossfade` no clipe que entra (`{"duration": 0.5, "curve": "constant_power_1"}`; `audio_crossfade_clips` e `dmaker audio crossfade-clips`): o corte de imagem continua seco, no quadro exato, e o som dos dois clipes cruza em volta dele, metade antes e metade depois, com a sobra do arquivo de cada lado. Sem sobra suficiente o cruzamento encurta e avisa. Na interface, o bloco **Crossfade do som neste corte** do trecho | "Cruzar o som de dois clipes ou de duas trilhas (crossfade)" |
+| Efeito > Change Pitch (Mudar Tom) | `{"type": "change_pitch", "semitones": 2}`: sobe ou desce o tom sem mudar a duração, na unidade escolhida em `mode`: `semitones` (com `cents` de ajuste fino), `notes` (de uma nota para outra: `from_note`, `from_octave`, `to_note` e `to_octave`, com A4 = 440 Hz) ou `percent` (mudança da frequência). `preserve_formants` mantém o timbre da voz. É o `rubberband` em alta qualidade: +2 semitons num tom de 440 Hz dá 493,88 Hz, e a duração muda 0 ms. Vale em qualquer item | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Efeito > Change Speed (Mudar Velocidade e Tom, o "vinil") | `{"type": "change_speed", "mode": "rpm", "rpm_from": 45, "rpm_to": 33.333333}` ou `"mode": "percent"` com `percent`: o tom e a velocidade andam juntos, como num disco que gira mais devagar. De 45 para 33⅓ RPM o tom e a duração mudam na razão 0,7407. Muda a duração: só vale em voz gravada e em música (no clipe, use o `speed` dele) | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Efeito > Change Tempo (Mudar Andamento) | `{"type": "change_tempo", "mode": "bpm", "bpm_from": 120, "bpm_to": 128}`, ou `"mode": "percent"` (`percent`), ou `"mode": "duration"` (`length_from` e `length_to`, em segundos): acelera ou desacelera sem mudar o tom. De 120 para 128 BPM a música dura 120/128 do que durava. Muda a duração: só vale em voz gravada e em música | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Efeito > Sliding Stretch (Esticar Gradualmente) | `{"type": "sliding_stretch", "tempo_start": 0, "tempo_end": -50, "pitch_start": 0, "pitch_end": -12}`: o andamento (em %) e o tom (em semitons) variam em linha reta do início ao fim do trecho, como um disco que perde a rotação; a duração é a integral do andamento. Muda a duração: só vale em voz gravada e em música | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Efeito > Paulstretch | `{"type": "paulstretch", "stretch_factor": 8, "time_resolution": 0.25}`: estica o som por um fator grande sem mudar o tom, até virar uma textura contínua (o algoritmo público de Paul Nasca, em numpy, com a fase sorteada por uma semente fixa para o resultado ser o mesmo a cada render). 8x de 5 s dão 40 s. A saída vai até 20 minutos; acima disso o efeito é recusado. Muda a duração: só vale em voz gravada e em música, e não no `audio.master_effects` | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| Os campos de cada unidade (semitons, nota, porcentagem; BPM, duração; RPM) | Na interface o seletor **Unidade** do efeito mostra só os campos do modo escolhido (a condição `shown_when` do catálogo); o valor do outro modo continua na spec, só a tela o esconde | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
+| A duração nova do item depois do efeito | A linha do tempo (`timeline_view`), o `validate` e a duração de um projeto só de áudio mostram o item com o tempo que ele passa a ter: o fim da voz gravada, e o campo `duration` do item **MUS** com o tamanho do arquivo da música | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -2693,7 +2701,7 @@ O áudio de um clipe, uma narração, uma voz gravada, a música ou o vídeo tod
 
 - O projeto (`name`) e o item: `timeline.N` (clipe), `overlays.N` (PiP), `audio.voiceover.N`, `audio.narration.N`, `audio.tracks.N`, `audio.music` ou `audio.master` (a mistura).
 - A **ordem conta**: normalizar depois de amplificar mede o som já amplificado.
-- O **Repetir** só vale em voz gravada e em música, onde o item pode crescer; nos outros a spec o recusa.
+- O **Repetir** e os efeitos de tempo que mudam a duração (Mudar Velocidade e Tom, Mudar Andamento, Esticar Gradualmente e Paulstretch) só valem em voz gravada e em música, onde o item pode crescer; nos outros a spec os recusa. O Mudar Tom não muda a duração e vale em qualquer item.
 - A normalização final de loudness continua valendo por cima do master.
 
 #### Pela IA
@@ -2733,7 +2741,7 @@ Rode `dmaker validate` e olhe a duração: o Repetir numa voz gravada mostra o �
 
 #### Se der errado
 
-- **"O efeito Repetir muda a duração do item e não vale aqui"**: o Repetir só vale em voz gravada (`audio.voiceover`) e em música (`audio.music`).
+- **"O efeito Repetir muda a duração do item e não vale aqui"**: o Repetir só vale em voz gravada (`audio.voiceover`) e em música (`audio.music`). O mesmo vale para os efeitos de tempo (veja "Mudar o tom, a velocidade e o andamento, e esticar o som"); no clipe, a velocidade do som e da imagem é o `speed` do próprio clipe.
 - **Não ouvi diferença**: confira se o efeito está ligado (`enabled`), se o intervalo (`start`/`end`) cobre o trecho e se o item não está mudo.
 - **O Normalizar não fez nada**: o trecho é silêncio, ou o intervalo está fora do item.
 - **A primeira prévia ou o primeiro render demora**: o item é tratado uma vez e guardado em `cache/audio-fx` (uns 23 MB por minuto de estéreo); `dmaker clean` o apaga.
@@ -3101,6 +3109,67 @@ Renderize e rode `dmaker qa`. Medido com um quadro claro e outro escuro, cada um
 - **"O crossfade de som de 0,5 s encurtou para 0,20 s"**: a fonte não tem som o bastante além do corte. Afaste o ponto de saída do clipe anterior ou o de entrada do seguinte do começo e do fim do arquivo.
 - **"O crossfade de som é ignorado: o corte tem transição de imagem"**: ponha a transição do clipe em `cut`, ou use só a transição.
 - **O volume cai ou sobe no meio do cruzamento**: veja "Qual tipo escolher" acima e troque o tipo.
+
+### Mudar o tom, a velocidade e o andamento, e esticar o som
+<!-- tarefa: tempo-e-afinacao -->
+Afina uma voz sem mudar a duração, encaixa uma música num tempo sem mudar o tom, faz o efeito de disco que perde a rotação e estica um som até virar uma textura etérea, sem mexer no arquivo original.
+
+#### Quando usar
+
+A voz ficou grossa ou fina, a música precisa durar menos sem soar mais aguda, o fim deve "parar" como um vinil, ou a abertura pede uma música esticada e etérea.
+
+**Pedidos que levam a esta tarefa:**
+- "Sobe a voz gravada 2 semitons, sem mudar a duração"
+- "Leva a música de 120 para 128 BPM sem mudar o tom"
+- "Estica a música 8 vezes (Paulstretch) para a abertura"
+
+#### Antes de começar
+
+- O projeto (`name`) e o item (`target`): `audio.voiceover.N` ou `audio.music`; o Mudar Tom vale também em `timeline.N`, `overlays.N`, `audio.narration.N` e `audio.master`.
+- **Mudar Tom** (`change_pitch`, sem mudar a duração): `mode` é `semitones` (`semitones`, `cents`), `notes` (`from_note`, `from_octave`, `to_note`, `to_octave`) ou `percent`; `preserve_formants` guarda o timbre da voz.
+- **Mudar Velocidade e Tom** (`change_speed`, o vinil): `mode` é `percent` ou `rpm` (`rpm_from`, `rpm_to`: 33⅓ é 33,3333, 45, 78).
+- **Mudar Andamento** (`change_tempo`, sem mudar o tom): `mode` é `percent`, `bpm` (`bpm_from`, `bpm_to`) ou `duration` (`length_from`, `length_to`).
+- **Esticar Gradualmente** (`sliding_stretch`): `tempo_start`, `tempo_end` (em %), `pitch_start`, `pitch_end` (em semitons), em linha reta do início ao fim.
+- **Paulstretch** (`paulstretch`): `stretch_factor` (8 transforma 5 s em 40 s) e `time_resolution` (a janela, 0,25 s). A saída vai até 20 minutos.
+- Os quatro que mudam a duração só valem em voz gravada e em música; no clipe e no PiP, a velocidade é o `speed` do clipe. Tom e tempo na narração podem apagar a marca d'água inaudível, e ela não é reaplicada (decisão de 03/11).
+
+#### Pela IA
+
+Diga: "Leva a música de 120 para 128 BPM, sem mudar o tom". A IA usa `edit_project` com `audio_effect` e confere a duração nova com `timeline_view`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "edit_project", "arguments": {"name": "abertura", "op": {"type": "audio_effect", "action": "add", "target": "audio.music", "effect": {"type": "change_tempo", "mode": "bpm", "bpm_from": 120, "bpm_to": 128}}}, "para": "levar a música de 120 a 128 BPM"},
+  {"tool": "edit_project", "arguments": {"name": "abertura", "op": {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "change_pitch", "semitones": 2, "preserve_formants": true}}}, "para": "subir a voz 2 semitons"},
+  {"tool": "timeline_view", "arguments": {"name": "abertura"}, "para": "ver a duração nova dos itens"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, **Efeitos de áudio**, **+ Efeito**, com a voz (**VO**) ou a música (**MUS**) selecionada. O seletor **Unidade** mostra só os campos da unidade escolhida, e o item na linha do tempo passa a ter o tamanho novo.
+
+#### Pela CLI
+
+```powershell
+dmaker audio effect add projects/abertura/spec.json audio.music change_tempo --param mode=bpm --param bpm_from=120 --param bpm_to=128
+dmaker audio effect add projects/abertura/spec.json audio.music paulstretch --param stretch_factor=8
+dmaker validate projects/abertura/spec.json
+```
+
+Tudo entra no histórico (`dmaker undo`).
+
+#### Como conferir
+
+Rode `dmaker validate`: o aviso traz a duração nova. Medido em sinais de teste: +2 semitons em 440 Hz deu 493,88 Hz, com 0 ms de mudança na duração; de 120 para 128 BPM a duração ficou em 0,9375 e o tom em 440,00 Hz; de 45 para 33⅓ RPM o tom e a velocidade caíram a 0,7407; o Paulstretch 8x de 5 s deu 40,0 s, sem estalo.
+
+#### Se der errado
+
+- **"O efeito Mudar Andamento muda a duração do item e não vale aqui"**: ele está num clipe, PiP, narração ou no master. Ponha-o na voz gravada ou na música, ou use o `speed` do clipe.
+- **"Paulstretch: a saída teria 25.0 minutos e o teto é de 20"**: use um fator menor, ou um trecho mais curto (`start`, `end`).
+- **O Paulstretch de uma nota só "pisca"**: um tom puro oscila de nível ao ser esticado; use um som com mais timbre.
 
 ### Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar
 <!-- tarefa: reparar-o-som -->
@@ -3975,6 +4044,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-52 | Volume e dinâmica: os efeitos Compressor (com lookahead compensado), Limitador (teto em dBTP, rígido ou suave), Noise Gate (em amostras, abre antes da palavra, com **Analisar ruído**) e Normalização de loudness (LUFS ou RMS, dual-mono); o Auto Duck entre duas trilhas quaisquer, com as regras de `audio.ducks` (a faixa externa só abaixa sob outra faixa externa) e o ducking antigo da música como o caso da música; as predefinições Voz de podcast, Voz de reels e Segurar picos; `audio_effect_action`, `dmaker audio duck`, `dmaker audio effect preset` e `action`, e o **Nível do item** (RMS, pico e LUFS) no painel Filtros | "Controlar o volume: compressor, limitador, noise gate e loudness"; "Abaixar uma trilha enquanto outra fala (Auto Duck)" |
 | DMK-54 | Equalização e filtros: Graves e agudos, EQ Gráfico (31 bandas de terço de oitava, de -20 a +20 dB), EQ por Curva (pontos arrastáveis, escala linear ou log, interpolação e tamanho do filtro), passa-alta e passa-baixa de 6 a 48 dB por oitava, Notch, prateleiras de graves e de agudos e os filtros clássicos Butterworth, Chebyshev I e II; o **gráfico da resposta de frequência** de cada efeito, calculado sem ffmpeg e igual ao do render (`audio_effect_response`, `dmaker audio effect response`); predefinições embutidas (aumentar e cortar graves e agudos, telefone, rádio AM, ronco de 100 Hz, zumbido de 60 e de 50 Hz com os harmônicos) e as suas, salvas por nome (`audio_effect_presets`, `dmaker audio preset`, o botão **Salvar predefinição**) | "Equalizar e filtrar o som: graves e agudos, EQ gráfico, passa-alta e Notch" |
 | DMK-53 | Fades e crossfades: Fade In e Fade Out com cinco curvas (linear, logarítmica, exponencial, seno e quadrática), Fade Ajustável (ganho inicial e final em % ou dB, a forma, o ajuste do meio e as predefinições do Audacity, com o fade parcial de 100% a 40%), Studio Fade Out (o volume fecha enquanto um passa-baixa desce), o crossfade de trilhas com os quatro tipos do Audacity, o crossfade do som entre dois clipes vizinhos (J-cut e L-cut) com a imagem trocando no quadro exato, e a alça de fade arrastável na linha do tempo; `audio_fade`, `audio_crossfade_tracks`, `audio_crossfade_clips`, `dmaker audio fade`, `crossfade-tracks` e `crossfade-clips` | "Fazer fades: curva, fade parcial e fade de estúdio"; "Cruzar o som de dois clipes ou de duas trilhas (crossfade)" |
+| DMK-56 | Tempo e afinação: os efeitos Mudar Tom (semitons e centavos, de nota para nota ou em porcentagem, com a opção de preservar os formantes da voz, sem mudar a duração), Mudar Velocidade e Tom (o "vinil", por porcentagem ou de RPM para RPM), Mudar Andamento (por porcentagem, de BPM para BPM ou de uma duração para outra, sem mudar o tom), Esticar Gradualmente (andamento e tom variando do início ao fim do trecho) e Paulstretch (esticar por um fator grande, até 20 minutos de saída, para a abertura etérea); o catálogo ganha a condição de exibição `shown_when`, e os campos de cada unidade só aparecem na tela no modo dela; a vista da linha do tempo, o `validate` e a duração do projeto só de áudio mostram a duração nova do item depois de esticar; `audio_effect` (`dmaker audio effect add ... change_tempo --param mode=bpm`) | "Mudar o tom, a velocidade e o andamento, e esticar o som" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -4772,7 +4842,7 @@ São 81 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 76 blocos e 613 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 81 blocos e 659 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -4878,7 +4948,7 @@ Usado em `Project.audio`.
 | `normalize` | `"two-pass"` ou `"fast"` ou `"off"` | `two-pass` | `two-pass` mede e ajusta em duas passadas (padrão das redes); `fast` numa só; `off` desliga. |
 | `target_lufs` | número, de -30 a -5 | -14 | Loudness alvo da normalização, em LUFS. |
 | `mute_clips` | sim ou não | não | Silencia o áudio dos clipes; a música e a narração ficam. |
-| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
+| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
 | `sfx_gain_db` | número, de -120 a 24 | 0.0 | Ganho em dB do barramento dos efeitos sonoros (a trilha SFX); fica no padrão na spec e é o que `tracks.SFX` vira no render. |
 | `sfx_pan` | número, de -1 a 1 | 0.0 | Equilíbrio do barramento dos efeitos sonoros, de -1 a 1. |
 | `noise_profiles` | mapa de `NoiseProfile` | vazio |  |
@@ -4894,7 +4964,7 @@ Usado em `AudioSettings.tracks`.
 | `volume` | número, de 0 a 4 | 1.0 | Volume da faixa. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca a faixa externa em relação à sessão, em segundos da gravação: positivo atrasa o som da faixa (corrige um gravador que começou adiantado). |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### AudiogramOverlay
 
@@ -5025,6 +5095,58 @@ Usado em `Project.timeline`.
 | `fields` | mapa de texto ou lista de texto | vazio | Valores dos campos do layout. |
 | `flat` | sim ou não | não | Cartão de cor lisa, sem decoração e sem exigir título. |
 
+#### ChangePitch
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"change_pitch"` | `change_pitch` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `mode` | `"semitones"` ou `"notes"` ou `"percent"` | `semitones` |  |
+| `semitones` | número, de -48 a 48 | 0.0 |  |
+| `cents` | número, de -100 a 100 | 0.0 |  |
+| `from_note` | `"C"` ou `"C#"` ou `"D"` ou `"D#"` ou `"E"` ou `"F"` ou `"F#"` ou `"G"` ou `"G#"` ou `"A"` ou `"A#"` ou `"B"` | `A` |  |
+| `from_octave` | inteiro, de 0 a 8 | 4 |  |
+| `to_note` | `"C"` ou `"C#"` ou `"D"` ou `"D#"` ou `"E"` ou `"F"` ou `"F#"` ou `"G"` ou `"G#"` ou `"A"` ou `"A#"` ou `"B"` | `B` |  |
+| `to_octave` | inteiro, de 0 a 8 | 4 |  |
+| `percent` | número, de -90 a 1500 | 0.0 |  |
+| `preserve_formants` | sim ou não | não |  |
+
+#### ChangeSpeed
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"change_speed"` | `change_speed` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `mode` | `"percent"` ou `"rpm"` | `percent` |  |
+| `percent` | número, de -90 a 900 | 0.0 |  |
+| `rpm_from` | número, de 1 a 200 | 45.0 |  |
+| `rpm_to` | número, de 1 a 200 | 33.333333 |  |
+
+#### ChangeTempo
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"change_tempo"` | `change_tempo` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `mode` | `"percent"` ou `"bpm"` ou `"duration"` | `percent` |  |
+| `percent` | número, de -90 a 900 | 0.0 |  |
+| `bpm_from` | número, de 1 a 999 | 120.0 |  |
+| `bpm_to` | número, de 1 a 999 | 128.0 |  |
+| `length_from` | número, maior que 0, até 36000 | 10.0 |  |
+| `length_to` | número, maior que 0, até 36000 | 10.0 |  |
+
 #### Channels
 
 Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
@@ -5106,7 +5228,7 @@ Usado em `Project.timeline`.
 | `audio_fade` | número, de 0 a 0.5 | 0.0 | Fade de áudio nas duas pontas, sem escurecer a imagem; tira o estalo de um corte seco. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do trecho em relação à imagem, em segundos da linha do tempo: positivo atrasa o som, negativo adianta. O som pode vir de fora de `start` e `end` na fonte; onde a fonte não tem som, sai silêncio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `audio_crossfade` | `AudioCrossfade` | nenhum | Crossfade do som no corte com o clipe anterior (J-cut e L-cut): a imagem troca no quadro exato e o som cruza por `duration` segundos em volta do corte. |
 
 #### ColorAdjust
@@ -5499,7 +5621,7 @@ Usado em `AudioSettings.music`.
 | `duck_ratio` | número, de 1 a 20 | 6 | Quanto a música abaixa quando há voz. |
 | `duck_release` | número, de 10 a 5000 | 350 | Tempo para a música voltar ao volume, em milissegundos. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### MusicSpan
 
@@ -5531,7 +5653,7 @@ Usado em `AudioSettings.narration`.
 | `language` | texto | `pt` | Idioma da fala. |
 | `seed` | inteiro | nenhum | Semente: a mesma semente repete a mesma fala. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### NoiseGate
 
@@ -5617,6 +5739,19 @@ Usado em `Project.output`.
 | `guides` | sim ou não | não | Desenha as zonas seguras do formato por cima do vídeo. |
 | `audio_format` | `AudioFormat` | nenhum | Só com um formato de áudio: taxa de amostragem, canais, profundidade ou taxa de bits do arquivo. |
 | `metadata` | `AudioMetadata` | nenhum | Etiquetas do arquivo de áudio (artista, título, álbum...); completam o modelo `metadata` da marca. |
+
+#### Paulstretch
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"paulstretch"` | `paulstretch` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `stretch_factor` | número, de 1 a 1000 | 10.0 |  |
+| `time_resolution` | número, de 0.01 a 10 | 0.25 |  |
 
 #### PhaseRuleSpec
 
@@ -5722,6 +5857,22 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `enabled` | sim ou não | sim |  |
 | `start` | número, mínimo 0 | nenhum |  |
 | `end` | número, mínimo 0 | nenhum |  |
+
+#### SlidingStretch
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `Music.effects`, `Narration.effects`, `VideoOverlay.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"sliding_stretch"` | `sliding_stretch` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `tempo_start` | número, de -90 a 900 | 0.0 |  |
+| `tempo_end` | número, de -90 a 900 | -50.0 |  |
+| `pitch_start` | número, de -48 a 48 | 0.0 |  |
+| `pitch_end` | número, de -48 a 48 | -12.0 |  |
+| `preserve_formants` | sim ou não | não |  |
 
 #### SourceRef
 
@@ -5900,7 +6051,7 @@ Usado em `Project.overlays`.
 | `margin` | número, mínimo 0 | 40 | Margem da borda, em px na base 1080. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio do vídeo (0 deixa mudo). |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do picture-in-picture em relação à imagem dele, em segundos: positivo atrasa o som. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `animation` | `"none"` ou `"fade"` ou `"slide"` | `fade` | Como entra: `fade`, `slide` ou `none`. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
@@ -5917,7 +6068,7 @@ Usado em `AudioSettings.voiceover`.
 | `end` | número, mínimo 0 | nenhum | Ponto de saída no arquivo, em segundos; vazio vai até o fim dele. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 <!-- dmaker:fim-gerado spec -->
 

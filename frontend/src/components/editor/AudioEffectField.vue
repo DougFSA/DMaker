@@ -15,6 +15,7 @@ import {
   clampParam,
   effectPath,
   isListParam,
+  isParamShown,
   paramValue,
   profileNames,
   setEffectFieldIn,
@@ -36,10 +37,15 @@ const props = defineProps<{
   optional?: boolean
   /** Diz o que há de errado com o número antes de gravar (o fim antes do início); nulo quando está certo. */
   check?: (value: number | null) => string | null
+  /** Os parâmetros do mesmo efeito: o padrão de quem a condição `shown_when` cita e a spec não guarda. */
+  siblings?: readonly AudioEffectParam[]
 }>()
 
 const editor = useEditorStore()
 const catalog = useAudioEffectsStore()
+
+/** O campo de um modo de unidade só aparece no modo dele: sem `shown_when` aparece sempre. */
+const shown = computed(() => isParamShown(props.param, props.effect, props.siblings))
 
 const path = computed(() => effectPath(props.listPath, props.index, props.param.name))
 
@@ -135,8 +141,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- o campo de outro modo de unidade fica de fora da tela (a spec o guarda) -->
+  <template v-if="!shown" />
   <AppNumberInput
-    v-if="param.kind === 'number' || param.kind === 'integer'"
+    v-else-if="param.kind === 'number' || param.kind === 'integer'"
     :label="param.label"
     :model-value="numberValue"
     :min="limits.min"

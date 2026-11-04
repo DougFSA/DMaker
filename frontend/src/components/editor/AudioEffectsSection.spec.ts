@@ -482,6 +482,46 @@ describe('AudioEffectsSection: parâmetros', () => {
     expect(effectsAt(opened, 'audio.master_effects')![0]!.curve).toBe('log')
   })
 
+  it('os campos de cada unidade só aparecem no modo dela (shown_when), sem um if por tipo', async () => {
+    const catalog = audioEffectCatalog()
+    const field = (name: string, label: string, kind: 'number' | 'choice', extra: Record<string, unknown> = {}) => ({
+      name,
+      label,
+      kind,
+      unit: '',
+      default: null,
+      minimum: null,
+      maximum: null,
+      hint: '',
+      options: [],
+      ...extra,
+    })
+    catalog.effects.push({
+      type: 'change_pitch',
+      label: 'Mudar Tom',
+      audacity_name: 'Change Pitch',
+      summary: '',
+      changes_duration: false,
+      parameters: [
+        field('mode', 'Unidade', 'choice', { default: 'semitones', options: ['semitones', 'percent'] }),
+        field('semitones', 'Semitons', 'number', { default: 0, shown_when: { mode: 'semitones' } }),
+        field('percent', 'Mudança de frequência', 'number', { default: 0, shown_when: { mode: 'percent' } }),
+      ],
+    })
+    const { opened, wrapper } = await mountEffects(effectsSpec(), { 'GET /api/audio-effects': catalog })
+    await addEffect(wrapper, 'change_pitch')
+    const shown = () =>
+      card(wrapper, 0)
+        .findAll('.effect__body > .effect__fields [data-effect-param]')
+        .map((element) => element.attributes('data-effect-param'))
+    expect(shown()).toEqual(['mode', 'semitones'])
+    await card(wrapper, 0).find('[data-effect-param="mode"] select').setValue('percent')
+    expect(shown()).toEqual(['mode', 'percent'])
+    expect(effectsAt(opened, 'audio.master_effects')![0]!.mode).toBe('percent')
+    // o valor do outro modo continua na spec: só a tela o esconde
+    expect(effectsAt(opened, 'audio.master_effects')![0]!.semitones).toBe(0)
+  })
+
   it('o efeito sem parâmetros diz que não tem', async () => {
     const { wrapper } = await mountEffects()
     await addEffect(wrapper, 'reverse')

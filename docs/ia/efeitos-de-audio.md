@@ -17,7 +17,7 @@ O áudio de um clipe, uma narração, uma voz gravada, a música ou o vídeo tod
 
 - O projeto (`name`) e o item: `timeline.N` (clipe), `overlays.N` (PiP), `audio.voiceover.N`, `audio.narration.N`, `audio.tracks.N`, `audio.music` ou `audio.master` (a mistura).
 - A **ordem conta**: normalizar depois de amplificar mede o som já amplificado.
-- O **Repetir** só vale em voz gravada e em música, onde o item pode crescer; nos outros a spec o recusa.
+- O **Repetir** e os efeitos de tempo que mudam a duração (Mudar Velocidade e Tom, Mudar Andamento, Esticar Gradualmente e Paulstretch) só valem em voz gravada e em música, onde o item pode crescer; nos outros a spec os recusa. O Mudar Tom não muda a duração e vale em qualquer item.
 - A normalização final de loudness continua valendo por cima do master.
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
@@ -49,7 +49,7 @@ Rode `dmaker validate` e olhe a duração: o Repetir numa voz gravada mostra o �
 
 ## Erros comuns
 
-- **"O efeito Repetir muda a duração do item e não vale aqui"**: o Repetir só vale em voz gravada (`audio.voiceover`) e em música (`audio.music`).
+- **"O efeito Repetir muda a duração do item e não vale aqui"**: o Repetir só vale em voz gravada (`audio.voiceover`) e em música (`audio.music`). O mesmo vale para os efeitos de tempo (veja "Mudar o tom, a velocidade e o andamento, e esticar o som"); no clipe, a velocidade do som e da imagem é o `speed` do próprio clipe.
 - **Não ouvi diferença**: confira se o efeito está ligado (`enabled`), se o intervalo (`start`/`end`) cobre o trecho e se o item não está mudo.
 - **O Normalizar não fez nada**: o trecho é silêncio, ou o intervalo está fora do item.
 - **A primeira prévia ou o primeiro render demora**: o item é tratado uma vez e guardado em `cache/audio-fx` (uns 23 MB por minuto de estéreo); `dmaker clean` o apaga.

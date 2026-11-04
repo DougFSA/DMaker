@@ -31,6 +31,7 @@ def param(
     unit: str = "",
     hint: str = "",
     kind: str = "",
+    shown_when: dict[str, Any] | None = None,
     low: float | None = None,
     high: float | None = None,
     options: Sequence[str] | None = None,
@@ -40,10 +41,14 @@ def param(
     catálogo mostra na interface, no MCP e na CLI. O padrão é o do Audacity quando ele tem um. `kind` força o tipo que
     o catálogo anuncia quando o tipo do Python não diz tudo (`profile`: o nome de um perfil de ruído do projeto;
     `band_gains` e `freq_points`: as listas do EQ). `low` e `high` dão a faixa dos ITENS de uma lista (que `ge` e `le`
-    não expressam), e `options` os nomes das posições de uma lista de tamanho fixo."""
+    não expressam), e `options` os nomes das posições de uma lista de tamanho fixo. `shown_when` é a condição para a
+    interface mostrar o campo: `{"mode": "semitones"}` o esconde enquanto o campo `mode` do mesmo efeito tiver outro
+    valor (os modos de unidade do Mudar Tom). Só esconde: a spec aceita o campo sempre."""
     extra: dict[str, Any] = {"label": label, "unit": unit}
     if kind:
         extra["kind"] = kind
+    if shown_when:
+        extra["shown_when"] = dict(shown_when)
     if low is not None:
         extra["minimum"] = low
     if high is not None:
@@ -107,6 +112,9 @@ class EffectBase(BaseModel):
     has_response: ClassVar[bool] = False
     # ações do catálogo deste efeito (ver `EffectAction`); o corpo de cada uma é registrado em `pipeline.effect_actions`
     actions: ClassVar[tuple[EffectAction, ...]] = ()
+    # o que dizer, além da recusa, quando o efeito muda a duração e cai num item que não pode crescer (Mudar Andamento no
+    # clipe): aponta o caminho que existe
+    duration_advice: ClassVar[str] = ""
 
     @model_validator(mode="after")
     def _interval(self) -> EffectBase:
@@ -189,6 +197,11 @@ class EffectBase(BaseModel):
     def output_duration(self, duration: float) -> float:
         """Quanto dura o sinal depois do efeito. Só os efeitos que declaram `changes_duration` mudam isto."""
         return duration
+
+    def refusal(self, duration: float) -> str | None:
+        """Por que o efeito não pode rodar num sinal de `duration` segundos, ou None quando pode. Existe para o que tem teto
+        de memória (o Paulstretch guarda a saída inteira): a spec não sabe a duração do arquivo, quem processa sabe."""
+        return None
 
 
 def _params(effect: EffectBase) -> dict[str, Any]:

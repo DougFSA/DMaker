@@ -71,9 +71,10 @@ class EffectsOwner(Strict):
         for name in self.effect_fields:
             for effect in getattr(self, name):
                 if effect.alters_duration():
+                    advice = f" {effect.duration_advice}" if effect.duration_advice else ""
                     raise ValueError(
                         f"{self.effects_place}: o efeito {effect.label} muda a duração do item e não vale "
-                        f"aqui. Ele vale em {GROWABLE_AUDIO}."
+                        f"aqui. Ele vale em {GROWABLE_AUDIO}.{advice}"
                     )
         return self
 

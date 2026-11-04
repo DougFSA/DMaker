@@ -25,7 +25,13 @@ from pathlib import Path
 import numpy as np
 
 from .. import config
-from ..domain.audio_effects import EffectBase, active_effects, chain_duration, chain_signature
+from ..domain.audio_effects import (
+    EffectBase,
+    active_effects,
+    chain_duration,
+    chain_refusal,
+    chain_signature,
+)
 from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
 from ..domain.spec import ClipSegment
@@ -147,6 +153,9 @@ class EffectProcessor:
         """O item processado, ou None quando nenhum efeito está ligado (o som segue pela fonte original)."""
         if not active_effects(item.effects) or item.duration <= 0:
             return None
+        reason = chain_refusal(item.effects, item.duration)
+        if reason is not None:  # o teto de saída do Paulstretch: recusa antes de gastar memória e tempo
+            raise ValueError(reason)
         out = self.cache_dir / f"{self.key(item)}.wav"
         if not out.exists():
             self._render(item, out)
