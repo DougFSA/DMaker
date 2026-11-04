@@ -649,6 +649,8 @@ def _music_track(
                 "loop": music.loop,
                 "volume": music.volume,
                 **_mix_extra(0.0, music.pan, music.effects),
+                # quanto dura o arquivo da música depois dos efeitos que mudam o tempo (a janela na linha do tempo não muda)
+                **({"duration": music_duration} if music_duration is not None else {}),
                 # com regra do Auto Duck para a música, ela substitui o `music.ducking` antigo: a vista diz quem a abaixa
                 **({"ducked_by": ducked_by} if ducked_by else {}),
             },

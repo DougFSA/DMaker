@@ -39,6 +39,11 @@ export interface AudioEffectParam {
   hint: string
   /** As opções de uma escolha (`kind: 'choice'`); vazio nos outros. */
   options: string[]
+  /**
+   * A condição para mostrar o campo: `{ mode: 'semitones' }` só o mostra enquanto o campo `mode` do mesmo efeito vale
+   * `semitones` (os modos de unidade do Mudar Tom). Nula ou ausente: aparece sempre. Só esconde; a spec aceita o campo.
+   */
+  shown_when?: Record<string, AudioEffectValue> | null
 }
 
 export interface AudioEffectInfo {

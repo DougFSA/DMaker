@@ -32,7 +32,11 @@ from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
 from .lint import lint
 from .sync import OffsetFinder
-from .voicefiles import voice_file_playtimes
+from .voicefiles import (
+    effect_refusal_warnings,
+    music_playtime_warnings,
+    voice_file_playtimes,
+)
 from .voiceover import known_voices
 
 
@@ -138,6 +142,8 @@ def summarize(
         known_voices=known_voices(project),
         voiceover_playtimes=voice_file_playtimes(project, prober),
     )
+    warnings += music_playtime_warnings(project, prober)
+    warnings += effect_refusal_warnings(project, prober)
     warnings += html_warnings(project, browser_problem)
     warnings += audio_output_warnings(project, presentation.total)
     warnings += noise_profile_warnings(project)

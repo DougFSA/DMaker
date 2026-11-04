@@ -158,6 +158,25 @@ export function paramValue(effect: AudioEffectSettings, param: Pick<AudioEffectP
   return typeof param.default === 'number' ? param.default : null
 }
 
+/**
+ * Se o formulário mostra o parâmetro agora: sem `shown_when` sempre; com ele, cada campo citado precisa valer o que a
+ * condição pede. O valor de um campo que a spec não guarda é o padrão do catálogo (`siblings`, os parâmetros do mesmo
+ * efeito). Serve ao cartão da cadeia e ao formulário do painel Áudio, sem um `if` por tipo de efeito.
+ */
+export function isParamShown(
+  param: Pick<AudioEffectParam, 'shown_when'>,
+  values: Record<string, unknown>,
+  siblings: readonly AudioEffectParam[] = [],
+): boolean {
+  const condition = param.shown_when
+  if (!condition) return true
+  return Object.entries(condition).every(([field, expected]) => {
+    const stored = values[field]
+    const fallback = siblings.find((sibling) => sibling.name === field)?.default
+    return (stored === undefined || stored === null ? fallback : stored) === expected
+  })
+}
+
 /** O texto da opção escolhida, que é o que o seletor compara (`6` e `"6"` são a mesma opção). */
 export function choiceText(value: AudioEffectValue | null | undefined): string {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''

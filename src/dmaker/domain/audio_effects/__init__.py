@@ -78,6 +78,17 @@ def chain_duration(effects: Sequence[EffectBase], duration: float) -> float:
     return duration
 
 
+def chain_refusal(effects: Sequence[EffectBase], duration: float) -> str | None:
+    """O primeiro motivo pelo qual a cadeia não pode rodar num item de `duration` segundos (o teto de saída do
+    Paulstretch), ou None. Cada efeito vê a duração que chega a ele, depois dos anteriores."""
+    for _, effect in active_effects(effects):
+        reason = effect.refusal(duration)
+        if reason is not None:
+            return reason
+        duration = effect.output_duration(duration)
+    return None
+
+
 def rebase_effects(
     effects: Sequence[EffectBase], origin: float, length: float, total: float | None = None
 ) -> list[EffectBase]:
@@ -122,6 +133,7 @@ __all__ = [
     "catalog",
     "catalog_payload",
     "chain_duration",
+    "chain_refusal",
     "chain_signature",
     "check_preset_fits",
     "common_parameters",
