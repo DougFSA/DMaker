@@ -66,9 +66,10 @@ def split_segment(project: Project, index: int, at: float, durations: list[float
             second["start"] = split_point
             # second["end"] continua o mesmo do original (pode ser None: até o fim da mídia)
             if original.get("effects"):  # os intervalos dos efeitos seguem o som para a metade a que ele foi
-                first["effects"] = rebase_effect_dicts(original["effects"], 0.0, at * speed)
+                whole = duration * speed  # o item inteiro: o fade preso à borda precisa saber onde ela fica
+                first["effects"] = rebase_effect_dicts(original["effects"], 0.0, at * speed, whole)
                 second["effects"] = rebase_effect_dicts(
-                    original["effects"], at * speed, (duration - at) * speed
+                    original["effects"], at * speed, (duration - at) * speed, whole
                 )
         else:
             first["duration"] = at
@@ -141,7 +142,9 @@ def trim_segment(
                 new_start = min(max(new_start, 0.0), end - MIN_SEGMENT_DURATION * speed)
                 seg["start"] = new_start
                 if seg.get("effects") and new_start != start:  # o tempo do item parte do começo do trecho
-                    seg["effects"] = rebase_effect_dicts(seg["effects"], new_start - start, end - new_start)
+                    seg["effects"] = rebase_effect_dicts(
+                        seg["effects"], new_start - start, end - new_start, end - start
+                    )
             else:
                 new_end = end + delta * speed
                 upper = media_duration if media_duration is not None else new_end

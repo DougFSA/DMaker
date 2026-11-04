@@ -225,6 +225,17 @@ class Transition(Strict):
         return v
 
 
+class AudioCrossfade(Strict):
+    """Crossfade do SOM no corte entre este clipe e o anterior, independente da imagem (que continua trocando no
+    quadro exato): o som de cada lado vem da sobra da fonte além do ponto de entrada e do de saída, e os dois se cruzam
+    por `duration` segundos, metade antes do corte e metade depois (o J-cut e o L-cut do vídeo). `curve` é o tipo do
+    crossfade: `constant_gain` soma as amplitudes (sons iguais e em fase), `constant_power_1` e `constant_power_2` somam as
+    potências (sons diferentes, a escolha de quase todo corte entre falas)."""
+
+    duration: float = Field(0.5, gt=0, le=5)
+    curve: Literal["constant_gain", "constant_power_1", "constant_power_2"] = "constant_power_1"
+
+
 class SegmentBase(Strict):
     label: str | None = None
     transition: Transition | None = None  # entrada deste trecho, a partir do anterior
@@ -267,9 +278,11 @@ class ClipSegment(SegmentBase, EffectsOwner):
     pan: float = Field(0.0, ge=-1, le=1)
     # cadeia de efeitos no som da própria câmera do trecho (ver `domain/audio_effects`), em ordem
     effects: list[AudioEffect] = []
+    # crossfade do som no corte com o clipe anterior (ver `AudioCrossfade`); vazio, fora do dump e do hash
+    audio_crossfade: AudioCrossfade | None = None
 
     effects_place: ClassVar[str] = "clipe"
-    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0}
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0, "audio_crossfade": None}
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:

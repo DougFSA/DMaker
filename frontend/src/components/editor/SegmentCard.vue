@@ -27,6 +27,7 @@ import { useToastsStore } from '@/stores/toasts'
 import FieldGrid from './FieldGrid.vue'
 import ItemCardShell from './ItemCardShell.vue'
 import MediaThumb from './MediaThumb.vue'
+import SegmentCrossfade from './SegmentCrossfade.vue'
 import SourceOriginField from './SourceOriginField.vue'
 import SpecField from './SpecField.vue'
 
@@ -120,6 +121,8 @@ function remove(): void {
           <SpecField :field="TRANSITION_DURATION_FIELD" :base="base" />
         </FieldGrid>
       </fieldset>
+
+      <SegmentCrossfade v-if="type === 'clip' && index > 0" :index="index" />
 
       <fieldset class="sub">
         <legend>Enquadramento</legend>

@@ -33,6 +33,7 @@ from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
+from .audio_crossfade import CutNeighbors, clip_crossfades, crossfade_key_parts
 from .audio_effects import clip_camera_audio, noise_profile_parts, track_audio_overrides
 from .auto_duck import duck_key_part, spill_long_graph, track_duck_lookup
 from .cache_key import cache_key
@@ -237,6 +238,10 @@ class ClipPreparer:
         )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
         look = segment_look(index, segment, ctx)
+        # o som emprestado dos clipes vizinhos nas duas pontas (J-cut e L-cut); None sem crossfade
+        crossfades = (
+            clip_crossfades(index, ctx.cut_neighbors, ctx.warn) if ctx.cut_neighbors is not None else None
+        )
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),  # inclui o audio_mode
@@ -265,6 +270,8 @@ class ClipPreparer:
             # o perfil de ruído nomeado que a Redução de ruído do clipe usa: mudar o trecho dele muda o som (vazio, e
             # fora da chave, sem perfil nomeado)
             *noise_profile_parts(ctx, segment.effects),
+            # o crossfade de som com os vizinhos: a receita e os arquivos de onde o som é emprestado (vazio sem crossfade)
+            *crossfade_key_parts(crossfades),
         )
         out = ctx.cache_dir / f"{key}.mov"
         if camera_audio is not None and _needs_render(out, ctx) and not ctx.options.dry_run:
@@ -312,6 +319,7 @@ class ClipPreparer:
             has_brand=ctx.has_brand,
             look=look,
             label=_label(index, ctx),
+            crossfades=crossfades,
         )
         if any(
             piece.duck for piece in tracks
@@ -518,6 +526,7 @@ class MezzanineBuilder:
         instante precisa de dois ou três trechos, e gerar o mezanino dos outros seria trabalho jogado fora."""
         prepared: list[PreparedSegment] = []
         wanted = None if only is None else set(only)
+        ctx.cut_neighbors = self._neighbors(ctx, sources)
         for i, (segment, source) in enumerate(zip(ctx.project.timeline, sources, strict=True)):
             if wanted is not None and i not in wanted:
                 continue
@@ -526,6 +535,26 @@ class MezzanineBuilder:
                 raise TypeError(f"timeline[{i}]: nenhum preparador para {type(segment).__name__}")
             prepared.append(preparer.prepare(i, segment, source, ctx))
         return prepared
+
+    @staticmethod
+    def _neighbors(ctx: RenderContext, sources: list[Source]) -> CutNeighbors | None:
+        """A linha do tempo como o crossfade de som entre clipes lê (fontes e durações dos vizinhos). Sem nenhum clipe com o
+        campo, nada a calcular: o projeto antigo segue o mesmo caminho de sempre."""
+        timeline = ctx.project.timeline
+        if not any(isinstance(seg, ClipSegment) and seg.audio_crossfade for seg in timeline):
+            return None
+        durations = [
+            segment_duration(seg, source.info, source.offset)
+            for seg, source in zip(timeline, sources, strict=True)
+        ]
+
+        def slices_of(i: int) -> tuple[TrackSlice, ...]:
+            segment = timeline[i]
+            if isinstance(segment, ClipSegment) and segment.source:
+                return _track_slices(ctx, segment, i)
+            return ()
+
+        return CutNeighbors(timeline, sources, durations, slices_of)
 
     def build(self, ctx: RenderContext, prepared: list[PreparedSegment]) -> None:
         for item in prepared:

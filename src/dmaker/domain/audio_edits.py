@@ -127,6 +127,40 @@ def add_envelope(project: Project, target: str, points: Sequence[tuple[float, fl
     return _readable(project, mutate)
 
 
+def set_edge_fade(
+    project: Project, target: str, side: str, duration: float, params: dict[str, Any] | None = None
+) -> Project:
+    """Põe, muda ou tira o Fade In (`side="in"`) ou o Fade Out (`side="out"`) preso à borda do item: o que a alça do fade
+    da linha do tempo grava. Se o item já tem o fade na borda (sem intervalo), a duração e os `params` (curva) o mudam;
+    senão ele nasce no fim da cadeia. Duração zero tira o fade. O Fade In e o Fade Out de intervalo marcado ficam como
+    estão: são outro efeito, da seleção."""
+    if side not in ("in", "out"):
+        raise EditError(f"lado do fade desconhecido: {side!r}. Use `in` (entrada) ou `out` (saída)")
+    kind = f"fade_{side}"
+
+    def mutate(data: dict) -> None:
+        chain = _effect_list(data, target)
+        position = next(
+            (
+                index
+                for index, entry in enumerate(chain)
+                if entry.get("type") == kind and entry.get("start") is None and entry.get("end") is None
+            ),
+            None,
+        )
+        if duration <= EPSILON:
+            if position is not None:
+                del chain[position]
+            return
+        changes = {**(params or {}), "type": kind, "duration": round(duration, 6), "enabled": True}
+        if position is None:
+            chain.append(_parse(changes))
+        else:
+            chain[position] = _parse({**chain[position], **changes})
+
+    return _readable(project, mutate)
+
+
 # ---------- voz gravada: colar, dividir, juntar, aparar ----------
 
 
@@ -169,10 +203,10 @@ def split_voiceover(project: Project, index: int, at_item: float, length: float)
         original = voices[index]
         first, second = dict(original), dict(original)
         first["end"] = round(clip.offset + at_item, 6)
-        first["effects"] = _dump(rebase_effects(clip.effects, 0.0, at_item))
+        first["effects"] = _dump(rebase_effects(clip.effects, 0.0, at_item, length))
         second["start"] = round(clip.start + at_item, 6)
         second["offset"] = round(clip.offset + at_item, 6)
-        second["effects"] = _dump(rebase_effects(clip.effects, at_item, length - at_item))
+        second["effects"] = _dump(rebase_effects(clip.effects, at_item, length - at_item, length))
         voices[index : index + 1] = [first, second]
 
     return _readable(project, mutate)
@@ -240,7 +274,7 @@ def trim_voiceover(project: Project, index: int, start_at: float, end_at: float,
         item["start"] = round(clip.start + start_at, 6)
         item["offset"] = round(clip.offset + start_at, 6)
         item["end"] = round(clip.offset + end_at, 6)
-        item["effects"] = _dump(rebase_effects(clip.effects, start_at, end_at - start_at))
+        item["effects"] = _dump(rebase_effects(clip.effects, start_at, end_at - start_at, length))
 
     return _readable(project, mutate)
 

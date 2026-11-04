@@ -13,6 +13,7 @@ from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, T
 from ..domain.timeline import TIME_EPSILON, timeline_spans, transitions_of
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
+from .crossfade_lint import crossfade_warnings
 from .voicefiles import voice_file_warnings
 from .voiceover import estimate_narration_duration
 
@@ -102,6 +103,7 @@ def lint(
     warnings += _behind_person_warnings(project, total, durations)
     warnings += _sfx_warnings(project, total)
     warnings += _marker_warnings(project, total)
+    warnings += crossfade_warnings(project, durations, infos, offsets)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:

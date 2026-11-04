@@ -3430,6 +3430,95 @@ def audio_channels_command(
     _run_wave_edit(spec, op, "Canais ajustados.")
 
 
+@audio_app.command("fade")
+def audio_fade_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    side: Annotated[str, typer.Argument(help="in (abre no começo do item) ou out (fecha no fim).")],
+    duration: Annotated[
+        float,
+        typer.Argument(help="Quanto dura o fade, em segundos, contado da borda do item. 0 tira o fade."),
+    ],
+    curve: Annotated[
+        str | None,
+        typer.Option(
+            "--curve",
+            help="linear (padrão), logarithmic, exponential, sine (S) ou quadratic. Sem ela, mantém a que o fade já tem.",
+        ),
+    ] = None,
+) -> None:
+    """Põe, muda ou tira o fade da borda de um item de áudio, com a curva escolhida (o Fade In e o Fade Out do Audacity).
+    É o fade que a alça da linha do tempo mexe; para um fade em um trecho marcado, use `audio effect add`."""
+    op = _wave_op("audio_fade", target, side=side, duration=duration, curve=curve)
+    _run_wave_edit(spec, op, "Fade ajustado." if duration > 0 else "Fade removido.")
+
+
+@audio_app.command("crossfade-tracks")
+def audio_crossfade_tracks_command(
+    spec: _WAVE_SPEC,
+    out_target: Annotated[
+        str, typer.Argument(help="O item que some (mesma forma do alvo de `audio silence`).")
+    ],
+    in_target: Annotated[str, typer.Argument(help="O item que entra.")],
+    start: Annotated[str, typer.Option("--start", help="Início do cruzamento, em segundos do vídeo final.")],
+    end: Annotated[str, typer.Option("--end", help="Fim do cruzamento, em segundos do vídeo final.")],
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help="constant_gain (soma de amplitudes: sons iguais), constant_power_1 (padrão), constant_power_2 ou custom.",
+        ),
+    ] = "constant_power_1",
+    curve: Annotated[
+        str | None,
+        typer.Option("--curve", help="Só no custom: a forma (up, down, s_up, s_down, sine_up, sine_down)."),
+    ] = None,
+    mid_adjust: Annotated[
+        float | None, typer.Option("--mid-adjust", help="Só no custom: o ajuste do meio, de -100 a 100.")
+    ] = None,
+) -> None:
+    """Uma trilha some enquanto outra entra, no intervalo dado (o Crossfade Tracks do Audacity). Grava um Fade Ajustável
+    em cada item, com as curvas casadas, num passo só do histórico; a mixagem não muda."""
+    op = {
+        "type": "audio_crossfade_tracks",
+        "out_target": out_target,
+        "in_target": in_target,
+        "start": _instant_arg(start),
+        "end": _instant_arg(end),
+        "kind": kind,
+    }
+    if curve is not None:
+        op["curve"] = curve
+    if mid_adjust is not None:
+        op["mid_adjust"] = mid_adjust
+    _run_wave_edit(spec, op, "Crossfade de trilhas feito.")
+
+
+@audio_app.command("crossfade-clips")
+def audio_crossfade_clips_command(
+    spec: _WAVE_SPEC,
+    index: Annotated[
+        int, typer.Argument(help="O clipe que entra no corte (1 é o segundo trecho da linha do tempo).")
+    ],
+    duration: Annotated[
+        float,
+        typer.Argument(
+            help="Quanto dura o cruzamento do som, em segundos (metade antes e metade depois do corte). 0 tira."
+        ),
+    ] = 0.5,
+    curve: Annotated[
+        str | None,
+        typer.Option("--curve", help="constant_gain, constant_power_1 (padrão) ou constant_power_2."),
+    ] = None,
+) -> None:
+    """Cruza o som de dois clipes vizinhos sem mexer na imagem, que continua trocando no quadro exato do corte (o J-cut e o
+    L-cut). O som de cada lado vem da sobra da fonte além do ponto de entrada e do de saída."""
+    op = {"type": "audio_crossfade_clips", "index": index, "duration": duration}
+    if curve is not None:
+        op["curve"] = curve
+    _run_wave_edit(spec, op, "Crossfade de som ajustado." if duration > 0 else "Crossfade de som removido.")
+
+
 @audio_app.command("paste")
 def audio_paste_command(
     spec: _WAVE_SPEC,

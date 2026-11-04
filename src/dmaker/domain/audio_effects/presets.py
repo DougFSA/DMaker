@@ -125,3 +125,90 @@ register_effect_preset(
         effects=({"type": "limiter", "limit_type": "soft", "ceiling_db": -1.0},),
     )
 )
+
+
+# ---------- Fade Ajustável: os valores de partida ----------
+#
+# O Audacity oferece predefinições no Fade Ajustável (linear, exponencial, logarítmica, arredondada, cosseno e S, cada uma de
+# entrada e de saída). Aqui são predefinições comuns: cada uma põe UM Fade Ajustável na cadeia, que a pessoa ajusta depois.
+# O ajuste do meio entorta a forma (`domain.fade_curves`): +50 demora a abrir (parecido com o exponencial), -50 abre logo (parecido
+# com o logarítmico).
+
+_FADE_CASES: tuple[tuple[str, str, str, float, str], ...] = (
+    # (id, nome, forma de entrada, ajuste do meio, forma de saída)
+    ("linear", "Linear", "up", 0.0, "up"),
+    ("exponential", "Exponencial", "up", 50.0, "down"),
+    ("logarithmic", "Logarítmica", "up", -50.0, "down"),
+    ("rounded", "Arredondada", "up", -25.0, "down"),
+    ("cosine", "Cosseno", "sine_up", 0.0, "sine_down"),
+    ("s_curve", "Curva em S", "s_up", 0.0, "s_down"),
+)
+
+for _id, _name, _shape_in, _mid, _shape_out in _FADE_CASES:
+    register_effect_preset(
+        EffectPreset(
+            id=f"fade_{_id}_in",
+            label=f"Fade Ajustável: {_name} (entrada)",
+            summary=f"Abre do silêncio ao nível original, forma {_name.lower()}.",
+            effects=(
+                {
+                    "type": "adjustable_fade",
+                    "shape": _shape_in,
+                    "mid_adjust": _mid,
+                    "start_gain": 0.0,
+                    "end_gain": 100.0,
+                },
+            ),
+        )
+    )
+    register_effect_preset(
+        EffectPreset(
+            id=f"fade_{_id}_out",
+            label=f"Fade Ajustável: {_name} (saída)",
+            summary=f"Fecha do nível original ao silêncio, forma {_name.lower()}.",
+            effects=(
+                {
+                    "type": "adjustable_fade",
+                    "shape": _shape_out,
+                    "mid_adjust": _mid,
+                    "start_gain": 100.0,
+                    "end_gain": 0.0,
+                },
+            ),
+        )
+    )
+
+register_effect_preset(
+    EffectPreset(
+        id="fade_partial",
+        label="Fade Ajustável: parcial (100% a 40%)",
+        summary="Desce o volume a 40% (cerca de -8 dB) sem chegar ao silêncio: abaixa o som e o deixa audível.",
+        effects=({"type": "adjustable_fade", "shape": "up", "start_gain": 100.0, "end_gain": 40.0},),
+    )
+)
+register_effect_preset(
+    EffectPreset(
+        id="fade_soft_up",
+        label="Fade Ajustável: subida suave (-12 dB a 0 dB)",
+        summary="Sobe 12 dB em S, sem partir do silêncio: para trazer a música de volta depois de uma fala.",
+        effects=(
+            {"type": "adjustable_fade", "shape": "s_up", "start_gain": -12.0, "end_gain": 0.0, "unit": "db"},
+        ),
+    )
+)
+register_effect_preset(
+    EffectPreset(
+        id="fade_soft_down",
+        label="Fade Ajustável: descida suave (0 dB a -12 dB)",
+        summary="Desce 12 dB em S, sem chegar ao silêncio: para abrir espaço para uma fala.",
+        effects=(
+            {
+                "type": "adjustable_fade",
+                "shape": "s_down",
+                "start_gain": 0.0,
+                "end_gain": -12.0,
+                "unit": "db",
+            },
+        ),
+    )
+)

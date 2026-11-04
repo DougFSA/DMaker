@@ -28,6 +28,15 @@ import {
   TRACK_ROW_HEIGHT,
   type TrackToggle,
 } from '@/lib/timeline'
+import {
+  draggedFadeDuration,
+  FADE_CURVES,
+  fadeOperation,
+  fadeTarget,
+  itemFades,
+  itemSpeed,
+  type FadeSide,
+} from '@/lib/audioFades'
 import { trackSetOp } from '@/lib/audioPanelOps'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
@@ -228,6 +237,88 @@ function beginDrag(event: MouseEvent, track: TimelineTrack, itemId: string, side
   document.addEventListener('mouseup', onDragEnd)
 }
 
+/* ---------- alça de fade ---------- */
+
+interface FadeDrag {
+  itemId: string
+  target: string
+  side: FadeSide
+  /** A borda do item na tela quando o gesto começou, e a duração dele (segundos da tela) e a velocidade. */
+  edgeX: number
+  lengthSeconds: number
+  speed: number
+  startX: number
+  moved: boolean
+}
+
+let activeFade: FadeDrag | null = null
+
+function onFadeMove(event: MouseEvent): void {
+  const drag = activeFade
+  if (!drag) return
+  if (!drag.moved && Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD_PX) return
+  if (!drag.moved) editor.beginGesture()
+  drag.moved = true
+  const pixels = drag.side === 'in' ? event.clientX - drag.edgeX : drag.edgeX - event.clientX
+  timeline.fadePreview = {
+    itemId: drag.itemId,
+    side: drag.side,
+    duration: draggedFadeDuration(pixels / timeline.pxPerSec, drag.lengthSeconds, drag.speed),
+  }
+}
+
+/** Soltar a alça grava o fade (duração 0 tira); a curva que ele já tinha fica. É um passo só do desfazer. */
+async function onFadeEnd(): Promise<void> {
+  document.removeEventListener('mousemove', onFadeMove)
+  document.removeEventListener('mouseup', onFadeEnd)
+  const drag = activeFade
+  const shown = timeline.fadePreview
+  activeFade = null
+  if (!drag?.moved || !shown) {
+    timeline.fadePreview = null
+    return
+  }
+  try {
+    const done = await editor.applyOp(fadeOperation(drag.target, drag.side, shown.duration))
+    if (done && editor.dirty) await editor.save({ quiet: true })
+  } finally {
+    timeline.fadePreview = null
+    editor.endGesture()
+  }
+}
+
+function beginFadeDrag(event: MouseEvent, track: TimelineTrack, itemElement: HTMLElement, side: FadeSide): void {
+  const item = track.items.find((candidate) => candidate.id === itemElement.dataset.itemId)
+  const target = item ? fadeTarget(track.id, item) : null
+  if (!item || !target) return
+  const rect = itemElement.getBoundingClientRect()
+  event.preventDefault()
+  activeFade = {
+    itemId: item.id,
+    target,
+    side,
+    edgeX: side === 'in' ? rect.left : rect.right,
+    lengthSeconds: item.end - item.start,
+    speed: itemSpeed(item),
+    startX: event.clientX,
+    moved: false,
+  }
+  document.addEventListener('mousemove', onFadeMove)
+  document.addEventListener('mouseup', onFadeEnd)
+}
+
+/** Duplo clique na alça troca a curva do fade pela seguinte (linear, logarítmica, exponencial, seno, quadrática). */
+async function cycleFadeCurve(track: TimelineTrack, itemId: string, side: FadeSide): Promise<void> {
+  const item = track.items.find((candidate) => candidate.id === itemId)
+  const target = item ? fadeTarget(track.id, item) : null
+  const fade = item ? itemFades(item)[side] : undefined
+  if (!item || !target || !fade) return
+  const next = FADE_CURVES[(FADE_CURVES.indexOf(fade.curve) + 1) % FADE_CURVES.length]
+  // como o arrasto, o gesto direto grava na hora
+  const done = await editor.applyOp(fadeOperation(target, side, fade.duration, next))
+  if (done && editor.dirty) await editor.save({ quiet: true })
+}
+
 function lockedWarning(trackId: string): void {
   toasts.push({ tone: 'error', title: `A trilha ${trackId} está bloqueada (cadeado no cabeçalho).` })
 }
@@ -243,6 +334,12 @@ function onMouseDown(event: MouseEvent): void {
     if (!track || !itemId) return
     if (track.locked) {
       lockedWarning(track.id)
+      return
+    }
+    const fadeSideRaw = target.closest<HTMLElement>('[data-fade]')?.dataset.fade
+    if (fadeSideRaw === 'in' || fadeSideRaw === 'out') {
+      // puxar a alça de fade muda o fade da borda sem mexer na seleção
+      beginFadeDrag(event, track, itemElement, fadeSideRaw)
       return
     }
     const handle = target.closest<HTMLElement>('[data-handle]')?.dataset.handle
@@ -278,6 +375,12 @@ const AUDIO_TRACK = /^(A\d+|MUS|NAR|VO)$/
 function onDoubleClick(event: MouseEvent): void {
   if (!(event.target instanceof HTMLElement)) return
   const item = event.target.closest<HTMLElement>('[data-item-id]')
+  const fadeSide = event.target.closest<HTMLElement>('[data-fade]')?.dataset.fade
+  if (item?.dataset.itemId && (fadeSide === 'in' || fadeSide === 'out')) {
+    const track = tracks.value.find((candidate) => candidate.id === item.dataset.trackId)
+    if (track && !track.locked) void cycleFadeCurve(track, item.dataset.itemId, fadeSide)
+    return
+  }
   if (item?.dataset.trackId && AUDIO_TRACK.test(item.dataset.trackId) && item.dataset.itemId) {
     const entry = editor.findItem(item.dataset.itemId)
     if (entry) audioPanel.openFor(entry)
@@ -364,7 +467,10 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
-  if (activeDrag?.moved) editor.endGesture()
+  document.removeEventListener('mousemove', onFadeMove)
+  document.removeEventListener('mouseup', onFadeEnd)
+  if (activeDrag?.moved || activeFade?.moved) editor.endGesture()
+  timeline.fadePreview = null
 })
 </script>
 
@@ -412,6 +518,7 @@ onBeforeUnmount(() => {
             :window-start="windowStart"
             :window-end="windowEnd"
             :selected="selected"
+            :fade-preview="timeline.fadePreview"
             @toggle="onTrackToggle"
             @track-set="onTrackSet"
           />
@@ -422,8 +529,9 @@ onBeforeUnmount(() => {
       </div>
 
       <p class="timeline__hint">
-        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. M cria um marcador no
-        cursor (duplo clique edita o texto; vírgula e ponto pulam entre eles). A tecla ? mostra os atalhos.
+        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. Puxe o quadradinho
+        do canto de um item de áudio para fazer o fade (duplo clique nele troca a curva). M cria um marcador no cursor
+        (duplo clique edita o texto; vírgula e ponto pulam entre eles). A tecla ? mostra os atalhos.
       </p>
     </template>
   </AppCard>

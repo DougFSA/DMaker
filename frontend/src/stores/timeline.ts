@@ -50,6 +50,9 @@ export const useTimelineStore = defineStore('timeline', () => {
   const mediaDropHandler = ref<MediaDropHandler | null>(null)
   /** O marcador (id do item da vista) cujo texto está sendo editado na própria trilha; nulo se nenhum. */
   const editingMarkerId = ref<string | null>(null)
+  /** O fade que a alça arrastada mostra enquanto o gesto não termina (o item, a ponta e a duração em segundos do item);
+   *  nulo fora do gesto. A spec só muda ao soltar. */
+  const fadePreview = ref<{ itemId: string; side: 'in' | 'out'; duration: number } | null>(null)
   let requestToken = 0
 
   const effectiveViewport = computed(() => (viewportWidth.value > 0 ? viewportWidth.value : FALLBACK_VIEWPORT_PX))
@@ -151,6 +154,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     scrollRequest,
     mediaDropHandler,
     editingMarkerId,
+    fadePreview,
     effectiveViewport,
     snapTolerance,
     windowLeftPx,

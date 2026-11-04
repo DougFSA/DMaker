@@ -170,7 +170,26 @@ def _mix_extra(audio_offset: float = 0.0, pan: float = 0.0, effects: Sequence = 
         extra["pan"] = pan
     if effects:
         extra["effects"] = len(effects)
+        if fades := _edge_fades(effects):
+            extra["fades"] = fades
     return extra
+
+
+def _edge_fades(effects: Sequence) -> dict:
+    """Os fades presos à borda do item (Fade In e Fade Out ligados, sem intervalo), com a duração e a curva: a interface
+    desenha uma alça arrastável e a curva em cada ponta. Os de intervalo são da seleção e ficam só no painel de efeitos."""
+    fades: dict = {}
+    for effect in effects:
+        side = {"fade_in": "in", "fade_out": "out"}.get(getattr(effect, "type", ""))
+        if side and effect.enabled and effect.start is None and effect.end is None:
+            fades[side] = {"duration": effect.duration, "curve": effect.curve}
+    return fades
+
+
+def _crossfade_extra(segment: Segment) -> dict:
+    """O crossfade de som no corte de entrada do clipe (duração e tipo), para o popover do corte; vazio sem ele."""
+    crossfade = getattr(segment, "audio_crossfade", None)
+    return {"audio_crossfade": crossfade.model_dump()} if crossfade is not None else {}
 
 
 def _item_id(track_id: str, index: int) -> str:
@@ -350,7 +369,10 @@ def _v1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) 
                 source=segment.source if is_clip else None,
                 transition=segment.transition.model_dump() if segment.transition else None,
                 muted=is_clip and (segment.mute or segment.volume <= 0),
-                extra={"pieces": pieces} if pieces else {},
+                extra={
+                    **({"pieces": pieces} if pieces else {}),
+                    **_crossfade_extra(segment),
+                },
                 path=pieces[0]["path"]
                 if pieces
                 else _resolve_item_path(
@@ -386,6 +408,7 @@ def _a1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) 
                     "speed": segment.speed,
                     **({"pieces": pieces} if pieces else {}),
                     **_mix_extra(segment.audio_offset, segment.pan, segment.effects),
+                    **_crossfade_extra(segment),
                 },
                 path=pieces[0]["path"]
                 if pieces
@@ -549,6 +572,7 @@ def _voiceover_track(project: Project, durations: Sequence[float | None] = ()) -
                     "volume": clip.volume,
                     "effects": len(clip.effects),
                     "duration": known,
+                    **({"fades": fades} if (fades := _edge_fades(clip.effects)) else {}),
                     **({"pan": clip.pan} if clip.pan else {}),
                 },
                 path=str(project.resolve(clip.src)),

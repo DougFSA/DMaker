@@ -262,7 +262,14 @@ def validate_project(name_or_path: str) -> dict:
         "ids A1, A2..., MUS, NAR, VO, SFX; `amount_db` -12, `threshold_db` -30, `max_pause` 1, `outer_fade_down`/`outer_fade_up` "
         "0.5, `inner_fade_down`/`inner_fade_up` 0; set e remove usam `index`; faixa externa só abaixa sob outra faixa externa), "
         "e audio_truncate_silence (`target`: um clipe, que perde a imagem junto, ou uma voz gravada; `threshold_db` "
-        "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). `op` é um "
+        "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). Fades: "
+        "audio_fade (o fade da borda de um item: `target`, `side` in ou out, `duration` em segundos, 0 tira, `curve` "
+        "linear, logarithmic, exponential, sine ou quadratic), audio_crossfade_tracks (uma trilha some enquanto outra "
+        "entra: `out_target`, `in_target`, `start`/`end`, `kind` constant_gain, constant_power_1, constant_power_2 ou "
+        "custom, com `curve` e `mid_adjust` no custom; grava um Fade Ajustável em cada item, um passo só) e "
+        "audio_crossfade_clips (o crossfade do SOM no corte entre dois clipes, o J-cut e o L-cut: `index` é o clipe "
+        "que entra, `duration` em segundos, 0 tira, `curve` constant_gain, constant_power_1 ou constant_power_2; a "
+        "imagem continua trocando no quadro exato). `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
         "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
         '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
