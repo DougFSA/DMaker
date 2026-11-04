@@ -51,7 +51,13 @@ def test_every_registered_effect_class_has_a_builder_and_the_other_way_around():
 
 
 # os efeitos que só existem com um intervalo (o Cortar tira "do instante tal ao instante tal")
-REQUIRED_FIELDS = {"cut": {"start": 1.0, "end": 2.0}, "repair": {"start": 1.0, "end": 1.001}}
+REQUIRED_FIELDS = {
+    "cut": {"start": 1.0, "end": 2.0},
+    "repair": {"start": 1.0, "end": 1.001},
+    "spectral_multi_tool": {"low_hz": 2800.0, "high_hz": 3200.0},
+    "spectral_eq": {"low_hz": 2800.0, "high_hz": 3200.0},
+    "spectral_shelves": {"low_hz": 1000.0},
+}
 
 
 def test_every_effect_builds_a_graph_that_runs_from_the_input_to_the_output_label():

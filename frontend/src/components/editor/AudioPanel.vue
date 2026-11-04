@@ -3,7 +3,7 @@
    tempo" traz ela de volta) e junta a onda por zoom, as ferramentas de seleção, envelope, desenho e zoom, a reprodução
    (tocar, loop, scrub, velocidade, prévia do corte, medidor), os comandos de edição e a janela de efeito. Os atalhos do
    Audacity valem quando o foco está nele. Selecionar e dar zoom não mudam a spec; cada comando é um passo do desfazer. */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -13,6 +13,7 @@ import { useShortcutHandler } from '@/composables/useEditorShortcuts'
 import { useWaveData } from '@/composables/useWaveData'
 import { useWavePlayback } from '@/composables/useWavePlayback'
 import { formatSpan, timeSample } from '@/lib/audioWave'
+import { centerFrequency, formatHz } from '@/lib/spectrogram'
 import type { AudioShortcutId } from '@/lib/keymap'
 import { SPEEDS, useAudioPanelStore, type PanelTool } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
@@ -41,6 +42,7 @@ const toolOptions: Array<{ value: PanelTool; label: string }> = [
   { value: 'draw', label: 'Desenho' },
   { value: 'zoom', label: 'Zoom' },
   { value: 'multi', label: 'Multi' },
+  { value: 'spectral', label: 'Espectral' },
 ]
 const speedOptions = SPEEDS.map((speed) => ({ value: String(speed), label: `${String(speed).replace('.', ',')}x` }))
 
@@ -57,11 +59,23 @@ const selectionText = computed(() => {
   const selection = panel.selection
   if (!selection) return 'Sem seleção'
   const samples = timeSample(selection.end, panel.rate) - timeSample(selection.start, panel.rate)
-  return `${formatSpan(selection.start)} a ${formatSpan(selection.end)} (${formatSpan(selection.end - selection.start)}, ${samples.toLocaleString('pt-BR')} amostras)`
+  const times = `${formatSpan(selection.start)} a ${formatSpan(selection.end)} (${formatSpan(selection.end - selection.start)}, ${samples.toLocaleString('pt-BR')} amostras)`
+  if (selection.low_hz === undefined || selection.high_hz === undefined) return times
+  const center = centerFrequency(selection.low_hz, selection.high_hz)
+  return `${times}, de ${formatHz(selection.low_hz)} a ${formatHz(selection.high_hz)} (centro em ${formatHz(center)})`
 })
 const cursorText = computed(() => `${formatSpan(panel.position ?? panel.cursor)} · amostra ${timeSample(panel.position ?? panel.cursor, panel.rate).toLocaleString('pt-BR')}`)
 
 const hasSelection = computed(() => panel.selection !== null)
+
+// ao abrir uma vista com espectrograma a ferramenta passa a ser o retângulo espectral, e ao voltar para a onda, a seleção
+watch(
+  () => view.value.id,
+  (id) => {
+    if (id !== 'wave' && panel.tool === 'select') panel.setTool('spectral')
+    else if (id === 'wave' && panel.tool === 'spectral') panel.setTool('select')
+  },
+)
 
 function hint(label: string, id: AudioShortcutId): string {
   const keys = keymap.labelFor(id)

@@ -48,6 +48,9 @@ AUDIO_FX_DIR = (
 )  # itens de áudio já com a cadeia de efeitos aplicada (WAV float), compartilhados por render e prévia
 FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
+SPECTROGRAM_DIR = (
+    CACHE_DIR / "spectrogram"
+)  # imagens PNG do espectrograma do painel Áudio, por trecho da grade
 VOICE_CACHE_DIR = CACHE_DIR / "voice"
 STEMS_DIR = CACHE_DIR / "stems"  # voz e fundo separados (isolamento vocal), por trecho de arquivo
 # Voz usada quando a narração não escolhe uma. Vazio (padrão) é a voz automática do OmniVoice; defina
@@ -83,6 +86,7 @@ def ensure_dirs() -> None:
         AUDIO_FX_DIR,
         FRAMES_DIR,
         WAVEFORM_DIR,
+        SPECTROGRAM_DIR,
         JOBS_DIR,
         MODELS_DIR,
         OUTPUT_DIR,

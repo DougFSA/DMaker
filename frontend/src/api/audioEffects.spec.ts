@@ -11,7 +11,7 @@ describe('cliente do catálogo de efeitos de áudio', () => {
     const fetch = stubFetch(audioEffectCatalog())
     const catalog = await fetchAudioEffects()
     expect(fetch.last()).toMatchObject({ url: '/api/audio-effects', method: 'GET' })
-    expect(catalog.effects.map((effect) => effect.type)).toEqual(['amplify', 'normalize', 'invert', 'reverse', 'repeat'])
+    expect(catalog.effects.map((effect) => effect.type)).toEqual(['amplify', 'normalize', 'invert', 'reverse', 'repeat', 'spectral_delete'])
     expect(catalog.common.map((param) => param.name)).toEqual(['enabled', 'start', 'end'])
     expect(catalog.targets.find((target) => target.target === 'audio.music')?.may_grow).toBe(true)
   })

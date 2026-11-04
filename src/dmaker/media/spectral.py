@@ -260,6 +260,75 @@ def _release(gains: np.ndarray, held: np.ndarray, release: float) -> tuple[np.nd
     return result, held
 
 
+# ---------- apagar um retângulo do espectrograma ----------
+
+# A máscara do Apagar Espectral desce em cosseno para fora do retângulo, em vez de cair de uma vez: uma borda reta no
+# espectro vira, ao voltar para o tempo, um chiado metálico (ruído musical) de bins que ligam e desligam de um quadro
+# para o outro. Na frequência a rampa tem 3 bins (70 Hz a 48 kHz: mais que a largura do lóbulo principal da janela, que
+# é de uns 2 bins); no tempo, 1024 amostras (2 saltos, 21 ms a 48 kHz).
+DELETE_FREQUENCY_RAMP_BINS = 3
+DELETE_TIME_RAMP_SAMPLES = 2 * HOP
+
+
+def _cosine_ramp(distance: np.ndarray, length: float) -> np.ndarray:
+    """1 na distância 0 (e dentro, distâncias negativas) e 0 a partir de `length`, descendo em meio cosseno."""
+    progress = np.clip(distance / length, 0.0, 1.0)
+    return 0.5 * (1.0 + np.cos(np.pi * progress))
+
+
+def _deletion_gain(
+    centers: np.ndarray, first: float, last: float, edges_hz: tuple[float, float], sample_rate: int
+) -> np.ndarray:
+    """O ganho (quadros, bins) do Apagar Espectral: 0 dentro do retângulo `first..last` (amostras) por `edges_hz`
+    (Hz), 1 longe dele, e a rampa de cosseno entre os dois (ver `DELETE_*_RAMP_*`)."""
+    bin_hz = sample_rate / FFT_SIZE
+    frequency = np.arange(FFT_SIZE // 2 + 1) * bin_hz
+    below = (edges_hz[0] - frequency) / bin_hz
+    above = (frequency - edges_hz[1]) / bin_hz
+    in_band = _cosine_ramp(np.maximum(below, above), float(DELETE_FREQUENCY_RAMP_BINS))
+    outside = np.maximum(first - centers, centers - last)
+    in_time = _cosine_ramp(outside, float(DELETE_TIME_RAMP_SAMPLES))
+    return 1.0 - in_time[:, None] * in_band[None, :]
+
+
+def delete_rectangle(
+    samples: np.ndarray, sample_rate: int, first: int, last: int, low_hz: float, high_hz: float
+) -> np.ndarray:
+    """O sinal `(amostras, canais)` sem a energia entre `low_hz` e `high_hz` nas amostras `first` a `last`: a STFT do
+    módulo (a mesma janela e soma de sobreposição da Redução de ruído) com a máscara de `_deletion_gain`.
+
+    Só o trecho em volta do retângulo é refeito; o resto do sinal sai igual (a menos de 1e-6), porque a máscara vale 1 ali e a
+    reconstrução da janela de raiz de Hann a 75% é exata. A forma e o número de canais não mudam."""
+    data = samples
+    squeeze = data.ndim == 1
+    if squeeze:
+        data = data[:, None]
+    result = np.array(data, dtype=np.float32, copy=True)
+    first, last = max(first, 0), min(last, len(data))
+    if last <= first or high_hz <= low_hz:
+        return result[:, 0] if squeeze else result
+    reach = DELETE_TIME_RAMP_SAMPLES + 2 * FFT_SIZE  # a rampa e os quadros que a atravessam
+    begin, stop = max(first - reach, 0), min(last + reach, len(data))
+    frames = _frame_count(stop - begin)
+    segment = data[begin:stop]
+    output = np.zeros(((frames - 1) * HOP + FFT_SIZE, data.shape[1]), dtype=np.float32)
+    for block_first in range(0, frames, BLOCK_FRAMES):
+        count = min(BLOCK_FRAMES, frames - block_first)
+        block = _block(segment, block_first, count)
+        centers = (np.arange(count) + block_first) * HOP - HEAD + FFT_SIZE / 2 + begin
+        gain = _deletion_gain(centers, first, last, (low_hz, high_hz), sample_rate)
+        for c in range(data.shape[1]):
+            spectrum = np.fft.rfft(_windowed(block, c, count), axis=1) * gain
+            frames_out = np.fft.irfft(spectrum, n=FFT_SIZE, axis=1) * WINDOW
+            summed = np.zeros((count - 1) * HOP + FFT_SIZE)
+            for k in range(count):
+                summed[k * HOP : k * HOP + FFT_SIZE] += frames_out[k]
+            at = block_first * HOP
+            output[at : at + len(summed), c] += summed.astype(np.float32)
+    result[begin:stop] = output[HEAD : HEAD + (stop - begin)] / np.float32(OVERLAP_GAIN)
+    return result[:, 0] if squeeze else result
+
+
 # ---------- a medida por banda (o que o MCP mostra) ----------
 
 # bandas de um terço de oitava, de 100 Hz a 16 kHz (a série ISO): o que quem mexe com áudio reconhece. Abaixo de 100 Hz

@@ -29,6 +29,7 @@ DATA_NAMES = (
     "MEZ_DIR",
     "PROXY_DIR",
     "WAVEFORM_DIR",
+    "SPECTROGRAM_DIR",
     "VOICE_CACHE_DIR",
     "STEMS_DIR",
     "JOBS_DIR",
