@@ -46,6 +46,9 @@ PREVIEW_AUDIO_DIR = (
 AUDIO_FX_DIR = (
     CACHE_DIR / "audio-fx"
 )  # itens de áudio já com a cadeia de efeitos aplicada (WAV float), compartilhados por render e prévia
+GENERATED_DIR = (
+    CACHE_DIR / "generated"
+)  # sons sintetizados (Tom, Ruído, Bipe...) de `audio.generated`, por hash do gerador, dos parâmetros e da duração
 FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 SPECTROGRAM_DIR = (
@@ -87,6 +90,7 @@ def ensure_dirs() -> None:
         PROXY_DIR,
         PREVIEW_AUDIO_DIR,
         AUDIO_FX_DIR,
+        GENERATED_DIR,
         FRAMES_DIR,
         WAVEFORM_DIR,
         SPECTROGRAM_DIR,

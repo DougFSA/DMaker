@@ -20,7 +20,12 @@ from .spec import Project
 ACTIONS = ("add", "remove", "move", "enable", "disable", "set", "preset")
 
 # alvos que são uma lista de itens (precisam de um número) e alvos que são um item só
-_LISTS = {"audio.voiceover": "voz gravada", "audio.narration": "narração", "audio.tracks": "faixa externa"}
+_LISTS = {
+    "audio.voiceover": "voz gravada",
+    "audio.narration": "narração",
+    "audio.tracks": "faixa externa",
+    "audio.generated": "som gerado",
+}
 _SINGLE = {"audio.music": "música", "audio.master": "áudio mestre", "audio.master_effects": "áudio mestre"}
 
 
@@ -32,7 +37,7 @@ def _indexed(target: str, data: dict) -> tuple[dict, str]:
     except ValueError:
         raise EditError(
             f"alvo de efeito inválido: {target!r}. Use timeline.N, overlays.N, audio.voiceover.N, "
-            "audio.narration.N, audio.tracks.N, audio.music ou audio.master"
+            "audio.narration.N, audio.tracks.N, audio.generated.N, audio.music ou audio.master"
         ) from None
     if prefix == "timeline":
         _check_index(len(data["timeline"]), index, "trecho")
@@ -54,7 +59,7 @@ def _indexed(target: str, data: dict) -> tuple[dict, str]:
         return data["audio"][kind][index], "effects"
     raise EditError(
         f"alvo de efeito inválido: {target!r}. Use timeline.N, overlays.N, audio.voiceover.N, "
-        "audio.narration.N, audio.tracks.N, audio.music ou audio.master"
+        "audio.narration.N, audio.tracks.N, audio.generated.N, audio.music ou audio.master"
     )
 
 

@@ -37,7 +37,7 @@ const present = computed(() => (editor.view?.tracks ?? []).map((track) => track.
 const rules = computed(() => (background.value ? rulesFor(editor.spec, background.value) : []))
 const candidates = computed(() => (background.value ? keyOptions(background.value, present.value) : []))
 
-const names: Record<string, string> = { A1: 'Som dos clipes (A1)', MUS: 'Música (MUS)', NAR: 'Narração (NAR)', VO: 'Voz gravada (VO)' }
+const names: Record<string, string> = { A1: 'Som dos clipes (A1)', MUS: 'Música (MUS)', NAR: 'Narração (NAR)', VO: 'Voz gravada (VO)', SFX: 'Sons gerados (SFX)' }
 const nameOf = (id: string) => names[id] ?? (isExternalTrack(id) ? `Faixa externa (${id})` : id)
 
 const reason = computed(() => {

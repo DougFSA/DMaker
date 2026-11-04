@@ -32,6 +32,7 @@ from .audio_effects import effect_processor, processed_music, processed_pips, pr
 from .auto_duck import begin_ducks, finish_ducks, project_track_origin
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
+from .generated_sounds import check_generated_files
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
 from .isolation import IsolationService
 from .lint import lint
@@ -177,6 +178,7 @@ class RenderPipeline:
 
         # um som que não existe falha agora, e não depois de minutos de mezaninos; a composição em HTML também
         resolve_files(p, plan_sfx(p, timeline_spans(durations, transitions)))
+        check_generated_files(p)
         self._check_html(ctx)
 
         # o Auto Duck: as regras de chave externa já se planejam, porque a faixa de fundo abaixa dentro do mezanino

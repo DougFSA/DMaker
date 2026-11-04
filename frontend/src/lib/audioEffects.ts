@@ -60,6 +60,7 @@ export function effectContextFor(selected: SelectedForEffects | null, view: Pick
   }
   if (trackId === 'V1') return item.kind === 'clip' ? clipChain(item) : { kind: 'silent' }
   if (trackId === 'MUS') return chainFor('audio.music', 'audio.music.effects', 'Música', item)
+  if (trackId === 'SFX') return chainFor('audio.generated.N', `audio.generated.${item.index}.effects`, `Som gerado ${item.index + 1}`, item)
   if (trackId === 'NAR') return chainFor('audio.narration.N', `audio.narration.${item.index}.effects`, `Narração ${item.index + 1}`, item)
   if (trackId === 'VO') return chainFor('audio.voiceover.N', `audio.voiceover.${item.index}.effects`, `Voz gravada ${item.index + 1}`, item)
   const externalNumber = /^A(\d+)$/.exec(trackId)?.[1]

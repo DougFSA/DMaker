@@ -29,6 +29,7 @@ import AudioLevelSection from './AudioLevelSection.vue'
 import AudioSpectrumSection from './AudioSpectrumSection.vue'
 import AutoDuckSection from './AutoDuckSection.vue'
 import FilterGroupCard from './FilterGroupCard.vue'
+import GeneratedSoundsSection from './GeneratedSoundsSection.vue'
 
 interface GroupEntry {
   group: FilterGroup
@@ -172,6 +173,7 @@ const ready = computed(() => !!editor.spec)
       <AudioLevelSection />
       <AudioEffectsSection />
       <AutoDuckSection />
+      <GeneratedSoundsSection />
     </div>
   </AppCard>
 </template>

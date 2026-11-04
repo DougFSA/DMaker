@@ -30,6 +30,28 @@ def write_wav_channels(path: Path, samples: np.ndarray, sample_rate: int) -> Pat
     return path
 
 
+def write_wav_float(path: Path, samples: np.ndarray, sample_rate: int) -> Path:
+    """Grava amostras float de forma (quadros, canais) como WAV de ponto flutuante de 32 bits, sem limitar nada: o pico de
+    um som gerado fica exatamente no nível pedido, e um valor acima de 1 chega inteiro à mixagem (a biblioteca `wave` não
+    escreve este formato, por isso o cabeçalho é montado aqui)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames = np.asarray(samples, dtype="<f4")
+    if frames.ndim != 2:
+        raise ValueError("as amostras precisam ter a forma (quadros, canais)")
+    data = frames.tobytes()
+    channels = frames.shape[1]
+    block = channels * 4
+    header = b"fmt " + struct.pack(
+        "<IHHIIHH", 16, _FORMAT_FLOAT, channels, sample_rate, sample_rate * block, block, 32
+    )
+    chunk = b"data" + struct.pack("<I", len(data))
+    # o cabeçalho do formato de ponto flutuante pede o chunk `fact` com o número de quadros
+    fact = b"fact" + struct.pack("<II", 4, frames.shape[0])
+    body = b"WAVE" + header + fact + chunk
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body) + len(data)) + body + data)
+    return path
+
+
 def wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
     """Amostras float (-1..1) de forma (quadros, canais) como o conteúdo de um WAV de 16 bits, sem passar por arquivo.
     É o que a interface baixa para tocar uma janela do áudio; o que passa da faixa é limitado."""

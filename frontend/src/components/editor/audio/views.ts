@@ -11,6 +11,7 @@
      precisa do mouse sobre a onda entra também em `PanelTool` (`stores/audioPanel.ts`) e no `onAreaDown` da vista. */
 import type { Component } from 'vue'
 import AudioWaveView from './AudioWaveView.vue'
+import CensorBeepButton from './CensorBeepButton.vue'
 import SpectrogramView from './SpectrogramView.vue'
 import WaveSpectrumView from './WaveSpectrumView.vue'
 
@@ -33,4 +34,4 @@ export const AUDIO_VIEWS: AudioViewDef[] = [
 ]
 
 /** Os botões e controles a mais da barra de reprodução, na ordem. */
-export const AUDIO_TOOLBAR_EXTRAS: AudioToolbarExtra[] = []
+export const AUDIO_TOOLBAR_EXTRAS: AudioToolbarExtra[] = [{ id: 'censor-beep', component: CensorBeepButton }]

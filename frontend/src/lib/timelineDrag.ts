@@ -2,6 +2,7 @@
    operação de edição sai quando o mouse é solto. Há três gestos: mover um trecho da V1 (muda a ordem), aparar uma
    borda e deslocar um bloco (sobreposição, fala da narração ou marcador). */
 import type { EditOperation, TimelineItem, TimelineTrack } from '@/api'
+import { generatedMoveOperation } from './generatedSounds'
 import { markerMoveOperation } from './markers'
 import { isMarkerTrack, MIN_ITEM_SECONDS, narrationMoveOp, roundSeconds, snapBlock, snapTime } from './timeline'
 
@@ -106,6 +107,8 @@ export function dragOperation(drag: DragStart, track: TimelineTrack, preview: Dr
   if (Math.abs(preview.start - original.start) < 0.001 && Math.abs(preview.end - original.end) < 0.001) return null
   if (drag.trackId === 'NAR') return narrationMoveOp(item, preview.start)
   if (isMarkerTrack(drag.trackId)) return markerMoveOperation(item, preview)
+  // o som gerado dura o que a spec diz: arrastar o corpo muda o início, e a borda muda o início e a duração dele
+  if (drag.trackId === 'SFX') return generatedMoveOperation(item.index, preview.start, preview.end - preview.start)
   if (drag.mode === 'trim' && drag.side) {
     if (drag.trackId === 'V1') {
       const delta = drag.side === 'in' ? preview.start - original.start : preview.end - original.end

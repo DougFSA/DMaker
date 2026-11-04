@@ -269,7 +269,12 @@ def validate_project(name_or_path: str) -> dict:
         "custom, com `curve` e `mid_adjust` no custom; grava um Fade Ajustável em cada item, um passo só) e "
         "audio_crossfade_clips (o crossfade do SOM no corte entre dois clipes, o J-cut e o L-cut: `index` é o clipe "
         "que entra, `duration` em segundos, 0 tira, `curve` constant_gain, constant_power_1 ou constant_power_2; a "
-        "imagem continua trocando no quadro exato). `op` é um "
+        "imagem continua trocando no quadro exato). Sons gerados (ver `audio_generators`): generated_add (`generator`, "
+        '`params`, `start`, e `duration` ou `end` ou `region: "marker:<texto>"`; `volume`, `pan`), generated_set e '
+        "generated_remove (por `index`; `params` se soma aos que o som já tem) e censor_beep (o bipe de censura: silencia o "
+        "item `target` e põe um Tom de 1 kHz no mesmo intervalo, num passo só; diga o intervalo por `word` (a palavra, "
+        "achada na transcrição do item) com `occurrence` e `search_from`/`search_to`, por `region` ou por `start` e `end`; "
+        "`margin` alarga o bipe, `frequency_hz` e `amplitude_db` o ajustam). `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
         "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
         '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
@@ -1254,6 +1259,50 @@ def audio_analyzers(type: str | None = None) -> dict:
         return analyzer_catalog(type)
     except ValueError as exc:
         raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "O catálogo dos geradores de som (o menu Gerar do Audacity): Tom (senoidal, quadrada, dente de serra, quadrada "
+        "sem aliasing), Chirp (varredura linear ou log), Ruído (branco, rosa, marrom), Tons DTMF, Silêncio, Pluck, "
+        "Tambor de Risset, Faixa de ritmo e Importar amostras (um texto com um valor por linha). Para cada um, o tipo, o "
+        "nome em português e no Audacity, o que faz, a duração sugerida e os parâmetros (tipo, unidade, padrão e faixa). "
+        "`type` restringe a um gerador. Para um arquivo solto use `audio_generate`; para pôr no projeto, a operação "
+        "generated_add do `edit_project`."
+    )
+)
+def audio_generators(type: str | None = None) -> dict:
+    from .domain.generators import catalog_payload
+
+    try:
+        return catalog_payload(type)
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "Gera um som solto e o grava num WAV (estéreo, ponto flutuante de 32 bits): `generator` é o tipo (veja "
+        "`audio_generators`), `params` os parâmetros dele (os que faltam ficam no padrão), `duration` os segundos (sem "
+        "ela vale a que o gerador pede) e `out` o arquivo .wav de destino. Um arquivo que já existe só é trocado com "
+        "overwrite=true. Devolve o caminho, a duração e o pico medido em dBFS. Por exemplo, um tom de teste: "
+        'generator "tone", params {"frequency_hz": 1000, "amplitude_db": -6}, duration 2.'
+    )
+)
+def audio_generate(
+    generator: str,
+    out: str,
+    params: dict | None = None,
+    duration: float | None = None,
+    overwrite: bool = False,
+) -> dict:
+    from .pipeline.generated_sounds import generate_sound_file
+
+    try:
+        made = generate_sound_file(generator, params, duration, Path(out), overwrite=overwrite)
+    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return made.to_dict()
 
 
 @server.tool(

@@ -15,9 +15,9 @@ from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 # "profile" é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou "auto": a interface o escolhe numa lista;
 # "band_gains" é a lista fixa de ganhos em dB do EQ Gráfico (um por banda, `options` traz a frequência de cada uma) e
 # "freq_points" a lista de pontos `{hz, db}` do EQ por Curva: a interface os desenha como controles deslizantes e como
-# um gráfico de pontos arrastáveis
+# um gráfico de pontos arrastáveis; "text" é um campo de texto livre (os dígitos do DTMF, o arquivo do Importar Amostras)
 ParamKind = Literal[
-    "number", "integer", "boolean", "choice", "points", "profile", "band_gains", "freq_points"
+    "number", "integer", "boolean", "choice", "points", "profile", "band_gains", "freq_points", "text"
 ]
 
 
@@ -162,6 +162,7 @@ EFFECT_TARGETS: tuple[dict[str, Any], ...] = (
     {"target": "overlays.N", "label": "Áudio de um PiP (N: posição da sobreposição)", "may_grow": False},
     {"target": "audio.voiceover.N", "label": "Voz gravada", "may_grow": True},
     {"target": "audio.narration.N", "label": "Narração sintetizada", "may_grow": False},
+    {"target": "audio.generated.N", "label": "Som gerado (Tom, Ruído, Bipe...)", "may_grow": False},
     {"target": "audio.music", "label": "Música", "may_grow": True},
     {"target": "audio.tracks.N", "label": "Faixa externa sincronizada", "may_grow": False},
     {"target": "audio.master", "label": "Mistura inteira, antes da normalização final", "may_grow": False},
