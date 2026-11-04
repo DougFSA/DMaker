@@ -63,6 +63,7 @@ def test_the_basic_and_the_wave_editing_effects_are_registered():
         "invert",
         "reverse",
         "repeat",
+        "draw",
         "silence",
         "cut",
         "envelope",
