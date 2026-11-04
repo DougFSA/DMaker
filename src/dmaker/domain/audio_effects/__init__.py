@@ -20,7 +20,7 @@ from .base import EFFECT_CLASSES, EffectAction, EffectBase, effect_type, param, 
 # os módulos de família (basic, depois os dos outros cards) se registram ao serem importados; as predefinições citam
 # efeitos pelo tipo, então só entram depois de todas as famílias
 for _module in pkgutil.iter_modules(__path__):
-    if _module.name not in {"base", "catalog", "presets"}:
+    if _module.name not in {"base", "catalog", "presets", "eq_presets", "user_presets"}:
         importlib.import_module(f"{__name__}.{_module.name}")
 
 # a união discriminada pelo `type`, montada do registro: é o tipo dos campos `effects` da spec
@@ -28,6 +28,7 @@ AudioEffect = Annotated[Union[tuple(EFFECT_CLASSES.values())], Field(discriminat
 
 _ADAPTER: TypeAdapter[Any] = TypeAdapter(AudioEffect)
 
+from . import eq_presets  # noqa: E402,F401  (registra as predefinições de equalização)
 from .catalog import (  # noqa: E402
     EFFECT_TARGETS,
     EffectInfo,
@@ -44,6 +45,11 @@ from .presets import (  # noqa: E402
     get_effect_preset,
     preset_catalog,
     register_effect_preset,
+)
+from .user_presets import (  # noqa: E402
+    list_user_presets,
+    remove_user_preset,
+    save_user_preset,
 )
 
 
@@ -117,6 +123,7 @@ __all__ = [
     "effect_info",
     "effect_type",
     "get_effect_preset",
+    "list_user_presets",
     "param",
     "parse_effect",
     "preset_catalog",
@@ -124,4 +131,6 @@ __all__ = [
     "rebase_effects",
     "register_effect",
     "register_effect_preset",
+    "remove_user_preset",
+    "save_user_preset",
 ]

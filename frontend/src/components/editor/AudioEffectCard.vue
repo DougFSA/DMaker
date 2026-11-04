@@ -6,11 +6,13 @@ import { computed, ref } from 'vue'
 import type { AudioEffectInfo, AudioEffectParam, AudioEffectSettings } from '@/api'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import { intervalProblem, isEnabled } from '@/lib/audioEffects'
+import { intervalProblem, isEnabled, isListParam } from '@/lib/audioEffects'
 import { formatSeconds } from '@/lib/speech'
 import AudioEffectActions from './AudioEffectActions.vue'
 import AudioEffectField from './AudioEffectField.vue'
+import EffectResponsePanel from './audio/EffectResponsePanel.vue'
 import NoiseProfileTools from './NoiseProfileTools.vue'
+import SavePresetButton from './SavePresetButton.vue'
 
 const props = defineProps<{
   effect: AudioEffectSettings
@@ -38,6 +40,8 @@ const emit = defineEmits<{
 
 const name = computed(() => props.info?.label ?? props.effect.type)
 const enabled = computed(() => isEnabled(props.effect))
+/** O gráfico simples da resposta de frequência: os efeitos de equalização que não têm uma lista do EQ (essa traz o gráfico dela). */
+const showChart = computed(() => props.info?.has_response === true && !props.info.parameters.some(isListParam))
 const hasInterval = computed(() => typeof props.effect.start === 'number' || typeof props.effect.end === 'number')
 
 const intervalOpen = ref(hasInterval.value)
@@ -161,6 +165,8 @@ function onDragStart(event: DragEvent): void {
       </div>
       <p v-else class="effect__plain">Este efeito não tem parâmetros.</p>
 
+      <EffectResponsePanel v-if="showChart" :effect="effect" :name="name" />
+
       <AudioEffectActions
         :info="info"
         :list-path="listPath"
@@ -174,6 +180,10 @@ function onDragStart(event: DragEvent): void {
         :index="index"
         :profile="typeof effect.profile === 'string' ? effect.profile : 'auto'"
       />
+
+      <div class="effect__tools">
+        <SavePresetButton :effect="effect" :suggestion="name" />
+      </div>
 
       <details v-if="startParam && endParam" class="effect__interval" :open="intervalOpen" data-effect-interval @toggle="onDetailsToggle">
         <summary class="effect__interval-title">
@@ -325,6 +335,11 @@ function onDragStart(event: DragEvent): void {
   grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
   gap: var(--space-3);
   align-items: start;
+}
+
+.effect__tools {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .effect__plain,

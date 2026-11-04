@@ -380,6 +380,64 @@ def audio_effects(type: str | None = None) -> dict:
 
 @server.tool(
     description=(
+        "A resposta de frequência de um efeito de equalização (`bass_treble`, `graphic_eq`, `filter_curve_eq`, "
+        "`highpass`, `lowpass`, `notch`, `low_shelf`, `high_shelf` ou `classic_filter`, ver `audio_effects`): o ganho em "
+        "dB em cada frequência, de 20 Hz a 20 kHz em oitavas, por conta pura, sem rodar o ffmpeg. É a mesma curva que o "
+        "gráfico da interface desenha e que o render aplica. `effect` é o efeito como a spec o escreve, "
+        '{"type": "highpass", "frequency_hz": 80, "slope_db": 24}; `points` é quantas frequências (padrão 256). '
+        "Devolve {hz: [...], db: [...]}."
+    )
+)
+def audio_effect_response(effect: dict, points: int = 256) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.effect_response import effect_frequency_response
+
+    try:
+        return effect_frequency_response(effect, points)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "As predefinições de efeitos de áudio que a pessoa salvou por nome (ficam no arquivo effect-presets.json da pasta "
+        "de dados e aparecem no catálogo `audio_effects` com `origin: user`, ao lado das embutidas). `action`: `list` "
+        "(as salvas), `save` (`label` é o nome, `effects` a cadeia, cada efeito como a spec o escreve, e `summary` uma "
+        "frase opcional; salvar com o mesmo nome troca a predefinição) ou `remove` (`id` é o id que `list` mostra). O "
+        "intervalo (`start`/`end`) e o bypass não entram na predefinição. Para pôr uma predefinição num item use "
+        '`edit_project`: {"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "<id>"}.'
+    )
+)
+def audio_effect_presets(
+    action: str = "list",
+    label: str | None = None,
+    effects: list[dict] | None = None,
+    summary: str = "",
+    id: str | None = None,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import list_user_presets, remove_user_preset, save_user_preset
+
+    try:
+        if action == "list":
+            return {"presets": [preset.to_dict() for preset in list_user_presets()]}
+        if action == "save":
+            if not label or not effects:
+                raise ToolError("para salvar, informe `label` (o nome) e `effects` (a lista de efeitos)")
+            return save_user_preset(label, effects, summary).to_dict()
+        if action == "remove":
+            if not id:
+                raise ToolError("para remover, informe o `id` da predefinição (veja `action: list`)")
+            return remove_user_preset(id).to_dict()
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    raise ToolError(f"ação desconhecida: {action!r}. Use list, save ou remove")
+
+
+@server.tool(
+    description=(
         "Pega o perfil de ruído de um trecho de um item de áudio, o primeiro passo da Redução de ruído (efeito "
         "`noise_reduction`, ver `audio_effects`). `profile` é o nome do perfil; `target` é o item (timeline.N, "
         "overlays.N, audio.voiceover.N, audio.tracks.N ou audio.music); `start` e `end` são o trecho que só tem o "

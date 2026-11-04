@@ -12,8 +12,13 @@ from pydantic_core import to_jsonable_python
 from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 
 # "points" é uma lista de pontos `{at, db}` (a curva do envelope): a interface a desenha, não a escreve em um campo;
-# "profile" é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou "auto": a interface o escolhe numa lista
-ParamKind = Literal["number", "integer", "boolean", "choice", "points", "profile"]
+# "profile" é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou "auto": a interface o escolhe numa lista;
+# "band_gains" é a lista fixa de ganhos em dB do EQ Gráfico (um por banda, `options` traz a frequência de cada uma) e
+# "freq_points" a lista de pontos `{hz, db}` do EQ por Curva: a interface os desenha como controles deslizantes e como
+# um gráfico de pontos arrastáveis
+ParamKind = Literal[
+    "number", "integer", "boolean", "choice", "points", "profile", "band_gains", "freq_points"
+]
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,8 @@ class EffectInfo:
     needs_selection: bool = False
     # trabalha sobre as amostras (Redução de ruído, Reparar): não vale no áudio mestre, que roda num grafo ao vivo
     sample_stage: bool = False
+    # tem resposta de frequência calculada sem o ffmpeg (os efeitos do EQ): a interface desenha o gráfico dele
+    has_response: bool = False
     # o que o efeito sabe fazer além de ser aplicado (o Noise Gate sugere o limiar a partir do ruído)
     actions: tuple[ActionInfo, ...] = ()
 
@@ -97,11 +104,19 @@ def _bounds(metadata: list[Any]) -> tuple[float | None, float | None]:
     return low, high
 
 
+def _options(annotation: Any, extra: dict) -> tuple[str, ...]:
+    """As opções de uma escolha (os valores do `Literal`) ou, num campo de lista, os nomes que `param(options=)` deu."""
+    if is_literal(annotation):
+        return tuple(str(option) for option in get_args(annotation))
+    return tuple(str(option) for option in extra.get("options", ()))
+
+
 def param_info(name: str, cls: type[BaseModel]) -> ParamInfo:
     """Um parâmetro de qualquer modelo montado com `param()` (efeito ou analisador): o catálogo dos dois é o mesmo."""
     field = cls.model_fields[name]
     extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
     low, high = _bounds(field.metadata)
+    low, high = extra.get("minimum", low), extra.get("maximum", high)
     annotation = field.annotation
     return ParamInfo(
         name=name,
@@ -112,7 +127,7 @@ def param_info(name: str, cls: type[BaseModel]) -> ParamInfo:
         minimum=low,
         maximum=high,
         hint=field.description or "",
-        options=tuple(str(option) for option in get_args(annotation)) if is_literal(annotation) else (),
+        options=_options(annotation, extra),
     )
 
 
@@ -127,6 +142,7 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         parameters=tuple(param_info(name, cls) for name in own),
         needs_selection=cls.needs_selection,
         sample_stage=cls.sample_stage,
+        has_response=cls.has_response,
         actions=tuple(
             ActionInfo(action.id, action.label, action.hint, action.fills, action.needs_range)
             for action in cls.actions

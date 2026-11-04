@@ -3,8 +3,16 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { errorMessage } from '@/api'
-import { fetchAudioEffects } from '@/api/audioEffects'
-import type { AudioEffectCatalog, AudioEffectInfo, AudioEffectParam, AudioEffectPreset, AudioEffectTarget } from '@/api'
+import { deleteUserPreset, fetchAudioEffects, fetchUserPresets, saveUserPreset } from '@/api/audioEffects'
+import type {
+  AudioEffectCatalog,
+  AudioEffectInfo,
+  AudioEffectParam,
+  AudioEffectPreset,
+  AudioEffectSettings,
+  AudioEffectTarget,
+} from '@/api'
+import { useToastsStore } from './toasts'
 
 export const useAudioEffectsStore = defineStore('audioEffects', () => {
   const catalog = ref<AudioEffectCatalog | null>(null)
@@ -45,5 +53,40 @@ export const useAudioEffectsStore = defineStore('audioEffects', () => {
     await loading
   }
 
-  return { catalog, error, effects, common, targets, presets, loaded, commonParam, infoOf, load }
+  /** Troca no catálogo só as predefinições salvas pela pessoa pelas que o servidor tem agora (as embutidas não mudam). */
+  async function refreshUserPresets(): Promise<void> {
+    if (!catalog.value) return
+    const saved = await fetchUserPresets()
+    const builtin = (catalog.value.presets ?? []).filter((preset) => preset.origin !== 'user')
+    catalog.value = { ...catalog.value, presets: [...builtin, ...saved] }
+  }
+
+  /** Salva a cadeia com o nome dado (o mesmo nome troca a predefinição). Devolve a predefinição, ou null com o motivo num aviso. */
+  async function savePreset(label: string, chain: AudioEffectSettings[]): Promise<AudioEffectPreset | null> {
+    const toasts = useToastsStore()
+    try {
+      const saved = await saveUserPreset(label, chain)
+      await refreshUserPresets()
+      toasts.push({ tone: 'success', title: `Predefinição "${saved.label}" salva`, description: 'Ela aparece em Predefinições, no menu + Efeito.' })
+      return saved
+    } catch (failure) {
+      toasts.push({ tone: 'error', title: 'Não consegui salvar a predefinição', description: errorMessage(failure) })
+      return null
+    }
+  }
+
+  /** Apaga uma predefinição salva pela pessoa. Devolve se apagou. */
+  async function removePreset(id: string): Promise<boolean> {
+    const toasts = useToastsStore()
+    try {
+      await deleteUserPreset(id)
+      await refreshUserPresets()
+      return true
+    } catch (failure) {
+      toasts.push({ tone: 'error', title: 'Não consegui apagar a predefinição', description: errorMessage(failure) })
+      return false
+    }
+  }
+
+  return { catalog, error, effects, common, targets, presets, loaded, commonParam, infoOf, load, savePreset, removePreset }
 })

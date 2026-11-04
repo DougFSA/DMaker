@@ -1,11 +1,27 @@
 /* Tipos do catálogo dos efeitos de áudio (GET /api/audio-effects, ui/audio_effect_routes.py), com os nomes de campo do
    backend. O painel "Efeitos de áudio" monta o menu e o formulário só a partir dele: efeito novo aparece sem mexer aqui. */
 
-/** `profile` é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou `auto`: o campo se escolhe numa lista. */
-export type AudioEffectParamKind = 'number' | 'integer' | 'boolean' | 'choice' | 'points' | 'profile'
+/** `profile` é o nome de um perfil de ruído do projeto (`audio.noise_profiles`) ou `auto`: o campo se escolhe numa lista.
+ *  `band_gains` é a lista fixa de ganhos (dB) do EQ Gráfico, um controle deslizante por banda (`options` traz a frequência de
+ *  cada uma); `freq_points` é a lista de pontos {hz, db} do EQ por Curva, um gráfico de pontos arrastáveis. */
+export type AudioEffectParamKind =
+  | 'number'
+  | 'integer'
+  | 'boolean'
+  | 'choice'
+  | 'points'
+  | 'profile'
+  | 'band_gains'
+  | 'freq_points'
 
-/** O valor de um parâmetro na spec: número, caixa de marcar ou uma das opções de uma escolha. */
-export type AudioEffectValue = number | boolean | string
+/** Um ponto da curva do EQ por Curva: a frequência (Hz) e o ganho nela (dB). */
+export interface CurvePoint {
+  hz: number
+  db: number
+}
+
+/** O valor de um parâmetro na spec: número, caixa de marcar, uma das opções de uma escolha ou uma das listas do EQ. */
+export type AudioEffectValue = number | boolean | string | number[] | CurvePoint[]
 
 export interface AudioEffectParam {
   /** O nome do campo na spec (`gain_db`). */
@@ -38,6 +54,8 @@ export interface AudioEffectInfo {
   needs_selection?: boolean
   /** Trabalha sobre as amostras do item (Redução de ruído, Reparar): não vale no master, que roda num grafo ao vivo. */
   sample_stage?: boolean
+  /** Tem resposta de frequência calculada pelo servidor (os efeitos do EQ): a interface desenha o gráfico dele. */
+  has_response?: boolean
   /** O que o efeito sabe fazer além de ser aplicado (o Noise Gate sugere o limiar a partir do ruído): um botão cada. */
   actions?: AudioEffectAction[]
 }
@@ -60,6 +78,14 @@ export interface AudioEffectPreset {
   summary: string
   /** Os efeitos como a spec os escreve (só o que difere do padrão). */
   effects: Array<{ type: string; [parameter: string]: unknown }>
+  /** De onde vem: `builtin` (embutida) ou `user` (salva pela pessoa, no arquivo effect-presets.json da pasta de dados). */
+  origin?: 'builtin' | 'user'
+}
+
+/** A resposta de frequência de um efeito de equalização (POST /api/audio-effects/response): o ganho em dB em cada frequência. */
+export interface EffectResponse {
+  hz: number[]
+  db: number[]
 }
 
 /** A resposta de uma ação de efeito. */

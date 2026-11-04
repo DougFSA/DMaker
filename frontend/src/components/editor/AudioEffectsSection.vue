@@ -18,6 +18,7 @@ import {
   setEnabledIn,
   targetMayGrow,
 } from '@/lib/audioEffects'
+import { useConfirm } from '@/composables/useConfirm'
 import { stableKey } from '@/lib/editorSpec'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
@@ -25,6 +26,7 @@ import AudioEffectCard from './AudioEffectCard.vue'
 
 const editor = useEditorStore()
 const catalog = useAudioEffectsStore()
+const confirm = useConfirm()
 
 onMounted(() => void catalog.load())
 
@@ -72,9 +74,21 @@ function add(info: AudioEffectInfo): void {
 /** Põe a cadeia pronta no fim da do item, cada efeito separado (e editável depois), num passo só do desfazer. */
 function addPreset(preset: AudioEffectPreset): void {
   act((draft, listPath) => {
-    for (const effect of preset.effects) addEffectIn(draft, listPath, { ...effect })
+    // por cópia funda: a predefinição pode ter listas (os pontos de uma curva) e a spec não pode dividi-las com o catálogo
+    for (const effect of preset.effects) addEffectIn(draft, listPath, JSON.parse(JSON.stringify(effect)))
   })
   menuOpen.value = false
+}
+
+/** Apaga uma predefinição que a pessoa salvou (as embutidas não têm o botão). Pergunta antes: não há desfazer para isto. */
+async function removePreset(preset: AudioEffectPreset): Promise<void> {
+  const accepted = await confirm({
+    title: `Apagar a predefinição "${preset.label}"?`,
+    description: 'Ela sai da lista. Os efeitos que você já pôs em itens com ela continuam como estão.',
+    tone: 'danger',
+    confirmLabel: 'Apagar',
+  })
+  if (accepted) await catalog.removePreset(preset.id)
 }
 
 const remove = (index: number) => act((draft, listPath) => removeEffectIn(draft, listPath, index))
@@ -141,10 +155,21 @@ function endDrag(): void {
             <div v-if="offeredPresets.length > 0" class="effects-menu__group" data-effects-presets>
               <p class="effects-menu__heading">Predefinições</p>
               <ul class="effects-menu__list">
-                <li v-for="preset in offeredPresets" :key="preset.id">
+                <li v-for="preset in offeredPresets" :key="preset.id" class="effects-menu__preset" :data-preset-origin="preset.origin ?? 'builtin'">
                   <button type="button" class="effects-menu__item" :data-add-preset="preset.id" :title="preset.summary" @click="addPreset(preset)">
                     <span class="effects-menu__name">{{ preset.label }}</span>
-                    <span class="effects-menu__audacity">{{ preset.summary }}</span>
+                    <span class="effects-menu__audacity">{{ preset.summary || (preset.origin === 'user' ? 'Salva por você' : '') }}</span>
+                  </button>
+                  <button
+                    v-if="preset.origin === 'user'"
+                    type="button"
+                    class="effects-menu__remove"
+                    :aria-label="`Apagar a predefinição ${preset.label}`"
+                    title="Apagar esta predefinição"
+                    :data-remove-preset="preset.id"
+                    @click="removePreset(preset)"
+                  >
+                    <AppIcon name="trash" :size="14" />
                   </button>
                 </li>
               </ul>
@@ -294,6 +319,32 @@ function endDrag(): void {
 .effects-menu__item:hover,
 .effects-menu__item:focus-visible {
   background: var(--color-surface-hover);
+}
+
+.effects-menu__preset {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.effects-menu__preset .effects-menu__item {
+  flex: 1;
+  min-width: 0;
+}
+
+.effects-menu__remove {
+  flex: none;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.effects-menu__remove:hover,
+.effects-menu__remove:focus-visible {
+  background: var(--color-surface-hover);
+  color: var(--color-error);
 }
 
 .effects-menu__audacity {
