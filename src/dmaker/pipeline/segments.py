@@ -33,7 +33,7 @@ from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
-from .audio_effects import clip_camera_audio, track_audio_overrides
+from .audio_effects import clip_camera_audio, noise_profile_parts, track_audio_overrides
 from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
@@ -245,6 +245,9 @@ class ClipPreparer:
             [(str(t.path), t.in_point, t.volume, t.audio_stream, *pan_key_part(t.pan)) for t in tracks],
             matted.path.name if matted else None,  # o nome carrega a chave do recorte
             camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
+            # o perfil de ruído nomeado que a Redução de ruído do clipe usa: mudar o trecho dele muda o som (vazio, e
+            # fora da chave, sem perfil nomeado)
+            *noise_profile_parts(ctx, segment.effects),
         )
         out = ctx.cache_dir / f"{key}.mov"
         if camera_audio is not None and _needs_render(out, ctx) and not ctx.options.dry_run:

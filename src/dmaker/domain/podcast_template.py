@@ -2,9 +2,9 @@
 não calcula sozinho (a duração total, onde a música de encerramento entra e as etiquetas que o episódio preenche).
 
 O modelo é um episódio só de áudio: a música de abertura, a voz gravada, a música de encerramento, tudo normalizado a
--16 LUFS (o alvo de podcast) e gravado como MP3 com as etiquetas do episódio. A limpeza da voz (ruído, cortes de
-respiração) é uma etapa que o editor de áudio ainda vai ganhar; quando ela existir, este modelo a liga. Tudo aqui é
-puro: recebe dados, devolve dados.
+-16 LUFS (o alvo de podcast) e gravado como MP3 com as etiquetas do episódio. A voz passa por uma Redução de ruído
+automática moderada (`limpeza`, ligada por padrão: o perfil é o trecho mais quieto da gravação, e sem uma pausa só de
+ruído nada é tirado). Tudo aqui é puro: recebe dados, devolve dados.
 """
 
 from __future__ import annotations

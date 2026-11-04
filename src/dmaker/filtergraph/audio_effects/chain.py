@@ -4,10 +4,11 @@ efeito à entrada do seguinte e cuida do intervalo (`start`/`end`) de qualquer e
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from ...domain.audio_effects import EffectBase, active_effects
 from .measure import Measure
-from .registry import SAMPLE_RATE, EffectRequest, build_effect
+from .registry import SAMPLE_RATE, EffectRequest, build_effect, is_sample_effect
 
 # Emenda entre o som seco e o processado nas bordas de um intervalo: 10 ms de transição linear. É curta o
 # bastante para o efeito começar onde a pessoa marcou e longa o bastante para a onda não dar degrau (um corte
@@ -39,7 +40,20 @@ def chain_lines(
     """Liga `source` a `out` passando pelos efeitos ligados de `effects`, em ordem. `duration` é a duração do
     sinal que entra e `measures` traz a medida do sinal que entra em cada efeito que precisa dela, pela posição
     do efeito na lista. Sem nenhum efeito ligado a cadeia é uma passagem direta."""
-    active = active_effects(effects)
+    return stage_lines(source, out, active_effects(effects), duration, measures, tag=tag)
+
+
+def stage_lines(
+    source: str,
+    out: str,
+    active: Sequence[tuple[int, EffectBase]],
+    duration: float,
+    measures: Mapping[int, Measure] | None = None,
+    *,
+    tag: str = "fx",
+) -> list[str]:
+    """Como `chain_lines`, para efeitos que já vêm com a posição que têm na lista da spec (`active_effects`): é o
+    que um trecho de ffmpeg de uma cadeia partida usa, e os rótulos seguem a posição de origem para não se repetirem."""
     if not active:
         return [f"{source}anull{out}"]
     lines: list[str] = []
@@ -53,6 +67,34 @@ def chain_lines(
         duration = effect.output_duration(duration)
         current = target
     return lines
+
+
+@dataclass(frozen=True)
+class Stage:
+    """Um trecho da cadeia: ou efeitos de filtro seguidos (um comando do ffmpeg), ou UM efeito de amostras (numpy).
+    Cada efeito vem com a posição que tem na lista da spec."""
+
+    effects: tuple[tuple[int, EffectBase], ...]
+    samples: bool = False
+
+
+def split_stages(effects: Sequence[EffectBase]) -> list[Stage]:
+    """Parte a cadeia nos trechos em que ela muda de mundo: os efeitos de filtro seguidos ficam juntos num trecho de
+    ffmpeg e cada efeito de amostras é um estágio só dele. Uma cadeia sem efeito de amostras é um trecho só (o comando
+    de sempre). Só os efeitos ligados entram."""
+    stages: list[Stage] = []
+    run: list[tuple[int, EffectBase]] = []
+    for index, effect in active_effects(effects):
+        if is_sample_effect(effect):
+            if run:
+                stages.append(Stage(tuple(run)))
+                run = []
+            stages.append(Stage(((index, effect),), samples=True))
+        else:
+            run.append((index, effect))
+    if run or not stages:
+        stages.append(Stage(tuple(run)))
+    return stages
 
 
 def apply_effect(request: EffectRequest) -> list[str]:

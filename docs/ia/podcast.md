@@ -4,7 +4,7 @@ Tarefa `podcast` do manual do DMaker. Monta um episódio só de áudio com a gra
 
 ## Quando usar
 
-Você gravou o episódio e quer o arquivo final para publicar, com a vinheta no começo e no fim e o volume no padrão de podcast. A limpeza da voz (ruído, respiração) é uma etapa que o editor de áudio ainda vai ganhar; este modelo usa o que existe hoje e passa a ligá-la quando ela chegar.
+Você gravou o episódio e quer o arquivo final para publicar, com a vinheta no começo e no fim e o volume no padrão de podcast. A voz passa por uma Redução de ruído automática e moderada (8 dB, `limpeza` ligada por padrão): o perfil é o trecho mais quieto da gravação, e uma gravação sem pausa só de ruído (ou já limpa) sai como entrou.
 
 **Pedidos que levam a esta tarefa:**
 - "Faz o episódio 12 do podcast com essa gravação e a vinheta"
@@ -14,6 +14,7 @@ Você gravou o episódio e quer o arquivo final para publicar, com a vinheta no 
 
 - A gravação (`voz`) e o arquivo da música (`trilha`): os dois são obrigatórios, e o modelo não tem caminho padrão. A abertura toca o começo da música por `abertura` segundos (padrão 8) e o encerramento toca o final dela por `encerramento` segundos (padrão 10). A voz entra depois da abertura.
 - As etiquetas do episódio: `artista`, `titulo`, `album`, `faixa`, `ano`, `genero` (padrão Podcast) e `comentario`; o que ficar vazio vale o modelo da marca (`marca`), se ela tiver.
+- A limpeza da voz (`limpeza`, padrão ligada): põe um efeito `noise_reduction` automático de 8 dB na voz gravada. `limpeza=false` deixa a voz como foi gravada. Para um chiado forte, pegue um perfil de um trecho só de ruído e ajuste o efeito (tarefa "Tirar o chiado de uma gravação (Redução de ruído)").
 
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
@@ -31,7 +32,7 @@ dmaker new-from-template podcast ep12 --param voz=C:\audios\ep12.wav --param tri
 dmaker audio export ep12
 ```
 
-Sem `--preset`, vale o formato do modelo (`audio/mp3`); `--param formato=audio/m4a` troca o formato e `--param loudness=-14` o alvo.
+Sem `--preset`, vale o formato do modelo (`audio/mp3`); `--param formato=audio/m4a` troca o formato, `--param loudness=-14` o alvo e `--param limpeza=false` desliga a Redução de ruído da voz.
 
 ## Como conferir
 
@@ -42,3 +43,4 @@ Sem `--preset`, vale o formato do modelo (`audio/mp3`); `--param formato=audio/m
 - **Faltam parâmetros obrigatórios**: o modelo pede `voz` e `trilha`, os dois arquivos de áudio.
 - **A música cobre a voz no começo**: a música abaixa sob a voz (ducking); se ainda atrapalha, aumente a `abertura` para a voz entrar depois dela.
 - **O episódio ficou longo demais ou curto**: a duração é a da gravação mais a abertura e o encerramento; ajuste os dois.
+- **A voz ficou abafada**: a limpeza automática achou "ruído" onde havia som de fundo que faz parte do episódio; passe `limpeza=false` e, se quiser, ponha a Redução de ruído com um perfil que você escolher.

@@ -74,9 +74,32 @@ export function targetMayGrow(targets: readonly AudioEffectTarget[], targetKey: 
 }
 
 /** Os efeitos que o menu "+ Efeito" oferece neste lugar: os que dependem de uma seleção ou de uma curva (Cortar,
- *  Envelope) nascem da edição de onda, não de um clique no menu. */
-export function effectsFor(effects: readonly AudioEffectInfo[], mayGrow: boolean): AudioEffectInfo[] {
-  return effects.filter((info) => !info.needs_selection && (mayGrow || !info.changes_duration))
+ *  Envelope) nascem da edição de onda, não de um clique no menu. Os que trabalham sobre as amostras do item (Redução de
+ *  ruído) não valem no master, que roda num grafo ao vivo: `onItem` é falso lá. */
+export function effectsFor(effects: readonly AudioEffectInfo[], mayGrow: boolean, onItem = true): AudioEffectInfo[] {
+  return effects.filter((info) => !info.needs_selection && (mayGrow || !info.changes_duration) && (onItem || !info.sample_stage))
+}
+
+/** O valor de `profile` que não guarda perfil: o trecho mais quieto do próprio item. */
+export const AUTO_PROFILE = 'auto'
+
+/** Os nomes dos perfis de ruído que o projeto guarda (`audio.noise_profiles`). */
+export function profileNames(spec: unknown): string[] {
+  const profiles = getPath(spec, 'audio.noise_profiles')
+  return profiles && typeof profiles === 'object' ? Object.keys(profiles as Record<string, unknown>) : []
+}
+
+/** O alvo de `edit_project` de uma cadeia, a partir de onde ela mora na spec (`timeline.0.effects` vira `timeline.0`). */
+export function targetOfList(listPath: string): string {
+  if (listPath === MASTER_LIST_PATH) return MASTER_TARGET_KEY
+  return listPath.replace(/\.effects$/, '')
+}
+
+/** Um nome livre para o perfil novo (`perfil-1`, `perfil-2`...). */
+export function freeProfileName(existing: readonly string[]): string {
+  let number = existing.length + 1
+  while (existing.includes(`perfil-${number}`)) number += 1
+  return `perfil-${number}`
 }
 
 /**
@@ -108,7 +131,9 @@ export function isEnabled(effect: Pick<AudioEffectSettings, 'enabled'>): boolean
 export function paramValue(effect: AudioEffectSettings, param: Pick<AudioEffectParam, 'name' | 'kind' | 'default'>): AudioEffectValue | null {
   const stored = effect[param.name]
   if (param.kind === 'boolean') return typeof stored === 'boolean' ? stored : param.default === true
-  if (param.kind === 'choice') return typeof stored === 'string' ? stored : typeof param.default === 'string' ? param.default : null
+  if (param.kind === 'choice' || param.kind === 'profile') {
+    return typeof stored === 'string' ? stored : typeof param.default === 'string' ? param.default : null
+  }
   if (typeof stored === 'number') return stored
   return typeof param.default === 'number' ? param.default : null
 }

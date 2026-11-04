@@ -26,7 +26,7 @@ from ..domain.spec import (
 from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
 from ..media.browser import browser_problem
 from ..media.probe import probe
-from .audio_lint import audio_output_warnings
+from .audio_lint import audio_output_warnings, noise_profile_warnings
 from .context import Prober
 from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
@@ -140,6 +140,7 @@ def summarize(
     )
     warnings += html_warnings(project, browser_problem)
     warnings += audio_output_warnings(project, presentation.total)
+    warnings += noise_profile_warnings(project)
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)

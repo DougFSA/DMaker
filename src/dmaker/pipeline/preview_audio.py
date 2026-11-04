@@ -41,6 +41,7 @@ from .assembly import (
 from .audio_effects import (
     clip_camera_audio,
     effect_processor,
+    noise_profile_parts,
     processed_music,
     processed_pips,
     processed_voiceovers,
@@ -389,6 +390,7 @@ class PreviewAudioBuilder:
                 for t in tracks
             ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
+            *noise_profile_parts(ctx, segment.effects),  # o perfil de ruído nomeado (vazio sem ele)
         )
         out = ctx.cache_dir / f"{key}.wav"
         if out.exists():

@@ -252,7 +252,11 @@ def validate_project(name_or_path: str) -> dict:
         "(`points`: [{at, db}]), audio_channels (`mode`: mono, swap, left, right), audio_paste (`at`, e "
         "`start`/`end` do trecho a copiar), audio_duplicate, audio_split (`at`), audio_join, audio_trim (aparar "
         "fora da seleção), audio_shift (`delta` ou `to`, em segundos), audio_split_stereo e track_set (`track`: "
-        "A1, A2..., MUS, NAR, VO, SFX; `gain_db`, `pan`, `muted`, `solo`); nada disso mexe na imagem. `op` é um "
+        "A1, A2..., MUS, NAR, VO, SFX; `gain_db`, `pan`, `muted`, `solo`); nada disso mexe na imagem. Limpeza do "
+        "som: noise_profile_set (`name`, `target`, `start`/`end` do trecho só de ruído; sem eles, o trecho mais quieto "
+        "do item) e noise_profile_remove (`name`), que cuidam dos perfis da Redução de ruído (ver `noise_profile`), "
+        "e audio_truncate_silence (`target`: um clipe, que perde a imagem junto, ou uma voz gravada; `threshold_db` "
+        "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). `op` é um "
         'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
         "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
         '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"); no split, sem '
@@ -277,6 +281,8 @@ def edit_project(name: str, op: dict) -> dict:
     result = {"spec_path": str(path), **_summary_dict(summary)}
     if report.warnings:
         result["edit_warnings"] = report.warnings
+    if report.notes:  # o que a operação fez (por exemplo, quantos silêncios foram truncados)
+        result["edit_notes"] = report.notes
     return result
 
 
@@ -363,6 +369,44 @@ def audio_effects(type: str | None = None) -> dict:
     try:
         return catalog_payload(type)
     except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Pega o perfil de ruído de um trecho de um item de áudio, o primeiro passo da Redução de ruído (efeito "
+        "`noise_reduction`, ver `audio_effects`). `profile` é o nome do perfil; `target` é o item (timeline.N, "
+        "overlays.N, audio.voiceover.N, audio.tracks.N ou audio.music); `start` e `end` são o trecho que só tem o "
+        "chiado, em segundos da linha do tempo (ou marker:<texto>). Sem `start` e `end`, o perfil é o trecho mais "
+        "quieto do item. O perfil fica guardado em audio.noise_profiles (entra no histórico: `undo_edit` o desfaz) e "
+        "a resposta traz o nível do ruído por banda de um terço de oitava, em dBFS. Aplique com `edit_project`: "
+        '{"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": '
+        '"noise_reduction", "profile": "<nome>", "reduction_db": 12}}. Sem `profile`, lista os perfis do projeto.'
+    )
+)
+def noise_profile(
+    name: str,
+    profile: str | None = None,
+    target: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.noise_profiles import capture_noise_profile
+    from .pipeline.projects import load_project
+
+    if profile is None:
+        saved = load_project(name).audio.noise_profiles
+        return {"profiles": {key: value.model_dump() for key, value in saved.items()}}
+    if target is None:
+        raise ToolError(
+            "informe o `target`, o item de onde vem o trecho de ruído (por exemplo audio.voiceover.0)"
+        )
+    try:
+        return capture_noise_profile(name, profile, target, start, end)
+    except (EditError, ValueError) as exc:
         raise ToolError(str(exc)) from exc
 
 

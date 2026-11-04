@@ -38,7 +38,6 @@ import {
 import { effectContextFor } from '@/lib/audioEffects'
 import type { Plan } from '@/lib/editorActions'
 import { nextMarker } from '@/lib/markers'
-import { roundSeconds } from '@/lib/timeline'
 import { useEditorStore, type SelectedItem } from './editor'
 import { useToastsStore } from './toasts'
 
@@ -265,9 +264,9 @@ export const useAudioPanelStore = defineStore('audioPanel', () => {
   const applyEnvelope = (points: readonly EnvelopePoint[], existingIndex: number | null): Promise<boolean> =>
     target.value ? run(planEnvelope(target.value, clock.value, points, existingIndex)) : Promise.resolve(false)
 
-  /** Grava o traço da Draw Tool: o efeito `draw` com os valores das amostras a partir do instante `start` (tempo do eixo). */
+  /** Grava o traço da Draw Tool: o efeito `draw` com os valores das amostras a partir do instante `start` (tempo do eixo, em microssegundos: arredondar para o milissegundo deslocaria o desenho até 24 amostras). */
   const applyDraw = (start: number, values: readonly number[], channel: string): Promise<boolean> =>
-    target.value ? run(planEffect(target.value, 'draw', { start: roundSeconds(start), values: [...values], channel }, null)) : Promise.resolve(false)
+    target.value ? run(planEffect(target.value, 'draw', { start: Math.round(start * 1e6) / 1e6, values: [...values], channel }, null)) : Promise.resolve(false)
 
   const canSplit = computed(() => !!target.value && isVoiceTarget(target.value))
 

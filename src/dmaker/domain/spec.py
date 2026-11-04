@@ -832,6 +832,25 @@ class VoiceoverClip(EffectsOwner):
         return self
 
 
+class NoiseProfile(Strict):
+    """Um trecho que só tem o chiado de fundo, guardado com um nome para a Redução de ruído (`noise_reduction`) usar.
+    `target` é o item de onde o trecho vem (`audio.voiceover.0`, `timeline.2`...), como em `edit_project`; `start` e
+    `end` são segundos do item, e não da linha do tempo, para o perfil seguir o item quando ele muda de lugar. O
+    espectro do trecho é medido na hora de processar e nunca fica na spec."""
+
+    target: str = Field(min_length=1)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> NoiseProfile:
+        if self.end <= self.start:
+            raise ValueError(
+                f"perfil de ruído: end ({self.end:g}) precisa ser maior que start ({self.start:g})"
+            )
+        return self
+
+
 class AudioSettings(EffectsOwner):
     music: Music | None = None
     tracks: list[AudioTrack] = []
@@ -852,10 +871,25 @@ class AudioSettings(EffectsOwner):
     # (`Project.tracks`) vira na hora de renderizar, junto com o mudo (-120 dB). Ficam fora do dump no padrão
     sfx_gain_db: float = Field(0.0, ge=-120, le=24)
     sfx_pan: float = Field(0.0, ge=-1, le=1)
+    # perfis de ruído com nome (ver `NoiseProfile`): a Redução de ruído aponta um deles por `profile`. Vazio fica fora do
+    # dump, então um projeto sem perfil gera os mesmos bytes e o mesmo hash de antes de o campo existir
+    noise_profiles: dict[str, NoiseProfile] = {}
 
     effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
     effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
-    omitted_at_default: ClassVar[dict[str, Any]] = {"sfx_gain_db": 0.0, "sfx_pan": 0.0}
+    omitted_at_default: ClassVar[dict[str, Any]] = {"sfx_gain_db": 0.0, "sfx_pan": 0.0, "noise_profiles": {}}
+
+    @model_validator(mode="after")
+    def _master_runs_live(self) -> AudioSettings:
+        """O áudio mestre roda dentro do grafo ao vivo da mistura; um efeito de amostras (Redução de ruído, Reparar)
+        precisa do sinal na memória e vale nos itens."""
+        for effect in self.master_effects:
+            if effect.sample_stage:
+                raise ValueError(
+                    f"{self.effects_place}: o efeito {effect.label} trabalha sobre as amostras do item e não vale "
+                    "na mistura inteira. Ponha-o no clipe, na voz gravada ou na faixa que tem o ruído"
+                )
+        return self
 
 
 # ---------- saída e projeto ----------

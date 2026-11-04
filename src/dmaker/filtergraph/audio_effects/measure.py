@@ -7,6 +7,8 @@ import math
 import re
 from dataclasses import dataclass
 
+from ...media.spectral import NoiseSpectrum
+
 _LINE_PREFIX = re.compile(r"^\[[^\]]*\]\s*")
 _CHANNEL = re.compile(r"^Channel:\s*(\d+)\s*$")
 _NUMBER = re.compile(r"^([A-Za-z][A-Za-z ]*?):\s*(-?inf|nan|-?[0-9.]+(?:e[-+]?\d+)?)\s*$", re.IGNORECASE)
@@ -29,9 +31,11 @@ class ChannelLevels:
 
 @dataclass(frozen=True)
 class Measure:
-    """A medida de um sinal estéreo (ou mono): um `ChannelLevels` por canal."""
+    """A medida de um sinal estéreo (ou mono): um `ChannelLevels` por canal e, para quem pede um perfil de ruído, o
+    espectro dele (`noise`, que a passada de medida do processador preenche e a spec nunca guarda)."""
 
-    channels: tuple[ChannelLevels, ...]
+    channels: tuple[ChannelLevels, ...] = ()
+    noise: NoiseSpectrum | None = None
 
     @property
     def peak_db(self) -> float:

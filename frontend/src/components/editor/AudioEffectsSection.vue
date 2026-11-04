@@ -38,9 +38,12 @@ const chain = computed(() => (context.value.kind === 'chain' ? context.value.cha
 const effects = computed(() => (chain.value ? chainOf(editor.spec, chain.value.listPath) : []))
 
 const mayGrow = computed(() => !!chain.value && targetMayGrow(catalog.targets, chain.value.targetKey))
-const offered = computed(() => effectsFor(catalog.effects, mayGrow.value))
+const onItem = computed(() => chain.value?.targetKey !== 'audio.master')
+const offered = computed(() => effectsFor(catalog.effects, mayGrow.value, onItem.value))
 /** O que o menu esconde neste lugar (o Repetir fora da voz gravada e da música), para explicar a ausência. */
-const hidden = computed(() => catalog.effects.filter((info) => !offered.value.includes(info)))
+const hidden = computed(() =>
+  catalog.effects.filter((info) => info.changes_duration && !mayGrow.value && !offered.value.includes(info)),
+)
 const growableLabels = computed(() => catalog.targets.filter((target) => target.may_grow).map((target) => target.label))
 
 const menuOpen = ref(false)

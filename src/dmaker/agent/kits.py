@@ -70,6 +70,10 @@ KITS: tuple[Kit, ...] = (
             "amplific",
             "normaliz",
             "silenci",
+            "chiado",
+            "ruido de fundo",
+            "reducao de ruido",
+            "truncar",
             "envelope",
             "desfaz",
             "refaz",
@@ -292,6 +296,7 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "audio_export": "grava vários arquivos de áudio (regiões, trilhas); é uma exportação que se pede por `dmaker audio export`, e o `export_project` com um preset de áudio já exporta o projeto inteiro",
     "import_raw_audio": "grava um WAV na pasta do projeto a partir de um arquivo bruto; se pede por `dmaker audio import-raw`",
     "audio_analyzers": "lista os analisadores de áudio; o `audio_analyze` já traz os nomes na descrição, e o catálogo completo se vê por `dmaker audio analyze catalog`",
+    "noise_profile": "pega o perfil de ruído e devolve o nível por banda; o modelo pequeno guarda o mesmo perfil por edit_project (noise_profile_set) e aplica a Redução de ruído por audio_effect, e a pessoa vê o nível por `dmaker audio noise-profile add`",
     "cut_on_beat": "com apply anda vários cortes de uma vez; o modelo pequeno confere as batidas com audio_analyze e corta por edit_project, e a pessoa pede o resto por `dmaker audio analyze cut-on-beat`",
 }
 

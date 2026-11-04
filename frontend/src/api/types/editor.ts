@@ -241,12 +241,46 @@ export type EditOperation =
   | { type: 'audio_split'; target: string; at: number }
   | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
   | { type: 'track_set'; track: string; gain_db?: number; pan?: number; solo?: boolean; muted?: boolean; hidden?: boolean; locked?: boolean }
+  /** Guarda o trecho que só tem chiado como perfil; sem `start` e `end`, é o trecho mais quieto do item. Os tempos são
+   *  segundos da linha do tempo. */
+  | { type: 'noise_profile_set'; name: string; target: string; start?: number; end?: number }
+  | { type: 'noise_profile_remove'; name: string }
 
 export interface EditResponse {
   spec: SpecDocument
   timeline: TimelineView
   /** Os marcadores que a edição apagou por estarem num trecho cortado (um aviso por marcador). */
   edit_warnings?: string[]
+  /** O que a operação fez, para mostrar (quantos silêncios foram truncados). */
+  edit_notes?: string[]
+}
+
+/** O nível do ruído de um perfil por banda de um terço de oitava (POST /api/projects/{nome}/noise-profile). */
+export interface NoiseProfileReport {
+  name: string
+  target: string
+  start: number
+  end: number
+  duration: number
+  /** O nível do trecho inteiro, em dBFS. */
+  level_db: number
+  bands: Array<{ hz: number; db: number }>
+}
+
+/** Pedido de POST /api/projects/{nome}/effect-compare: um trecho do item com o efeito desligado e ligado. */
+export interface EffectCompareRequest {
+  target: string
+  /** A posição do efeito na cadeia do item. */
+  index: number
+  /** Segundos da linha do tempo onde o trecho começa (o cursor); o item começa em 0 sem ele. */
+  at?: number | null
+  duration: number
+}
+
+export interface EffectCompareResponse {
+  before_url: string
+  after_url: string
+  duration_s: number
 }
 
 /* ---------- tema e cartões ---------- */

@@ -16,7 +16,7 @@ from dmaker.domain.spec import AudioTrack, ClipSegment, Project, TrackState, Vid
 from dmaker.domain.tracks import apply_track_state, audio_track_ids, known_track_ids, silenced_audio_tracks
 from dmaker.filtergraph import Inputs, ResolvedVideoOverlay, pip_audio_graph
 from dmaker.filtergraph.audio import audio_graph
-from dmaker.filtergraph.audio_effects import EffectRequest, build_effect, builder_types
+from dmaker.filtergraph.audio_effects import EffectRequest, build_effect, builder_types, sample_builder_types
 from dmaker.filtergraph.audio_effects.editing import envelope_gain_expression
 from dmaker.filtergraph.mezzanine import TrackSlice, clip_audio_lines
 from dmaker.filtergraph.mix import pan_filter, pan_gains
@@ -36,7 +36,11 @@ def project(**parts) -> Project:
 
 
 def test_the_new_effects_have_a_builder_each_and_the_catalog_tells_the_interface_which_need_a_selection():
-    assert {"silence", "cut", "envelope", "channels"} <= set(EFFECT_CLASSES) == builder_types()
+    assert (
+        {"silence", "cut", "envelope", "channels"}
+        <= set(EFFECT_CLASSES)
+        == builder_types() | sample_builder_types()
+    )
     payload = catalog_payload()
     json.dumps(payload)  # serializável: a rota da API e o MCP devolvem isto
     by_type = {effect["type"]: effect for effect in payload["effects"]}

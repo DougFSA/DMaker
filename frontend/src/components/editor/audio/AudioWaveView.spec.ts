@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { audioWave, voiceSpec, voiceView } from '@/test/audioPanelFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useAudioPanelStore } from '@/stores/audioPanel'
+import { useToastsStore } from '@/stores/toasts'
 import AudioWaveView from './AudioWaveView.vue'
 
 let wrapper: VueWrapper | null = null
@@ -28,7 +29,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-async function mountWave(spec: Record<string, unknown> = voiceSpec(), tool: 'select' | 'envelope' | 'zoom' | 'multi' = 'select') {
+async function mountWave(spec: Record<string, unknown> = voiceSpec(), tool: 'select' | 'envelope' | 'zoom' | 'multi' | 'draw' = 'select') {
   const view = voiceView()
   opened = await openEditor(spec, {
     'POST /api/projects/demo/timeline': () => view,
@@ -210,5 +211,79 @@ describe('a multiferramenta', () => {
     mouse(document, 'mousemove', 500)
     mouse(document, 'mouseup', 500)
     expect(panel.selection?.start).toBeCloseTo(3, 2)
+  })
+
+  it('no zoom de amostra desenha em vez de selecionar', async () => {
+    const { panel, area } = await mountWave(voiceSpec(), 'multi')
+    panel.setView({ start: 1, end: 1 + 200 / 48000 })
+    mouse(area, 'mousedown', 100, { clientY: 37 })
+    mouse(document, 'mouseup', 100, { clientY: 37 })
+    await flushPromises()
+    expect(panel.selection).toBeNull()
+    expect(edits().at(-1)).toMatchObject({ type: 'audio_effect', action: 'add' })
+  })
+})
+
+describe('a Draw Tool', () => {
+  const zoomed = () => ({ start: 1, end: 1 + 200 / 48000 }) // 200 amostras em 1000 px: 5 px cada
+
+  it('arrastar no zoom máximo grava o efeito draw com os valores das amostras, a partir da amostra certa', async () => {
+    const { panel, area } = await mountWave(voiceSpec(), 'draw')
+    panel.setView(zoomed())
+    // o canal de cima vai de 0 a 149 px: 74,5 é o zero, 0 é o topo (1)
+    mouse(area, 'mousedown', 100, { clientY: 74.5 })
+    mouse(document, 'mousemove', 125, { clientY: 0 })
+    mouse(document, 'mouseup', 125, { clientY: 0 })
+    await flushPromises()
+    const op = edits().at(-1) as { type: string; action: string; target: string; effect: { type: string; start: number; values: number[]; channel: string } }
+    expect(op).toMatchObject({ type: 'audio_effect', action: 'add', target: 'audio.voiceover.0' })
+    expect(op.effect.type).toBe('draw')
+    expect(op.effect.channel).toBe('left') // o canal sob o mouse
+    // x = 100 px é a amostra 20 da janela, que começa em 1 s (48000): 48020
+    expect(Math.round(op.effect.start * 48000)).toBe(48020)
+    expect(op.effect.values).toHaveLength(6) // de x = 100 a 125, a cinco pixels por amostra
+    expect(op.effect.values[0]).toBeCloseTo(0, 5)
+    expect(op.effect.values.at(-1)).toBeCloseTo(1, 5)
+    expect(op.effect.values).toEqual([...op.effect.values].sort((a, b) => a - b)) // a reta sobe sem buracos
+  })
+
+  it('Shift desenha nos dois canais', async () => {
+    const { panel, area } = await mountWave(voiceSpec(), 'draw')
+    panel.setView(zoomed())
+    mouse(area, 'mousedown', 100, { clientY: 200, shiftKey: true })
+    mouse(document, 'mouseup', 100, { clientY: 200, shiftKey: true })
+    await flushPromises()
+    expect((edits().at(-1) as { effect: { channel: string } }).effect.channel).toBe('both')
+  })
+
+  it('sem zoom de amostra não desenha e explica o que fazer', async () => {
+    const { area } = await mountWave(voiceSpec(), 'draw')
+    mouse(area, 'mousedown', 100)
+    mouse(document, 'mouseup', 100)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(useToastsStore().items.at(-1)?.title).toContain('Aproxime mais o zoom')
+  })
+
+  it('num áudio que não é de 48 kHz não desenha e diz por quê', async () => {
+    const { panel, area } = await mountWave(voiceSpec(), 'draw')
+    panel.setOverview(audioWave({ rate: 44100 }))
+    panel.setView({ start: 1, end: 1 + 200 / 44100 })
+    mouse(area, 'mousedown', 100)
+    mouse(document, 'mouseup', 100)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(useToastsStore().items.at(-1)?.title).toContain('44,1 kHz')
+  })
+
+  it('Esc cancela o traço sem gravar nada', async () => {
+    const { panel, area } = await mountWave(voiceSpec(), 'draw')
+    panel.setView(zoomed())
+    mouse(area, 'mousedown', 100, { clientY: 50 })
+    mouse(document, 'mousemove', 150, { clientY: 30 })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    mouse(document, 'mouseup', 150, { clientY: 30 })
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
   })
 })

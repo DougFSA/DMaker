@@ -108,6 +108,22 @@ describe('cliente do editor: projeto, legendas e linha do tempo', () => {
     await editorApi.previewAudio.get('a', 'chave 1')
     expect(fetch.last()).toMatchObject({ url: '/api/projects/a/preview-audio?key=chave%201', method: 'GET' })
   })
+
+  it('mede o perfil de ruído da spec na tela e pede o antes e depois de um efeito', async () => {
+    const fetch = stubFetch({ name: 'sala', bands: [] })
+    await editorApi.noiseProfile('meu projeto', { name: 'a' }, 'sala')
+    expect(fetch.last()).toMatchObject({
+      url: '/api/projects/meu%20projeto/noise-profile',
+      method: 'POST',
+      body: { spec: { name: 'a' }, profile: 'sala' },
+    })
+    await editorApi.effectCompare('a', { name: 'a' }, { target: 'audio.voiceover.0', index: 1, at: 2.5, duration: 6 })
+    expect(fetch.last()).toMatchObject({
+      url: '/api/projects/a/effect-compare',
+      method: 'POST',
+      body: { spec: { name: 'a' }, target: 'audio.voiceover.0', index: 1, at: 2.5, duration: 6 },
+    })
+  })
 })
 
 describe('cliente do editor: cartão, mídia e conferência', () => {
