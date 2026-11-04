@@ -72,23 +72,28 @@ def chain_duration(effects: Sequence[EffectBase], duration: float) -> float:
     return duration
 
 
-def rebase_effects(effects: Sequence[EffectBase], origin: float, length: float) -> list[EffectBase]:
+def rebase_effects(
+    effects: Sequence[EffectBase], origin: float, length: float, total: float | None = None
+) -> list[EffectBase]:
     """A cadeia de um pedaço do item que começa em `origin` (segundos do item) e dura `length`: cada intervalo anda
     junto com o som e o que cai fora do pedaço some. É o que leva a cadeia para a metade de uma divisão, para o
-    trecho que sobra de uma apara e para a cópia de um trecho."""
+    trecho que sobra de uma apara e para a cópia de um trecho. `total` é a duração do item inteiro, quando se sabe: o
+    Fade Out preso ao fim do item só fica no pedaço que contém o fim."""
     kept = []
     for effect in effects:
-        moved = effect.rebased(origin, length)
+        moved = effect.rebased(origin, length, total)
         if moved is not None:
             kept.append(moved)
     return kept
 
 
-def rebase_effect_dicts(chain: Sequence[dict], origin: float, length: float) -> list[dict]:
+def rebase_effect_dicts(
+    chain: Sequence[dict], origin: float, length: float, total: float | None = None
+) -> list[dict]:
     """Como `rebase_effects`, para a cadeia como dicionários (a forma que a edição da spec manipula)."""
     return [
         effect.model_dump()
-        for effect in rebase_effects([parse_effect(item) for item in chain], origin, length)
+        for effect in rebase_effects([parse_effect(item) for item in chain], origin, length, total)
     ]
 
 

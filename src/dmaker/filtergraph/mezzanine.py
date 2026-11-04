@@ -16,6 +16,7 @@ from ..domain.audio_shift import shifted_window
 from ..domain.spec import ClipSegment, ColorAdjust, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
+from .clip_crossfade import ClipCrossfades, crossfade_lines
 from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, fade_chains
 from .duck import duck_filters
 from .encode import mezzanine_output_args
@@ -85,6 +86,11 @@ def _audio_source_chain(
     return chain
 
 
+def _borrowed_chain(in_point: float, volume: float, length: float, pan: float) -> list[str]:
+    """O ramo de uma fatia de som emprestada do clipe vizinho: a mesma receita das faixas externas do trecho."""
+    return _audio_source_chain(in_point, volume, length, pan)
+
+
 def uses_camera_audio(seg: ClipSegment, info: MediaInfo) -> bool:
     """O som da própria câmera entra no trecho: o arquivo tem áudio e o trecho não está mudo nem a volume zero."""
     return info.has_audio and not seg.mute and seg.volume > 0
@@ -105,6 +111,7 @@ def clip_audio_lines(
     src: Path | None = None,
     in_point: float = 0.0,
     camera_lead: float = 0.0,
+    crossfades: ClipCrossfades | None = None,
 ) -> None:
     """Acrescenta a `lines` o ramo de áudio do trecho, terminado em `[aout]`: câmera (se houver e não estiver
     muda) + faixas externas, tudo alinhado ao início do trecho, com velocidade e fades. `source_index` é a
@@ -113,7 +120,10 @@ def clip_audio_lines(
 
     Com `audio_offset` o som anda em relação à imagem, então sai de uma entrada própria do arquivo `src`, lida a
     partir de onde o som deslocado começa (`in_point` é o ponto da fonte em que a imagem começa); `camera_lead` é o
-    silêncio que antecede um `camera_audio` já recortado (som isolado) cujo início cai antes do começo do arquivo."""
+    silêncio que antecede um `camera_audio` já recortado (som isolado) cujo início cai antes do começo do arquivo.
+
+    `crossfades` traz o cruzamento do som com o clipe vizinho nas duas pontas (J-cut e L-cut): o som emprestado dele
+    entra por cima do trecho e o trecho abaixa por baixo, sem mudar a duração (ver `filtergraph.clip_crossfade`)."""
     afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
     afades += audio_edge_fades(seg.audio_fade, duration)
     voices: list[str] = []
@@ -142,17 +152,21 @@ def clip_audio_lines(
         voices.append(f"[mz_trk{k}]")
 
     tail = ([atempo_chain(seg.speed)] if seg.speed != 1 else []) + [AUDIO_FMT_MEZZ] + afades
+    # com crossfade nas pontas, o som do próprio trecho passa por mais uma etapa antes de ser a saída
+    final = "[mz_body]" if crossfades else "[aout]"
     if not voices:
-        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}[aout]")
+        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}{final}")
     elif len(voices) == 1:
-        lines.append(voices[0] + ",".join(tail) + "[aout]")
+        lines.append(voices[0] + ",".join(tail) + final)
     else:
         lines.append(
             "".join(voices)
             + f"amix=inputs={len(voices)}:duration=longest:dropout_transition=0:normalize=0,"
             + ",".join(tail)
-            + "[aout]"
+            + final
         )
+    if crossfades:
+        lines += crossfade_lines(inputs, final, "[aout]", duration, crossfades, _borrowed_chain)
 
 
 def clip_mezzanine(
@@ -175,6 +189,7 @@ def clip_mezzanine(
     has_brand: bool = False,
     look: ColorAdjust | None = None,
     label: str = "trecho",
+    crossfades: ClipCrossfades | None = None,
 ) -> FFmpegCommand:
     """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
     `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
@@ -209,6 +224,7 @@ def clip_mezzanine(
         src=src,
         in_point=start,
         camera_lead=camera_lead,
+        crossfades=crossfades,
     )
     return _finish(inputs, lines, fps, duration, out, label)
 

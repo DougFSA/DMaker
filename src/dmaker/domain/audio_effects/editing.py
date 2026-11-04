@@ -123,7 +123,7 @@ class Envelope(EffectBase):
                 return before.db + (after.db - before.db) * fraction
         return points[-1].db
 
-    def rebased(self, origin: float, length: float) -> Envelope | None:
+    def rebased(self, origin: float, length: float, total: float | None = None) -> Envelope | None:
         """A curva para um pedaço do item: os pontos de dentro andam, e as pontas ganham o valor que a curva tinha
         ali, para o som do pedaço ser o mesmo de antes."""
         if length <= EPSILON:

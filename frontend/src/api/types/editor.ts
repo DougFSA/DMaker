@@ -240,6 +240,21 @@ export type EditOperation =
   | { type: 'audio_cut'; target: string; start: number; end: number }
   | { type: 'audio_split'; target: string; at: number }
   | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
+  /** O Fade In (`in`) ou Fade Out (`out`) preso à borda do item; duração 0 tira o fade e sem `curve` mantém a que ele tinha. */
+  | { type: 'audio_fade'; target: string; side: 'in' | 'out'; duration: number; curve?: string }
+  /** O crossfade de trilhas: um Fade Ajustável de saída num item e de entrada no outro, no mesmo intervalo da linha do tempo. */
+  | {
+      type: 'audio_crossfade_tracks'
+      out_target: string
+      in_target: string
+      start: number
+      end: number
+      kind?: 'constant_gain' | 'constant_power_1' | 'constant_power_2' | 'custom'
+      curve?: string
+      mid_adjust?: number
+    }
+  /** O crossfade do som no corte entre o clipe `index - 1` e o `index` (J-cut e L-cut); `duration` 0 tira. */
+  | { type: 'audio_crossfade_clips'; index: number; duration: number; curve?: string }
   | { type: 'track_set'; track: string; gain_db?: number; pan?: number; solo?: boolean; muted?: boolean; hidden?: boolean; locked?: boolean }
   /** Guarda o trecho que só tem chiado como perfil; sem `start` e `end`, é o trecho mais quieto do item. Os tempos são
    *  segundos da linha do tempo. */

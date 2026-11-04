@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import type { TimelineItem } from '@/api'
 import { displayLabel, hasTrimHandles, isDraggable, itemTitle, kindClass } from '@/lib/timeline'
 import { itemPieces } from '@/lib/waveform'
+import TimelineFadeHandles from './TimelineFadeHandles.vue'
 import TimelineWaveform from './TimelineWaveform.vue'
 
 const props = defineProps<{
@@ -66,6 +67,7 @@ const classes = computed(() => [
       <span class="item__handle item__handle--in" data-handle="in" />
       <span class="item__handle item__handle--out" data-handle="out" />
     </template>
+    <TimelineFadeHandles v-if="!item.missing" :item="item" :track-id="trackId" :px-per-sec="pxPerSec" />
     <span class="item__label">{{ label }}</span>
   </div>
 </template>

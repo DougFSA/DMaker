@@ -174,6 +174,7 @@ def _split_clip_over_parts(
                 "start": piece_start,
                 "end": piece_end,
                 "transition": segment.transition if i == 0 else None,
+                "audio_crossfade": segment.audio_crossfade if i == 0 else None,
                 "fade_in": segment.fade_in if i == 0 else 0.0,
                 "fade_out": segment.fade_out if i == last else 0.0,
             }

@@ -20,6 +20,7 @@ from ..domain.audio_edits import (
     rebase_effects,
     require_file_time,
     set_audio_offset,
+    set_edge_fade,
     set_track_state,
     shift_later_voiceovers,
     shift_music,
@@ -29,6 +30,7 @@ from ..domain.audio_edits import (
     trim_voiceover,
 )
 from ..domain.audio_targets import AudioTarget
+from ..domain.crossfade_edits import check_crossfade_kind, crossfade_pair, set_clip_crossfade
 from ..domain.edits import EditError
 from ..domain.markers import MarkerError, find_marker, is_marker_ref, resolve_instant
 from ..domain.spec import ClipSegment, Project, VideoOverlay
@@ -133,6 +135,62 @@ def _op_envelope(project: Project, op: dict, layout: OriginAggregate) -> Project
         instant = target.item_time(_instant(project, point["at"], f"points[{position}].at"))
         points.append((round(instant, 6), float(point["db"])))
     return add_envelope(project, target.path, points)
+
+
+def _op_fade(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    """O Fade In (`side: in`) ou o Fade Out (`side: out`) preso à borda do item, com `duration` e `curve`: o que a alça do
+    fade da linha do tempo grava. Duração zero tira o fade."""
+    target = _target(project, op, layout)
+    if target.kind == "master":
+        raise EditError(
+            "o fade da borda vale num item; para o fim da mistura use o efeito studio_fade_out ou fade_out"
+        )
+    duration = _required(op, "duration")
+    if not isinstance(duration, int | float) or isinstance(duration, bool) or duration < 0:
+        raise EditError("`duration` é a duração do fade em segundos (0 tira o fade)")
+    params = {"curve": op["curve"]} if op.get("curve") is not None else {}
+    return set_edge_fade(project, target.path, str(_required(op, "side")), float(duration), params)
+
+
+def _op_crossfade_tracks(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    """O Crossfade Tracks do Audacity: um Fade Ajustável de saída em `out_target` e um de entrada em `in_target`, no
+    mesmo intervalo da linha do tempo, com as curvas casadas. É uma edição só (um passo do desfazer) e não muda a mixagem."""
+    out_target = resolve_audio_target(project, layout, _required(op, "out_target"))
+    in_target = resolve_audio_target(project, layout, _required(op, "in_target"))
+    if out_target.path == in_target.path:
+        raise EditError("o crossfade pede dois itens diferentes: um que sai e um que entra")
+    kind, shape, mid = check_crossfade_kind(
+        op.get("kind", "constant_power_1"), op.get("curve"), op.get("mid_adjust")
+    )
+    start, end = _interval(project, op)
+    spans = []
+    for target in (out_target, in_target):
+        if target.kind == "master":
+            raise EditError(
+                "a mistura inteira não faz crossfade: use dois itens (clipes, faixas, voz ou música)"
+            )
+        first, last = target.windows[0], target.windows[-1]
+        if start < first.start - TIME_TOLERANCE or end > last.end + TIME_TOLERANCE:
+            raise EditError(
+                f"{target.path}: {target.name} soa {target.where()} e o crossfade vai de {start:g} a {end:g} s; os "
+                "dois itens precisam cobrir o intervalo inteiro"
+            )
+        spans.append(target.single_interval(start, end))
+    leaving, entering = crossfade_pair(kind, shape, mid, spans[0], spans[1])
+    edited = add_effects(project, out_target.path, [leaving])
+    return add_effects(edited, in_target.path, [entering])
+
+
+def _op_crossfade_clips(project: Project, op: dict, layout: OriginAggregate) -> Project:
+    """O crossfade de som no corte entre dois clipes vizinhos (J-cut e L-cut): `index` é o clipe que entra, `duration` o
+    tempo do cruzamento (0 tira) e `curve` o tipo. A imagem continua trocando no quadro exato do corte."""
+    index = _required(op, "index")
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise EditError("`index` é a posição do clipe que entra no corte (1 é o segundo trecho)")
+    duration = op.get("duration", 0.5)
+    if not isinstance(duration, int | float) or isinstance(duration, bool) or not 0 <= duration <= 5:
+        raise EditError("`duration` é o tempo do crossfade em segundos, de 0 (tira) a 5")
+    return set_clip_crossfade(project, index, float(duration), op.get("curve"))
 
 
 def _op_channels(project: Project, op: dict, layout: OriginAggregate) -> Project:
@@ -379,6 +437,9 @@ AUDIO_OPERATIONS: dict[str, AudioOperation] = {
     "audio_cut": _op_cut,
     "audio_envelope": _op_envelope,
     "audio_channels": _op_channels,
+    "audio_fade": _op_fade,
+    "audio_crossfade_tracks": _op_crossfade_tracks,
+    "audio_crossfade_clips": _op_crossfade_clips,
     "audio_trim": _op_trim,
     "audio_paste": _op_paste,
     "audio_duplicate": _op_duplicate,

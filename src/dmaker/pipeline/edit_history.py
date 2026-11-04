@@ -73,6 +73,9 @@ OPERATION_LABELS = {
     "noise_profile_set": "Perfil de ruído",
     "noise_profile_remove": "Apagar perfil de ruído",
     "audio_truncate_silence": "Truncar silêncio",
+    "audio_fade": "Fade na borda",
+    "audio_crossfade_tracks": "Crossfade de trilhas",
+    "audio_crossfade_clips": "Crossfade de som entre clipes",
 }
 _DETAIL_KEYS = (
     "name",
@@ -87,6 +90,10 @@ _DETAIL_KEYS = (
     "delta",
     "to",
     "mode",
+    "side",
+    "kind",
+    "out_target",
+    "in_target",
 )
 
 
