@@ -2798,6 +2798,206 @@ def audio_effect_set(
     _apply_effect_op(spec, {"action": "set", "target": target, "index": index, "params": params})
 
 
+# ---------- analisadores de áudio ----------
+
+audio_analyze_app = typer.Typer(
+    help="Analisar o áudio sem mudar o som: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), "
+    "Marcar Sons, Achar Batidas, Exportar Amostras e cortar no ritmo.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_analyze_app, name="analyze")
+
+
+@audio_analyze_app.command("catalog")
+def audio_analyze_catalog(
+    analyzer: Annotated[
+        str | None, typer.Argument(help="Tipo de um analisador, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os analisadores de áudio: o nome em português e no Audacity, o que fazem e os parâmetros."""
+    from .analysis import analyzer_catalog
+
+    try:
+        payload = analyzer_catalog(analyzer)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Analisadores de áudio",
+    )
+    for info in payload["analyzers"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["analyzers"]:
+        marks = f" Marca no grupo '{info['marker_group']}'." if info["marker_group"] else ""
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}{marks}", highlight=False)
+    console.print("De onde vem o som: " + ", ".join(s["source"] for s in payload["sources"]), highlight=False)
+
+
+def _analysis_request(
+    analyzer: str,
+    target: str | None,
+    file: Path | None,
+    start: str | None,
+    end: str | None,
+    param: list[str] | None,
+    mark: bool | None,
+    group: str | None,
+):
+    from .pipeline.audio_analysis import AnalysisRequest
+
+    def instant(value: str | None) -> float | str | None:
+        if value is None or value.strip().lower().startswith("marker:"):
+            return value
+        try:
+            return float(value)
+        except ValueError:
+            _fail(f"Instante inválido: {value!r}. Use segundos (12.5) ou marker:<texto>.")
+
+    return AnalysisRequest(
+        analyzer,
+        _parse_effect_params(param),
+        target=target,
+        file=str(file) if file else None,
+        start=instant(start),
+        end=instant(end),
+        mark=mark,
+        group=group,
+    )
+
+
+def _print_outcome(outcome) -> None:
+    console.print(f"[green]{escape(outcome.result.summary)}[/green]", highlight=False, soft_wrap=True)
+    console.print(
+        f"Som analisado: {escape(outcome.label)}, de {outcome.interval[0]:g} s a {outcome.interval[1]:g} s."
+    )
+    for note in (*outcome.notes, *outcome.result.warnings):
+        console.print(f"[yellow]{escape(note)}[/yellow]", highlight=False, soft_wrap=True)
+    if outcome.marker_group is not None:
+        console.print(
+            f"Marcadores no grupo '{escape(outcome.marker_group)}': {outcome.markers_written} (os marcadores "
+            "de outros grupos ficaram como estavam).",
+            highlight=False,
+        )
+        for warning in outcome.edit_warnings:
+            console.print(f"[yellow]{escape(warning)}[/yellow]", highlight=False)
+    if outcome.exported:
+        console.print(f"Arquivo gravado: {outcome.exported}", highlight=False, soft_wrap=True)
+
+
+@audio_analyze_app.command("run")
+def audio_analyze_run(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json.")],
+    analyzer: Annotated[str, typer.Argument(help="O analisador (veja `dmaker audio analyze catalog`).")],
+    target: Annotated[
+        str | None,
+        typer.Option(
+            help="De onde vem o som: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.music, "
+            "audio.tracks.N ou output (a saída final já renderizada, o padrão)."
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option(help="Um arquivo de áudio ou vídeo solto, no lugar do alvo.")
+    ] = None,
+    start: Annotated[
+        str | None, typer.Option(help="Início do trecho, em segundos do item ou marker:<texto>.")
+    ] = None,
+    end: Annotated[
+        str | None, typer.Option(help="Fim do trecho, em segundos do item ou marker:<texto>.")
+    ] = None,
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Parâmetro do analisador, nome=valor (repetível)."),
+    ] = None,
+    mark: Annotated[
+        bool | None,
+        typer.Option(
+            "--mark/--no-mark",
+            help="Grava os marcadores da análise (padrão: sim para Marcar Sons e Achar Batidas, não nos outros).",
+        ),
+    ] = None,
+    group: Annotated[
+        str | None, typer.Option(help="Grupo de marcadores onde gravar (padrão: o do analisador).")
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Exporta o resultado: .csv ou .txt (tabela), .png (espectro) ou .json."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Resultado completo em JSON, como a ferramenta MCP.")
+    ] = False,
+) -> None:
+    """Roda um analisador sobre o áudio do projeto (por exemplo: audio analyze run spec.json clipping --target
+    audio.voiceover.0)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import analyze_project
+
+    request = _analysis_request(analyzer, target, file, start, end, param, mark, group)
+    try:
+        outcome = analyze_project(spec, request, out=out)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(outcome.to_dict(), ensure_ascii=False))
+        return
+    _print_outcome(outcome)
+
+
+@audio_analyze_app.command("cut-on-beat")
+def audio_cut_on_beat(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json.")],
+    source: Annotated[str, typer.Option(help="De onde vêm as batidas (padrão: a música).")] = "audio.music",
+    tolerance: Annotated[
+        float, typer.Option(help="Quanto, em segundos, um corte pode andar para cair numa batida.")
+    ] = 0.2,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Anda os cortes (por padrão só propõe e mostra a lista).")
+    ] = False,
+    group: Annotated[
+        str | None,
+        typer.Option(help="Usa as batidas de um grupo de marcadores que já existe, no lugar da análise."),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Resultado completo em JSON.")] = False,
+) -> None:
+    """Propõe (ou, com --apply, aplica) o corte de cada fronteira entre clipes na batida da música mais perto."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.beat_cut import cut_on_beat
+
+    try:
+        outcome = cut_on_beat(spec, source=source, tolerance=tolerance, apply=apply, group=group)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(outcome.to_dict(), ensure_ascii=False))
+        return
+    bpm = f", cerca de {outcome.bpm:g} batidas por minuto" if outcome.bpm else ""
+    console.print(f"{outcome.beats} batida(s){bpm}. Tolerância de {outcome.tolerance:g} s.", highlight=False)
+    table = Table("Trecho", "Corte hoje", "Batida", "Andaria", "Obs.", title="Fronteiras entre os trechos")
+    for proposal in outcome.proposals:
+        table.add_row(
+            str(proposal.index + 1),
+            f"{proposal.boundary:.3f} s",
+            "" if proposal.beat is None else f"{proposal.beat:.3f} s",
+            "" if proposal.shift is None else f"{proposal.shift * 1000:+.0f} ms",
+            escape(proposal.reason or ""),
+        )
+    console.print(table)
+    for warning in outcome.warnings:
+        console.print(f"[yellow]{escape(warning)}[/yellow]", highlight=False)
+    if apply:
+        console.print(f"[green]{outcome.moved} corte(s) andaram para a batida.[/green]")
+    else:
+        console.print("Nada foi gravado. Use --apply para andar os cortes.")
+
+
 # ---------- efeitos sonoros ----------
 
 sfx_app = typer.Typer(

@@ -57,6 +57,7 @@ KITS: tuple[Kit, ...] = (
             "undo_edit",
             "redo_edit",
             "audio_effects",
+            "audio_analyze",
             "timeline_view",
             "render_project",
             "export_project",
@@ -290,6 +291,8 @@ EXCLUDED_TOOLS: dict[str, str] = {
     "audio_presets": "lista os formatos de arquivo de áudio; serve a quem exporta áudio, que o agente pede por `dmaker audio export`",
     "audio_export": "grava vários arquivos de áudio (regiões, trilhas); é uma exportação que se pede por `dmaker audio export`, e o `export_project` com um preset de áudio já exporta o projeto inteiro",
     "import_raw_audio": "grava um WAV na pasta do projeto a partir de um arquivo bruto; se pede por `dmaker audio import-raw`",
+    "audio_analyzers": "lista os analisadores de áudio; o `audio_analyze` já traz os nomes na descrição, e o catálogo completo se vê por `dmaker audio analyze catalog`",
+    "cut_on_beat": "com apply anda vários cortes de uma vez; o modelo pequeno confere as batidas com audio_analyze e corta por edit_project, e a pessoa pede o resto por `dmaker audio analyze cut-on-beat`",
 }
 
 # Só com configuração explícita (`DMAKER_AGENT_FREE_HTML`, medida na avaliação) o modelo ganha HTML livre; com

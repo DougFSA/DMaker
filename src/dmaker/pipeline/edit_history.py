@@ -52,6 +52,7 @@ OPERATION_LABELS = {
     "marker_add": "Marcador novo",
     "marker_set": "Editar marcador",
     "marker_remove": "Remover marcador",
+    "marker_group_set": "Marcadores da análise de áudio",
     "audio_silence": "Silenciar",
     "audio_cut": "Cortar som",
     "audio_envelope": "Envelope de volume",

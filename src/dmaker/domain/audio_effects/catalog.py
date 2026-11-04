@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, get_args, get_origin
 
+from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
 from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
@@ -77,7 +78,8 @@ def _bounds(metadata: list[Any]) -> tuple[float | None, float | None]:
     return low, high
 
 
-def _param_info(name: str, cls: type[EffectBase]) -> ParamInfo:
+def param_info(name: str, cls: type[BaseModel]) -> ParamInfo:
+    """Um parâmetro de qualquer modelo montado com `param()` (efeito ou analisador): o catálogo dos dois é o mesmo."""
     field = cls.model_fields[name]
     extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
     low, high = _bounds(field.metadata)
@@ -103,7 +105,7 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         audacity_name=cls.audacity_name,
         summary=cls.summary,
         changes_duration=cls.changes_duration,
-        parameters=tuple(_param_info(name, cls) for name in own),
+        parameters=tuple(param_info(name, cls) for name in own),
         needs_selection=cls.needs_selection,
     )
 
@@ -145,4 +147,4 @@ def catalog_payload(effect_type_name: str | None = None) -> dict[str, Any]:
 def common_parameters() -> tuple[ParamInfo, ...]:
     """Os campos que todo efeito tem (`enabled`, `start`, `end`): a interface os mostra à parte, no cabeçalho
     do efeito e no seletor de intervalo, em vez de repetir em cada formulário."""
-    return tuple(_param_info(name, EffectBase) for name in ("enabled", "start", "end"))
+    return tuple(param_info(name, EffectBase) for name in ("enabled", "start", "end"))
