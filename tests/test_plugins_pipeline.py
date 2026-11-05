@@ -48,7 +48,7 @@ class FakeCatalog:
                 "Eco LADSPA",
                 str(self.ladspa_binary),
                 str(self.ladspa_binary),
-                controls,
+                (PluginControl("c0", "Mistura", 0.5, 0.0, 1.0),),  # no LADSPA o nome é a posição
             ),
         }
         self.enabled = enabled
@@ -151,6 +151,69 @@ def test_a_disabled_plugin_is_skipped_too(tmp_path):
     runner_processor, _, commands = processor(tmp_path, FakeCatalog(tmp_path, enabled=False), warnings)
     assert runner_processor.process(AudioItem(tmp_path / "voz.wav", 2.0, effects(LV2))) is None
     assert commands == [] and "desabilitado" in warnings[0]
+
+
+def graph_of(command: FFmpegCommand) -> str:
+    return command.args[command.args.index("-filter_complex") + 1]
+
+
+def test_a_value_out_of_range_runs_with_the_nearest_limit_and_an_unknown_control_is_left_out(tmp_path):
+    warnings: list[str] = []
+    runner_processor, _, commands = processor(tmp_path, FakeCatalog(tmp_path), warnings)
+    wrong = LV2 | {"params": {"mix": 3, "eco": 1}}
+    runner_processor.process(AudioItem(tmp_path / "voz.wav", 2.0, effects(wrong)))
+    graph = graph_of(commands[0])
+    assert "c='mix=1'" in graph and "mix=3" not in graph and "eco=" not in graph
+    assert warnings == [
+        "efeito Plugin: o plugin 'Eco' não tem o controle 'eco' (os dele: mix); o render ignora esse valor",
+        "efeito Plugin: Eco: Mistura (mix) vale de 0 a 1; 3 está fora, o render usa 1",
+    ]
+
+
+def test_the_warning_comes_once_even_when_the_key_and_the_process_look_at_the_same_item(tmp_path):
+    warnings: list[str] = []
+    runner_processor, _, _ = processor(tmp_path, FakeCatalog(tmp_path), warnings)
+    item = AudioItem(tmp_path / "voz.wav", 2.0, effects(LV2 | {"params": {"mix": 3}}))
+    runner_processor.key(item)
+    runner_processor.process(item)
+    runner_processor.process(item)
+    assert len(warnings) == 1
+
+
+def test_values_inside_the_range_keep_the_command_and_the_key_and_do_not_warn(tmp_path):
+    catalog = FakeCatalog(tmp_path)
+    warnings: list[str] = []
+    runner_processor, _, commands = processor(tmp_path, catalog, warnings)
+    source = tmp_path / "voz.wav"
+    source.write_bytes(b"x")
+    item = AudioItem(source, 2.0, effects(LV2, LADSPA))
+    runner_processor.process(item)
+    assert "c='mix=0.3'" in graph_of(commands[0]) and "c='c0=0.3'" in graph_of(commands[1])
+    assert warnings == []
+    chain = effects(LV2, LADSPA)
+    hosts = {0: catalog.resolve("lv2", "urn:t:eco"), 1: catalog.resolve("ladspa", "eco.dll#eco")}
+    unfitted = cache_key(
+        EFFECTS_VERSION,
+        str(source),
+        (source.stat().st_mtime_ns, source.stat().st_size),
+        0,
+        0.0,
+        2.0,
+        "",
+        chain_signature(chain),
+        hosts[0].signature(),
+        hosts[1].signature(),
+    )
+    assert runner_processor.key(item) == unfitted
+
+
+def test_the_key_of_a_spec_out_of_range_is_the_one_of_the_spec_already_limited(tmp_path):
+    source = tmp_path / "voz.wav"
+    source.write_bytes(b"x")
+    outside = AudioItem(source, 2.0, effects(LV2 | {"params": {"mix": 3, "eco": 1}}))
+    limited = AudioItem(source, 2.0, effects(LV2 | {"params": {"mix": 1}}))
+    catalog = FakeCatalog(tmp_path)
+    assert processor(tmp_path, catalog)[0].key(outside) == processor(tmp_path, catalog)[0].key(limited)
 
 
 def test_the_cache_key_without_a_plugin_is_the_one_the_processor_always_made(tmp_path):

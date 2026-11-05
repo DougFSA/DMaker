@@ -205,6 +205,40 @@ def test_moving_each_control_changes_the_sound_by_what_that_control_does(format_
         assert first_echo == pytest.approx(0.8 * mix, abs=0.001)
 
 
+def test_a_value_out_of_range_renders_and_gives_the_same_file_as_the_limited_value(
+    format_name, service, tmp_path
+):
+    """O ffmpeg recusa o valor fora da faixa; o render usa o limite mais próximo e dá o mesmo som do valor já limitado."""
+    source = clicks(tmp_path, "c", 0.1)
+    names = CONTROL_NAMES[format_name]
+    outside = effect(format_name, delay=5000.0, feedback=2.0, mix=0.8)  # tetos: 1000 ms e 0,95
+    limited = effect(format_name, delay=1000.0, feedback=0.95, mix=0.8)
+    warnings: list[str] = []
+    fitting = EffectProcessor(
+        SubprocessRunner(quiet=True), tmp_path / "fx-fora", plugins=service, on_warning=warnings.append
+    )
+    exact = EffectProcessor(SubprocessRunner(quiet=True), tmp_path / "fx-limite", plugins=service)
+    result = apply(fitting, source, 3.0, outside)
+    assert np.array_equal(result, apply(exact, source, 3.0, limited))
+    assert len(warnings) == 2 and f"({names[0]})" in warnings[0] and "o render usa 1000" in warnings[0]
+    assert fitting.key(AudioItem(source, 3.0, (outside,))) == exact.key(AudioItem(source, 3.0, (limited,)))
+
+
+def test_a_control_the_plugin_does_not_have_is_ignored_and_the_render_does_not_fail(
+    format_name, service, tmp_path
+):
+    source = clicks(tmp_path, "c", 0.1)
+    warnings: list[str] = []
+    fitting = EffectProcessor(
+        SubprocessRunner(quiet=True), tmp_path / "fx-extra", plugins=service, on_warning=warnings.append
+    )
+    exact = EffectProcessor(SubprocessRunner(quiet=True), tmp_path / "fx-certo", plugins=service)
+    extra = effect(format_name)
+    extra = extra.model_copy(update={"params": {**extra.params, "c9": 1.0, "inexistente": 1.0}})
+    assert np.array_equal(apply(fitting, source, 3.0, extra), apply(exact, source, 3.0, effect(format_name)))
+    assert len(warnings) == 2 and all("o render ignora esse valor" in warning for warning in warnings)
+
+
 def test_in_an_interval_the_sound_outside_it_is_untouched(format_name, processor, tmp_path):
     source = clicks(tmp_path, "tres", 0.5, 1.2, 2.6)
     original, _ = read_wav_float(source)

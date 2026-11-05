@@ -17,6 +17,7 @@ Você tem um plugin de efeito que o DMaker não traz e quer ouvi-lo na narraçã
 - A varredura lê as pastas padrão do sistema (só leitura: `LV2_PATH`, `LADSPA_PATH`, `%APPDATA%\LV2`...) e a pasta `plugins/` do DMaker (`plugins/lv2/<pacote>.lv2`, `plugins/ladspa/<arquivo>.dll`). Depois de instalar um plugin, rode `dmaker audio plugins scan`.
 - O efeito: `{"type": "plugin", "format": "lv2", "plugin": "<URI>", "params": {"<controle>": 0.5}}`. No LADSPA, `plugin` é `arquivo#rótulo` e os controles são `c0`, `c1`... Controles, faixas e padrões vêm do próprio plugin.
 - Plugin mono em item estéreo roda uma vez por canal. `start`, `end` e `enabled` valem; a cauda do plugin é cortada no fim do item; não vale em `audio.master`.
+- Valor fora da faixa do plugin: o render usa o limite mais próximo. Controle que o plugin não tem: ignorado. O render segue e avisa, como o `validate_project`.
 - Ausente, desabilitado ou que o ffmpeg não hospeda: o `validate` avisa com o nome, e o render pula só aquele efeito e segue.
 - Na narração sintetizada, o plugin pode apagar a marca d'água inaudível, e ela não é reaplicada (decisão de 03/11).
 

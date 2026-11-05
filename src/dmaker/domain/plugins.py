@@ -111,19 +111,45 @@ def split_ladspa_ref(ref: str) -> tuple[str, str]:
     return library, label
 
 
-def check_params(info: PluginInfo, params: dict[str, float]) -> list[str]:
-    """O que há de errado nos `params` de um efeito contra os controles do plugin: nome que ele não tem e valor fora da faixa
-    que ele declara. A faixa é do plugin (cada um tem a sua), por isso a spec não a conhece: quem chama decide se é aviso."""
+@dataclass(frozen=True)
+class FittedParams:
+    """Os parâmetros de um efeito de plugin como o render os usa, e o que foi preciso mudar para isso (um texto por mudança)."""
+
+    params: dict[str, float]
+    problems: tuple[str, ...] = ()
+
+
+def fit_params(info: PluginInfo, params: dict[str, float]) -> FittedParams:
+    """Ajusta os `params` de um efeito aos controles do plugin: o valor fora da faixa que ele declara vira o limite mais próximo
+    (um lado sem limite não limita) e o controle que ele não tem sai. É o que a interface já faz ao limitar o valor, e assim um
+    valor ruim na spec, na CLI ou no MCP não derruba o render (o ffmpeg recusa o valor fora da faixa). A faixa é do plugin, por
+    isso a spec não a conhece; o texto dos problemas é o mesmo na validação e no render. A ordem das chaves é mantida."""
     by_name = {control.name: control for control in info.controls}
-    problems = []
+    fitted: dict[str, float] = {}
+    problems: list[str] = []
     for name, value in params.items():
         control = by_name.get(name)
         if control is None:
             known = ", ".join(sorted(by_name)) or "nenhum"
-            problems.append(f"o plugin {info.name!r} não tem o controle {name!r} (os dele: {known})")
+            problems.append(
+                f"o plugin {info.name!r} não tem o controle {name!r} (os dele: {known}); o render ignora esse valor"
+            )
             continue
         low, high = control.minimum, control.maximum
-        if (low is not None and value < low) or (high is not None and value > high):
-            span = f"{'' if low is None else f'{low:g}'} a {'' if high is None else f'{high:g}'}".strip()
-            problems.append(f"{info.name}: {control.label} ({name}) vale de {span}; {value:g} está fora")
-    return problems
+        limit = value
+        if low is not None and limit < low:
+            limit = low
+        if high is not None and limit > high:
+            limit = high
+        if limit != value:
+            if low is not None and high is not None:
+                span = f"vale de {low:g} a {high:g}"
+            elif low is not None:
+                span = f"vale a partir de {low:g}"
+            else:
+                span = f"vale até {high:g}"
+            problems.append(
+                f"{info.name}: {control.label} ({name}) {span}; {value:g} está fora, o render usa {limit:g}"
+            )
+        fitted[name] = limit
+    return FittedParams(fitted, tuple(problems))
