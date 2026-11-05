@@ -3,8 +3,15 @@ o que a interface muda/oculta também some do vídeo final, não só da prévia)
 
 from __future__ import annotations
 
+import pytest
+
 from dmaker.domain.spec import ImageOverlay, ProgressBar, Project, TextOverlay, VideoOverlay
-from dmaker.domain.tracks import apply_track_state, known_track_ids, video_overlay_lanes
+from dmaker.domain.tracks import (
+    apply_track_state,
+    known_track_ids,
+    silenced_carrier_warnings,
+    video_overlay_lanes,
+)
 
 BASE = {
     "name": "trilhas-teste",
@@ -152,3 +159,129 @@ def test_nar_track_exists_only_with_narration_and_muting_it_removes_the_narratio
     assert "NAR" in known_track_ids(project)
     new = apply_track_state(project)
     assert new.audio.narration == [] and len(project.audio.narration) == 1  # original intocado
+
+
+# ---------- a portadora do Vocoder acompanha o mudo e o solo (DMK-70) ----------
+
+
+def vocoder_on(track: str | None) -> dict:
+    return {"type": "vocoder", **({"carrier_track": track} if track else {})}
+
+
+def carrier_project(carrier: str | None = "A3", states: dict | None = None, **audio) -> Project:
+    """Três faixas externas (A2 = a, A3 = b, A4 = d) e uma voz gravada cujo Vocoder ouve `carrier`."""
+    return Project.model_validate(
+        {
+            "name": "portadora-mudo",
+            "sources": {name: {"src": f"{name}.wav", "sync": 0} for name in "abd"},
+            "timeline": [{"type": "clip", "source": "a", "start": 0, "end": 4}],
+            "audio": {
+                "tracks": [{"source": name} for name in "abd"],
+                "voiceover": [{"src": "fala.wav", "effects": [vocoder_on(carrier)]}],
+                **audio,
+            },
+            "tracks": states or {},
+        }
+    )
+
+
+def voice_carrier(project: Project) -> str | None:
+    return project.audio.voiceover[0].effects[0].carrier_track_id()
+
+
+def test_the_carrier_follows_the_renumbering_when_another_external_track_is_muted():
+    state = apply_track_state(carrier_project("A3", {"A2": {"muted": True}}))
+    assert [track.source for track in state.audio.tracks] == ["b", "d"]
+    assert voice_carrier(state) == "A2"  # a A3 virou a A2 e continua sendo a fonte b
+    assert state.audio.tracks[int(voice_carrier(state)[1:]) - 2].source == "b"
+
+
+def test_the_carrier_is_dropped_when_it_is_the_muted_track_itself():
+    state = apply_track_state(carrier_project("A3", {"A3": {"muted": True}}))
+    assert voice_carrier(state) is None  # sem isto o A3 passaria a ser a fonte d
+
+
+def test_the_carrier_is_dropped_when_another_track_is_in_solo():
+    state = apply_track_state(carrier_project("A3", {"VO": {"solo": True}}))
+    assert voice_carrier(state) is None  # só a voz soa, e a A3 ficou fora do solo
+    kept = apply_track_state(carrier_project("A3", {"A3": {"solo": True}, "VO": {"solo": True}}))
+    assert voice_carrier(kept) == "A2"  # a única que soa é a b, que passa a ser a A2
+
+
+@pytest.mark.parametrize("carrier", ["MUS", "NAR", "SFX", "A1"])
+def test_the_carrier_of_any_silenced_track_kind_falls_back_to_the_generated_one(carrier):
+    extra = {"music": {"src": "m.mp3"}, "narration": [{"text": "oi"}]}
+    state = apply_track_state(carrier_project(carrier, {carrier: {"muted": True}}, **extra))
+    assert voice_carrier(state) is None
+
+
+def test_the_vo_carrier_on_another_host_is_dropped_when_the_voice_track_is_muted():
+    audio = {"music": {"src": "m.mp3", "effects": [vocoder_on("VO")]}}
+    state = apply_track_state(carrier_project(None, {"VO": {"muted": True}}, **audio))
+    assert state.audio.voiceover == []
+    assert state.audio.music.effects[0].carrier_track_id() is None
+
+
+def test_the_renumbering_holds_on_every_host_that_can_listen_to_an_external_track():
+    audio = {
+        "tracks": [{"source": "a"}, {"source": "b"}, {"source": "d", "effects": [vocoder_on("A3")]}],
+        "music": {"src": "m.mp3", "effects": [vocoder_on("A3")]},
+        "narration": [{"text": "oi", "effects": [vocoder_on("A3")]}],
+        "generated": [{"generator": "tone", "duration": 1, "effects": [vocoder_on("A3")]}],
+    }
+    state = apply_track_state(carrier_project("A3", {"A2": {"muted": True}}, **audio)).audio
+    assert state.tracks[1].effects[0].carrier_track_id() == "A2"  # a faixa d, agora A3, ouve a b, agora A2
+    assert state.music.effects[0].carrier_track_id() == "A2"
+    assert state.narration[0].effects[0].carrier_track_id() == "A2"
+    assert state.generated[0].effects[0].carrier_track_id() == "A2"
+    assert state.voiceover[0].effects[0].carrier_track_id() == "A2"
+
+
+def test_the_clip_host_drops_a_silenced_carrier():
+    project = Project.model_validate(
+        {
+            "name": "clipe",
+            "timeline": [
+                {"type": "clip", "src": "a.mp4", "start": 0, "end": 4, "effects": [vocoder_on("MUS")]}
+            ],
+            "audio": {"music": {"src": "m.mp3"}},
+            "tracks": {"MUS": {"muted": True}},
+        }
+    )
+    assert apply_track_state(project).timeline[0].effects[0].carrier_track_id() is None
+
+
+def test_a_host_that_was_removed_by_the_mute_does_not_break_the_carrier_pass():
+    audio = {"tracks": [{"source": "a"}, {"source": "b", "effects": [vocoder_on("A2")]}, {"source": "d"}]}
+    state = apply_track_state(carrier_project(None, {"A3": {"muted": True}}, **audio))
+    assert [track.source for track in state.audio.tracks] == ["a", "d"]
+    assert apply_track_state(carrier_project("A3", {"VO": {"muted": True}})).audio.voiceover == []
+
+
+def test_an_effect_that_does_not_change_keeps_the_same_objects():
+    project = carrier_project("A2", {"A4": {"muted": True}})
+    state = apply_track_state(project)
+    assert state.audio.voiceover is project.audio.voiceover  # a A2 não anda quando a A4 sai
+    assert state.audio.tracks[0] is project.audio.tracks[0]
+
+
+def test_without_a_carrier_track_a_muted_track_gives_the_same_result_as_before():
+    project = carrier_project(None, {"A2": {"muted": True}})
+    state = apply_track_state(project)
+    assert state.audio.voiceover is project.audio.voiceover
+    expected = project.model_copy(
+        update={"audio": project.audio.model_copy(update={"tracks": project.audio.tracks[1:]})}
+    )
+    assert state.model_dump() == expected.model_dump()
+    assert silenced_carrier_warnings(project) == []
+
+
+def test_the_warning_names_the_item_and_the_track_and_is_empty_when_nothing_is_silenced():
+    muted = carrier_project("A3", {"A3": {"muted": True}})
+    assert silenced_carrier_warnings(muted) == [
+        "audio.voiceover[0]: o Vocoder pede a portadora da trilha A3, que está muda ou fora do solo; "
+        "usa a portadora gerada."
+    ]
+    assert silenced_carrier_warnings(carrier_project("A3", {"VO": {"solo": True}}))  # fora do solo também
+    assert silenced_carrier_warnings(carrier_project("A3", {"A2": {"muted": True}})) == []  # só renumerou
+    assert silenced_carrier_warnings(carrier_project("A3")) == []

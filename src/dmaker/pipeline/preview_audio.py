@@ -22,7 +22,7 @@ from ..domain.brand import load_theme
 from ..domain.outputs import frame_preset
 from ..domain.spec import ClipSegment, Project, Segment, VideoOverlay
 from ..domain.timeline import transitions_of
-from ..domain.tracks import apply_track_state
+from ..domain.tracks import apply_track_state, silenced_carrier_warnings
 from ..filtergraph.pip import ResolvedVideoOverlay
 from ..filtergraph.preview_audio import clip_audio_piece, preview_encode_args, silence_piece
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner
@@ -275,6 +275,7 @@ class PreviewAudioBuilder:
         voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
         voice_files_of = Deferred(lambda: self._voice_files(ctx), "a voz gravada")
         music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        ctx.warnings.extend(silenced_carrier_warnings(original))
         install_carrier_tracks(
             ctx,
             CarrierInputs(

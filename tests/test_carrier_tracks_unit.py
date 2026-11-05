@@ -3,6 +3,7 @@ não muda sem o campo, o grafo da trilha, onde cada tipo de item cai na linha do
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,6 +66,7 @@ def test_the_same_track_and_the_camera_under_an_external_track_are_refused_with_
     assert same is not None and "MUS" in same and "portadora gerada" in same
     camera = check_carrier_pair("A1", "A3")
     assert camera is not None and "A1" in camera and "A3" in camera and "portadora gerada" in camera
+    assert "escolha MUS, NAR, VO ou SFX" in camera and "harmonia" not in camera
     assert "desconhecida" in (check_carrier_pair("MUS", "XYZ") or "")
 
 
@@ -622,3 +624,40 @@ def test_the_cli_sets_the_carrier_track_and_refuses_a_pair_that_does_not_hold(tm
     assert refused.exit_code != 0 and "portadora gerada" in " ".join(refused.output.split())
     listing = cli.invoke(app, ["audio", "effects", "vocoder"])
     assert listing.exit_code == 0 and "carrier_track" in listing.output
+
+
+# ---------- o aviso do loop e o temporário da passada (ajuste do DMK-70) ----------
+
+
+def test_the_loop_warning_only_comes_when_the_music_itself_listens_to_another_track(tmp_path):
+    def warnings_for(music_effects: list[dict]) -> list[str]:
+        project = make_project(
+            tmp_path,
+            timeline=[{"type": "card", "title": "x", "duration": 10}],
+            audio={
+                "music": {"src": "musica.mp3", "start_at": 119.0, "effects": music_effects},
+                "voiceover": [
+                    {"src": "fala.wav", "effects": [vocoder("MUS")]}
+                ],  # o projeto usa carrier_track
+            },
+        )
+        ctx, _ = spy_context(project, [(0.0, 10.0)])
+        processed_music(ctx, tmp_path / "musica.mp3")
+        return ctx.warnings
+
+    assert warnings_for([{"type": "tremolo"}]) == []  # outro efeito: nada a avisar
+    assert warnings_for([{**vocoder("NAR"), "enabled": False}]) == []
+    assert len(warnings_for([vocoder("NAR")])) == 1
+
+
+def test_the_staging_file_of_the_carrier_pass_changes_on_every_run(tmp_path, monkeypatch):
+    def staging_names(label: str) -> list[str]:
+        # a chave do item pede a identidade da trilha, e é ela que dispara a passada
+        monkeypatch.setattr(EffectProcessor, "process", lambda self, item: (self.key(item), None)[1])
+        runner, _ = build(tmp_path / label, timeline_project(tmp_path / label))
+        return [Path(c[-1]).name for c in runner.commands if Path(c[-1]).parent.name == "carriers"]
+
+    first, second = staging_names("um"), staging_names("dois")
+    assert first and second
+    assert all(re.search(r"\.tmp-\d+-[0-9a-f]{8}\.wav$", name) for name in first + second)
+    assert set(first).isdisjoint(second)

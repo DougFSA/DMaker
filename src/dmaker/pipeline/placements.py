@@ -44,6 +44,8 @@ def music_placement(ctx: RenderContext, item_duration: float) -> tuple[PlacedRun
     if tracks is None or music is None:
         return ()
     total = tracks.inputs.total
+    # só a música cujo próprio efeito ouve outra trilha perde a portadora na repetição do loop; a que não ouve nada não tem o que avisar
+    listens = any(effect.enabled and effect.carrier_track_id() is not None for effect in music.effects)
     grid = music_grid(ctx.project.audio)
     windows = music.spans or [None]
     runs = []
@@ -56,7 +58,7 @@ def music_placement(ctx: RenderContext, item_duration: float) -> tuple[PlacedRun
         entry = grid.entry_delay(start, start_at) if grid else 0.0
         length = max(end - start - entry, 0.0)
         available = max(item_duration - start_at, 0.0)
-        if music.loop and length > available + 1e-3:
+        if listens and music.loop and length > available + 1e-3:
             ctx.warn(
                 "Vocoder: a música está em loop e o arquivo processado é um só; a portadora de outra trilha vale na primeira "
                 "passada da música, e o que repete depois fica sem ela."
