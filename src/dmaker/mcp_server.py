@@ -605,6 +605,41 @@ def audio_effect_action(
 
 @server.tool(
     description=(
+        "Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity. `action`: `list` (os da "
+        "última varredura, com os controles que cada um declara: nome na spec, rótulo, padrão, mínimo e máximo, e o estado), "
+        "`scan` (varre de novo as pastas padrão do sistema, só para leitura, e a pasta de plugins do DMaker), `show` (um "
+        "plugin, por `plugin`: o id ou a referência), `enable` e `disable` (por `plugin`). Para usar um plugin num item, "
+        "ponha o efeito `plugin` com `edit_project` (operação audio_effect): "
+        '{"type": "plugin", "format": "lv2", "plugin": "<URI>", "params": {"<controle>": 0.5}}; no LADSPA o `plugin` é '
+        '"arquivo#rótulo" e os controles são c0, c1... Um plugin ausente ou desabilitado é pulado com um aviso e o '
+        "`validate_project` o cita."
+    )
+)
+def audio_plugins(action: str = "list", plugin: str | None = None) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.plugins import PluginUnavailable, plugin_service
+
+    service = plugin_service()
+    try:
+        if action == "scan":
+            service.scan()
+            return service.catalog()
+        if action == "list":
+            return service.catalog()
+        if action in {"show", "enable", "disable"}:
+            if not plugin:
+                raise ToolError(f"`{action}` pede o plugin (o id ou a referência; veja `list`)")
+            if action != "show":
+                service.set_enabled(plugin, action == "enable")
+            return service.catalog(plugin)
+    except PluginUnavailable as exc:
+        raise ToolError(str(exc)) from exc
+    raise ToolError(f"ação desconhecida: {action!r}. Use list, scan, show, enable ou disable")
+
+
+@server.tool(
+    description=(
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
         "NAR narrações (duração real quando já sintetizadas, senão estimada), "

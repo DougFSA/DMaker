@@ -32,6 +32,7 @@ from .context import Prober
 from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
 from .lint import lint
+from .plugin_lint import PluginLookup, plugin_warnings
 from .sync import OffsetFinder
 from .voicefiles import (
     effect_refusal_warnings,
@@ -118,7 +119,10 @@ class ProjectSummary:
 
 
 def summarize(
-    project: Project, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+    project: Project,
+    prober: Prober = probe,
+    offset_finder: OffsetFinder | None = None,
+    plugins: PluginLookup | None = None,
 ) -> ProjectSummary:
     """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra).
     Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto);
@@ -149,6 +153,7 @@ def summarize(
     warnings += html_warnings(project, browser_problem)
     warnings += audio_output_warnings(project, presentation.total)
     warnings += noise_profile_warnings(project)
+    warnings += plugin_warnings(project, plugins)
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)

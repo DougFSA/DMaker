@@ -37,7 +37,7 @@ Detalhes no capítulo "Usando com LLM local (Ollama)" do [manual](docs/MANUAL.md
 
 ## Instalação rápida (Windows)
 
-Precisa de Python 3.11 ou mais novo e de internet na primeira vez (FFmpeg, ~110 MB, e a fonte). A pasta do clone pode ser qualquer uma, em qualquer unidade: o DMaker e o servidor MCP não dependem de onde ela está. No PowerShell, na pasta onde você guarda os seus projetos:
+Precisa de Python 3.11 ou mais novo e de internet na primeira vez (FFmpeg completo, ~170 MB, e a fonte). A pasta do clone pode ser qualquer uma, em qualquer unidade: o DMaker e o servidor MCP não dependem de onde ela está. No PowerShell, na pasta onde você guarda os seus projetos:
 
 ```powershell
 git clone https://github.com/DougFSA/DMaker.git

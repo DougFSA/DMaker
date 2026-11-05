@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -217,6 +218,7 @@ def doctor(
         console.print(
             f"  filtros: {'ok' if not missing else '[red]faltam: ' + ', '.join(missing) + '[/red]'}"
         )
+        _doctor_plugins()
         if hw:
             from .media.ffmpeg import hardware_encoder
 
@@ -256,6 +258,22 @@ def doctor(
         console.print(f"  {name}: {d}")
 
 
+def _doctor_plugins() -> None:
+    """Os plugins de efeito: qual ffmpeg hospeda o LADSPA e o LV2, e quantos plugins a última varredura achou."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+    for name, found in service.hosts().items():
+        if found:
+            console.print(f"  plugins {name.upper()}: [green]disponível[/green]  ({found})")
+        else:
+            fix = "dmaker setup --plugins" if name == "lv2" else "dmaker setup"
+            console.print(f"  plugins {name.upper()}: [yellow]indisponível[/yellow] (rode {fix})")
+    console.print(
+        "  plugins instalados: `dmaker audio plugins list`; pasta do DMaker: " + str(config.PLUGINS_DIR)
+    )
+
+
 def _doctor_offline() -> None:
     """O relatório de "funciona sem internet?": cada item com onde procurei e o comando para baixar."""
     from .agent.offline import DiskOfflineProbe, build_report, render_report
@@ -282,15 +300,30 @@ def setup(
             help="Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).",
         ),
     ] = False,
+    plugins: Annotated[
+        bool,
+        typer.Option(
+            "--plugins",
+            help="Instala só o FFmpeg que hospeda os plugins LV2 (em bin/ffmpeg-lv2). O LADSPA já vem no FFmpeg principal.",
+        ),
+    ] = False,
 ) -> None:
-    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium."""
-    from .setup_tools import install_chromium
+    """Baixa o FFmpeg completo (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o
+    Chromium; com --plugins, o FFmpeg dos plugins LV2."""
+    from .setup_tools import install_chromium, install_lv2_ffmpeg
 
     if html:
         try:
             install_chromium()
         except RuntimeError as exc:
             _fail(escape(str(exc)))  # a mensagem traz `[html]`, que o Rich leria como marcação
+        return
+    if plugins:
+        config.ensure_dirs()
+        try:
+            install_lv2_ffmpeg(force=force)
+        except RuntimeError as exc:
+            _fail(escape(str(exc)))
         return
     from .media.matting import ensure_model, model_path
     from .setup_tools import install_ffmpeg, install_fonts
@@ -3454,6 +3487,134 @@ def audio_effect_response_command(
     for hz, db in list(zip(response["hz"], response["db"], strict=True))[::step]:
         table.add_row(f"{hz:g}", f"{db:+.2f}")
     console.print(table)
+
+
+audio_plugins_app = typer.Typer(
+    help="Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity: varrer as pastas, listar "
+    "com os controles que cada plugin declara, habilitar e desabilitar. O efeito `plugin` os usa (`dmaker audio effect add`).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_plugins_app, name="plugins")
+
+
+def _plugin_state(info: dict) -> str:
+    if not info["usable"]:
+        return "não usável: " + info["problem"]
+    return "habilitado" if info["enabled"] else "desabilitado"
+
+
+def _print_plugin_table(payload: dict) -> None:
+    table = Table("id", "formato", "nome", "controles", "estado", title="Plugins de efeito")
+    for info in payload["plugins"]:
+        table.add_row(
+            info["id"], info["format"], info["name"], str(len(info["controls"])), escape(_plugin_state(info))
+        )
+    console.print(table)
+    for name, found in payload["hosts"].items():
+        shown = (
+            found or "indisponível (" + ("dmaker setup --plugins" if name == "lv2" else "dmaker setup") + ")"
+        )
+        console.print(f"  ffmpeg do {name.upper()}: {escape(shown)}", highlight=False)
+    for note in payload["notes"]:
+        console.print(f"  [yellow]{escape(note)}[/yellow]", highlight=False)
+    console.print(
+        f"  Ponha plugins seus em {escape(payload['install_to'])} e rode `dmaker audio plugins scan`."
+    )
+
+
+def _plugins_command(action: Callable[[], dict], as_json: bool, show_key: str | None = None) -> None:
+    from .pipeline.plugins import PluginUnavailable
+
+    try:
+        payload = action()
+    except PluginUnavailable as exc:
+        _fail(escape(str(exc)))
+    if as_json:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if show_key is None:
+        _print_plugin_table(payload)
+        return
+    (info,) = payload["plugins"]
+    console.print(
+        f"[bold]{escape(info['name'])}[/bold] ({info['format'].upper()}, id {info['id']})", highlight=False
+    )
+    console.print(f"  na spec: format={info['format']!r} plugin={escape(repr(info['ref']))}", highlight=False)
+    console.print(f"  estado: {escape(_plugin_state(info))}", highlight=False)
+    table = Table("nome na spec", "rótulo", "padrão", "mínimo", "máximo")
+    for control in info["controls"]:
+        table.add_row(
+            control["name"],
+            escape(control["label"]),
+            f"{control['default']:g}",
+            "-" if control["minimum"] is None else f"{control['minimum']:g}",
+            "-" if control["maximum"] is None else f"{control['maximum']:g}",
+        )
+    console.print(table)
+
+
+_PLUGIN_JSON = Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")]
+_PLUGIN_KEY = Annotated[
+    str, typer.Argument(help="O id (lv2-1a2b3c4d5e) ou a referência do plugin (a URI, arquivo#rótulo).")
+]
+
+
+@audio_plugins_app.command("scan")
+def audio_plugins_scan(as_json: _PLUGIN_JSON = False) -> None:
+    """Varre as pastas de plugins (as do sistema, só para leitura, e a do DMaker) e pergunta ao ffmpeg o que cada um expõe."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def scan() -> dict:
+        service.scan()
+        return service.catalog()
+
+    _plugins_command(scan, as_json)
+
+
+@audio_plugins_app.command("list")
+def audio_plugins_list(as_json: _PLUGIN_JSON = False) -> None:
+    """Lista os plugins da última varredura (faz uma se nunca houve) com o estado de cada um."""
+    from .pipeline.plugins import plugin_service
+
+    _plugins_command(plugin_service().catalog, as_json)
+
+
+@audio_plugins_app.command("show")
+def audio_plugins_show(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Mostra um plugin: a referência para a spec e os controles com faixa e padrão, lidos do próprio plugin."""
+    from .pipeline.plugins import plugin_service
+
+    _plugins_command(lambda: plugin_service().catalog(key), as_json, show_key=key)
+
+
+@audio_plugins_app.command("enable")
+def audio_plugins_enable(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Habilita um plugin (o padrão de todo plugin achado)."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def run() -> dict:
+        service.set_enabled(key, True)
+        return service.catalog(key)
+
+    _plugins_command(run, as_json, show_key=key)
+
+
+@audio_plugins_app.command("disable")
+def audio_plugins_disable(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Desabilita um plugin: ele continua na lista, e os efeitos que o usam são pulados com um aviso."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def run() -> dict:
+        service.set_enabled(key, False)
+        return service.catalog(key)
+
+    _plugins_command(run, as_json, show_key=key)
 
 
 audio_preset_app = typer.Typer(

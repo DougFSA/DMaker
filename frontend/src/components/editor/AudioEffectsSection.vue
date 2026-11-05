@@ -4,7 +4,7 @@
    catálogo do servidor. Cada ação (adicionar, remover, mover, ligar, mudar um valor) é um passo do desfazer. */
 import { computed, onMounted, ref, watch } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
-import type { AudioEffectInfo, AudioEffectPreset } from '@/api'
+import type { AudioEffectInfo, AudioEffectPreset, PluginInfo } from '@/api'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
@@ -19,18 +19,24 @@ import {
   targetMayGrow,
   targetOfList,
 } from '@/lib/audioEffects'
+import { newPluginEffect, pluginProblem } from '@/lib/audioPlugins'
 import { useConfirm } from '@/composables/useConfirm'
 import { stableKey } from '@/lib/editorSpec'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
+import { useAudioPluginsStore } from '@/stores/audioPlugins'
 import { useEditorStore } from '@/stores/editor'
 import AudioEffectCard from './AudioEffectCard.vue'
 import SaveChainMacroButton from './SaveChainMacroButton.vue'
 
 const editor = useEditorStore()
 const catalog = useAudioEffectsStore()
+const plugins = useAudioPluginsStore()
 const confirm = useConfirm()
 
-onMounted(() => void catalog.load())
+onMounted(() => {
+  void catalog.load()
+  void plugins.load()
+})
 
 /** As macros da marca do projeto entram no menu junto com as globais; trocar de projeto (ou de marca) as atualiza. */
 const projectBrand = computed(() => (editor.get('brand') as string | undefined) ?? '')
@@ -84,6 +90,19 @@ function addPreset(preset: AudioEffectPreset): void {
     for (const effect of preset.effects) addEffectIn(draft, listPath, JSON.parse(JSON.stringify(effect)))
   })
   menuOpen.value = false
+}
+
+/** Põe o plugin escolhido no fim da cadeia, com os controles no padrão dele (a pessoa ajusta depois, no cartão). */
+function addPlugin(plugin: PluginInfo): void {
+  act((draft, listPath) => addEffectIn(draft, listPath, newPluginEffect(plugin)))
+  menuOpen.value = false
+}
+
+/** O que a linha do plugin mostra sob o nome: o formato, ou o motivo de não poder ser usado (o que o próprio plugin reclamou; o resto fica no title). */
+function pluginNote(plugin: PluginInfo): string {
+  const kind = plugin.format.toUpperCase()
+  if (!plugin.usable) return `${kind} · não usável: ${plugin.problem.split(' | ')[0]}`
+  return pluginProblem(plugin) ? `${kind} · ${pluginProblem(plugin)}` : kind
 }
 
 /** A marca de uma macro da pasta de uma marca (`brand:acme` -> `acme`); vazio nas globais e nas embutidas. */
@@ -198,6 +217,41 @@ function endDrag(): void {
                   </button>
                 </li>
               </ul>
+            </div>
+            <div v-if="onItem" class="effects-menu__group" data-effects-plugins>
+              <p class="effects-menu__heading">Plugins (LV2 e LADSPA)</p>
+              <ul v-if="plugins.plugins.length > 0" class="effects-menu__list">
+                <li v-for="plugin in plugins.plugins" :key="plugin.id" class="effects-menu__preset" :data-plugin-id="plugin.id">
+                  <button
+                    type="button"
+                    class="effects-menu__item"
+                    :disabled="!plugin.usable || !plugin.enabled"
+                    :data-add-plugin="plugin.id"
+                    :title="plugin.problem || plugin.ref"
+                    @click="addPlugin(plugin)"
+                  >
+                    <span class="effects-menu__name">{{ plugin.name }}</span>
+                    <span class="effects-menu__audacity">{{ pluginNote(plugin) }}</span>
+                  </button>
+                  <button
+                    v-if="plugin.usable"
+                    type="button"
+                    class="effects-menu__toggle"
+                    :title="plugin.enabled ? 'Desabilitar este plugin: os efeitos que o usam são pulados' : 'Habilitar este plugin'"
+                    :data-toggle-plugin="plugin.id"
+                    @click="plugins.setEnabled(plugin, !plugin.enabled)"
+                  >
+                    {{ plugin.enabled ? 'Desligar' : 'Ligar' }}
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="effects-menu__note" data-plugins-empty>
+                Nenhum plugin instalado. Ponha plugins LV2 ou LADSPA em <code>{{ plugins.catalog?.install_to ?? 'plugins' }}</code> e varra de novo.
+              </p>
+              <p v-for="note in plugins.catalog?.notes ?? []" :key="note" class="effects-menu__note" data-plugins-note>{{ note }}</p>
+              <div class="effects-menu__scan">
+                <AppButton size="sm" variant="ghost" :loading="plugins.scanning" data-scan-plugins @click="plugins.scan()">Varrer plugins</AppButton>
+              </div>
             </div>
             <p v-if="hidden.length > 0 && offered.length > 0" class="effects-menu__note" data-effects-hidden>
               {{ hidden.map((info) => info.label).join(', ') }}: só vale em {{ growableLabels.join(' e ').toLowerCase() }}.
@@ -370,6 +424,32 @@ function endDrag(): void {
 .effects-menu__remove:focus-visible {
   background: var(--color-surface-hover);
   color: var(--color-error);
+}
+
+.effects-menu__toggle {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.effects-menu__toggle:hover,
+.effects-menu__toggle:focus-visible {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.effects-menu__item:disabled {
+  opacity: 0.55;
+}
+
+.effects-menu__scan {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2) 0;
 }
 
 .effects-menu__audacity {

@@ -17,6 +17,9 @@ importa cada módulo da pasta sozinho. Quatro pontos do contrato:
   na classe e registra uma função pura sobre arrays com `@register_sample_builder("<type>")`, que recebe um
   `SampleRequest` (`samples` de forma `(amostras, canais)`, `measure`) e devolve o sinal depois do efeito. O processador
   parte a cadeia em trechos de ffmpeg e estágios de amostras, e o intervalo e a emenda de 10 ms são os mesmos.
+- Plugin de terceiros: o efeito que precisa de outro ffmpeg (o `plugin`, com LV2 e LADSPA) marca `separate_stage = True` e
+  devolve o formato em `host_format()`. O processador o roda num comando só dele, com o ffmpeg que tem o filtro, e o construtor
+  continua sendo um construtor de filtro comum (`@register_builder`), que recebe as portas de áudio do plugin em `request.ports`.
 - Resposta de frequência: um efeito de equalização com `has_response = True` na classe registra a conta pura do ganho em
   dB por frequência com `@register_response("<type>")` (`frequency_response`), a partir dos mesmos dados que o construtor
   usa; a interface desenha o gráfico com ela, sem rodar o ffmpeg. Um teste prende que as classes e as contas listam os

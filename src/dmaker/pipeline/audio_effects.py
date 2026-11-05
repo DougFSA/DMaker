@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -59,6 +59,7 @@ from ..media.wavio import read_wav_float
 from .cache_key import cache_key
 from .context import RenderContext
 from .noise_profiles import AUTO_PROFILE_SECONDS, ProfileLocator, measure_profile
+from .plugins import PluginService, PluginUnavailable, ResolvedPlugin, plugin_service
 from .sample_reader import FFmpegSampleReader, SampleReader
 from .sources import Source
 from .voiceover import PreparedVoiceover
@@ -115,7 +116,9 @@ class EffectProcessor:
 
     O ffmpeg entra por injeção (`runner`), como no resto do pipeline: com o `RecordingRunner` nada é executado e
     os comandos só ficam registrados (a simulação do render). `profiles` resolve os perfis de ruído do projeto (sem
-    ele, só o perfil `auto` funciona) e `reader` lê as amostras que a medida do perfil precisa."""
+    ele, só o perfil `auto` funciona) e `reader` lê as amostras que a medida do perfil precisa. `plugins` resolve os efeitos de
+    plugin (o serviço do processo, quando não vem outro) e `on_warning` recebe o aviso de cada plugin que não pode rodar: o
+    efeito é pulado e o render segue."""
 
     def __init__(
         self,
@@ -123,10 +126,15 @@ class EffectProcessor:
         cache_dir: Path | None = None,
         profiles: ProfileLocator | None = None,
         reader: SampleReader | None = None,
+        plugins: PluginService | None = None,
+        on_warning: Callable[[str], None] | None = None,
     ) -> None:
         self.runner = runner
         self._cache_dir = cache_dir
         self.profiles = profiles
+        self._plugins = plugins
+        self._on_warning = on_warning
+        self._resolved: dict[tuple[str, str], ResolvedPlugin | str] = {}
         self.reader: SampleReader = reader or FFmpegSampleReader(runner)
         self._spectra: dict[
             str, NoiseSpectrum
@@ -137,6 +145,10 @@ class EffectProcessor:
         return self._cache_dir or config.AUDIO_FX_DIR
 
     def key(self, item: AudioItem) -> str:
+        item, hosts = self._available(item)
+        return self._key(item, hosts)
+
+    def _key(self, item: AudioItem, hosts: dict[int, ResolvedPlugin]) -> str:
         return cache_key(
             EFFECTS_VERSION,
             str(item.path),
@@ -150,19 +162,72 @@ class EffectProcessor:
                 [round(item.lead, 3)] if item.lead else []
             ),  # fora da chave sem deslocamento: cache antigo vale
             *self.profile_parts(item.effects),  # idem: sem perfil nomeado a chave é a de sempre
+            *[hosts[index].signature() for index in sorted(hosts)],  # idem: sem plugin a chave é a de sempre
         )
 
     def process(self, item: AudioItem) -> ProcessedAudio | None:
-        """O item processado, ou None quando nenhum efeito está ligado (o som segue pela fonte original)."""
+        """O item processado, ou None quando nenhum efeito está ligado (o som segue pela fonte original). O efeito de plugin que
+        não pode rodar aqui (não instalado, desabilitado) é pulado com um aviso."""
+        item, hosts = self._available(item)
         if not active_effects(item.effects) or item.duration <= 0:
             return None
         reason = chain_refusal(item.effects, item.duration)
         if reason is not None:  # o teto de saída do Paulstretch: recusa antes de gastar memória e tempo
             raise ValueError(reason)
-        out = self.cache_dir / f"{self.key(item)}.wav"
+        out = self.cache_dir / f"{self._key(item, hosts)}.wav"
         if not out.exists():
-            self._render(item, out)
+            self._render(item, out, hosts)
         return ProcessedAudio(out, chain_duration(item.effects, item.duration))
+
+    # ---------- plugins ----------
+
+    def _service(self) -> PluginService:
+        return self._plugins or plugin_service()
+
+    def _plugin(self, format_name: str, ref: str) -> ResolvedPlugin | str:
+        """O plugin resolvido, ou o motivo de ele não poder rodar (guardado: o mesmo plugin é perguntado uma vez por render)."""
+        key = (format_name, ref)
+        if key not in self._resolved:
+            try:
+                self._resolved[key] = self._service().resolve(format_name, ref)
+            except PluginUnavailable as exc:
+                self._resolved[key] = str(exc)
+        return self._resolved[key]
+
+    def _available(self, item: AudioItem) -> tuple[AudioItem, dict[int, ResolvedPlugin]]:
+        """O item sem os efeitos de plugin que não podem rodar (desligados, para as posições da cadeia não mudarem) e os plugins
+        resolvidos dos que sobram, pela posição. Sem nenhum efeito de plugin não consulta nada."""
+        hosted = [
+            (index, effect)
+            for index, effect in active_effects(item.effects)
+            if effect.host_format() is not None
+        ]
+        if not hosted:
+            return item, {}
+        hosts: dict[int, ResolvedPlugin] = {}
+        effects = list(item.effects)
+        for index, effect in hosted:
+            resolved = self._plugin(effect.host_format() or "", effect.host_reference() or "")
+            if isinstance(resolved, str):
+                if self._on_warning is not None:
+                    self._on_warning(f"efeito Plugin pulado: {resolved}")
+                effects[index] = effect.model_copy(update={"enabled": False})
+            else:
+                hosts[index] = resolved
+        return replace(item, effects=tuple(effects)), hosts
+
+    def host_parts(self, effects: Sequence[EffectBase]) -> list:
+        """O que os plugins da cadeia decidem do som, para a chave de cache de quem usa o item (o mezanino do clipe, o pedaço
+        da prévia): o arquivo de cada plugin, ou a ausência dele. Vazia sem efeito de plugin."""
+        parts = []
+        for _, effect in active_effects(effects):
+            format_name = effect.host_format()
+            if format_name is None:
+                continue
+            ref = effect.host_reference() or ""
+            resolved = self._plugin(format_name, ref)
+            parts.append(["ausente", format_name, ref] if isinstance(resolved, str) else resolved.signature())
+        return parts
 
     # ---------- perfis de ruído ----------
 
@@ -210,21 +275,23 @@ class EffectProcessor:
         inputs.add(item.path, "-ss", f"{max(item.start, 0):.3f}", "-t", f"{item.duration - item.lead:.3f}")
         return inputs
 
-    def _render(self, item: AudioItem, out: Path) -> None:
+    def _render(self, item: AudioItem, out: Path, hosts: dict[int, ResolvedPlugin]) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         prepare_impulse_responses(item.effects)
         token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
         staging = out.with_name(f"{out.stem}.tmp-{token}{out.suffix}")
         scratch = out.with_name(f"{out.stem}.stages-{token}")
         try:
-            self._run_stages(item, staging, scratch)
+            self._run_stages(item, staging, scratch, hosts)
             if staging.exists():  # na simulação (RecordingRunner) nada é gravado
                 staging.replace(out)
         finally:
             staging.unlink(missing_ok=True)
             shutil.rmtree(scratch, ignore_errors=True)
 
-    def _run_stages(self, item: AudioItem, destination: Path, scratch: Path) -> None:
+    def _run_stages(
+        self, item: AudioItem, destination: Path, scratch: Path, hosts: dict[int, ResolvedPlugin]
+    ) -> None:
         """Percorre os trechos da cadeia: cada um lê o sinal do anterior (o item, no primeiro) e grava o seguinte. O
         primeiro e o último trecho são sempre de ffmpeg: o que lê o item e o que grava o WAV final, mesmo que o
         efeito de amostras esteja numa ponta da cadeia."""
@@ -242,7 +309,7 @@ class EffectProcessor:
             if stage.samples:
                 self._sample_pass(stage, entering, target)
             else:
-                self._filter_pass(item, stage, entering, duration, target, final, total)
+                self._filter_pass(item, stage, entering, duration, target, final, total, hosts)
             entering = target
             for _, effect in stage.effects:
                 duration = effect.output_duration(duration)
@@ -256,8 +323,10 @@ class EffectProcessor:
         target: Path,
         final: bool,
         total: float,
+        hosts: dict[int, ResolvedPlugin],
     ) -> None:
-        """Um comando do ffmpeg: os efeitos de filtro do trecho, do sinal que entra até `target`."""
+        """Um comando do ffmpeg: os efeitos de filtro do trecho, do sinal que entra até `target`. Um trecho de plugin roda com o
+        ffmpeg que hospeda o formato dele, na pasta e com o ambiente que o plugin pede."""
         if entering is None:
             inputs = self._inputs(item)
             ingress = ingress_line(0, item.stream, "[fx_in]", item.lead)
@@ -266,12 +335,17 @@ class EffectProcessor:
             inputs.add(entering, *STAGE_CODEC)
             ingress = "[0:a]anull[fx_in]"
         measures = self._measures(inputs, ingress, stage, duration, item.stream if entering is None else 0)
-        lines = [ingress, *stage_lines("[fx_in]", "[fx_out]", stage.effects, duration, measures)]
+        ports = {index: hosts[index].ports for index, _ in stage.effects if index in hosts}
+        lines = [ingress, *stage_lines("[fx_in]", "[fx_out]", stage.effects, duration, measures, ports=ports)]
         target.parent.mkdir(parents=True, exist_ok=True)
         args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fx_out]"]
         args += PROCESSED_CODEC if final else STAGE_CODEC
         args.append(str(target))
-        self.runner.run(FFmpegCommand(args, label="efeitos de áudio", total=total))
+        where: dict = {}
+        if stage.host is not None:
+            plugin = hosts[stage.effects[0][0]]
+            where = {"binary": plugin.ffmpeg, "cwd": plugin.cwd, "env": plugin.env or None}
+        self.runner.run(FFmpegCommand(args, label="efeitos de áudio", total=total, **where))
 
     def _sample_pass(self, stage: Stage, entering: Path | None, target: Path) -> None:
         """O estágio de amostras: lê o sinal do trecho anterior, aplica o efeito em numpy e grava o seguinte. O arquivo
@@ -359,7 +433,11 @@ def _fitted(samples: np.ndarray, frames: int) -> np.ndarray:
 def effect_processor(ctx: RenderContext) -> EffectProcessor:
     """O processador do render em curso, criado na primeira vez que algum item tem efeito."""
     if ctx.audio_fx is None:
-        ctx.audio_fx = EffectProcessor(ctx.runner, profiles=ProfileLocator(ctx.project, ctx.session))
+        ctx.audio_fx = EffectProcessor(
+            ctx.runner,
+            profiles=ProfileLocator(ctx.project, ctx.session),
+            on_warning=getattr(ctx, "warn", None),
+        )
     return ctx.audio_fx
 
 
@@ -369,11 +447,15 @@ def uses_named_profile(effects: Sequence[EffectBase]) -> bool:
 
 
 def noise_profile_parts(ctx: RenderContext, effects: Sequence[EffectBase]) -> list:
-    """A parte da chave de cache de um item (o mezanino do clipe, o pedaço da prévia) que muda quando um perfil de ruído
-    nomeado que a cadeia usa muda. Vazia sem perfil nomeado: a chave de um projeto antigo é a de sempre."""
-    if not uses_named_profile(effects):
-        return []  # a maioria dos itens: nem cria o processador
-    return effect_processor(ctx).profile_parts(effects)
+    """A parte da chave de cache de um item (o mezanino do clipe, o pedaço da prévia) que muda quando algo de fora da spec que a
+    cadeia usa muda: o perfil de ruído nomeado, ou o arquivo de um plugin. Vazia sem nenhum dos dois: a chave de um projeto
+    antigo é a de sempre."""
+    parts: list = []
+    if uses_named_profile(effects):  # a maioria dos itens não usa: nem cria o processador
+        parts += effect_processor(ctx).profile_parts(effects)
+    if any(effect.host_format() is not None for _, effect in active_effects(effects)):
+        parts += effect_processor(ctx).host_parts(effects)
+    return parts
 
 
 def clip_camera_audio(

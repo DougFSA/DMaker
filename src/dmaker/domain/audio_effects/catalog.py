@@ -16,7 +16,9 @@ from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 # "band_gains" é a lista fixa de ganhos em dB do EQ Gráfico (um por banda, `options` traz a frequência de cada uma) e
 # "freq_points" a lista de pontos `{hz, db}` do EQ por Curva: a interface os desenha como controles deslizantes e como
 # um gráfico de pontos arrastáveis; "text" é um campo de texto livre (os dígitos do DTMF, o arquivo do Importar Amostras)
-# um som gerado `{generator, params}` (a portadora do Vocoder): a interface o escolhe entre os geradores do catálogo de sons
+# um som gerado `{generator, params}` (a portadora do Vocoder): a interface o escolhe entre os geradores do catálogo de sons;
+# "plugin_format" é o formato (lv2 ou ladspa), que a interface não mostra: vem do plugin escolhido; "plugin" é o nome do plugin LV2 ou LADSPA do efeito Plugin (a interface o escolhe na lista dos instalados) e "plugin_params"
+# os valores dos controles dele, `{nome: número}`: a interface monta um controle por controle que o próprio plugin declara
 ParamKind = Literal[
     "number",
     "integer",
@@ -28,6 +30,9 @@ ParamKind = Literal[
     "freq_points",
     "text",
     "carrier",
+    "plugin",
+    "plugin_format",
+    "plugin_params",
 ]
 
 
@@ -154,7 +159,7 @@ def effect_info(cls: type[EffectBase]) -> EffectInfo:
         changes_duration=cls.changes_duration,
         parameters=tuple(param_info(name, cls) for name in own),
         needs_selection=cls.needs_selection,
-        sample_stage=cls.sample_stage,
+        sample_stage=cls.item_only(),
         has_response=cls.has_response,
         actions=tuple(
             ActionInfo(action.id, action.label, action.hint, action.fills, action.needs_range)

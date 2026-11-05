@@ -97,9 +97,9 @@ def check_preset_fits(preset: EffectPreset, sample_stage_allowed: bool, place: s
         return
     for effect in preset.effects:
         cls = EFFECT_CLASSES[effect["type"]]
-        if cls.sample_stage:
+        if cls.item_only():
             raise ValueError(
-                f"a predefinição {preset.label!r} tem o efeito {cls.label}, que trabalha sobre as amostras do item e "
+                f"a predefinição {preset.label!r} tem o efeito {cls.label}, que {cls.item_only_reason()} e "
                 f"não vale em {place}. Aplique no item de voz (narração, voz gravada ou trecho de vídeo)"
             )
 

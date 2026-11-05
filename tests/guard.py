@@ -1,7 +1,7 @@
 """Guarda de isolamento: nenhum teste pode escrever nos dados reais de quem usa o editor.
 
 Sem CI, a suíte é o último portão, e ela não pode depender do que existe (ou está sendo gravado agora, por
-uma dublagem em andamento, por exemplo) em cache/, output/, projects/, conversations/, assets/voices/ ou nos léxicos de
+uma dublagem em andamento, por exemplo) em cache/, output/, projects/, conversations/, plugins/, plugins.json, assets/voices/ ou nos léxicos de
 pronúncia. Um gancho de auditoria do Python observa as escritas do processo de teste: ele enxerga só o que
 os testes fazem, então um render real rodando em paralelo não dá falso positivo.
 """
@@ -49,12 +49,14 @@ class Guard:
             _key(root / "conversations"),
             _key(root / "assets" / "voices"),
             _key(root / "assets" / "macros"),
+            _key(root / "plugins"),
         ]
         self.protected_files = [
             _key(root / "assets" / LEXICON_NAME),
             _key(root / "layouts.json"),
             _key(root / "effect-presets.json"),
             _key(root / "effect-presets.json.importado"),
+            _key(root / "plugins.json"),
         ]
         self.brands_dir = _key(root / "assets" / "brands")
         # com DMAKER_VOICE_SMOKE=1 os modelos de verdade baixam para cá, e isso é esperado

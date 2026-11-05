@@ -30,6 +30,9 @@ FFMPEG_DIR = BIN_DIR / "ffmpeg"
 # Chromium do Playwright (composição em HTML, PDF do manual): mora dentro do clone, como o ffmpeg, para o DMaker
 # não guardar nada na pasta compartilhada `%LOCALAPPDATA%/ms-playwright` e não depender dela.
 PLAYWRIGHT_DIR = BIN_DIR / "playwright"
+# Segundo ffmpeg, só para os efeitos de plugin LV2 (o build principal, o completo do gyan.dev, hospeda o LADSPA mas não o LV2).
+# Mora ao lado do principal, instalado por `dmaker setup --plugins`.
+FFMPEG_LV2_DIR = BIN_DIR / "ffmpeg-lv2"
 ASSETS_DIR = ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 HTML_ASSETS_DIR = ASSETS_DIR / "html"  # three.js e lottie-web (MIT), servidos às composições em HTML
@@ -52,6 +55,9 @@ GENERATED_DIR = (
 REVERB_IR_DIR = (
     CACHE_DIR / "reverb-ir"
 )  # respostas ao impulso do Reverb (WAV float), uma por conjunto de parâmetros da sala
+PLUGIN_SCAN_DIR = (
+    CACHE_DIR / "plugins"
+)  # a varredura dos plugins (o que cada um expõe, lido pelo ffmpeg), por pasta
 FRAMES_DIR = CACHE_DIR / "frames"  # quadros do projeto num instante, renderizados pelo pipeline (editor)
 WAVEFORM_DIR = CACHE_DIR / "waveform"
 SPECTROGRAM_DIR = (
@@ -86,6 +92,10 @@ EFFECT_PRESETS_FILE = (
 # `BRAND_DATA_DIR/<marca>/macros`. É dado de quem usa o editor, por isso fica fora do repositório.
 MACROS_DIR = DATA_DIR / "assets" / "macros"
 BRAND_DATA_DIR = DATA_DIR / "assets" / "brands"
+# Plugins de efeito de terceiros (LV2 e LADSPA) que a pessoa quer usar só no DMaker; a varredura lê também as pastas
+# padrão do sistema (somente leitura). O `plugins.json` guarda os que ela desligou. Ambos são dados de quem usa o editor.
+PLUGINS_DIR = DATA_DIR / "plugins"
+PLUGINS_FILE = DATA_DIR / "plugins.json"
 
 WINDOWS_FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 
@@ -125,3 +135,21 @@ def find_tool(name: str) -> Path | None:
             return c
     found = shutil.which(name)
     return Path(found) if found else None
+
+
+def plugin_ffmpeg_candidates(format_name: str) -> list[Path]:
+    """Os ffmpeg que podem hospedar os plugins de um formato (`lv2` ou `ladspa`), do mais específico ao principal: a variável
+    `DMAKER_FFMPEG_<FORMATO>_DIR`, o `bin/ffmpeg-lv2` (só no LV2) e o ffmpeg principal. Lidos na hora do uso, para os testes e
+    a verificação apontarem para outra pasta. Quem escolhe o que tem o filtro é `media.plugin_host`."""
+    exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    folders: list[Path] = []
+    env_dir = os.environ.get(f"DMAKER_FFMPEG_{format_name.upper()}_DIR")
+    if env_dir:
+        folders.append(Path(env_dir).expanduser())
+    if format_name == "lv2":
+        folders.append(FFMPEG_LV2_DIR)
+    candidates = [folder / sub / exe for folder in folders for sub in ("bin", ".")]
+    main = find_tool("ffmpeg")
+    if main is not None:
+        candidates.append(main)
+    return [candidate for candidate in candidates if candidate.exists()]

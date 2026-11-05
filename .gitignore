@@ -32,6 +32,11 @@ layouts.json
 effect-presets.json
 effect-presets.json.importado*
 
+# plugins de efeito de terceiros (LV2 e LADSPA) que a pessoa pôs para o DMaker, e a lista dos que ela desligou
+# (dado de quem usa o editor, não do repositório)
+/plugins/
+/plugins.json
+
 # macros de áudio salvas pela pessoa, globais e de cada marca (dado de quem usa o editor, não do repositório)
 assets/macros/
 assets/brands/*/macros/

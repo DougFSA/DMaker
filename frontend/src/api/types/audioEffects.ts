@@ -17,6 +17,12 @@ export type AudioEffectParamKind =
   | 'text'
   /** Um som gerado `{ generator, params }` (a portadora do Vocoder): a interface edita a onda e a frequência do Tom. */
   | 'carrier'
+  /** O plugin do efeito Plugin (a URI do LV2, `arquivo#rótulo` no LADSPA): a interface mostra o nome dele e o estado. */
+  | 'plugin'
+  /** O formato do plugin (`lv2` ou `ladspa`): vem do plugin escolhido, a interface não o mostra. */
+  | 'plugin_format'
+  /** Os valores dos controles do plugin, `{ nome: número }`: a interface monta um campo por controle que o plugin declara. */
+  | 'plugin_params'
 
 /** Um ponto da curva do EQ por Curva: a frequência (Hz) e o ganho nela (dB). */
 export interface CurvePoint {

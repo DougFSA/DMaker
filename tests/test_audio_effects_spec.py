@@ -98,6 +98,7 @@ def test_the_basic_and_the_wave_editing_effects_are_registered():
         "change_tempo",
         "sliding_stretch",
         "paulstretch",
+        "plugin",
         "noise_reduction",
         "click_removal",
         "clip_fix",

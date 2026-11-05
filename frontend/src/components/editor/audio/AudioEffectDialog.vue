@@ -13,12 +13,14 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import { ComparePlayer, type CompareSide } from '@/lib/audioCompare'
 import { newAudioContext } from '@/lib/audioContext'
 import { effectsFor, newEffect, targetMayGrow } from '@/lib/audioEffects'
+import { isPluginChoice, pluginAsEffectInfo, pluginEffectFromChoice } from '@/lib/audioPlugins'
 import { PREVIEW_SECONDS, SPECTRAL_PREFIX } from '@/lib/audioPanelOps'
 import { formatHz } from '@/lib/spectrogram'
 import { formatSpan } from '@/lib/audioWave'
 import { pruneEmpty } from '@/lib/editorPaths'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useAudioPanelStore } from '@/stores/audioPanel'
+import { useAudioPluginsStore } from '@/stores/audioPlugins'
 import { useEditorStore } from '@/stores/editor'
 import SavePresetButton from '../SavePresetButton.vue'
 import AudioEffectForm from './AudioEffectForm.vue'
@@ -32,6 +34,7 @@ const REPREVIEW_DELAY_MS = 600
 const panel = useAudioPanelStore()
 const editor = useEditorStore()
 const catalog = useAudioEffectsStore()
+const plugins = useAudioPluginsStore()
 
 const type = ref('')
 const values = ref<Record<string, AudioEffectValue>>({})
@@ -49,9 +52,11 @@ let ticket = 0
 const genericTarget = computed(() => panel.target?.replace(/\.\d+$/, '.N') ?? '')
 /** Só uma seleção com frequência (o retângulo do espectrograma) pede os efeitos espectrais: eles agem numa faixa. */
 const hasBand = computed(() => panel.selection?.low_hz !== undefined || panel.selection?.high_hz !== undefined)
+/** Cada plugin instalado e habilitado entra na lista como mais um efeito, com os controles que ele declara. */
 const offered = computed<AudioEffectInfo[]>(() => [
   ...effectsFor(catalog.effects, targetMayGrow(catalog.targets, genericTarget.value)),
   ...(hasBand.value ? catalog.effects.filter((info) => info.type.startsWith(SPECTRAL_PREFIX)) : []),
+  ...plugins.usable.map(pluginAsEffectInfo),
 ])
 const info = computed(() => offered.value.find((candidate) => candidate.type === type.value) ?? null)
 const typeOptions = computed(() => offered.value.map((effect) => ({ value: effect.type, label: effect.label })))
@@ -102,6 +107,7 @@ watch(open, (isOpen) => {
     return
   }
   void catalog.load()
+  void plugins.load()
   problem.value = ''
   note.value = ''
   previewed = false
@@ -143,11 +149,16 @@ function stopPreview(): void {
   status.value = 'idle'
 }
 
+/** O plugin escolhido na lista (quando o "efeito" é um plugin), com os dados que a spec precisa para citá-lo. */
+function chosenPlugin() {
+  return isPluginChoice(type.value) ? plugins.usable.find((plugin) => `plugin:${plugin.id}` === type.value) : undefined
+}
+
 function proposedEffect(): AudioEffectSettings {
   const selection = panel.selection
+  const plugin = chosenPlugin()
   return {
-    type: type.value,
-    ...values.value,
+    ...(plugin ? pluginEffectFromChoice(plugin, values.value) : { type: type.value, ...values.value }),
     ...(selection ? { start: selection.start, end: selection.end } : {}),
   }
 }
@@ -188,7 +199,9 @@ async function runPreview(): Promise<void> {
 async function apply(): Promise<void> {
   if (!info.value) return
   stopPreview()
-  const done = await panel.applyEffect(info.value.type, { ...values.value })
+  const plugin = chosenPlugin()
+  const { type: effectType, ...fields } = plugin ? pluginEffectFromChoice(plugin, values.value) : { type: info.value.type, ...values.value }
+  const done = await panel.applyEffect(effectType, fields)
   if (done) open.value = false
 }
 

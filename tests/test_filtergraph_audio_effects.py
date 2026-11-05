@@ -57,6 +57,7 @@ REQUIRED_FIELDS = {
     "spectral_multi_tool": {"low_hz": 2800.0, "high_hz": 3200.0},
     "spectral_eq": {"low_hz": 2800.0, "high_hz": 3200.0},
     "spectral_shelves": {"low_hz": 1000.0},
+    "plugin": {"format": "lv2", "plugin": "urn:exemplo:eco"},
 }
 
 
