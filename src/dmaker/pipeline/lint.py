@@ -105,6 +105,7 @@ def lint(
     warnings += _sfx_warnings(project, total)
     warnings += _generated_warnings(project, total)
     warnings += _marker_warnings(project, total)
+    warnings += _carrier_track_warnings(project)
     warnings += crossfade_warnings(project, durations, infos, offsets)
     if project.tracks:
         known = known_track_ids(project)
@@ -114,6 +115,31 @@ def lint(
         v1_state = project.tracks.get("V1")
         if v1_state and v1_state.hidden:
             warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
+    return warnings
+
+
+def _carrier_track_warnings(project: Project) -> list[str]:
+    """O Vocoder cuja trilha-portadora não existe no projeto: não é erro, ele cai na portadora gerada na hora do render. A `SFX`
+    não entra: os sons de entrada das sobreposições também a alimentam e a spec não os lista num lugar só."""
+    audio = project.audio
+    present = {f"A{i + 2}" for i in range(len(audio.tracks))}
+    if any(isinstance(segment, ClipSegment) for segment in project.timeline):
+        present.add("A1")
+    if audio.music is not None:
+        present.add("MUS")
+    if audio.narration:
+        present.add("NAR")
+    if audio.voiceover:
+        present.add("VO")
+    warnings = []
+    for _, place, effects in project.carrier_hosts():
+        for effect in effects:
+            carrier = effect.carrier_track_id()
+            if carrier and carrier != "SFX" and carrier not in present and effect.enabled:
+                warnings.append(
+                    f"{place}: o {effect.label} pede a portadora da trilha {carrier}, que o projeto não tem; "
+                    "usa a portadora gerada."
+                )
     return warnings
 
 

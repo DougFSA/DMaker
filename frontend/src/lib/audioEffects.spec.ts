@@ -6,6 +6,7 @@ import { eqEffects } from '@/test/eqFixtures'
 import {
   addEffectIn,
   AUTO_PROFILE,
+  carrierTrackOptions,
   chainOf,
   choiceText,
   choiceValue,
@@ -14,6 +15,7 @@ import {
   effectPath,
   effectsFor,
   freeProfileName,
+  hostTrackOf,
   intervalProblem,
   isCarrier,
   isEnabled,
@@ -245,6 +247,57 @@ describe('a portadora do Vocoder', () => {
     expect(isCarrier(custom)).toBe(true)
     expect(isCarrier([custom])).toBe(false)
     expect(isCarrier(null)).toBe(false)
+  })
+})
+
+describe('a portadora de outra trilha', () => {
+  const present = ['A1', 'A2', 'MUS', 'NAR', 'VO']
+
+  it('descobre a trilha que hospeda a cadeia pelo lugar dela na spec', () => {
+    expect(hostTrackOf('timeline.3.effects')).toBe('A1')
+    expect(hostTrackOf('audio.tracks.0.effects')).toBe('A2')
+    expect(hostTrackOf('audio.tracks.2.effects')).toBe('A4')
+    expect(hostTrackOf('audio.music.effects')).toBe('MUS')
+    expect(hostTrackOf('audio.narration.1.effects')).toBe('NAR')
+    expect(hostTrackOf('audio.voiceover.0.effects')).toBe('VO')
+    expect(hostTrackOf('audio.generated.0.effects')).toBe('SFX')
+  })
+
+  it('o PiP e o master não são trilha da linha do tempo: não há escolha', () => {
+    expect(hostTrackOf('overlays.0.effects')).toBeNull()
+    expect(hostTrackOf('audio.master_effects')).toBeNull()
+    expect(carrierTrackOptions(hostTrackOf('overlays.0.effects'), present)).toBeNull()
+  })
+
+  it('oferece o som gerado e só as trilhas que o par aceita, com os rótulos do Auto Duck', () => {
+    const music = carrierTrackOptions('MUS', present)!
+    expect(music.map((option) => option.value)).toEqual(['', 'A1', 'A2', 'NAR', 'VO'])
+    expect(music[0]).toEqual({ value: '', label: 'Som gerado' })
+    expect(music.find((option) => option.value === 'A2')?.label).toBe('Faixa externa (A2)')
+    // a câmera já contém as faixas externas, e nenhuma trilha ouve a si mesma
+    expect(carrierTrackOptions('A1', present)!.map((option) => option.value)).toEqual(['', 'MUS', 'NAR', 'VO'])
+    expect(carrierTrackOptions('A2', present)!.map((option) => option.value)).toEqual(['', 'A1', 'MUS', 'NAR', 'VO'])
+  })
+
+  it('a trilha que a spec cita e o projeto não tem continua na lista, marcada', () => {
+    const options = carrierTrackOptions('NAR', ['MUS'], 'A5')!
+    expect(options.map((option) => option.value)).toEqual(['', 'MUS', 'A5'])
+    expect(options[2]!.label).toBe('Faixa externa (A5) (não existe)')
+  })
+
+  it('a portadora gerada some enquanto uma trilha está escolhida', () => {
+    const generated = { name: 'carrier', shown_when: { carrier_track: null } }
+    const siblings = [{ name: 'carrier_track', default: null }] as never
+    expect(isParamShown(generated, { type: 'vocoder' }, siblings)).toBe(true)
+    expect(isParamShown(generated, { type: 'vocoder', carrier_track: 'MUS' }, siblings)).toBe(false)
+  })
+
+  it('escolher a trilha grava a chave e escolher o som gerado a apaga', () => {
+    const spec: Record<string, unknown> = { audio: { voiceover: [{ src: 'a.wav', effects: [{ type: 'vocoder' }] }] } }
+    expect(setEffectFieldIn(spec, 'audio.voiceover.0.effects', 0, 'carrier_track', 'MUS')).toBe(true)
+    expect(chainOf(spec, 'audio.voiceover.0.effects')).toEqual([{ type: 'vocoder', carrier_track: 'MUS' }])
+    setEffectFieldIn(spec, 'audio.voiceover.0.effects', 0, 'carrier_track', undefined)
+    expect(chainOf(spec, 'audio.voiceover.0.effects')).toEqual([{ type: 'vocoder' }])
   })
 })
 

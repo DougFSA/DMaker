@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain.audio_effects import active_effects, chain_duration, chain_refusal
+from ..domain.carrier_tracks import PlacedRun
 from ..domain.music_tempo import music_chain
 from ..domain.spec import Project, VoiceoverClip
 from .audio_effects import AudioItem, EffectProcessor
@@ -61,7 +62,15 @@ def prepare_voice_files(
             raise ValueError(f"audio.voiceover[{index}].src: o arquivo {clip.src!r} não tem áudio")
         length = play_length(clip, info.duration)
         done = (
-            processor.process(AudioItem(path, length, tuple(clip.effects), clip.offset))
+            processor.process(
+                AudioItem(
+                    path,
+                    length,
+                    tuple(clip.effects),
+                    clip.offset,
+                    placement=(PlacedRun(0.0, clip.start, length),),
+                )
+            )
             if processor
             else None
         )

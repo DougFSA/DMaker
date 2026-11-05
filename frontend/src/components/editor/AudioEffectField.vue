@@ -13,7 +13,10 @@ import {
   choiceText,
   choiceValue,
   clampParam,
+  GENERATED_CARRIER,
+  carrierTrackOptions,
   effectPath,
+  hostTrackOf,
   isCarrier,
   isListParam,
   isParamShown,
@@ -21,6 +24,7 @@ import {
   profileNames,
   setEffectFieldIn,
 } from '@/lib/audioEffects'
+import { isDuckTrack } from '@/lib/autoDuck'
 import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
 import CarrierControl from './audio/CarrierControl.vue'
@@ -133,6 +137,22 @@ const profileOptions = computed(() => {
   return options
 })
 
+/** As opções da portadora: o som gerado e as trilhas que o par aceita e o projeto tem. Nulo no PiP e no master. */
+const carrierTrackChoices = computed(() => {
+  const present = (editor.view?.tracks ?? []).map((track) => track.id).filter(isDuckTrack)
+  return carrierTrackOptions(hostTrackOf(props.listPath), present, typeof stored.value === 'string' ? stored.value : undefined)
+})
+
+/** Escolher o som gerado apaga a chave: a spec de antes de existir a escolha segue igual. Um passo do desfazer, como os outros. */
+function onCarrierTrack(value: string): void {
+  commit()
+  editor.flushPendingEdits()
+  const { listPath, index } = props
+  editor.mutate((draft) =>
+    setEffectFieldIn(draft, listPath, index, props.param.name, value === GENERATED_CARRIER ? undefined : value),
+  )
+}
+
 // outro caminho (o efeito subiu ou desceu e o cartão foi reaproveitado): o que esperava vai para o caminho de antes
 watch(path, commit, { flush: 'sync' })
 
@@ -186,6 +206,18 @@ onBeforeUnmount(() => {
     :data-effect-param="param.name"
     @update:model-value="onDiscrete"
   />
+  <!-- a trilha de onde a portadora vem: o som gerado ou uma trilha do projeto; no PiP e no master a escolha não existe -->
+  <template v-else-if="param.kind === 'carrier_track'">
+    <AppSelect
+      v-if="carrierTrackChoices"
+      :label="param.label"
+      :model-value="typeof stored === 'string' ? stored : GENERATED_CARRIER"
+      :options="carrierTrackChoices"
+      :hint="param.hint || undefined"
+      :data-effect-param="param.name"
+      @update:model-value="onCarrierTrack"
+    />
+  </template>
   <!-- a portadora do Vocoder: a onda e a frequência do Tom, na linha inteira -->
   <div v-else-if="param.kind === 'carrier'" class="list-cell" :data-effect-param="param.name">
     <CarrierControl

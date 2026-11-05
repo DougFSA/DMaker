@@ -36,6 +36,7 @@ from .audio_presets import (
     resolve_encoding,
 )
 from .auto_duck import AutoDuck
+from .carrier_tracks import check_carrier_pair, find_cycle
 from .curves import Curve
 from .generators import normalized_params
 from .pitch_tempo import MAX_TIME_RATIO, MIN_TIME_RATIO
@@ -513,6 +514,18 @@ class VideoOverlay(EffectsOwner):
             raise ValueError("vídeo com `region` não leva `x` nem `y`: a região já define o lugar")
         if not all(0 <= v <= 1 for v in self.focus):
             raise ValueError("focus do vídeo precisa ter os dois valores entre 0 e 1")
+        return self
+
+    @model_validator(mode="after")
+    def _no_carrier_track(self) -> VideoOverlay:
+        """A sobreposição não é trilha da linha do tempo (o Auto Duck também não a cita): não há id para a portadora apontar
+        de volta nem lugar na mixagem de onde o Vocoder leria a trilha."""
+        for effect in self.effects:
+            if effect.carrier_track_id() is not None:
+                raise ValueError(
+                    f"{self.effects_place}: o efeito {effect.label} não aceita `carrier_track` aqui, porque a sobreposição "
+                    "não é uma trilha da linha do tempo; deixe a portadora gerada"
+                )
         return self
 
 
@@ -1255,6 +1268,46 @@ class Project(Strict):
             raise ValueError(
                 "timeline precisa de pelo menos um trecho; só um projeto com saída de áudio "
                 "(output.preset: audio/mp3, audio/wav...) pode ficar sem trechos de vídeo"
+            )
+        return self
+
+    def carrier_hosts(self) -> list[tuple[str, str, list]]:
+        """Os itens da spec que podem ter um Vocoder, como `(id da trilha que hospeda, lugar na spec, efeitos)`: o clipe é o `A1`,
+        a faixa externa `i` é a `A{i+2}`, e a música, a narração, a voz gravada e o som gerado são `MUS`, `NAR`, `VO` e `SFX`."""
+        audio = self.audio
+        hosts: list[tuple[str, str, list]] = [
+            ("A1", f"timeline[{index}]", list(segment.effects))
+            for index, segment in enumerate(self.timeline)
+            if isinstance(segment, ClipSegment)
+        ]
+        hosts += [(f"A{i + 2}", f"audio.tracks[{i}]", list(t.effects)) for i, t in enumerate(audio.tracks)]
+        if audio.music is not None:
+            hosts.append(("MUS", "audio.music", list(audio.music.effects)))
+        hosts += [("NAR", f"audio.narration[{i}]", list(n.effects)) for i, n in enumerate(audio.narration)]
+        hosts += [("VO", f"audio.voiceover[{i}]", list(v.effects)) for i, v in enumerate(audio.voiceover)]
+        hosts += [("SFX", f"audio.generated[{i}]", list(g.effects)) for i, g in enumerate(audio.generated)]
+        return hosts
+
+    @model_validator(mode="after")
+    def _carrier_track_refs(self) -> Project:
+        """O Vocoder que ouve outra trilha: recusa o par que não vale e o ciclo (cada trilha precisaria da outra pronta). A trilha
+        que não existe no projeto não é erro aqui: o efeito cai na portadora gerada e o `lint` avisa."""
+        edges: list[tuple[str, str]] = []
+        for host, place, effects in self.carrier_hosts():
+            for effect in effects:
+                carrier = effect.carrier_track_id()
+                if carrier is None:
+                    continue
+                reason = check_carrier_pair(host, carrier)
+                if reason:
+                    raise ValueError(f"{place}: efeito {effect.label}: {reason}")
+                if effect.enabled:
+                    edges.append((host, carrier))
+        cycle = find_cycle(edges)
+        if cycle:
+            raise ValueError(
+                f"Vocoder: as portadoras fecham um ciclo ({' -> '.join(cycle)}), e cada trilha precisaria da outra já pronta. "
+                "Deixe uma delas com a portadora gerada"
             )
         return self
 

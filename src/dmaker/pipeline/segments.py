@@ -39,6 +39,7 @@ from .auto_duck import duck_key_part, spill_long_graph, track_duck_lookup
 from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
+from .placements import clip_placement
 from .sources import Source
 from .track_slices import track_slices
 
@@ -237,6 +238,9 @@ class ClipPreparer:
             else None
         )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        placement = clip_placement(
+            ctx, index, duration, segment.speed
+        )  # onde o clipe cai (o Vocoder que ouve outra trilha)
         look = segment_look(index, segment, ctx)
         # o som emprestado dos clipes vizinhos nas duas pontas (J-cut e L-cut); None sem crossfade
         crossfades = (
@@ -269,7 +273,7 @@ class ClipPreparer:
             camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
             # o perfil de ruído nomeado que a Redução de ruído do clipe usa: mudar o trecho dele muda o som (vazio, e
             # fora da chave, sem perfil nomeado)
-            *noise_profile_parts(ctx, segment.effects),
+            *noise_profile_parts(ctx, segment.effects, placement),
             # o crossfade de som com os vizinhos: a receita e os arquivos de onde o som é emprestado (vazio sem crossfade)
             *crossfade_key_parts(crossfades),
         )
@@ -295,7 +299,7 @@ class ClipPreparer:
         if _needs_render(out, ctx):
             # os efeitos do clipe: o som da câmera (ou a voz isolada) entra no mezanino já processado
             length = max(duration * segment.speed, 0.01)
-            processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path)
+            processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path, placement)
             if processed is not None:
                 camera_path, camera_lead = (
                     processed,

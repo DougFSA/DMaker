@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.audio_effects import EffectBase, rebase_effects
+from ..domain.audio_effects import EffectBase, active_effects, rebase_effects
 from ..domain.audio_effects.basic import Amplify
 from ..domain.edits import EditError
 from ..domain.spec import ClipSegment, Project, VideoOverlay
@@ -30,6 +30,20 @@ class Comparison:
     before: Path
     after: Path
     duration: float
+    # o que o antes e depois não representa (vazio quando representa tudo)
+    warning: str = ""
+
+
+def loose_item_warning(chain: list[EffectBase]) -> str:
+    """O aviso de que o item é tocado solto, fora da linha do tempo: o Vocoder cuja portadora é outra trilha do projeto soa aqui com a
+    portadora gerada, porque a comparação não monta o projeto inteiro. Vazio sem Vocoder ligado a uma trilha."""
+    tracks = sorted({track for _, effect in active_effects(chain) if (track := effect.carrier_track_id())})
+    if not tracks:
+        return ""
+    return (
+        f"O antes e depois toca o item solto e usa a portadora gerada do Vocoder, não a da trilha {', '.join(tracks)}; "
+        "o render e a prévia da linha do tempo usam a trilha."
+    )
 
 
 def _chain(project: Project, target: str) -> list[EffectBase]:
@@ -97,4 +111,4 @@ def compare_effect(
         assert done is not None
         return done.path
 
-    return Comparison(processed(False), processed(True), duration)
+    return Comparison(processed(False), processed(True), duration, loose_item_warning(chain))

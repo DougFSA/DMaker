@@ -12,6 +12,7 @@ import type {
   TimelineItem,
   TimelineView,
 } from '@/api'
+import { keyOptions, trackLabel } from './autoDuck'
 import { getPath, setPath } from './editorPaths'
 import { displayLabel } from './timeline'
 
@@ -100,6 +101,44 @@ export function profileNames(spec: unknown): string[] {
   return profiles && typeof profiles === 'object' ? Object.keys(profiles as Record<string, unknown>) : []
 }
 
+/**
+ * A trilha da linha do tempo que hospeda a cadeia, a partir de onde ela mora na spec: o clipe é o A1, a faixa externa `i` é a
+ * A{i+2}, e a música, a narração, a voz gravada e o som gerado são MUS, NAR, VO e SFX. O PiP e o master não são trilha da
+ * linha do tempo (nulo): a portadora de outra trilha não vale ali.
+ */
+export function hostTrackOf(listPath: string): string | null {
+  const parts = /^(timeline|audio\.tracks|audio\.narration|audio\.voiceover|audio\.generated)\.(\d+)\.effects$/.exec(listPath)
+  if (listPath === 'audio.music.effects') return 'MUS'
+  if (!parts) return null
+  const [, where, index] = parts
+  if (where === 'timeline') return 'A1'
+  if (where === 'audio.tracks') return `A${Number(index) + 2}`
+  if (where === 'audio.narration') return 'NAR'
+  if (where === 'audio.voiceover') return 'VO'
+  return 'SFX'
+}
+
+/** O valor de `carrier_track` que não guarda trilha: o som gerado do Vocoder. */
+export const GENERATED_CARRIER = ''
+
+/**
+ * As opções da portadora do Vocoder: o som gerado e as trilhas que o par aceita (as mesmas do Auto Duck). Nulo onde a
+ * escolha não existe (PiP, master). A trilha que a spec cita e o projeto não tem fica na lista, marcada, para não sumir.
+ */
+export function carrierTrackOptions(
+  host: string | null,
+  present: readonly string[],
+  current?: string,
+): Array<{ value: string; label: string }> | null {
+  if (host === null) return null
+  const options = [
+    { value: GENERATED_CARRIER, label: 'Som gerado' },
+    ...keyOptions(host, present).map((id) => ({ value: id, label: trackLabel(id) })),
+  ]
+  if (current && !options.some((option) => option.value === current)) options.push({ value: current, label: `${trackLabel(current)} (não existe)` })
+  return options
+}
+
 /** O alvo de `edit_project` de uma cadeia, a partir de onde ela mora na spec (`timeline.0.effects` vira `timeline.0`). */
 export function targetOfList(listPath: string): string {
   if (listPath === MASTER_LIST_PATH) return MASTER_TARGET_KEY
@@ -161,7 +200,7 @@ export function paramValue(effect: AudioEffectSettings, param: Pick<AudioEffectP
   if (param.kind === 'boolean') return typeof stored === 'boolean' ? stored : param.default === true
   if (isCarrierParam(param)) return isCarrier(stored) ? stored : isCarrier(param.default) ? param.default : null
   if (isListParam(param)) return Array.isArray(stored) ? (stored as number[] | CurvePoint[]) : Array.isArray(param.default) ? param.default : null
-  if (param.kind === 'choice' || param.kind === 'profile') {
+  if (param.kind === 'choice' || param.kind === 'profile' || param.kind === 'carrier_track') {
     // uma escolha pode ter opções numéricas (a inclinação do passa-alta, 6 a 48 dB por oitava): a spec guarda o número
     if (typeof stored === 'string' || (param.kind === 'choice' && typeof stored === 'number')) return stored
     return typeof param.default === 'string' || typeof param.default === 'number' ? param.default : null

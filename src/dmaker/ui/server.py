@@ -877,6 +877,7 @@ def effect_compare(name: str, req: EffectCompareRequest, services: Services) -> 
         "before_url": _file_url(compared.before),
         "after_url": _file_url(compared.after),
         "duration_s": round(compared.duration, 3),
+        "warning": compared.warning,
     }
 
 

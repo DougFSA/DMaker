@@ -57,11 +57,13 @@ from .auto_duck import (
     spill_long_graph,
     track_duck_lookup,
 )
+from .carrier_tracks import CarrierInputs, Deferred, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia, media_references
 from .narration import NarrationService
+from .placements import clip_placement
 from .segments import PreparedSegment, cache_key, isolate_camera_audio, pan_key_part
 from .sfx import SfxTrack, leveled_effects
 from .sync import OffsetFinder
@@ -266,10 +268,26 @@ class PreviewAudioBuilder:
         total = layout.total
         # o que não depende dos pedaços fica pronto antes deles, como no render: o Auto Duck mede a chave de uma faixa
         # externa de fundo (que abaixa dentro do pedaço) na narração, nas vozes gravadas e na música
-        voiceovers = processed_voiceovers(ctx, self._voiceovers(ctx))
-        voice_files = self._voice_files(ctx)
+        # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
+        spoken = self._voiceovers(ctx)
         music = ctx.project.audio.music
-        music_path = processed_music(ctx, ctx.project.resolve(music.src) if music else None)
+        music_file = ctx.project.resolve(music.src) if music else None
+        voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
+        voice_files_of = Deferred(lambda: self._voice_files(ctx), "a voz gravada")
+        music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        install_carrier_tracks(
+            ctx,
+            CarrierInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers_of,
+                voice_files_of,
+                music_of,
+            ),
+        )
+        voiceovers, voice_files, music_path = voiceovers_of(), voice_files_of(), music_of()
         begin_ducks(
             ctx,
             DuckInputs(
@@ -430,6 +448,7 @@ class PreviewAudioBuilder:
                 if not missing.covers(piece.path)
             )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        placement = clip_placement(ctx, index, duration, segment.speed)
         crossfades = (
             clip_crossfades(index, ctx.cut_neighbors, ctx.warn) if ctx.cut_neighbors is not None else None
         )
@@ -454,7 +473,9 @@ class PreviewAudioBuilder:
                 for t in tracks
             ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
-            *noise_profile_parts(ctx, segment.effects),  # o perfil de ruído nomeado (vazio sem ele)
+            *noise_profile_parts(
+                ctx, segment.effects, placement
+            ),  # o perfil de ruído e a portadora de outra trilha (vazio sem eles)
             *crossfade_key_parts(crossfades),  # o som emprestado dos vizinhos no crossfade (vazio sem ele)
         )
         out = ctx.cache_dir / f"{key}.wav"
@@ -465,7 +486,7 @@ class PreviewAudioBuilder:
         camera_path = camera_audio.path if camera_audio else None
         camera_lead = camera_audio.lead if camera_audio else 0.0
         length = max(duration * segment.speed, 0.01)  # tempo de fonte que o trecho consome
-        processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path)
+        processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path, placement)
         if processed is not None:
             camera_path, camera_lead = (
                 processed,

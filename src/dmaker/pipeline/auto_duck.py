@@ -52,15 +52,17 @@ from ..domain.auto_duck import (
 from ..domain.spec import ClipSegment, Project
 from ..domain.timeline import segment_duration
 from ..filtergraph.audio import StemTaps
+from ..filtergraph.common import Inputs
 from ..filtergraph.duck import DuckCurve
 from ..filtergraph.mezzanine import uses_camera_audio
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args
 from .audio_effects import clip_camera_audio, track_audio_overrides
 from .cache_key import cache_key
 from .context import RenderContext
+from .placements import clip_placement
 from .sfx import SfxTrack, unleveled_effects
 from .sources import Source, physical_source_names
-from .track_slices import track_slice, track_window
+from .track_slices import clip_windows
 
 DUCK_VERSION = "dk1"  # muda quando a medida da chave muda (invalida os níveis em cache)
 # A janela do nível RMS: 20 ms, a 48 kHz. Curta o bastante para a descida começar a tempo da primeira palavra (a janela que
@@ -235,7 +237,7 @@ def _stamp(path: Path) -> list | None:
     return [str(path), stat.st_mtime_ns, stat.st_size]
 
 
-def _input_stamps(args: Sequence[str]) -> list:
+def input_stamps(args: Sequence[str]) -> list:
     """Data e tamanho de cada arquivo de entrada de um comando: trocar o conteúdo de um deles muda a chave."""
     return [
         _stamp(Path(args[i + 1]))
@@ -280,7 +282,7 @@ def file_levels(ctx: RenderContext, path: Path, stream: int, volume: float) -> n
     return _measure(ctx, args, ["file", graph, _stamp(path)])
 
 
-def tap_levels(
+def tap_graph(
     ctx: RenderContext,
     key: str,
     music_path: Path | None,
@@ -288,11 +290,12 @@ def tap_levels(
     voiceovers: Sequence,
     sfx: Sequence,
     voice_files: Sequence,
-) -> np.ndarray:
-    """Os níveis RMS da trilha `key` (`MUS`, `NAR`, `VO` ou `SFX`) no tempo do projeto, lidos da cópia que o grafo da
-    mixagem tira dela antes de abaixar nada. O grafo leva só o que a chave pede, sobre um silêncio da duração do projeto:
-    não usa os mezaninos, então vale antes deles."""
-    from .assembly import audio_only_graph, graph_args
+) -> tuple[Inputs, list[str], str] | None:
+    """As entradas, as linhas e o rótulo da cópia que o grafo da mixagem tira da trilha `key` (`MUS`, `NAR`, `VO` ou `SFX`) antes
+    de abaixar nada, no tempo do projeto. O grafo leva só o que a chave pede, sobre um silêncio da duração do projeto: não usa os
+    mezaninos, então vale antes deles. É o que o Auto Duck mede e o que o Vocoder lê como portadora. None quando a trilha existe na
+    spec mas nada dela toca ainda (a narração da prévia ainda não foi falada)."""
+    from .assembly import audio_only_graph
 
     taps = StemTaps(frozenset({key}))
     inputs, lines, aout = audio_only_graph(
@@ -310,14 +313,32 @@ def tap_levels(
         stems=taps,
         ducks=[],
     )
-    if (
-        key not in taps.labels
-    ):  # a trilha existe na spec mas nada dela toca ainda (a narração da prévia ainda não foi falada)
-        return np.zeros(0, dtype=np.float32)
+    if key not in taps.labels:
+        return None
     lines.append(f"{aout}anullsink")  # a mistura inteira não interessa: só a cópia da chave
-    lines.append(level_filters(taps.labels[key], "[dk_out]"))
+    return inputs, lines, taps.labels[key]
+
+
+def tap_levels(
+    ctx: RenderContext,
+    key: str,
+    music_path: Path | None,
+    total: float,
+    voiceovers: Sequence,
+    sfx: Sequence,
+    voice_files: Sequence,
+) -> np.ndarray:
+    """Os níveis RMS da trilha `key` (`MUS`, `NAR`, `VO` ou `SFX`) no tempo do projeto, lidos da cópia que o grafo da mixagem
+    tira dela antes de abaixar nada (`tap_graph`). Vazio quando a trilha ainda não toca."""
+    from .assembly import graph_args
+
+    found = tap_graph(ctx, key, music_path, total, voiceovers, sfx, voice_files)
+    if found is None:
+        return np.zeros(0, dtype=np.float32)
+    inputs, lines, label = found
+    lines.append(level_filters(label, "[dk_out]"))
     args = [*graph_args(ctx, inputs, lines, "duck_detect.txt"), "-map", "[dk_out]", "-f", "null", "-"]
-    return _measure(ctx, args, ["tap", key, ";".join(lines), _input_stamps(inputs.args)])
+    return _measure(ctx, args, ["tap", key, ";".join(lines), input_stamps(inputs.args)])
 
 
 # ---------- planejar ----------
@@ -442,7 +463,12 @@ def _absent(ctx: RenderContext, plan: DuckPlan, track_id: str, sfx: Sequence | N
 
 
 def camera_input(
-    ctx: RenderContext, plan: DuckPlan, index: int, segment: ClipSegment, source: Source, span_length: float
+    ctx: RenderContext,
+    cameras: dict[int, CameraInput | None],
+    index: int,
+    segment: ClipSegment,
+    source: Source,
+    span_length: float,
 ) -> CameraInput | None:
     """De onde sai o som da câmera do clipe `index`, pela mesma receita do mezanino: o isolamento vocal e os efeitos do
     clipe (`clip_camera_audio`) valem, e o som deslocado (`audio_offset`) começa na janela dele. None quando o clipe não
@@ -450,8 +476,8 @@ def camera_input(
     voz do projeto, que é o que sobra do A1 antes da mistura com o resto."""
     from .segments import isolate_camera_audio
 
-    if index in plan.cameras:
-        return plan.cameras[index]
+    if index in cameras:
+        return cameras[index]
     audio = ctx.project.audio
     result: CameraInput | None = None
     if (
@@ -467,7 +493,13 @@ def camera_input(
             isolated.isolate()  # separa a voz (ou o fundo) se ainda não está em cache: a medida lê o arquivo isolado
         length = max(span_length * segment.speed, 0.01)
         processed = clip_camera_audio(
-            ctx, segment, source, in_point, length, isolated.path if isolated else None
+            ctx,
+            segment,
+            source,
+            in_point,
+            length,
+            isolated.path if isolated else None,
+            clip_placement(ctx, index, span_length, segment.speed),
         )
         volume = segment.volume * audio.voice_gain
         if processed is not None:  # o silêncio inicial já vem dentro do arquivo processado
@@ -479,7 +511,7 @@ def camera_input(
             result = CameraInput(source.path, source.audio_stream, volume, window.read_from, window.lead)
         else:
             result = CameraInput(source.path, source.audio_stream, volume, max(in_point, 0.0), 0.0)
-    plan.cameras[index] = result
+    cameras[index] = result
     return result
 
 
@@ -497,7 +529,7 @@ def _camera_key_runs(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck, inputs:
         if source.info is None:
             continue
         length = segment_duration(segment, source.info, source.offset)
-        heard = camera_input(ctx, plan, index, segment, source, length)
+        heard = camera_input(ctx, plan.cameras, index, segment, source, length)
         if heard is None:
             continue
         file_runs = sound_runs(
@@ -529,15 +561,7 @@ def _external_runs(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck) -> list[R
         )
         if not file_runs:
             continue
-        for index, segment in enumerate(ctx.project.timeline):
-            if not isinstance(segment, ClipSegment) or not segment.source or index >= len(plan.spans):
-                continue
-            piece = track_slice(track, ctx.session[track.source], segment, override)
-            window = (
-                track_window(piece, source.info.duration, segment.speed, plan.spans[index]) if piece else None
-            )
-            if window is None:
-                continue
+        for segment, window in clip_windows(track, ctx.session, ctx.project.timeline, plan.spans, override):
             runs += clip_runs(file_runs, window.start, window.end, window.file_in, segment.speed)
     return runs
 

@@ -17,6 +17,8 @@ export type AudioEffectParamKind =
   | 'text'
   /** Um som gerado `{ generator, params }` (a portadora do Vocoder): a interface edita a onda e a frequência do Tom. */
   | 'carrier'
+  /** O id da trilha do projeto de onde a portadora do Vocoder vem (`A1`, `MUS`...); ausente é o som gerado. */
+  | 'carrier_track'
   /** O plugin do efeito Plugin (a URI do LV2, `arquivo#rótulo` no LADSPA): a interface mostra o nome dele e o estado. */
   | 'plugin'
   /** O formato do plugin (`lv2` ou `ladspa`): vem do plugin escolhido, a interface não o mostra. */
@@ -57,7 +59,7 @@ export interface AudioEffectParam {
    * A condição para mostrar o campo: `{ mode: 'semitones' }` só o mostra enquanto o campo `mode` do mesmo efeito vale
    * `semitones` (os modos de unidade do Mudar Tom). Nula ou ausente: aparece sempre. Só esconde; a spec aceita o campo.
    */
-  shown_when?: Record<string, AudioEffectValue> | null
+  shown_when?: Record<string, AudioEffectValue | null> | null
 }
 
 export interface AudioEffectInfo {

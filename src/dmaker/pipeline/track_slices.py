@@ -89,3 +89,27 @@ def track_window(
         return None
     start = span[0] + delay / speed
     return TrackWindow(start, start + audible / speed, file_in)
+
+
+def clip_windows(
+    track: AudioTrack,
+    session: Mapping[str, Source],
+    timeline: Sequence,
+    spans: Sequence[tuple[float, float]],
+    processed: Path | None = None,
+) -> list[tuple[ClipSegment, TrackWindow]]:
+    """Os clipes que ouvem a faixa externa `track` e a janela em que cada um a ouve na linha do tempo final. `spans` diz onde cada
+    trecho da `timeline` cai; `processed` é o arquivo da faixa já com os efeitos dela. É a conta que o Auto Duck e o Vocoder
+    fazem para saber quando a faixa soa, a mesma do mezanino."""
+    source = session.get(track.source)
+    if source is None or source.info is None:
+        return []
+    found = []
+    for index, segment in enumerate(timeline):
+        if not isinstance(segment, ClipSegment) or not segment.source or index >= len(spans):
+            continue
+        piece = track_slice(track, session[track.source], segment, processed)
+        window = track_window(piece, source.info.duration, segment.speed, spans[index]) if piece else None
+        if window is not None:
+            found.append((segment, window))
+    return found

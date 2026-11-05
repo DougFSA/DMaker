@@ -23,6 +23,7 @@ import numpy as np
 
 from .. import config
 from ..domain.audio_effects import active_effects
+from ..domain.carrier_tracks import PlacedRun
 from ..domain.generators import GENERATOR_SAMPLE_RATE, parse_generator
 from ..domain.spec import GeneratedSound, Project
 from ..filtergraph.generators import FilterSource, GeneratorRequest, build_generator
@@ -154,7 +155,14 @@ def generated_tracks(ctx: RenderContext, renderer: GeneratedSoundRenderer | None
         except (FileNotFoundError, ValueError) as exc:
             raise type(exc)(f"{origin}: {exc}") from exc
         if active_effects(sound.effects):
-            done = effect_processor(ctx).process(AudioItem(path, sound.duration, tuple(sound.effects)))
+            done = effect_processor(ctx).process(
+                AudioItem(
+                    path,
+                    sound.duration,
+                    tuple(sound.effects),
+                    placement=(PlacedRun(0.0, sound.start, sound.duration),),
+                )
+            )
             path = done.path if done else path
         pan = max(-1.0, min(1.0, sound.pan + audio.sfx_pan))
         tracks.append(SfxTrack(path, sound.start, volume_db(sound.volume) + audio.sfx_gain_db, origin, pan))

@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 
@@ -34,6 +35,7 @@ from ..domain.audio_effects import (
 )
 from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
+from ..domain.carrier_tracks import PlacedRun
 from ..domain.music_tempo import music_chain
 from ..domain.plugins import fit_params
 from ..domain.spec import ClipSegment, GeneratedSound
@@ -60,6 +62,7 @@ from ..media.wavio import read_wav_float
 from .cache_key import cache_key
 from .context import RenderContext
 from .noise_profiles import AUTO_PROFILE_SECONDS, ProfileLocator, measure_profile
+from .placements import music_placement, track_placement
 from .plugins import PluginService, PluginUnavailable, ResolvedPlugin, plugin_service
 from .sample_reader import FFmpegSampleReader, SampleReader
 from .sources import Source
@@ -93,6 +96,8 @@ class AudioItem:
     lead: float = (
         0.0  # silêncio antes de o arquivo começar, dentro do item (som deslocado para antes do arquivo)
     )
+    # onde o item cai na linha do tempo do projeto (vazio: item solto, como no painel de onda). Só o Vocoder com `carrier_track` lê
+    placement: tuple[PlacedRun, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,20 @@ def _stamp(path: Path) -> tuple[int, int] | None:
     return stat.st_mtime_ns, stat.st_size
 
 
+# Abaixo disto (dBFS) a trilha portadora, no trecho do item, é silêncio: o Vocoder deixa o item mudo
+SILENT_CARRIER_DB = -70.0
+
+
+class CarrierSource(Protocol):
+    """De onde o Vocoder lê a portadora de outra trilha (`pipeline.carrier_tracks.CarrierTracks`), injetado no processador."""
+
+    def identity(self, track_id: str) -> str | None:
+        """A chave de cache da trilha inteira (muda com o som dela), ou None quando ela não existe ou ainda não toca."""
+
+    def window(self, track_id: str, placement: Sequence[PlacedRun], frames: int) -> np.ndarray | None:
+        """`frames` quadros `(n, 2)` da trilha no tempo do item, ou None quando não há trilha."""
+
+
 class EffectProcessor:
     """Processa um item com a cadeia de efeitos, guardando o resultado em cache pelo que decide o som.
 
@@ -119,7 +138,8 @@ class EffectProcessor:
     os comandos só ficam registrados (a simulação do render). `profiles` resolve os perfis de ruído do projeto (sem
     ele, só o perfil `auto` funciona) e `reader` lê as amostras que a medida do perfil precisa. `plugins` resolve os efeitos de
     plugin (o serviço do processo, quando não vem outro) e `on_warning` recebe o aviso de cada plugin que não pode rodar: o
-    efeito é pulado e o render segue."""
+    efeito é pulado e o render segue. `carriers` entrega a passada prévia das portadoras de outra trilha (None, ou uma função
+    que devolve None, é o item solto: o Vocoder usa a portadora gerada)."""
 
     def __init__(
         self,
@@ -129,8 +149,10 @@ class EffectProcessor:
         reader: SampleReader | None = None,
         plugins: PluginService | None = None,
         on_warning: Callable[[str], None] | None = None,
+        carriers: Callable[[], CarrierSource | None] | None = None,
     ) -> None:
         self.runner = runner
+        self._carriers = carriers
         self._cache_dir = cache_dir
         self.profiles = profiles
         self._plugins = plugins
@@ -165,6 +187,9 @@ class EffectProcessor:
             ),  # fora da chave sem deslocamento: cache antigo vale
             *self.profile_parts(item.effects),  # idem: sem perfil nomeado a chave é a de sempre
             *[hosts[index].signature() for index in sorted(hosts)],  # idem: sem plugin a chave é a de sempre
+            *self.carrier_parts(
+                item.effects, item.placement
+            ),  # idem: sem portadora de outra trilha a chave é a de sempre
         )
 
     def process(self, item: AudioItem) -> ProcessedAudio | None:
@@ -241,6 +266,52 @@ class EffectProcessor:
             parts.append(["ausente", format_name, ref] if isinstance(resolved, str) else resolved.signature())
         return parts
 
+    # ---------- portadora de outra trilha ----------
+
+    def carrier_parts(self, effects: Sequence[EffectBase], placement: Sequence[PlacedRun]) -> list:
+        """O que a trilha portadora decide do som, para a chave de cache de quem usa o item (o processado, o mezanino, o pedaço da
+        prévia): `[trilha, identidade dela, onde o item cai]` por trilha citada. Mudar a trilha, o som dela ou a posição do item na
+        linha do tempo muda a chave. Vazia (e fora da chave) sem Vocoder ligado a uma trilha."""
+        wanted = sorted(
+            {track for _, effect in active_effects(effects) if (track := effect.carrier_track_id())}
+        )
+        if not wanted:
+            return []
+        carriers = self._carriers() if self._carriers else None
+        runs = [run.key_part() for run in placement]
+        return [[track, carriers.identity(track) if carriers else None, runs] for track in wanted]
+
+    def _side(self, effect: EffectBase, item: AudioItem, frames: int, shifted: bool) -> np.ndarray | None:
+        """A segunda entrada do efeito: a janela da trilha do projeto que ele pede (`carrier_track`) ou, sem ela, a portadora gerada.
+        A trilha que não existe, o item solto e o projeto sem passada prévia caem na gerada, com um aviso: o item nunca falha nem
+        some. `shifted` diz que um efeito antes deste mudou a duração, e o alinhamento com a linha do tempo se perdeu."""
+        track = effect.carrier_track_id()
+        if track is None:
+            return self._carrier(effect, frames)
+        carriers = self._carriers() if self._carriers else None
+        window = carriers.window(track, item.placement, frames) if carriers and item.placement else None
+        if window is None:
+            reason = (
+                "o item não tem posição na linha do tempo (item solto)"
+                if not item.placement or not carriers
+                else "a trilha não existe no projeto ou ainda não toca"
+            )
+            self._warn(
+                f"Vocoder: a portadora da trilha {track} não pôde ser lida ({reason}); usou a portadora gerada."
+            )
+            return self._carrier(effect, frames)
+        if shifted:
+            self._warn(
+                f"Vocoder: um efeito antes dele muda a duração do item, e a portadora da trilha {track} só acompanha o começo; "
+                "ponha o Vocoder antes desse efeito."
+            )
+        if len(window) and float(np.max(np.abs(window))) < 10 ** (SILENT_CARRIER_DB / 20.0):
+            self._warn(
+                f"Vocoder: a trilha {track} está em silêncio no trecho deste item (abaixo de {SILENT_CARRIER_DB:.0f} dBFS), "
+                "então o Vocoder deixa o item mudo."
+            )
+        return window
+
     # ---------- perfis de ruído ----------
 
     def _named_profiles(self, effects: Sequence[EffectBase]) -> list[str]:
@@ -315,16 +386,20 @@ class EffectProcessor:
         entering: Path | None = None  # None: o sinal é o próprio item
         duration = item.duration
         total = chain_duration(item.effects, item.duration)
+        shifted = (
+            False  # um efeito já mudou a duração do sinal: a posição dele na linha do tempo deixou de valer
+        )
         for position, stage in enumerate(stages):
             final = position == len(stages) - 1
             target = destination if final else scratch / f"estagio{position}.f32"
             if stage.samples:
-                self._sample_pass(stage, entering, target)
+                self._sample_pass(stage, entering, target, item, shifted)
             else:
                 self._filter_pass(item, stage, entering, duration, target, final, total, hosts)
             entering = target
             for _, effect in stage.effects:
                 duration = effect.output_duration(duration)
+                shifted = shifted or effect.alters_duration()
 
     def _filter_pass(
         self,
@@ -359,7 +434,9 @@ class EffectProcessor:
             where = {"binary": plugin.ffmpeg, "cwd": plugin.cwd, "env": plugin.env or None}
         self.runner.run(FFmpegCommand(args, label="efeitos de áudio", total=total, **where))
 
-    def _sample_pass(self, stage: Stage, entering: Path | None, target: Path) -> None:
+    def _sample_pass(
+        self, stage: Stage, entering: Path | None, target: Path, item: AudioItem, shifted: bool = False
+    ) -> None:
         """O estágio de amostras: lê o sinal do trecho anterior, aplica o efeito em numpy e grava o seguinte. O arquivo
         de entrada é mapeado em disco (só o que o efeito toca vai à memória)."""
         ((_, effect),) = stage.effects
@@ -378,7 +455,7 @@ class EffectProcessor:
                 shutil.copyfile(entering, target)
                 return
             measure = Measure(noise=spectrum)
-        side = self._carrier(effect, len(entering_samples))
+        side = self._side(effect, item, len(entering_samples), shifted)
         result = apply_sample_effect(SampleRequest(effect, entering_samples, SAMPLE_RATE, measure, side))
         np.asarray(result, dtype="<f4").tofile(target)
 
@@ -449,6 +526,7 @@ def effect_processor(ctx: RenderContext) -> EffectProcessor:
             ctx.runner,
             profiles=ProfileLocator(ctx.project, ctx.session),
             on_warning=getattr(ctx, "warn", None),
+            carriers=lambda: ctx.carrier_tracks,
         )
     return ctx.audio_fx
 
@@ -458,15 +536,19 @@ def uses_named_profile(effects: Sequence[EffectBase]) -> bool:
     return any(effect.noise_profile() not in (None, AUTO_PROFILE) for _, effect in active_effects(effects))
 
 
-def noise_profile_parts(ctx: RenderContext, effects: Sequence[EffectBase]) -> list:
+def noise_profile_parts(
+    ctx: RenderContext, effects: Sequence[EffectBase], placement: Sequence[PlacedRun] = ()
+) -> list:
     """A parte da chave de cache de um item (o mezanino do clipe, o pedaço da prévia) que muda quando algo de fora da spec que a
-    cadeia usa muda: o perfil de ruído nomeado, ou o arquivo de um plugin. Vazia sem nenhum dos dois: a chave de um projeto
-    antigo é a de sempre."""
+    cadeia usa muda: o perfil de ruído nomeado, o arquivo de um plugin, ou a trilha que o Vocoder ouve como portadora (com a
+    posição do item na linha do tempo, que é o `placement`). Vazia sem nenhum dos três: a chave de um projeto antigo é a de sempre."""
     parts: list = []
     if uses_named_profile(effects):  # a maioria dos itens não usa: nem cria o processador
         parts += effect_processor(ctx).profile_parts(effects)
     if any(effect.host_format() is not None for _, effect in active_effects(effects)):
         parts += effect_processor(ctx).host_parts(effects)
+    if any(effect.carrier_track_id() is not None for _, effect in active_effects(effects)):
+        parts += effect_processor(ctx).carrier_parts(effects, placement)
     return parts
 
 
@@ -477,10 +559,13 @@ def clip_camera_audio(
     in_point: float,
     length: float,
     isolated: Path | None,
+    placement: Sequence[PlacedRun] = (),
 ) -> Path | None:
     """O som da câmera do clipe depois dos efeitos do clipe, ou None quando não há efeito ligado ou a câmera não
     soa. O item é o trecho da fonte que o clipe usa (`length`, no tempo da fonte e antes do `speed`); quando o
-    trecho vem do isolamento vocal, é o áudio isolado. Entra no mezanino no lugar do áudio da câmera."""
+    trecho vem do isolamento vocal, é o áudio isolado. Entra no mezanino no lugar do áudio da câmera. `placement` diz onde o
+    clipe cai na linha do tempo (para o Vocoder que ouve outra trilha)."""
+    placed = tuple(placement)
     info = source.info
     if not active_effects(segment.effects) or info is None or not uses_camera_audio(segment, info):
         return None
@@ -488,12 +573,20 @@ def clip_camera_audio(
     # com o som deslocado a janela do item começa antes (ou depois) da imagem; sem deslocamento é a de sempre
     window = shifted_window(in_point, segment.speed, segment.audio_offset) if segment.audio_offset else None
     if isolated is not None:
-        item = AudioItem(isolated, length, effects, origin="isolado", lead=window.lead if window else 0.0)
+        item = AudioItem(
+            isolated, length, effects, origin="isolado", lead=window.lead if window else 0.0, placement=placed
+        )
     else:
         assert source.path is not None
         start = window.read_from if window else max(in_point, 0.0)
         item = AudioItem(
-            source.path, length, effects, start, source.audio_stream, lead=window.lead if window else 0.0
+            source.path,
+            length,
+            effects,
+            start,
+            source.audio_stream,
+            lead=window.lead if window else 0.0,
+            placement=placed,
         )
     done = effect_processor(ctx).process(item)
     return done.path if done else None
@@ -504,7 +597,7 @@ def track_audio_overrides(ctx: RenderContext) -> tuple[Path | None, ...]:
     com o arquivo ausente). É calculado uma vez por render e vale para todos os clipes que fatiam a faixa."""
     if ctx.track_audio is None:
         overrides: list[Path | None] = []
-        for track in ctx.project.audio.tracks:
+        for position, track in enumerate(ctx.project.audio.tracks):
             source = ctx.session.get(track.source)
             override = None
             if (
@@ -515,7 +608,12 @@ def track_audio_overrides(ctx: RenderContext) -> tuple[Path | None, ...]:
                 and source.path.exists()
             ):
                 item = AudioItem(
-                    source.path, source.info.duration, tuple(track.effects), 0.0, source.audio_stream
+                    source.path,
+                    source.info.duration,
+                    tuple(track.effects),
+                    0.0,
+                    source.audio_stream,
+                    placement=track_placement(ctx, position),
                 )
                 done = effect_processor(ctx).process(item)
                 override = done.path if done else None
@@ -532,7 +630,8 @@ def processed_music(ctx: RenderContext, music_path: Path | None) -> Path | None:
     chain = music_chain(ctx.project.audio)
     if music_path is None or music is None or music.volume <= 0 or not active_effects(chain):
         return music_path
-    item = AudioItem(music_path, ctx.prober(music_path).duration, chain)
+    duration = ctx.prober(music_path).duration
+    item = AudioItem(music_path, duration, chain, placement=music_placement(ctx, duration))
     done = effect_processor(ctx).process(item)
     return done.path if done else music_path
 
@@ -546,7 +645,12 @@ def processed_voiceovers(
         done = None
         if active_effects(voiceover.effects):
             done = effect_processor(ctx).process(
-                AudioItem(voiceover.path, voiceover.duration, voiceover.effects)
+                AudioItem(
+                    voiceover.path,
+                    voiceover.duration,
+                    voiceover.effects,
+                    placement=(PlacedRun(0.0, voiceover.start, voiceover.duration),),
+                )
             )
         result.append(replace(voiceover, path=done.path) if done else voiceover)
     return result
