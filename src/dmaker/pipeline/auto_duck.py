@@ -3,15 +3,22 @@
 Fluxo (as funções puras estão em `domain/auto_duck.py` e `filtergraph/duck.py`; aqui só se mede e se decide):
 
 1. **Medir a chave.** Uma passada do ffmpeg lê o nível RMS da trilha-chave em janelas de 20 ms e devolve TEXTO (uma
-   linha por janela), nunca um arquivo de áudio. Duas formas, conforme onde a chave soa:
+   linha por janela), nunca um arquivo de áudio. Três formas, conforme onde a chave soa:
    - uma faixa externa (`A2`, `A3`...) vive no arquivo dela, no tempo do arquivo. Mede-se o arquivo inteiro uma vez
      (já com os efeitos dele e o volume que ele tem na mistura) e o trecho de cada clipe vai para a linha do tempo pela
      mesma conta que o mezanino e a vista usam (`track_window`), então o que se mede é o que se ouve;
-   - as outras trilhas (`A1`, `NAR`, `VO`, `MUS`, `SFX`) são lidas da cópia que o grafo da mixagem tira de cada uma
-     (`StemTaps`, a mesma do DMK-64), no tempo do projeto, antes de qualquer abaixamento. Só `A1` precisa dos mezaninos.
+   - `A1` é o som dos PRÓPRIOS trechos: a câmera de cada clipe como o mezanino a recebe (com os efeitos do clipe e o
+     isolamento), com o volume dele, sem as faixas externas e sem os PiPs. Mede-se o arquivo de cada câmera uma vez
+     e o trecho de cada clipe vai para a linha do tempo pela mesma conta da faixa externa (`camera_runs`);
+   - as outras trilhas (`NAR`, `VO`, `MUS`, `SFX`) são lidas da cópia que o grafo da mixagem tira de cada uma
+     (`StemTaps`, a mesma do DMK-64), no tempo do projeto, antes de qualquer abaixamento. Não precisam dos mezaninos,
+     então servem a uma faixa externa de fundo, que abaixa DENTRO do mezanino.
    O resultado fica em cache por hash do que entra na chave (o grafo e o arquivo de cada entrada), e não depende dos
    parâmetros da regra: mudar a quantidade, o limiar ou as rampas refaz só a conta, que é pura.
 2. **Planejar a curva.** Os trechos acima do limiar, juntados pela pausa da regra, viram os pontos de ganho do fundo.
+   `begin_ducks` planeja, ANTES dos mezaninos, toda regra cuja chave não precisa deles (`AutoDuck.measured_early`); o
+   `finish_ducks` planeja o resto, com a mixagem pronta. As duas são chamadas pelo render, pela prévia e pelo render só
+   de áudio, então a decisão é uma só.
 3. **Aplicar.** `filtergraph/audio.py` abaixa a música, a narração, a voz gravada, os efeitos sonoros e o `A1` na
    mixagem, e `filtergraph/mezzanine.py` abaixa a faixa externa dentro do clipe, só com o pedaço da curva que cai nele.
 
@@ -28,10 +35,13 @@ from pathlib import Path
 import numpy as np
 
 from .. import config
+from ..domain.audio_shift import shifted_window
 from ..domain.auto_duck import (
     AutoDuck,
     Point,
     Region,
+    camera_runs,
+    clip_runs,
     duck_points,
     external_index,
     is_external,
@@ -40,12 +50,15 @@ from ..domain.auto_duck import (
     sound_runs,
 )
 from ..domain.spec import ClipSegment, Project
+from ..domain.timeline import segment_duration
 from ..filtergraph.audio import StemTaps
 from ..filtergraph.duck import DuckCurve
+from ..filtergraph.mezzanine import uses_camera_audio
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args
-from .audio_effects import track_audio_overrides
+from .audio_effects import clip_camera_audio, track_audio_overrides
 from .cache_key import cache_key
 from .context import RenderContext
+from .sfx import SfxTrack, unleveled_effects
 from .sources import Source, physical_source_names
 from .track_slices import track_slice, track_window
 
@@ -93,6 +106,34 @@ class PlannedDuck:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class CameraInput:
+    """De onde sai o som da câmera de um clipe, como o mezanino o recebe: o arquivo (o da fonte, o isolado ou o já
+    processado pelos efeitos do clipe), a faixa de áudio dele, o ponto em que o clipe começa a ouvir e o silêncio que o
+    antecede."""
+
+    path: Path
+    stream: int
+    volume: float
+    file_in: float
+    lead: float
+
+
+@dataclass(frozen=True)
+class DuckInputs:
+    """O que o plano precisa saber ANTES dos mezaninos: onde cada clipe cai na linha do tempo e de onde vem o seu som, a
+    duração estimada do projeto e o que a narração, as vozes gravadas e a música já têm pronto (nada disso depende dos
+    mezaninos). É o que o render, a prévia e o render só de áudio entregam ao `begin_ducks`."""
+
+    spans: Sequence[tuple[float, float]]
+    sources: Sequence[Source]
+    total: float
+    track_origin: Sequence[int] | None = None
+    voiceovers: Sequence = ()
+    voice_files: Sequence = ()
+    music_path: Path | None = None
+
+
 @dataclass
 class DuckPlan:
     """As regras de `audio.ducks` já planejadas, na ordem da spec. Mora no contexto do render (`ctx.duck_plan`)."""
@@ -104,6 +145,12 @@ class DuckPlan:
     track_origin: list[int] = field(
         default_factory=list
     )  # de que faixa externa da spec veio cada faixa física
+    levels: dict[str, np.ndarray] = field(
+        default_factory=dict
+    )  # as medidas já feitas neste render, por identidade: o mesmo arquivo nunca passa duas vezes pelo ffmpeg
+    cameras: dict[int, CameraInput | None] = field(
+        default_factory=dict
+    )  # o som da câmera de cada clipe, resolvido uma vez para todas as regras de chave A1
 
     def curves(self) -> list[DuckCurve]:
         """As curvas das trilhas que a mixagem abaixa (`filtergraph/audio.py`): todas menos as faixas externas, que são
@@ -198,17 +245,25 @@ def _input_stamps(args: Sequence[str]) -> list:
 
 
 def _measure(ctx: RenderContext, args: list[str], identity: Sequence[object]) -> np.ndarray:
-    """Roda a passada de nível e guarda o resultado em cache pela chave `identity` (o grafo e os arquivos de entrada)."""
+    """Roda a passada de nível e guarda o resultado em cache pela chave `identity` (o grafo e os arquivos de entrada), no
+    disco e na memória do plano: dois clipes que usam o mesmo arquivo não o medem duas vezes."""
     if ctx.options.dry_run:
         return np.zeros(0, dtype=np.float32)
-    cache = _levels_dir() / f"{cache_key(DUCK_VERSION, *identity)}.npy"
+    key = cache_key(DUCK_VERSION, *identity)
+    plan: DuckPlan | None = ctx.duck_plan
+    if plan is not None and key in plan.levels:
+        return plan.levels[key]
+    cache = _levels_dir() / f"{key}.npy"
     if cache.exists():
-        return np.load(cache)
-    levels = parse_levels(ctx.runner.capture(args, label="nível da trilha-chave do Auto Duck"))
-    if len(levels):
-        staging = cache.with_suffix(".tmp.npy")
-        np.save(staging, levels)
-        staging.replace(cache)
+        levels = np.load(cache)
+    else:
+        levels = parse_levels(ctx.runner.capture(args, label="nível da trilha-chave do Auto Duck"))
+        if len(levels):
+            staging = cache.with_suffix(".tmp.npy")
+            np.save(staging, levels)
+            staging.replace(cache)
+    if plan is not None:
+        plan.levels[key] = levels
     return levels
 
 
@@ -228,29 +283,26 @@ def file_levels(ctx: RenderContext, path: Path, stream: int, volume: float) -> n
 def tap_levels(
     ctx: RenderContext,
     key: str,
-    prepared: list,
-    transitions: list,
     music_path: Path | None,
     total: float,
     voiceovers: Sequence,
-    pips: Sequence,
     sfx: Sequence,
     voice_files: Sequence,
 ) -> np.ndarray:
-    """Os níveis RMS da trilha `key` no tempo do projeto, lidos da cópia que o grafo da mixagem tira dela antes de abaixar
-    nada. O grafo leva só o que a chave pede: a música, a narração, as vozes ou os efeitos de cada vez, sobre um silêncio
-    da duração do projeto; só `A1` precisa dos mezaninos."""
+    """Os níveis RMS da trilha `key` (`MUS`, `NAR`, `VO` ou `SFX`) no tempo do projeto, lidos da cópia que o grafo da
+    mixagem tira dela antes de abaixar nada. O grafo leva só o que a chave pede, sobre um silêncio da duração do projeto:
+    não usa os mezaninos, então vale antes deles."""
     from .assembly import audio_only_graph, graph_args
 
     taps = StemTaps(frozenset({key}))
     inputs, lines, aout = audio_only_graph(
         ctx,
-        prepared if key == "A1" else [],
-        transitions if key == "A1" else [],
+        [],
+        [],
         music_path if key == "MUS" else None,
         total,
         voiceovers if key == "NAR" else (),
-        pips if key == "A1" else (),
+        (),
         include_music=key == "MUS",
         sfx=sfx if key == "SFX" else (),
         voice_files=voice_files if key == "VO" else (),
@@ -258,6 +310,10 @@ def tap_levels(
         stems=taps,
         ducks=[],
     )
+    if (
+        key not in taps.labels
+    ):  # a trilha existe na spec mas nada dela toca ainda (a narração da prévia ainda não foi falada)
+        return np.zeros(0, dtype=np.float32)
     lines.append(f"{aout}anullsink")  # a mistura inteira não interessa: só a cópia da chave
     lines.append(level_filters(taps.labels[key], "[dk_out]"))
     args = [*graph_args(ctx, inputs, lines, "duck_detect.txt"), "-map", "[dk_out]", "-f", "null", "-"]
@@ -267,64 +323,69 @@ def tap_levels(
 # ---------- planejar ----------
 
 
-def begin_ducks(
-    ctx: RenderContext, spans: Sequence[tuple[float, float]], track_origin: Sequence[int] | None = None
-) -> None:
-    """Começa o plano do Auto Duck, ANTES de os mezaninos e os pedaços da prévia existirem: as regras cuja chave é uma faixa
-    externa já podem ser planejadas (a chave se mede no arquivo dela), e são elas que a faixa externa de fundo precisa, porque
-    é dentro do clipe que ela abaixa. As regras de chave de outro tipo ficam para `finish_ducks`, que precisa da mixagem.
-    `spans` é onde cada clipe cai na linha do tempo final e `track_origin` diz de que faixa da spec veio cada faixa física."""
+def begin_ducks(ctx: RenderContext, inputs: DuckInputs) -> None:
+    """Começa o plano do Auto Duck, ANTES de os mezaninos e os pedaços da prévia existirem: toda regra cuja chave não
+    precisa da mixagem pronta (`AutoDuck.measured_early`) já pode ser planejada. É o caso da chave `A1` (só a câmera, lida
+    do arquivo de cada clipe), da faixa externa (lida do arquivo dela) e de `MUS`, `NAR`, `VO` e `SFX` sob uma faixa externa
+    de fundo, que abaixa dentro do clipe e por isso precisa da curva antes de o mezanino existir. As demais ficam para o
+    `finish_ducks`. `inputs.spans` é onde cada clipe cai na linha do tempo final e `inputs.track_origin` diz de que faixa da
+    spec veio cada faixa física."""
     ctx.duck_plan = None
     rules = ctx.project.audio.ducks
     if not rules:
         return
-    origin = list(track_origin) if track_origin is not None else list(range(len(ctx.project.audio.tracks)))
+    origin = (
+        list(inputs.track_origin)
+        if inputs.track_origin is not None
+        else list(range(len(ctx.project.audio.tracks)))
+    )
     plan = DuckPlan(
         [PlannedDuck(rule) for rule in rules],
-        list(spans),
+        list(inputs.spans),
         origin,
-        {i: seg.speed for i, seg in enumerate(ctx.project.timeline) if isinstance(seg, ClipSegment)},
+        speeds={i: seg.speed for i, seg in enumerate(ctx.project.timeline) if isinstance(seg, ClipSegment)},
     )
     ctx.duck_plan = plan
+    sfx: list[SfxTrack] | None = None
     for position, item in enumerate(plan.rules):
         rule = item.rule
-        missing = _missing(ctx, plan, rule, early=True)
+        missing = _missing(ctx, plan, rule)
+        if not missing and rule.key == "SFX" and rule.measured_early:
+            # os efeitos só se nivelam contra a voz depois dos mezaninos (e a voz precisa deles): aqui valem com o volume da
+            # spec, o nível que teriam sem voz medida
+            sfx = unleveled_effects(ctx, inputs.spans) if sfx is None else sfx
+            missing = _missing(ctx, plan, rule, sfx=sfx)
         if missing:
             plan.rules[position] = PlannedDuck(rule, note=missing)
             ctx.warn(missing)
-        elif is_external(rule.key):
-            runs = _external_runs(ctx, plan, rule)
-            plan.rules[position] = _planned(rule, runs)
+        elif rule.measured_early:
+            plan.rules[position] = _planned(rule, _early_runs(ctx, plan, rule, inputs, sfx or ()))
 
 
 def finish_ducks(
     ctx: RenderContext,
-    prepared: list,
-    transitions: list,
     music_path: Path | None,
     total: float,
     voiceovers: Sequence = (),
-    pips: Sequence = (),
     sfx: Sequence = (),
     voice_files: Sequence = (),
 ) -> None:
-    """Planeja as regras cuja chave é a música, a narração, a voz gravada, os efeitos ou o som dos clipes: lê a cópia que o
-    grafo da mixagem tira de cada uma. Roda depois de todo o resto estar pronto, junto das medidas do master."""
+    """Planeja as regras que sobraram: as de chave `MUS`, `NAR`, `VO` ou `SFX` sobre um fundo que não é faixa externa. Lê a
+    cópia que o grafo da mixagem tira de cada uma, com os efeitos sonoros já nivelados contra a voz. Roda depois de todo o
+    resto estar pronto, junto das medidas do master."""
     plan: DuckPlan | None = ctx.duck_plan
     if plan is None:
         return
     for position, item in enumerate(plan.rules):
         rule = item.rule
-        if item.note or item.points or is_external(rule.key):
+        if item.note or item.points or rule.measured_early:
             continue
-        missing = _missing(ctx, plan, rule, early=False, sfx=sfx)
+        missing = _missing(ctx, plan, rule, sfx=sfx)
         if missing:
             plan.rules[position] = PlannedDuck(rule, note=missing)
             ctx.warn(missing)
             continue
-        levels = tap_levels(
-            ctx, rule.key, prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files
-        )
+        levels = tap_levels(ctx, rule.key, music_path, total, voiceovers, sfx, voice_files)
         plan.rules[position] = _planned(rule, sound_runs(levels, LEVEL_WINDOW_SECONDS, rule.threshold_db))
 
 
@@ -333,16 +394,31 @@ def _planned(rule: AutoDuck, runs: Sequence[Region]) -> PlannedDuck:
     return PlannedDuck(rule, tuple(regions), tuple(duck_points(regions, rule)))
 
 
-def _missing(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck, *, early: bool, sfx: Sequence = ()) -> str:
-    """Por que a regra não age, ou vazio: a trilha dela não existe neste projeto (a regra fica na spec, mas não faz nada)."""
+def _early_runs(
+    ctx: RenderContext, plan: DuckPlan, rule: AutoDuck, inputs: DuckInputs, sfx: Sequence
+) -> list[Region]:
+    """Os trechos em que a chave de uma regra planejada antes dos mezaninos soa acima do limiar."""
+    if is_external(rule.key):
+        return _external_runs(ctx, plan, rule)
+    if rule.key == "A1":
+        return _camera_key_runs(ctx, plan, rule, inputs)
+    levels = tap_levels(
+        ctx, rule.key, inputs.music_path, inputs.total, inputs.voiceovers, sfx, inputs.voice_files
+    )
+    return sound_runs(levels, LEVEL_WINDOW_SECONDS, rule.threshold_db)
+
+
+def _missing(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck, *, sfx: Sequence | None = None) -> str:
+    """Por que a regra não age, ou vazio: a trilha dela não existe neste projeto (a regra fica na spec, mas não faz nada).
+    `sfx` é None enquanto os efeitos sonoros não são conhecidos (a regra então vale)."""
     for track_id in (rule.background, rule.key):
-        absent = _absent(ctx, plan, track_id, early, sfx)
+        absent = _absent(ctx, plan, track_id, sfx)
         if absent:
             return f"Auto Duck: {rule.background} sob {rule.key} não age: o projeto não tem {absent}."
     return ""
 
 
-def _absent(ctx: RenderContext, plan: DuckPlan, track_id: str, early: bool, sfx: Sequence) -> str:
+def _absent(ctx: RenderContext, plan: DuckPlan, track_id: str, sfx: Sequence | None) -> str:
     audio = ctx.project.audio
     if track_id == "A1":
         return (
@@ -358,8 +434,79 @@ def _absent(ctx: RenderContext, plan: DuckPlan, track_id: str, early: bool, sfx:
         return "" if audio.voiceover else "voz gravada (VO)"
     if track_id == "SFX":
         # os efeitos sonoros só se conhecem depois de nivelados; antes disso a regra vale
-        return "" if early or sfx else "efeito sonoro (SFX)"
+        return "" if sfx is None or sfx else "efeito sonoro (SFX)"
     return "" if plan.physical_tracks(track_id) else f"a faixa externa {track_id}"
+
+
+# ---------- a chave é a câmera dos clipes (A1) ----------
+
+
+def camera_input(
+    ctx: RenderContext, plan: DuckPlan, index: int, segment: ClipSegment, source: Source, span_length: float
+) -> CameraInput | None:
+    """De onde sai o som da câmera do clipe `index`, pela mesma receita do mezanino: o isolamento vocal e os efeitos do
+    clipe (`clip_camera_audio`) valem, e o som deslocado (`audio_offset`) começa na janela dele. None quando o clipe não
+    tem câmera que soe (mudo, volume zero, sem áudio, ou o A1 desligado na interface). O volume é o do clipe vezes o ganho da
+    voz do projeto, que é o que sobra do A1 antes da mistura com o resto."""
+    from .segments import isolate_camera_audio
+
+    if index in plan.cameras:
+        return plan.cameras[index]
+    audio = ctx.project.audio
+    result: CameraInput | None = None
+    if (
+        not audio.mute_clips
+        and source.path is not None
+        and source.info is not None
+        and source.path.exists()
+        and uses_camera_audio(segment, source.info)
+    ):
+        in_point = source.in_point(segment.start) if segment.source else segment.start
+        isolated = isolate_camera_audio(index, segment, source, in_point, span_length, ctx)
+        if isolated is not None:
+            isolated.isolate()  # separa a voz (ou o fundo) se ainda não está em cache: a medida lê o arquivo isolado
+        length = max(span_length * segment.speed, 0.01)
+        processed = clip_camera_audio(
+            ctx, segment, source, in_point, length, isolated.path if isolated else None
+        )
+        volume = segment.volume * audio.voice_gain
+        if processed is not None:  # o silêncio inicial já vem dentro do arquivo processado
+            result = CameraInput(processed, 0, volume, 0.0, 0.0)
+        elif isolated is not None:
+            result = CameraInput(isolated.path, 0, volume, 0.0, isolated.lead)
+        elif segment.audio_offset:
+            window = shifted_window(in_point, segment.speed, segment.audio_offset)
+            result = CameraInput(source.path, source.audio_stream, volume, window.read_from, window.lead)
+        else:
+            result = CameraInput(source.path, source.audio_stream, volume, max(in_point, 0.0), 0.0)
+    plan.cameras[index] = result
+    return result
+
+
+def _camera_key_runs(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck, inputs: DuckInputs) -> list[Region]:
+    """Os trechos, na linha do tempo final, em que a câmera dos clipes soa acima do limiar: só o som dos próprios trechos,
+    sem as faixas externas que o mezanino soma a ele e sem os PiPs. Mede-se o arquivo de cada câmera uma vez (o mesmo
+    arquivo, faixa e volume em vários clipes é uma passada só) e cada clipe recorta o que ouve."""
+    if ctx.options.dry_run:
+        return []
+    runs: list[Region] = []
+    for index, segment in enumerate(ctx.project.timeline):
+        if not isinstance(segment, ClipSegment) or index >= len(plan.spans) or index >= len(inputs.sources):
+            continue
+        source = inputs.sources[index]
+        if source.info is None:
+            continue
+        length = segment_duration(segment, source.info, source.offset)
+        heard = camera_input(ctx, plan, index, segment, source, length)
+        if heard is None:
+            continue
+        file_runs = sound_runs(
+            file_levels(ctx, heard.path, heard.stream, heard.volume),
+            LEVEL_WINDOW_SECONDS,
+            rule.threshold_db,
+        )
+        runs += camera_runs(file_runs, plan.spans[index], segment.speed, heard.file_in, heard.lead)
+    return runs
 
 
 # ---------- a chave é uma faixa externa ----------
@@ -391,22 +538,8 @@ def _external_runs(ctx: RenderContext, plan: DuckPlan, rule: AutoDuck) -> list[R
             )
             if window is None:
                 continue
-            runs += _clip_runs(file_runs, window.start, window.end, window.file_in, segment.speed)
+            runs += clip_runs(file_runs, window.start, window.end, window.file_in, segment.speed)
     return runs
-
-
-def _clip_runs(
-    file_runs: Sequence[Region], start: float, end: float, file_in: float, speed: float
-) -> list[Region]:
-    """Os trechos do arquivo que um clipe toca (de `file_in`, durante `end - start` segundos da linha do tempo, na
-    velocidade `speed`), no tempo da linha do tempo final."""
-    heard_until = file_in + (end - start) * speed
-    mapped = []
-    for first, last in file_runs:
-        low, high = max(first, file_in), min(last, heard_until)
-        if high > low:
-            mapped.append((start + (low - file_in) / speed, start + (high - file_in) / speed))
-    return mapped
 
 
 # ---------- o que o mezanino e a mixagem pedem ----------

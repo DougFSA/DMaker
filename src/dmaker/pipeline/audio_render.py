@@ -53,7 +53,7 @@ from .assembly import (
 from .audio_duration import NOTHING_TO_PLAY, audio_extent
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .audio_lint import audio_output_warnings
-from .auto_duck import begin_ducks, finish_ducks, project_track_origin
+from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia
@@ -248,20 +248,32 @@ class AudioRenderPipeline:
             raise ValueError(NOTHING_TO_PLAY)
         ctx.warnings.extend(audio_output_warnings(project, total))
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
-        begin_ducks(ctx, layout.spans, project_track_origin(project))
-        prepared = self.pieces.pieces(ctx, layout, MissingMedia())
-        pips = self.pieces.pip_audio(ctx, total, MissingMedia())
-        processed_pips(ctx, pips)
         music = layout.project.audio.music
         music_path = layout.project.resolve(music.src) if music else None
         if music_path is not None and not music_path.exists():
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
         music_path = processed_music(ctx, music_path)
+        # a música já processada entra antes dos pedaços: o Auto Duck mede a chave de uma faixa externa de fundo nela
+        begin_ducks(
+            ctx,
+            DuckInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers,
+                voice_files,
+                music_path,
+            ),
+        )
+        prepared = self.pieces.pieces(ctx, layout, MissingMedia())
+        pips = self.pieces.pip_audio(ctx, total, MissingMedia())
+        processed_pips(ctx, pips)
         transitions = transitions_of(layout.project.timeline)
         sfx = leveled_effects(
             ctx, VoiceLevelMeter(), prepared, transitions, layout.spans, total, voiceovers, pips, voice_files
         )
-        finish_ducks(ctx, prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files)
+        finish_ducks(ctx, music_path, total, voiceovers, sfx, voice_files)
         # a medida que cada efeito do master pede vem antes de qualquer grafo da mixagem, como no render de vídeo
         plan_master_effects(
             ctx,

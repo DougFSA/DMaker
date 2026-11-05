@@ -40,13 +40,12 @@ export function isDuckTrack(id: string): boolean {
   return id === 'A1' || isExternalTrack(id) || id === 'MUS' || id === 'NAR' || id === 'VO' || id === 'SFX'
 }
 
-/** Quais trilhas podem comandar o fundo `background`: as combinações que o servidor aceita. A faixa externa só abaixa sob
- *  outra faixa externa (ela é misturada dentro do clipe, antes da música e das vozes existirem), e o A1, que já contém as
- *  faixas externas, não abaixa sob elas. */
+/** Quais trilhas podem comandar o fundo `background`: as combinações que o servidor aceita. Só uma recusa sobra: o A1, que já
+ *  contém as faixas externas, não abaixa sob elas. A faixa externa abaixa sob qualquer trilha (a chave é medida antes de o
+ *  clipe ser montado), e a chave A1 é só o som dos próprios trechos. */
 export function keyOptions(background: string, present: readonly string[]): string[] {
   return present.filter((id) => {
     if (id === background || !isDuckTrack(id)) return false
-    if (isExternalTrack(background)) return isExternalTrack(id)
     if (background === 'A1') return !isExternalTrack(id)
     return true
   })

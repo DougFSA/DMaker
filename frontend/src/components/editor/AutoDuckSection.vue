@@ -43,7 +43,6 @@ const nameOf = (id: string) => names[id] ?? (isExternalTrack(id) ? `Faixa extern
 const reason = computed(() => {
   const id = background.value
   if (!id || candidates.value.length > 0) return ''
-  if (isExternalTrack(id)) return 'Uma faixa externa só abaixa sob outra faixa externa, e este projeto tem só uma.'
   return 'Não há outra trilha para comandar esta.'
 })
 const musicNote = computed(() => background.value === 'MUS' && rules.value.length > 0)

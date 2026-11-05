@@ -49,6 +49,7 @@ from .audio_effects import (
     track_audio_overrides,
 )
 from .auto_duck import (
+    DuckInputs,
     begin_ducks,
     duck_key_part,
     finish_ducks,
@@ -262,19 +263,32 @@ class PreviewAudioBuilder:
         self._drop_old_pieces(pieces_dir)
 
         ctx = self._context(layout, job_dir, pieces_dir)
-        begin_ducks(ctx, layout.spans, project_track_origin(project))
-        prepared = self.pieces(ctx, layout, missing)
-        transitions = transitions_of(layout.project.timeline)
         total = layout.total
+        # o que não depende dos pedaços fica pronto antes deles, como no render: o Auto Duck mede a chave de uma faixa
+        # externa de fundo (que abaixa dentro do pedaço) na narração, nas vozes gravadas e na música
         voiceovers = processed_voiceovers(ctx, self._voiceovers(ctx))
         voice_files = self._voice_files(ctx)
-        pips = self.pip_audio(ctx, total, missing)
-        processed_pips(ctx, pips)
         music = ctx.project.audio.music
         music_path = processed_music(ctx, ctx.project.resolve(music.src) if music else None)
+        begin_ducks(
+            ctx,
+            DuckInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers,
+                voice_files,
+                music_path,
+            ),
+        )
+        prepared = self.pieces(ctx, layout, missing)
+        transitions = transitions_of(layout.project.timeline)
+        pips = self.pip_audio(ctx, total, missing)
+        processed_pips(ctx, pips)
         sfx = self._effects(ctx, prepared, transitions, layout, total, voiceovers, pips, voice_files)
 
-        finish_ducks(ctx, prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files)
+        finish_ducks(ctx, music_path, total, voiceovers, sfx, voice_files)
         plan_master_effects(
             ctx,
             MasterEffectMeter(),

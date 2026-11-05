@@ -260,7 +260,7 @@ def validate_project(name_or_path: str) -> dict:
         "do item) e noise_profile_remove (`name`), que cuidam dos perfis da Redução de ruído (ver `noise_profile`), "
         "auto_duck_add/auto_duck_set/auto_duck_remove (Auto Duck: `background` é a trilha que abaixa e `key` a que comanda, "
         "ids A1, A2..., MUS, NAR, VO, SFX; `amount_db` -12, `threshold_db` -30, `max_pause` 1, `outer_fade_down`/`outer_fade_up` "
-        "0.5, `inner_fade_down`/`inner_fade_up` 0; set e remove usam `index`; faixa externa só abaixa sob outra faixa externa), "
+        "0.5, `inner_fade_down`/`inner_fade_up` 0; set e remove usam `index`; a faixa externa abaixa sob qualquer trilha, e a chave A1 é só o som dos clipes, sem as faixas externas nem os PiPs; a chave SFX de uma faixa externa se mede antes do nivelamento dos efeitos), "
         "e audio_truncate_silence (`target`: um clipe, que perde a imagem junto, ou uma voz gravada; `threshold_db` "
         "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). Fades: "
         "audio_fade (o fade da borda de um item: `target`, `side` in ou out, `duration` em segundos, 0 tira, `curve` "
