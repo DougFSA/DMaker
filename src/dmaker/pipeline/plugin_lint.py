@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from ..domain.plugins import check_params
+from ..domain.plugins import fit_params
 from ..domain.spec import Project
 from .plugins import PluginUnavailable, ResolvedPlugin, plugin_service
 
@@ -35,7 +35,7 @@ def plugin_references(project: Project) -> list[dict[str, Any]]:
 
 def plugin_warnings(project: Project, lookup: PluginLookup | None = None) -> list[str]:
     """Um aviso por plugin ausente, desabilitado ou que não roda aqui, com o nome dele, e um por controle que o plugin não tem ou
-    que está fora da faixa que ele declara. Um projeto sem efeito de plugin não consulta nada."""
+    que está fora da faixa que ele declara (o render usa o limite mais próximo, ou ignora o controle). Um projeto sem efeito de plugin não consulta nada."""
     references = plugin_references(project)
     if not references:
         return []
@@ -51,7 +51,7 @@ def plugin_warnings(project: Project, lookup: PluginLookup | None = None) -> lis
                 warnings.append(f"{exc}; o render pula esse efeito e segue sem ele.")
             seen.add((format_name, ref))
             continue
-        warnings += check_params(
+        warnings += fit_params(
             resolved.info, {str(k): float(v) for k, v in (node.get("params") or {}).items()}
-        )
+        ).problems
     return warnings

@@ -16,7 +16,7 @@ from dmaker.domain.plugins import (
     PluginControl,
     PluginInfo,
     PluginPorts,
-    check_params,
+    fit_params,
     ladspa_ref,
     plugin_id,
     split_ladspa_ref,
@@ -156,13 +156,45 @@ def info(**changes) -> PluginInfo:
     return PluginInfo(**{**base.__dict__, **changes})
 
 
-def test_the_parameters_are_checked_against_the_range_the_plugin_declares():
-    plugin = info()
-    assert check_params(plugin, {"delay_ms": 300, "mix": 2}) == []  # sem teto declarado, qualquer valor serve
-    unknown = check_params(plugin, {"eco": 1})
-    assert len(unknown) == 1 and "não tem o controle 'eco'" in unknown[0] and "delay_ms, mix" in unknown[0]
-    outside = check_params(plugin, {"delay_ms": 5000})
-    assert len(outside) == 1 and "1 a 1000" in outside[0] and "5000" in outside[0]
+def test_values_inside_the_range_come_back_the_same_without_problems():
+    fitted = fit_params(info(), {"delay_ms": 300, "mix": 2})  # `mix` não declara teto: qualquer valor serve
+    assert fitted.params == {"delay_ms": 300, "mix": 2} and fitted.problems == ()
+    assert list(fitted.params) == ["delay_ms", "mix"]
+
+
+def test_a_value_above_the_ceiling_becomes_the_ceiling_and_below_the_floor_becomes_the_floor():
+    fitted = fit_params(info(), {"delay_ms": 5000, "mix": -3})
+    assert fitted.params == {"delay_ms": 1000, "mix": 0}
+    assert fitted.problems == (
+        "Eco: Atraso (delay_ms) vale de 1 a 1000; 5000 está fora, o render usa 1000",
+        "Eco: Mistura (mix) vale a partir de 0; -3 está fora, o render usa 0",
+    )
+    assert fit_params(info(), {"delay_ms": 0.5}).params == {"delay_ms": 1}
+
+
+def test_a_side_without_a_limit_does_not_limit_and_the_text_names_the_open_side():
+    only_ceiling = info(controls=(PluginControl("x", "Ganho", 0.0, None, 10.0),))
+    fitted = fit_params(only_ceiling, {"x": -999})
+    assert fitted.params == {"x": -999} and fitted.problems == ()
+    assert fit_params(only_ceiling, {"x": 11}).problems == (
+        "Eco: Ganho (x) vale até 10; 11 está fora, o render usa 10",
+    )
+
+
+def test_the_text_for_a_decimal_value_matches_the_one_in_the_briefing():
+    gverb = info(name="GVerb", controls=(PluginControl("c4", "Dry signal level", -70.0, -90.0, 0.0),))
+    assert fit_params(gverb, {"c4": 0.5}).problems == (
+        "GVerb: Dry signal level (c4) vale de -90 a 0; 0.5 está fora, o render usa 0",
+    )
+
+
+def test_a_control_the_plugin_does_not_have_is_dropped_and_the_others_keep_their_order():
+    fitted = fit_params(info(), {"mix": 0.2, "eco": 1, "delay_ms": 300})
+    assert list(fitted.params) == ["mix", "delay_ms"]
+    assert fitted.problems == (
+        "o plugin 'Eco' não tem o controle 'eco' (os dele: delay_ms, mix); o render ignora esse valor",
+    )
+    assert "nenhum" in fit_params(info(controls=()), {"a": 1}).problems[0]
 
 
 def test_the_info_round_trips_through_its_dict_with_the_id_and_the_enabled_state():

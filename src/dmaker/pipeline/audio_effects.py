@@ -35,6 +35,7 @@ from ..domain.audio_effects import (
 from ..domain.audio_effects.restoration import AUTO_PROFILE
 from ..domain.audio_shift import shifted_window
 from ..domain.music_tempo import music_chain
+from ..domain.plugins import fit_params
 from ..domain.spec import ClipSegment, GeneratedSound
 from ..filtergraph.audio_effects import (
     SAMPLE_RATE,
@@ -135,6 +136,7 @@ class EffectProcessor:
         self._plugins = plugins
         self._on_warning = on_warning
         self._resolved: dict[tuple[str, str], ResolvedPlugin | str] = {}
+        self._warned: set[str] = set()  # cada aviso sai uma vez: key() e process() consultam o mesmo item
         self.reader: SampleReader = reader or FFmpegSampleReader(runner)
         self._spectra: dict[
             str, NoiseSpectrum
@@ -194,9 +196,15 @@ class EffectProcessor:
                 self._resolved[key] = str(exc)
         return self._resolved[key]
 
+    def _warn(self, message: str) -> None:
+        """Avisa uma vez por mensagem: o mesmo item passa por `key()` e por `process()`."""
+        if self._on_warning is not None and message not in self._warned:
+            self._warned.add(message)
+            self._on_warning(message)
+
     def _available(self, item: AudioItem) -> tuple[AudioItem, dict[int, ResolvedPlugin]]:
-        """O item sem os efeitos de plugin que não podem rodar (desligados, para as posições da cadeia não mudarem) e os plugins
-        resolvidos dos que sobram, pela posição. Sem nenhum efeito de plugin não consulta nada."""
+        """O item sem os efeitos de plugin que não podem rodar (desligados, para as posições da cadeia não mudarem), com os
+        parâmetros dos que sobram ajustados à faixa do plugin, e os plugins resolvidos deles, pela posição. Sem nenhum efeito de plugin não consulta nada."""
         hosted = [
             (index, effect)
             for index, effect in active_effects(item.effects)
@@ -209,10 +217,14 @@ class EffectProcessor:
         for index, effect in hosted:
             resolved = self._plugin(effect.host_format() or "", effect.host_reference() or "")
             if isinstance(resolved, str):
-                if self._on_warning is not None:
-                    self._on_warning(f"efeito Plugin pulado: {resolved}")
+                self._warn(f"efeito Plugin pulado: {resolved}")
                 effects[index] = effect.model_copy(update={"enabled": False})
             else:
+                fitted = fit_params(resolved.info, dict(effect.params))
+                for problem in fitted.problems:
+                    self._warn(f"efeito Plugin: {problem}")
+                if fitted.params != effect.params:
+                    effects[index] = effect.model_copy(update={"params": fitted.params})
                 hosts[index] = resolved
         return replace(item, effects=tuple(effects)), hosts
 
