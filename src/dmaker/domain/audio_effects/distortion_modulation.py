@@ -10,8 +10,16 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from ..auto_duck import is_track_id
 from ..generators import normalized_params, parse_generator
 from .base import EffectBase, param, register_effect
 
@@ -309,6 +317,16 @@ class Vocoder(EffectBase):
         hint="O som que a voz modula: um gerador de som (`generator`) com os parâmetros dele (`params`). O padrão é uma "
         "dente de serra de 110 Hz.",
         kind="carrier",
+        shown_when={"carrier_track": None},
+    )
+    carrier_track: str | None = param(
+        None,
+        label="Trilha da portadora",
+        hint="De que trilha do projeto vem a portadora (A1, A2..., MUS, NAR, VO ou SFX): a voz canta na harmonia dela. "
+        "Vazio: a portadora gerada. Com uma trilha escolhida, os controles da portadora gerada (onda e frequência) ficam "
+        "escondidos e os valores ficam guardados. A trilha é lida antes dos abaixamentos do Auto Duck; se ela não existe "
+        "ou ainda não toca, o efeito usa a portadora gerada.",
+        kind="carrier_track",
     )
     bands: int = param(
         40,
@@ -356,8 +374,31 @@ class Vocoder(EffectBase):
         -3.0, label="Ganho de saída", unit="dB", hint="Ganho depois do efeito.", ge=-30.0, le=30.0
     )
 
+    @field_validator("carrier_track")
+    @classmethod
+    def _track(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not is_track_id(value):
+            raise ValueError(
+                f"vocoder: trilha desconhecida: {value!r}. Use A1, A2 (A3...), MUS, NAR, VO ou SFX, os ids da linha do tempo"
+            )
+        return value
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_track(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Sem trilha o campo some do dump: o efeito de um projeto que nunca o usou segue com os mesmos bytes e o mesmo hash."""
+        data = handler(self)
+        if data.get("carrier_track") is None:
+            data.pop("carrier_track", None)
+        return data
+
     def carrier_sound(self) -> tuple[str, dict[str, Any]]:
         return self.carrier.generator, dict(self.carrier.params or {})
+
+    def carrier_track_id(self) -> str | None:
+        return self.carrier_track
 
     def refusal(self, duration: float) -> str | None:
         if duration > MAX_VOCODER_SECONDS:

@@ -163,7 +163,9 @@ def test_every_shown_when_names_a_choice_of_the_same_effect_and_one_of_its_optio
         for param in info.parameters:
             if param.shown_when:
                 for field, value in param.shown_when.items():
-                    assert params[field].kind == "choice" and value in params[field].options, (
+                    # o Vocoder esconde a portadora gerada enquanto `carrier_track` tem uma trilha (valor nulo)
+                    names_a_choice = params[field].kind == "choice" and value in params[field].options
+                    assert names_a_choice or (params[field].kind == "carrier_track" and value is None), (
                         info.type,
                         param.name,
                     )

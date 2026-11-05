@@ -40,6 +40,19 @@ export function isDuckTrack(id: string): boolean {
   return id === 'A1' || isExternalTrack(id) || id === 'MUS' || id === 'NAR' || id === 'VO' || id === 'SFX'
 }
 
+const TRACK_NAMES: Record<string, string> = {
+  A1: 'Som dos clipes (A1)',
+  MUS: 'Música (MUS)',
+  NAR: 'Narração (NAR)',
+  VO: 'Voz gravada (VO)',
+  SFX: 'Sons gerados (SFX)',
+}
+
+/** O nome da trilha como as listas de escolha a mostram (o Auto Duck e a portadora do Vocoder). */
+export function trackLabel(id: string): string {
+  return TRACK_NAMES[id] ?? (isExternalTrack(id) ? `Faixa externa (${id})` : id)
+}
+
 /** Quais trilhas podem comandar o fundo `background`: as combinações que o servidor aceita. Só uma recusa sobra: o A1, que já
  *  contém as faixas externas, não abaixa sob elas. A faixa externa abaixa sob qualquer trilha (a chave é medida antes de o
  *  clipe ser montado), e a chave A1 é só o som dos próprios trechos. */

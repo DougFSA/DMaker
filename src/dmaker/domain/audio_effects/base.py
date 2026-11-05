@@ -177,6 +177,11 @@ class EffectBase(BaseModel):
         portadora: o processador o gera na duração do sinal que entra e o entrega em `SampleRequest.side`."""
         return None
 
+    def carrier_track_id(self) -> str | None:
+        """A trilha do projeto (`A1`, `MUS`, `NAR`...) de onde vem a segunda entrada do efeito, ou None quando ela é o som gerado
+        de `carrier_sound()`. Só o Vocoder escolhe a trilha; o resto da spec e dos pares recusados está em `domain.carrier_tracks`."""
+        return None
+
     def alters_duration(self) -> bool:
         """Se ESTA instância muda a duração do item. É `changes_duration` para quase todos; o Cortar decide pelo
         parâmetro (completar com silêncio mantém a duração, não completar encurta), por isso a conta é por instância."""

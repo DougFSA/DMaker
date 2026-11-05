@@ -31,6 +31,7 @@ from .assembly import (
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
+from .carrier_tracks import CarrierInputs, Deferred, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .generated_sounds import check_generated_files
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
@@ -183,9 +184,27 @@ class RenderPipeline:
 
         # o que não depende dos mezaninos fica pronto antes deles: o Auto Duck mede a chave de uma faixa externa de fundo
         # (que abaixa dentro do mezanino) na narração, nas vozes gravadas e na música já processadas
-        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
-        voice_files = prepare_voice_files(p, self.prober, effect_processor(ctx))
-        music_path = processed_music(ctx, self._music_path())
+        # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
+        spoken = self.voiceover.prepare(ctx)
+        music_file = self._music_path()
+        voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
+        voice_files_of = Deferred(
+            lambda: prepare_voice_files(p, self.prober, effect_processor(ctx)), "a voz gravada"
+        )
+        music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        install_carrier_tracks(
+            ctx,
+            CarrierInputs(
+                timeline_spans(durations, transitions),
+                sources,
+                total,
+                track_origin,
+                voiceovers_of,
+                voice_files_of,
+                music_of,
+            ),
+        )
+        voiceovers, voice_files, music_path = voiceovers_of(), voice_files_of(), music_of()
         begin_ducks(
             ctx,
             DuckInputs(

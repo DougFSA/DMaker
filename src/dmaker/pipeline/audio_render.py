@@ -54,6 +54,7 @@ from .audio_duration import NOTHING_TO_PLAY, audio_extent
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .audio_lint import audio_output_warnings
 from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
+from .carrier_tracks import CarrierInputs, Deferred, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia
@@ -239,21 +240,40 @@ class AudioRenderPipeline:
         ctx.log(f"render de áudio {project.name}: {self.preset.id}")
         # os efeitos de cada item (cadeia de efeitos) viram um arquivo processado em cache antes de tudo: a mixagem,
         # a duração e a exportação por trilha partem dele, como no render de vídeo e na prévia
-        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
-        voice_files = prepare_voice_files(layout.project, self.prober, effect_processor(ctx))
+        # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
+        spoken = self.voiceover.prepare(ctx)
         total = layout.total
         if not layout.project.timeline:
-            total = audio_extent(layout.project, self.prober, [item.duration for item in voiceovers])
+            # a duração de uma narração não muda com a cadeia de efeitos (o processado troca só o arquivo)
+            total = audio_extent(layout.project, self.prober, [item.duration for item in spoken])
         if total <= 0:
             raise ValueError(NOTHING_TO_PLAY)
+        music = layout.project.audio.music
+        music_file = layout.project.resolve(music.src) if music else None
+        if music_file is not None and not music_file.exists():
+            raise FileNotFoundError(f"Música não encontrada: {music.src}")
+        voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
+        voice_files_of = Deferred(
+            lambda: prepare_voice_files(layout.project, self.prober, effect_processor(ctx)), "a voz gravada"
+        )
+        music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        install_carrier_tracks(
+            ctx,
+            CarrierInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers_of,
+                voice_files_of,
+                music_of,
+            ),
+        )
+        voiceovers, voice_files = voiceovers_of(), voice_files_of()
         ctx.warnings.extend(audio_output_warnings(project, total))
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
-        music = layout.project.audio.music
-        music_path = layout.project.resolve(music.src) if music else None
-        if music_path is not None and not music_path.exists():
-            raise FileNotFoundError(f"Música não encontrada: {music.src}")
-        music_path = processed_music(ctx, music_path)
         # a música já processada entra antes dos pedaços: o Auto Duck mede a chave de uma faixa externa de fundo nela
+        music_path = music_of()
         begin_ducks(
             ctx,
             DuckInputs(

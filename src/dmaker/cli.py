@@ -2702,7 +2702,14 @@ def _effect_param_text(param: dict) -> str:
         else f" [{'' if low is None else f'{low:g}'}..{'' if high is None else f'{high:g}'}]"
     )
     when = param.get("shown_when")
-    only = f", só com {', '.join(f'{field}={value}' for field, value in when.items())}" if when else ""
+    only = (
+        ", só com "
+        + ", ".join(
+            f"{field} vazio" if value is None else f"{field}={value}" for field, value in when.items()
+        )
+        if when
+        else ""
+    )
     return f"{param['name']} ({param['label']}{unit}{span}, padrão {param['default']!r}{only})"
 
 
@@ -2771,7 +2778,8 @@ def audio_effect_add(
     ] = None,
 ) -> None:
     """Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify
-    -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim")."""
+    -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim"; ou o Vocoder cantando
+    na harmonia da música: ... audio.voiceover.0 vocoder -p carrier_track=MUS)."""
     data: dict = {"type": effect, **_parse_effect_params(param)}
     if start is not None:
         data["start"] = start

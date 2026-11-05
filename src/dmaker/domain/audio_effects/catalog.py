@@ -17,6 +17,7 @@ from .base import EFFECT_CLASSES, EffectBase, effect_type, is_literal
 # "freq_points" a lista de pontos `{hz, db}` do EQ por Curva: a interface os desenha como controles deslizantes e como
 # um gráfico de pontos arrastáveis; "text" é um campo de texto livre (os dígitos do DTMF, o arquivo do Importar Amostras)
 # um som gerado `{generator, params}` (a portadora do Vocoder): a interface o escolhe entre os geradores do catálogo de sons;
+# "carrier_track" é o id da trilha do projeto de onde a portadora vem (A1, MUS, NAR...) ou vazio, para a portadora gerada;
 # "plugin_format" é o formato (lv2 ou ladspa), que a interface não mostra: vem do plugin escolhido; "plugin" é o nome do plugin LV2 ou LADSPA do efeito Plugin (a interface o escolhe na lista dos instalados) e "plugin_params"
 # os valores dos controles dele, `{nome: número}`: a interface monta um controle por controle que o próprio plugin declara
 ParamKind = Literal[
@@ -30,6 +31,7 @@ ParamKind = Literal[
     "freq_points",
     "text",
     "carrier",
+    "carrier_track",
     "plugin",
     "plugin_format",
     "plugin_params",

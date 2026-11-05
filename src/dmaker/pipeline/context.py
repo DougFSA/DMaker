@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..filtergraph.audio_effects import Measure
     from .audio_effects import EffectProcessor
     from .auto_duck import DuckPlan
+    from .carrier_tracks import CarrierTracks
     from .isolation import IsolationService
     from .narration import NarrationService
 
@@ -80,6 +81,8 @@ class RenderContext:
     master_measures: dict[int, Measure] = field(default_factory=dict)
     # o plano do Auto Duck (ver `pipeline/auto_duck.py`); None quando o projeto não tem regra
     duck_plan: DuckPlan | None = None
+    # as trilhas que o Vocoder ouve como portadora (ver `pipeline/carrier_tracks.py`); None quando nenhum efeito usa `carrier_track`
+    carrier_tracks: CarrierTracks | None = None
     # a linha do tempo vista pelo crossfade de som entre clipes vizinhos (`pipeline.audio_crossfade.CutNeighbors`): o
     # preparador de um trecho precisa das fontes e das durações dos vizinhos. O construtor do mezanino a preenche
     cut_neighbors: Any = None
