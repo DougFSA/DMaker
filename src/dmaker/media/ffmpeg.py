@@ -8,6 +8,7 @@ A execução passa por um `FFmpegRunner` (protocolo). O pipeline recebe o runner
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -81,9 +82,13 @@ class FFmpegCommand:
     total: float | None = None  # segundos de saída, para a barra de progresso
     cwd: Path | None = None
     frames: Iterable[bytes] | None = None  # quadros rawvideo escritos no stdin (entrada `-i pipe:0`)
+    # Outro ffmpeg para este comando (o que hospeda os plugins LV2) e variáveis de ambiente a somar às do processo (onde o
+    # LV2 procura os plugins). Vazios: o ffmpeg principal e o ambiente de sempre.
+    binary: Path | None = None
+    env: dict[str, str] | None = None
 
     def full(self) -> list[str]:
-        return [str(ffmpeg_path()), *GLOBAL_FLAGS, *self.args]
+        return [str(self.binary or ffmpeg_path()), *GLOBAL_FLAGS, *self.args]
 
 
 class FFmpegRunner(Protocol):
@@ -161,6 +166,7 @@ class SubprocessRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(command.cwd) if command.cwd else None,
+            env={**os.environ, **command.env} if command.env else None,
         )
         stderr_chunks: list[bytes] = []
         progress_state = {"done": 0.0}
@@ -229,7 +235,11 @@ class RecordingRunner:
     frames_consumed: int = 0
 
     def run(self, command: FFmpegCommand) -> list[str]:
-        cmd = command.full() if find_tool("ffmpeg") else ["ffmpeg", *GLOBAL_FLAGS, *command.args]
+        cmd = (
+            command.full()
+            if command.binary or find_tool("ffmpeg")
+            else ["ffmpeg", *GLOBAL_FLAGS, *command.args]
+        )
         self.commands.append(cmd)
         if command.frames is not None:
             self.frames_consumed += sum(1 for _ in command.frames)

@@ -25,6 +25,7 @@ import { useAudioEffectsStore } from '@/stores/audioEffects'
 import { useEditorStore } from '@/stores/editor'
 import CarrierControl from './audio/CarrierControl.vue'
 import EqParamControl from './audio/EqParamControl.vue'
+import PluginControls from './audio/PluginControls.vue'
 
 /** A espera do número digitado: cada tecla reinicia, e a spec só muda quando a pessoa para (a mesma do painel Filtros). */
 const EFFECT_DEBOUNCE_MS = 300
@@ -145,6 +146,12 @@ onBeforeUnmount(() => {
 <template>
   <!-- o campo de outro modo de unidade fica de fora da tela (a spec o guarda) -->
   <template v-if="!shown" />
+  <!-- o efeito Plugin: o formato vem do plugin escolhido (não aparece), o nome dele com o aviso, e um campo por controle que ele declara -->
+  <template v-else-if="param.kind === 'plugin_format'" />
+  <div v-else-if="param.kind === 'plugin'" class="list-cell" :data-effect-param="param.name">
+    <PluginControls part="name" :effect="effect" :list-path="listPath" :index="index" />
+  </div>
+  <PluginControls v-else-if="param.kind === 'plugin_params'" part="controls" :effect="effect" :list-path="listPath" :index="index" />
   <AppNumberInput
     v-else-if="param.kind === 'number' || param.kind === 'integer'"
     :label="param.label"

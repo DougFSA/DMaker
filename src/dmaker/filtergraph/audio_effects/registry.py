@@ -11,6 +11,7 @@ import numpy as np
 
 from ...domain.audio_effects import EffectBase
 from ...domain.audio_effects.base import EFFECT_SAMPLE_RATE
+from ...domain.plugins import PluginPorts
 from .measure import Measure
 
 # O áudio de um item é levado a esta taxa e a estéreo antes dos efeitos, que é o formato do resto da mixagem;
@@ -37,6 +38,8 @@ class EffectRequest:
     measure: Measure | None = None
     side: str | None = None
     sample_rate: int = SAMPLE_RATE
+    # as portas de áudio do plugin, para o efeito Plugin adaptar o sinal estéreo a elas; só o pipeline sabe (a varredura leu)
+    ports: PluginPorts | None = None
 
     @property
     def samples(self) -> int:

@@ -1007,9 +1007,9 @@ class AudioSettings(EffectsOwner):
         """O áudio mestre roda dentro do grafo ao vivo da mistura; um efeito de amostras (Redução de ruído, Reparar)
         precisa do sinal na memória e vale nos itens."""
         for effect in self.master_effects:
-            if effect.sample_stage:
+            if effect.item_only():
                 raise ValueError(
-                    f"{self.effects_place}: o efeito {effect.label} trabalha sobre as amostras do item e não vale "
+                    f"{self.effects_place}: o efeito {effect.label} {effect.item_only_reason()} e não vale "
                     "na mistura inteira. Ponha-o no clipe, na voz gravada ou na faixa que tem o ruído"
                 )
         return self

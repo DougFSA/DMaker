@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 59 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 60 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -82,6 +82,7 @@ São 59 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Cruzar o som de dois clipes ou de duas trilhas (crossfade)](#cruzar-o-som-de-dois-clipes-ou-de-duas-trilhas-crossfade) | Cruza o som de dois clipes vizinhos sem trocar a imagem, que continua cortando seca (J-cut e L-cut), ou faz uma trilha sumir enquanto outra entra, sem mexer nos arquivos originais. | sim |
 | [Mudar o tom, a velocidade e o andamento, e esticar o som](#mudar-o-tom-a-velocidade-e-o-andamento-e-esticar-o-som) | Afina uma voz sem mudar a duração, encaixa uma música num tempo sem mudar o tom, faz o efeito de disco que perde a rotação e estica um som até virar uma textura etérea, sem mexer no arquivo original. | sim |
 | [Dar ambiente e voz de efeito: eco, reverb, distorção, modulação e vocoder](#dar-ambiente-e-voz-de-efeito-eco-reverb-distorção-modulação-e-vocoder) | Dá ambiente a uma narração seca, faz voz de telefone ou de rádio, põe eco numa vinheta e transforma a voz em robô, como efeitos do item, sem mexer no arquivo original. | sim |
+| [Usar plugins de efeito de terceiros (LV2 e LADSPA)](#usar-plugins-de-efeito-de-terceiros-lv2-e-ladspa) | Usa no som de um item um plugin de efeito que não é do DMaker (um reverb de estúdio, um de-esser), como o menu de efeitos do Audacity faz com LV2 e LADSPA, sem mexer no arquivo original. | ainda não: `audio_plugins` |
 | [Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar](#reparar-o-som-de-um-item-silenciar-cortar-envelope-canais-e-deslocar) | Mexe no som de qualquer item como o Audacity mexe numa seleção (silenciar, cortar, desenhar o volume, mexer nos canais, deslocar no tempo, ganho e pan da trilha), sem tocar na imagem nem no arquivo. | sim |
 | [Copiar, colar, dividir e juntar trechos de áudio](#copiar-colar-dividir-e-juntar-trechos-de-áudio) | Copia um trecho do som de um item e cola noutro instante como uma voz gravada nova, divide e junta vozes gravadas e apara fora da seleção, tudo apontando para o mesmo arquivo, sem copiá-lo. | sim |
 | [Desfazer e refazer uma edição](#desfazer-e-refazer-uma-edição) | Volta a spec exatamente a como estava antes da última edição do `edit_project` (ou refaz a que foi desfeita), com um histórico de até 50 passos guardado na pasta do projeto. | ainda não: `edit_history` |
@@ -153,7 +154,7 @@ cd DMaker
 .\.venv\Scripts\dmaker.exe --version    # a versão instalada (a mesma da tag do release)
 ```
 
-O `scripts/setup.ps1` cria o `.venv`, instala o pacote com os extras `dev` e `captions` (`pip install -e ".[dev,captions]"`), roda `dmaker setup` (baixa FFmpeg e Poppins) e termina com `dmaker doctor`. Se o PowerShell recusar rodar o script (política de execução), rode antes, uma vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+O `scripts/setup.ps1` cria o `.venv`, instala o pacote com os extras `dev` e `captions` (`pip install -e ".[dev,captions]"`), roda `dmaker setup` (baixa o FFmpeg completo e a Poppins) e termina com `dmaker doctor`. Se o PowerShell recusar rodar o script (política de execução), rode antes, uma vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 O `dmaker doctor` confere o FFmpeg e o libass (sem ele não há texto nem legendas), os filtros necessários, os encoders de hardware (NVENC, AMF, QSV) e qual seria usado com `"encoder": "auto"`, as fontes, as marcas instaladas e se o `faster-whisper`, o Playwright com o Chromium (animação em HTML) e o `mcp` estão presentes.
 
@@ -175,16 +176,19 @@ Cada função pesada tem o seu extra do pip, para quem não a usa não pagar o d
 | Ler planilha `.xlsx` no lote | `pip install -e ".[lote]"` |
 | Animação em HTML sobre o vídeo, e exportar o manual em PDF | `pip install -e ".[html]"` (o `.[docs]` traz o mesmo pacote) e depois `dmaker setup --html`, que baixa o Chromium (cerca de 120 MB) para `bin/playwright`, dentro do DMaker |
 | Interface nova (Vue) | Node.js instalado e, uma vez, `cd frontend; npm ci; npm run build` |
+| Plugins de efeito LV2 (reverb, de-esser e outros de terceiros) | `dmaker setup --plugins`, com a interface fechada, instala o FFmpeg que hospeda o LV2 em `bin/ffmpeg-lv2`. O LADSPA já roda no FFmpeg principal |
 | Operador local | O [Ollama](https://ollama.com) instalado e `ollama pull gpt-oss:20b` |
 
-Rodar `.\scripts\setup.ps1` de novo é seguro e atualiza as dependências. Para forçar o download do FFmpeg e das fontes de novo, use `dmaker setup --force`.
+Rodar `.\scripts\setup.ps1` de novo é seguro e atualiza as dependências. Para forçar o download do FFmpeg e das fontes de novo, use `dmaker setup --force`. O `dmaker setup` baixa o FFmpeg completo do gyan.dev (cerca de 170 MB) e confere o SHA-256 contra o que o site publica; se a máquina tinha o essentials de antes, troca por ele sem `--force`, com a interface fechada. Os dois renderizam igual (a saída dos projetos de teste é idêntica byte a byte); o completo traz o filtro `ladspa`.
 
 ### Onde fica cada coisa
 
 | Pasta | Conteúdo | No controle de versão? |
 | --- | --- | --- |
 | `bin/ffmpeg/` | FFmpeg e ffprobe baixados pelo `setup` | Não |
+| `bin/ffmpeg-lv2/` | O FFmpeg que hospeda os plugins LV2, baixado por `dmaker setup --plugins` | Não |
 | `bin/playwright/` | O Chromium da animação em HTML e do PDF do manual, baixado por `dmaker setup --html` | Não |
+| `plugins/`, `plugins.json` | Os plugins LV2 e LADSPA que você pôs para o DMaker (`plugins/lv2`, `plugins/ladspa`) e a lista dos que você desabilitou | Não |
 | `assets/fonts/` | Fonte Poppins (licença OFL) | Sim |
 | `assets/html/` | three.js e lottie-web (MIT) que as animações em HTML usam, com a licença de cada um | Sim |
 | `assets/brands/<nome>/` | `brand.json` de cada marca (cores, fontes, logos, vocabulário, looks) | Sim |
@@ -2732,6 +2736,11 @@ Esta tabela traduz o que se faz no Audacity para o que se escreve no DMaker. Os 
 | Detectar o BPM de um loop (Beat Finder, BPM) | **Detectar BPM** no bloco da música, `audio_tempo` com `action: "detect"` e `dmaker audio tempo detect` medem o andamento e o primeiro tempo do arquivo (autocorrelação dos ataques) e preenchem `audio.music.bpm` e `beat_offset`, editáveis. Numa Faixa de Ritmo gerada a 90, 120 e 128 BPM o valor sai com menos de 1 BPM de erro; com `--apply` a gravação entra no histórico | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
 | Clip Stretch (esticar o loop para o andamento do projeto) | `audio.music.stretch_to_tempo: true` com o `bpm` da música: o DMaker põe na frente da cadeia da música um Mudar Andamento derivado (de `music.bpm` para `tempo.bpm`, sem mudar o tom) que não vira efeito seu e acompanha o andamento do projeto. O primeiro tempo da música entra num tempo da grade (a entrada atrasa até lá) e o loop repete em tempos inteiros, com um fade de 3 ms na emenda quando o arquivo esticado não fecha um número inteiro de tempos. Um loop de 100 BPM num projeto de 120 BPM dura 100/120 do que durava e as batidas caem na grade a menos de 15 ms | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
 | Cortar o vídeo na batida pela grade | `cut_on_beat` com `source: "grid"` (`dmaker audio analyze cut-on-beat --source grid`) puxa cada corte entre clipes para o tempo mais perto do andamento do projeto (ou o início de compasso, com `params: {"level": "bar"}`), em vez das batidas medidas na música | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| Effect > Add / Remove Plug-ins (Plugin Manager), varredura | `dmaker audio plugins scan` varre as pastas padrão do sistema (só leitura) e a pasta `plugins/` do DMaker e pergunta ao ffmpeg o que cada plugin LV2 e LADSPA expõe; `list`, `show`, `enable` e `disable` são o Gerenciador de Plugins (o desligado fica em `plugins.json`). Pelo MCP, `audio_plugins`; na interface, o grupo **Plugins** do menu **+ Efeito** | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
+| Efeito de plugin LV2 ou LADSPA (menu Efeitos) | `{"type": "plugin", "format": "lv2", "plugin": "<URI>", "params": {"<controle>": valor}}`; no LADSPA `"plugin": "arquivo#rótulo"` e os controles são `c0`, `c1`... Os controles, as faixas e os padrões vêm do próprio plugin. Um plugin mono roda uma vez por canal; `start`, `end` e `enabled` valem como nos outros efeitos; não vale em `audio.master`. O LADSPA roda no ffmpeg principal (o build completo do `dmaker setup`) e o LV2 num segundo ffmpeg (`dmaker setup --plugins`). Igual ao ffmpeg direto: diferença máxima de amostra 0 nos dois formatos; um item de 10 minutos estéreo levou 0,9 s (LV2) e 0,6 s (LADSPA) | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
+| Plugin que não está instalado na máquina | O `validate_project` avisa com o nome do plugin e o render pula só aquele efeito e segue, com o mesmo aviso: o som sai idêntico ao do projeto sem o efeito. Desabilitado ou que o ffmpeg não hospeda (um LV2 que exige `options` e `worker`, como o Dragonfly Reverb) tem o mesmo tratamento, com o motivo na lista | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
+| Plugins VST e VST3 | O DMaker não hospeda VST3: o ffmpeg não carrega o formato e hospedá-lo pediria uma dependência nova pesada (decisão do Douglas de 03/11). Use a versão LV2 ou LADSPA do mesmo plugin, ou trate o arquivo no programa que hospeda VST3 e traga o resultado como voz gravada ou faixa externa | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
+| Nyquist (Nyquist Prompt e os plug-ins `.ny`) | O DMaker não traz o interpretador Nyquist: os efeitos Nyquist embutidos do Audacity que importavam já são os efeitos nativos desta tabela (Reverb, Atraso, Eco, Wahwah, Vocoder, Tremolo, Truncar Silêncio, Redução de ruído, Normalização de loudness, Fades, EQ, Mudar Tom e Andamento). Um script `.ny` de terceiros roda no Audacity ou num interpretador Nyquist à parte, e o arquivo tratado entra pela importação (voz gravada ou faixa externa) | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
 
 ### Aplicar efeitos de áudio em um item ou no master
 <!-- tarefa: efeitos-de-audio -->
@@ -3283,6 +3292,67 @@ Rode `dmaker validate` e ouça a prévia. Medido: o eco de 0,3 s com decaimento 
 - **"O efeito Vocoder trabalha sobre as amostras do item"**: ponha-o no item de voz, não em `audio.master`.
 - **A fala some no vocoder**: aumente `noise_level` (as consoantes não têm harmônico) ou `bands`.
 - **O som estoura depois do reverb ou do eco**: baixe `wet_db` e `dry_db`.
+
+### Usar plugins de efeito de terceiros (LV2 e LADSPA)
+<!-- tarefa: plugins-de-efeito -->
+Usa no som de um item um plugin de efeito que não é do DMaker (um reverb de estúdio, um de-esser), como o menu de efeitos do Audacity faz com LV2 e LADSPA, sem mexer no arquivo original.
+
+#### Quando usar
+
+Você tem um plugin de efeito que o DMaker não traz e quer ouvi-lo na narração, na música ou no som de um clipe.
+
+**Pedidos que levam a esta tarefa:**
+- "Quais plugins de áudio eu tenho instalados?"
+- "Aplica o plugin de de-esser na narração"
+- "Desliga o plugin de reverb que está dando erro"
+
+#### Antes de começar
+
+- Formatos: **LV2** e **LADSPA**, hospedados pelo ffmpeg. O LADSPA roda no ffmpeg principal (o completo, que o `dmaker setup` instala, trocando o essentials sem `--force`). O LV2 roda num segundo ffmpeg: `dmaker setup --plugins` o instala em `bin/ffmpeg-lv2`. Rode o `setup` com a interface fechada; o `dmaker doctor` mostra o que está disponível.
+- A varredura lê as pastas padrão do sistema (só leitura: `LV2_PATH`, `LADSPA_PATH`, `%APPDATA%\LV2`...) e a pasta `plugins/` do DMaker (`plugins/lv2/<pacote>.lv2`, `plugins/ladspa/<arquivo>.dll`). Depois de instalar um plugin, rode `dmaker audio plugins scan`.
+- O efeito: `{"type": "plugin", "format": "lv2", "plugin": "<URI>", "params": {"<controle>": 0.5}}`. No LADSPA, `plugin` é `arquivo#rótulo` e os controles são `c0`, `c1`... Controles, faixas e padrões vêm do próprio plugin.
+- Plugin mono em item estéreo roda uma vez por canal. `start`, `end` e `enabled` valem; a cauda do plugin é cortada no fim do item; não vale em `audio.master`.
+- Ausente, desabilitado ou que o ffmpeg não hospeda: o `validate` avisa com o nome, e o render pula só aquele efeito e segue.
+- Na narração sintetizada, o plugin pode apagar a marca d'água inaudível, e ela não é reaplicada (decisão de 03/11).
+
+#### Pela IA
+
+Diga: "Lista os plugins de áudio" e, escolhido um, "Põe o plugin Eco na narração com atraso de 300 ms". A IA usa `audio_plugins` e `edit_project` e confere com `validate_project`.
+
+#### Chamadas das ferramentas
+
+```json
+[
+  {"tool": "audio_plugins", "arguments": {"action": "list"}, "para": "ver os plugins, com os controles, as faixas e os padrões"},
+  {"tool": "edit_project", "arguments": {"name": "abertura", "op": {"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": "plugin", "format": "lv2", "plugin": "urn:exemplo:eco", "params": {"delay_ms": 300}}}}, "para": "pôr o plugin na voz gravada"},
+  {"tool": "validate_project", "arguments": {"name_or_path": "abertura"}, "para": "conferir se o plugin está instalado"}
+]
+```
+
+#### Pela interface
+
+Interface nova, **Editor**, painel **Filtros**, **Efeitos de áudio**, **+ Efeito**, grupo **Plugins (LV2 e LADSPA)**: clique no nome para pôr no item; **Desligar**, **Ligar** e **Varrer plugins** cuidam da lista. O cartão mostra um campo por controle do plugin. No painel **Áudio**, **Aplicar efeito** lista cada um como **Plugin: nome**, com **Prévia**.
+
+#### Pela CLI
+
+```powershell
+dmaker setup --plugins
+dmaker audio plugins scan
+dmaker audio plugins show urn:exemplo:eco
+dmaker audio plugins disable urn:exemplo:eco
+```
+
+#### Como conferir
+
+Rode `dmaker validate` e ouça a prévia. Medido com um plugin de teste (um eco) nos dois formatos: contra o ffmpeg rodando o mesmo filtro, a diferença máxima de amostra foi 0; atraso de 100, 300 e 600 ms pôs o primeiro eco a 0,2, 0,4 e 0,7 s; realimentação de 0,2, 0,5 e 0,8 deu razão 0,200, 0,500 e 0,800 entre os ecos.
+
+#### Se der errado
+
+- **"O plugin ... não está instalado"** ou **"desabilitado"**: ponha o plugin numa pasta e rode `dmaker audio plugins scan`, ou `dmaker audio plugins enable <id>`. O render segue sem o efeito.
+- **"falta o ffmpeg que hospeda o LV2"**: `dmaker setup --plugins`.
+- **"Options feature missing, cannot continue!"**: o ffmpeg só oferece o mapa de URIs ao plugin LV2. Os que exigem `options` e `worker` (feitos com DPF, como o Dragonfly Reverb 3.2.10) não instanciam e aparecem como não usáveis.
+- **VST3**: o DMaker não hospeda; o ffmpeg não o carrega e hospedá-lo pediria uma dependência nova pesada (decisão de 03/11). Use a versão LV2 ou LADSPA do plugin, ou trate o arquivo onde há VST3 e traga o resultado como faixa.
+- **Nyquist**: os efeitos embutidos do Audacity que importavam já são nativos aqui. Um script `.ny` de terceiros roda no Audacity ou num interpretador à parte, e o arquivo tratado entra pela importação.
 
 ### Reparar o som de um item: silenciar, cortar, envelope, canais e deslocar
 <!-- tarefa: reparar-o-som -->
@@ -4433,6 +4503,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 | DMK-57 | Atraso, eco e reverb, e os efeitos de distorção e modulação: Atraso (regular, bola quicando e ao contrário, com tom por eco), Eco com realimentação, Reverb próprio no estilo Freeverb aplicado pelo `afir` (com as nove predefinições do Audacity, cada uma com o RT60 medido), Distorção (12 tipos), Phaser, Tremolo, Wahwah e Vocoder com a portadora gerada; a cauda do eco e do reverb pode esticar o item (`extend_tail`); quatro predefinições de uso (voz de telefone, voz de rádio antigo, narração em sala, música etérea); `audio_effect` (`dmaker audio effect add ... echo --param decay=0.5`) | "Dar ambiente e voz de efeito: eco, reverb, distorção, modulação e vocoder" |
 | DMK-65 | Gravar do microfone: a janela **Gravar** (botão no painel Áudio e **Gravar narração** na linha do tempo) capta o som cru, sem eco, ruído ou ganho automático, e manda um pedaço de um segundo por vez para `projects/<nome>/recordings`, então a aba que fecha no meio não perde o que já chegou (**Recuperar** ou **Descartar** ao abrir o projeto); medidor com clipping e monitoramento; gravar sobre o vídeo com a latência compensada e calibrada; punch-in que guarda o trecho antigo como take (`VoiceoverClip.takes`, `audio_punch`, `voiceover_take_set`); gravação com hora marcada e ativada por som; e o atalho de 15 s que clona a voz direto na biblioteca. `audio_recordings` no MCP e `dmaker audio recordings|punch|take` na CLI | "Gravar do microfone: narração, punch-in, hora marcada, ativada por som e clonagem" |
 | DMK-67 | Música no andamento: `audio.tempo` (BPM, compasso e onde cai o tempo 1) dá ao projeto uma grade de tempos e compassos; a régua da linha do tempo e do painel Áudio alterna entre segundos e compassos (`9`, `9.3`), o **Snap** da linha do tempo e do painel Áudio atrai também para os tempos (bordas, cortes, marcadores, alça de fade e cursor), e `beat:<n>` e `bar:<n>` valem onde `marker:<texto>` vale. **Detectar BPM** (`audio_tempo`, `dmaker audio tempo detect`, a rota `audio-tempo/detect`) mede o andamento e o primeiro tempo do arquivo da música (autocorrelação dos ataques, que também corrige o BPM do Achar Batidas); `audio.music.stretch_to_tempo` estica a música até o andamento do projeto, sem mudar o tom e com o loop em tempos inteiros; e `cut_on_beat` ganha a fonte `grid`. Sem `audio.tempo` o projeto se comporta como antes | "Pôr a música no andamento do projeto: BPM, compasso, régua em compassos e loop esticado" |
+| DMK-68 | Plugins de efeito de terceiros (LV2 e LADSPA) pelo ffmpeg: o efeito `plugin` (`format`, `plugin`, `params`) e a varredura das pastas padrão do sistema (só leitura) e da pasta `plugins/` do DMaker, com os controles, as faixas e os padrões lidos do próprio plugin; habilitar e desabilitar (`plugins.json`); `audio_plugins` no MCP, `dmaker audio plugins scan|list|show|enable|disable` e `GET /api/audio-plugins`; o grupo **Plugins** do menu **+ Efeito** e os controles do cartão e da janela do painel Áudio. O `dmaker setup` passa a instalar o ffmpeg completo do gyan.dev (SHA-256 conferido; a saída dos projetos de teste é idêntica à do essentials) e `dmaker setup --plugins` instala o ffmpeg do BtbN com LV2 em `bin/ffmpeg-lv2`; `dmaker doctor` mostra os dois formatos. Plugin ausente avisa no `validate` e o render pula o efeito. VST3 e Nyquist ficam de fora, com o motivo | "Usar plugins de efeito de terceiros (LV2 e LADSPA)" |
 
 Já estavam na versão anterior e agora têm tarefas próprias: a interface nova em Vue (DMK-20), a troca de voz (DMK-5), a dublagem com uma voz por pessoa (DMK-4), a marca d'água e a etiqueta de procedência (DMK-7), a fila de narrações (DMK-6), a prévia ao vivo da narração (DMK-16), a trilha `NAR` (DMK-3), as trilhas separadas (DMK-18), o esticar do vídeo na dublagem (DMK-19) e o gerenciador de modelos (DMK-17).
 
@@ -4446,7 +4517,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 148 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 153 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -4536,9 +4607,10 @@ São 148 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a v
   - `--quiet` / `--no-quiet`: Sem barra de progresso.
   - `--segments` TEXTO: Render parcial só destes trechos, ex.: 12-20 (para revisar vídeos longos).
   - `--no-ui`: Roda só no terminal; não usa a interface gráfica.
-- **`dmaker setup`**: Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium.
+- **`dmaker setup`**: Baixa o FFmpeg completo (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium; com --plugins, o FFmpeg dos plugins LV2.
   - `--force` / `--no-force`: Baixa de novo mesmo se já existir.
   - `--html`: Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).
+  - `--plugins`: Instala só o FFmpeg que hospeda os plugins LV2 (em bin/ffmpeg-lv2). O LADSPA já vem no FFmpeg principal.
 - **`dmaker sheet VIDEO`**: Grade de quadros do vídeo inteiro (para revisar de uma vez).
   - `--out` CAMINHO
   - `--cols` NÚMERO: (padrão 3)
@@ -4824,6 +4896,21 @@ Perfis de ruído do projeto, o primeiro passo da Redução de ruído (efeito noi
   - `--json`: Saída em JSON.
 - **`dmaker audio noise-profile list SPEC`**: Lista os perfis de ruído do projeto.
 - **`dmaker audio noise-profile remove SPEC NAME`**: Apaga um perfil de ruído (recusa se algum efeito ainda o usa).
+
+#### dmaker audio plugins
+
+Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity: varrer as pastas, listar com os controles que cada plugin declara, habilitar e desabilitar. O efeito `plugin` os usa (`dmaker audio effect add`).
+
+- **`dmaker audio plugins disable KEY`**: Desabilita um plugin: ele continua na lista, e os efeitos que o usam são pulados com um aviso.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio plugins enable KEY`**: Habilita um plugin (o padrão de todo plugin achado).
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio plugins list`**: Lista os plugins da última varredura (faz uma se nunca houve) com o estado de cada um.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio plugins scan`**: Varre as pastas de plugins (as do sistema, só para leitura, e a do DMaker) e pergunta ao ffmpeg o que cada um expõe.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
+- **`dmaker audio plugins show KEY`**: Mostra um plugin: a referência para a spec e os controles com faixa e padrão, lidos do próprio plugin.
+  - `--json`: Saída em JSON, como a ferramenta MCP.
 
 #### dmaker audio preset
 
@@ -5168,7 +5255,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 86 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 87 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -5212,6 +5299,8 @@ São 86 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `name`\* (texto), `profile` (texto), `target` (texto), `start` (número ou texto), `end` (número ou texto).
 - **`audio_effect_action`**: Executa uma ação de um efeito de áudio (as que o catálogo `audio_effects` lista em `actions`): hoje `noise_gate` + `analyze_noise`, que mede o ruído de um trecho em que ninguém fala e sugere o limiar do gate (o nível do ruído mais 6 dB).
   Parâmetros: `name`\* (texto), `effect`\* (texto), `action`\* (texto), `target` (texto), `profile` (texto), `start` (número ou texto), `end` (número ou texto).
+- **`audio_plugins`**: Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity.
+  Parâmetros: `action` (texto, padrão list), `plugin` (texto).
 - **`timeline_view`**: Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, NAR narrações (duração real quando já sintetizadas, senão estimada), MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de cada item já calculado.
   Parâmetros: `name`\* (texto).
 - **`markers_import`**: Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK).
@@ -5349,7 +5438,7 @@ São 86 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 93 blocos e 771 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 94 blocos e 778 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -5455,7 +5544,7 @@ Usado em `Project.audio`.
 | `normalize` | `"two-pass"` ou `"fast"` ou `"off"` | `two-pass` | `two-pass` mede e ajusta em duas passadas (padrão das redes); `fast` numa só; `off` desliga. |
 | `target_lufs` | número, de -30 a -5 | -14 | Loudness alvo da normalização, em LUFS. |
 | `mute_clips` | sim ou não | não | Silencia o áudio dos clipes; a música e a narração ficam. |
-| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
+| `master_effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos da mistura inteira, depois da música, da voz e dos efeitos sonoros e antes da normalização final, que continua valendo por cima. |
 | `sfx_gain_db` | número, de -120 a 24 | 0.0 | Ganho em dB do barramento dos efeitos sonoros (a trilha SFX); fica no padrão na spec e é o que `tracks.SFX` vira no render. |
 | `sfx_pan` | número, de -1 a 1 | 0.0 | Equilíbrio do barramento dos efeitos sonoros, de -1 a 1. |
 | `noise_profiles` | mapa de `NoiseProfile` | vazio |  |
@@ -5473,7 +5562,7 @@ Usado em `AudioSettings.tracks`.
 | `volume` | número, de 0 a 4 | 1.0 | Volume da faixa. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca a faixa externa em relação à sessão, em segundos da gravação: positivo atrasa o som da faixa (corrige um gravador que começou adiantado). |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### AudiogramOverlay
 
@@ -5746,7 +5835,7 @@ Usado em `Project.timeline`.
 | `audio_fade` | número, de 0 a 0.5 | 0.0 | Fade de áudio nas duas pontas, sem escurecer a imagem; tira o estalo de um corte seco. |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do trecho em relação à imagem, em segundos da linha do tempo: positivo atrasa o som, negativo adianta. O som pode vir de fora de `start` e `end` na fonte; onde a fonte não tem som, sai silêncio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `audio_crossfade` | `AudioCrossfade` | nenhum | Crossfade do som no corte com o clipe anterior (J-cut e L-cut): a imagem troca no quadro exato e o som cruza por `duration` segundos em volta do corte. |
 
 #### ColorAdjust
@@ -5959,7 +6048,7 @@ Usado em `AudioSettings.generated`.
 | `duration` | número, maior que 0, até 600 | obrigatório | Quanto o som dura, em segundos (até 600): o gerador enche exatamente esse tempo. |
 | `volume` | número, de 0 a 4 | 1.0 | Ganho linear do item sobre o nível do gerador (1 é o nível dele); não se nivela contra a voz. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### GraphicEq
 
@@ -6207,7 +6296,7 @@ Usado em `AudioSettings.music`.
 | `duck_ratio` | número, de 1 a 20 | 6 | Quanto a música abaixa quando há voz. |
 | `duck_release` | número, de 10 a 5000 | 350 | Tempo para a música voltar ao volume, em milissegundos. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `bpm` | número, de 20 a 400 | nenhum | Andamento da música em batidas por minuto (`dmaker audio tempo detect` o mede); vazio é desconhecido. |
 | `beat_offset` | número, de 0 a 3600 | 0.0 | Onde cai o primeiro tempo dentro do arquivo da música, em segundos. |
 | `stretch_to_tempo` | sim ou não | não | Estica a música, sem mudar o tom, até o andamento do projeto (`audio.tempo`); precisa do `bpm` da música. |
@@ -6242,7 +6331,7 @@ Usado em `AudioSettings.narration`.
 | `language` | texto | `pt` | Idioma da fala. |
 | `seed` | inteiro | nenhum | Semente: a mesma semente repete a mesma fala. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 
 #### NoiseGate
 
@@ -6371,6 +6460,20 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `depth` | número, de 0 a 255 | 100.0 |  |
 | `feedback_percent` | número, de -100 a 100 | 0.0 |  |
 | `output_db` | número, de -30 a 30 | -6.0 |  |
+
+#### Plugin
+
+Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effects`, `GeneratedSound.effects`, `Music.effects`, `Narration.effects` e outros.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"plugin"` | `plugin` | Tipo do item: escolhe qual dos blocos vale. |
+| `enabled` | sim ou não | sim |  |
+| `start` | número, mínimo 0 | nenhum |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `format` | `"lv2"` ou `"ladspa"` | `lv2` |  |
+| `plugin` | texto | texto vazio |  |
+| `params` | mapa de número | vazio |  |
 
 #### ProgressBar
 
@@ -6716,7 +6819,7 @@ Usado em `Project.overlays`.
 | `margin` | número, mínimo 0 | 40 | Margem da borda, em px na base 1080. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio do vídeo (0 deixa mudo). |
 | `audio_offset` | número, de -60 a 60 | 0.0 | Desloca o som do picture-in-picture em relação à imagem dele, em segundos: positivo atrasa o som. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `animation` | `"none"` ou `"fade"` ou `"slide"` | `fade` | Como entra: `fade`, `slide` ou `none`. |
 | `fade` | número, mínimo 0 | 0.3 | Entrada e saída graduais, em segundos. |
 | `sound` | sim ou não ou texto ou `EntrySound` | nenhum | Efeito sonoro na entrada: `true` usa o som padrão do tipo, um nome escolhe outro. |
@@ -6752,7 +6855,7 @@ Usado em `AudioSettings.voiceover`.
 | `end` | número, mínimo 0 | nenhum | Ponto de saída no arquivo, em segundos; vazio vai até o fim dele. |
 | `volume` | número, de 0 a 4 | 1.0 | Volume do áudio. |
 | `pan` | número, de -1 a 1 | 0.0 | Equilíbrio esquerda/direita do item, de -1 (tudo à esquerda) a 1 (tudo à direita). Soma ao pan da trilha dele. |
-| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
+| `effects` | lista de `Amplify` ou `Normalize` ou `Invert` ou `Reverse` ou `Repeat` ou `Delay` ou `Echo` ou `Reverb` ou `Distortion` ou `Phaser` ou `Tremolo` ou `Wahwah` ou `Vocoder` ou `Draw` ou `Compressor` ou `Limiter` ou `NoiseGate` ou `LoudnessNormalize` ou `Silence` ou `Cut` ou `Envelope` ou `Channels` ou `BassTreble` ou `LowShelf` ou `HighShelf` ou `Highpass` ou `Lowpass` ou `Notch` ou `ClassicFilter` ou `GraphicEq` ou `FilterCurveEq` ou `FadeIn` ou `FadeOut` ou `AdjustableFade` ou `StudioFadeOut` ou `ChangePitch` ou `ChangeSpeed` ou `ChangeTempo` ou `SlidingStretch` ou `Paulstretch` ou `Plugin` ou `NoiseReduction` ou `ClickRemoval` ou `ClipFix` ou `Repair` ou `SpectralDelete` ou `SpectralMultiTool` ou `SpectralParametricEq` ou `SpectralShelves` | vazio | Cadeia de efeitos de áudio do item, na ordem em que o som passa por eles (`dmaker audio effects` lista os efeitos). Cada efeito tem `type`, `enabled` (liga e desliga sem apagar), `start` e `end` (o intervalo, em segundos do item) e os parâmetros dele. |
 | `takes` | lista de `Take` | vazio | Os outros takes deste trecho (o punch-in guarda a gravação antiga aqui); `voiceover_take_set` troca o que toca. |
 | `take_label` | texto | texto vazio | Nome do take que toca agora na lista de takes (por exemplo, Original ou Take 2). |
 
@@ -6935,6 +7038,7 @@ Tamanho natural da página: 900x500 px (base 1080); duração sugerida: 4 s.
 | O PDF não sai (`dmaker manual export`) | Faltam o Playwright ou o Chromium: `pip install -e ".[html]"` e `dmaker setup --html`. O HTML sai sem eles (`--html`). |
 | A animação em HTML não renderiza ("O Chromium não está em bin/playwright") | Rode `pip install -e ".[html]"` e `dmaker setup --html`; `dmaker validate` avisa antes do render. |
 | Aviso "a composição tentou acessar ... na internet" | A animação em HTML não tem rede: só os arquivos dela. Ponha o arquivo (imagem, JSON, biblioteca) na pasta da composição e aponte para ele. O render segue sem a requisição. |
+| Aviso "o plugin ... não está instalado nesta máquina" (ou "desabilitado", "não pode ser usado") | O efeito de plugin é pulado e o render segue. Instale o plugin numa das pastas e rode `dmaker audio plugins scan`; veja "Usar plugins de efeito de terceiros (LV2 e LADSPA)". |
 | Não acho como fazer algo | `dmaker ajuda "sua pergunta"`, ou peça à IA que use `search_manual`. |
 
 ---

@@ -109,6 +109,9 @@ class EffectBase(BaseModel):
     # True quando o efeito trabalha sobre as amostras em numpy (`register_sample_builder`), e não como filtro do ffmpeg:
     # ele precisa do sinal inteiro na memória, então não roda dentro do grafo ao vivo da mistura (o áudio mestre o recusa)
     sample_stage: ClassVar[bool] = False
+    # True quando o efeito roda num comando de ffmpeg só dele, e não dentro do grafo da cadeia (o plugin de terceiros usa outro
+    # ffmpeg): como o estágio de amostras, ele precisa do item inteiro e não vale no áudio mestre, que roda num grafo ao vivo
+    separate_stage: ClassVar[bool] = False
     # True quando a resposta de frequência do efeito é conhecida por conta pura (`frequency_response`): a interface desenha
     # o gráfico dele sem rodar o ffmpeg. O registro das contas está em `filtergraph.audio_effects`; um teste prende os dois
     has_response: ClassVar[bool] = False
@@ -139,6 +142,29 @@ class EffectBase(BaseModel):
     def noise_profile(self) -> str | None:
         """A referência de perfil de ruído que o efeito pede (`auto` ou o nome de um perfil do projeto), ou None quando
         ele não usa perfil. O processador mede o espectro dela antes de aplicar o efeito."""
+        return None
+
+    @classmethod
+    def item_only(cls) -> bool:
+        """Se o efeito só vale num item (e não no áudio mestre): o estágio de amostras e o que roda à parte precisam do sinal
+        do item fora do grafo ao vivo da mistura."""
+        return cls.sample_stage or cls.separate_stage
+
+    @classmethod
+    def item_only_reason(cls) -> str:
+        """Por que o efeito só vale num item, na frase das recusas: "trabalha sobre as amostras do item" (estágio de amostras) ou
+        "roda num comando à parte do ffmpeg" (plugin)."""
+        return (
+            "trabalha sobre as amostras do item" if cls.sample_stage else "roda num comando à parte do ffmpeg"
+        )
+
+    def host_format(self) -> str | None:
+        """O formato de plugin que o ffmpeg precisa hospedar para este efeito (`lv2` ou `ladspa`), ou None quando o filtro é do
+        próprio ffmpeg. O processador roda esse efeito num comando à parte, com o ffmpeg que tem o filtro."""
+        return None
+
+    def host_reference(self) -> str | None:
+        """A referência do plugin que `host_format()` hospeda (a URI do LV2, `arquivo#rótulo` no LADSPA), ou None."""
         return None
 
     def impulse_settings(self) -> ReverbSettings | None:

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ...domain.audio_effects import EffectBase, active_effects
+from ...domain.plugins import PluginPorts
 from .measure import Measure
 from .registry import SAMPLE_RATE, EffectRequest, build_effect, is_sample_effect
 
@@ -36,11 +37,13 @@ def chain_lines(
     measures: Mapping[int, Measure] | None = None,
     *,
     tag: str = "fx",
+    ports: Mapping[int, PluginPorts] | None = None,
 ) -> list[str]:
     """Liga `source` a `out` passando pelos efeitos ligados de `effects`, em ordem. `duration` é a duração do
     sinal que entra e `measures` traz a medida do sinal que entra em cada efeito que precisa dela, pela posição
-    do efeito na lista. Sem nenhum efeito ligado a cadeia é uma passagem direta."""
-    return stage_lines(source, out, active_effects(effects), duration, measures, tag=tag)
+    do efeito na lista (`ports` faz o mesmo com as portas de áudio dos plugins). Sem nenhum efeito ligado a cadeia
+    é uma passagem direta."""
+    return stage_lines(source, out, active_effects(effects), duration, measures, tag=tag, ports=ports)
 
 
 def stage_lines(
@@ -51,6 +54,7 @@ def stage_lines(
     measures: Mapping[int, Measure] | None = None,
     *,
     tag: str = "fx",
+    ports: Mapping[int, PluginPorts] | None = None,
 ) -> list[str]:
     """Como `chain_lines`, para efeitos que já vêm com a posição que têm na lista da spec (`active_effects`): é o
     que um trecho de ffmpeg de uma cadeia partida usa, e os rótulos seguem a posição de origem para não se repetirem."""
@@ -61,7 +65,13 @@ def stage_lines(
     for position, (index, effect) in enumerate(active):
         target = out if position == len(active) - 1 else f"[{tag}{index}]"
         request = EffectRequest(
-            effect, current, target, f"{tag}{index}", duration, (measures or {}).get(index)
+            effect,
+            current,
+            target,
+            f"{tag}{index}",
+            duration,
+            (measures or {}).get(index),
+            ports=(ports or {}).get(index),
         )
         lines += apply_effect(request)
         duration = effect.output_duration(duration)
@@ -71,25 +81,28 @@ def stage_lines(
 
 @dataclass(frozen=True)
 class Stage:
-    """Um trecho da cadeia: ou efeitos de filtro seguidos (um comando do ffmpeg), ou UM efeito de amostras (numpy).
-    Cada efeito vem com a posição que tem na lista da spec."""
+    """Um trecho da cadeia: ou efeitos de filtro seguidos (um comando do ffmpeg), ou UM efeito de amostras (numpy), ou UM
+    efeito de plugin (um comando só dele, com o ffmpeg que hospeda o formato: `host` é `lv2` ou `ladspa`). Cada efeito vem
+    com a posição que tem na lista da spec."""
 
     effects: tuple[tuple[int, EffectBase], ...]
     samples: bool = False
+    host: str | None = None
 
 
 def split_stages(effects: Sequence[EffectBase]) -> list[Stage]:
     """Parte a cadeia nos trechos em que ela muda de mundo: os efeitos de filtro seguidos ficam juntos num trecho de
-    ffmpeg e cada efeito de amostras é um estágio só dele. Uma cadeia sem efeito de amostras é um trecho só (o comando
-    de sempre). Só os efeitos ligados entram."""
+    ffmpeg e cada efeito de amostras, ou de plugin, é um estágio só dele. Uma cadeia sem nenhum dos dois é um trecho só (o
+    comando de sempre). Só os efeitos ligados entram."""
     stages: list[Stage] = []
     run: list[tuple[int, EffectBase]] = []
     for index, effect in active_effects(effects):
-        if is_sample_effect(effect):
+        host = effect.host_format()
+        if host is not None or is_sample_effect(effect):
             if run:
                 stages.append(Stage(tuple(run)))
                 run = []
-            stages.append(Stage(((index, effect),), samples=True))
+            stages.append(Stage(((index, effect),), samples=host is None, host=host))
         else:
             run.append((index, effect))
     if run or not stages:
@@ -137,6 +150,7 @@ def _inner(request: EffectRequest, first: int, last: int, source: str, out: str)
         request.measure,
         request.side,
         request.sample_rate,
+        request.ports,
     )
     return build_effect(inner)
 

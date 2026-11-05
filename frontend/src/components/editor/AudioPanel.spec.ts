@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { audioEffectCatalog } from '@/test/audioEffectsFixtures'
 import { audioWave, FakeWebAudio, voiceSpec, voiceView } from '@/test/audioPanelFixtures'
+import { audioPluginCatalog } from '@/test/audioPluginsFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useKeymapStore } from '@/stores/keymap'
@@ -229,6 +230,42 @@ describe('a janela do efeito', () => {
       action: 'add',
       target: 'audio.voiceover.0',
       effect: { type: 'normalize', peak_db: -1, remove_dc: true, stereo_independent: false, start: 2, end: 5 },
+    })
+  })
+
+  it('lista cada plugin instalado como um efeito, monta os controles dele e aplica o efeito Plugin com a seleção', async () => {
+    const { panel } = await mountPanel({ 'GET /api/audio-plugins': audioPluginCatalog() })
+    panel.select(2, 5)
+    await button('[data-audio-effect]')?.trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-effect-type] option[value="plugin:lv2-f6c94886b1"]')).not.toBeNull())
+    const options = [...document.body.querySelectorAll('[data-effect-type] option')].map((option) => option.textContent?.trim())
+    expect(options).toContain('Plugin: DMaker Eco (LV2)')
+    expect(options).not.toContain('Plugin: DragonflyHallReverb (LV2)') // o que o ffmpeg não hospeda fica de fora
+    const select = document.body.querySelector('[data-effect-type] select') as HTMLSelectElement
+    select.value = 'plugin:lv2-f6c94886b1'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+    const form = document.body.querySelector('[data-audio-effect-form]')
+    expect([...(form?.querySelectorAll('[data-effect-param]') ?? [])].map((control) => control.getAttribute('data-effect-param'))).toEqual([
+      'delay_ms',
+      'feedback',
+      'mix',
+    ])
+    expect((form?.querySelector('[data-effect-param="delay_ms"] input') as HTMLInputElement).value).toBe('250')
+    ;(document.body.querySelector('[data-effect-apply]') as HTMLElement).click()
+    await flushPromises()
+    expect(edits().at(-1)).toEqual({
+      type: 'audio_effect',
+      action: 'add',
+      target: 'audio.voiceover.0',
+      effect: {
+        type: 'plugin',
+        format: 'lv2',
+        plugin: 'urn:dmaker:test:echo',
+        params: { delay_ms: 250, feedback: 0.4, mix: 0.5 },
+        start: 2,
+        end: 5,
+      },
     })
   })
 
