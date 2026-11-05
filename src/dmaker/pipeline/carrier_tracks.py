@@ -16,7 +16,9 @@ O projeto que nenhum efeito liga a `carrier_track` não nasce com isto: não med
 
 from __future__ import annotations
 
+import os
 import struct
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -310,7 +312,8 @@ class CarrierTracks:
             return CarrierTrack(out, identity)
         if not out.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
-            staging = out.with_name(f"{out.stem}.tmp{out.suffix}")
+            # um token por execução: a prévia e o render do mesmo projeto rodam juntos e dividiriam um temporário de nome fixo
+            staging = out.with_name(f"{out.stem}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}{out.suffix}")
             args = [
                 *graph_args(ctx, inputs, lines, f"portadora_{track_id}.txt"),
                 *["-map", label, "-c:a", "pcm_f32le", "-ar", str(SAMPLE_RATE), "-ac", str(WAV_CHANNELS)],

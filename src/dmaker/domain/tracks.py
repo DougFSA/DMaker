@@ -70,14 +70,20 @@ def silenced_audio_tracks(project: Project) -> set[str]:
     return {track_id for track_id in ids if _muted(tracks, track_id) or (soloed and track_id not in soloed)}
 
 
+def _renumbered_externals(project: Project, silenced: set[str]) -> dict[str, str]:
+    """Para cada faixa externa que sobra, o id que ela passa a ter: tirar a A2 faz a A3 virar a A2, porque `audio.tracks` é
+    uma lista e a vista conta pela posição. É a conta que o Auto Duck e a portadora do Vocoder dividem."""
+    kept = [i for i in range(len(project.audio.tracks)) if f"A{2 + i}" not in silenced]
+    return {f"A{2 + old}": f"A{2 + new}" for new, old in enumerate(kept)}
+
+
 def _ducks_after_state(project: Project, audio, silenced: set[str]):
     """As regras do Auto Duck depois do mudo e do solo: uma regra cuja trilha (a que abaixa ou a que comanda) não soa
     deixa de valer, e os ids das faixas externas acompanham a lista que sobrou (tirar a A2 faz a A3 virar a A2, como
     `audio.tracks` acima)."""
     if not project.audio.ducks:
         return audio
-    kept = [i for i in range(len(project.audio.tracks)) if f"A{2 + i}" not in silenced]
-    renamed = {f"A{2 + old}": f"A{2 + new}" for new, old in enumerate(kept)}
+    renamed = _renumbered_externals(project, silenced)
     rules = []
     for rule in project.audio.ducks:
         if rule.background in silenced or rule.key in silenced:
@@ -159,6 +165,7 @@ def apply_track_state(project: Project) -> Project:
             audio = audio.model_copy(update={"sfx_gain_db": gain, "sfx_pan": pan})
 
     audio = _ducks_after_state(project, audio, silenced)
+    audio, timeline = _carriers_after_state(project, audio, timeline, silenced)
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:
@@ -194,6 +201,61 @@ def apply_track_state(project: Project) -> Project:
     )
     updated.base_dir = project.base_dir
     return updated
+
+
+def _carrier_effects(effects: list, silenced: set[str], renamed: dict[str, str]) -> list:
+    """A cadeia com a trilha portadora de cada efeito posta no estado: a que não soa vira `None` (o efeito usa a portadora
+    gerada) e a de faixa externa segue a renumeração. Devolve a própria lista quando nada muda."""
+    result = []
+    for effect in effects:
+        carrier = effect.carrier_track_id()
+        if carrier is not None:
+            target = None if carrier in silenced else renamed.get(carrier, carrier)
+            if target != carrier:
+                effect = effect.model_copy(update={"carrier_track": target})
+        result.append(effect)
+    return effects if all(new is old for new, old in zip(result, effects, strict=True)) else result
+
+
+def _carriers_after_state(project: Project, audio, timeline, silenced: set[str]):
+    """Os itens que sobraram com a portadora do Vocoder acompanhando o mudo e o solo: a trilha que não soa não pode ser
+    ouvida (o id dela passaria a apontar para outra fonte, ou para um barramento calado) e as demais seguem a renumeração das
+    faixas externas. Sem `carrier_track` em lugar nenhum devolve os mesmos objetos."""
+    if not any(
+        effect.carrier_track_id() is not None
+        for _, _, effects in project.carrier_hosts()
+        for effect in effects
+    ):
+        return audio, timeline
+    renamed = _renumbered_externals(project, silenced)
+
+    def fixed(item):
+        effects = _carrier_effects(item.effects, silenced, renamed)
+        return item if effects is item.effects else item.model_copy(update={"effects": effects})
+
+    timeline = [fixed(seg) if isinstance(seg, ClipSegment) else seg for seg in timeline]
+    update = {}
+    for name in ("tracks", "narration", "voiceover", "generated"):
+        items = getattr(audio, name)
+        new = [fixed(item) for item in items]
+        if any(a is not b for a, b in zip(new, items, strict=True)):
+            update[name] = new
+    if audio.music is not None and fixed(audio.music) is not audio.music:
+        update["music"] = fixed(audio.music)
+    return (audio.model_copy(update=update) if update else audio), timeline
+
+
+def silenced_carrier_warnings(project: Project) -> list[str]:
+    """Um aviso por item cujo Vocoder pede a portadora de uma trilha que está muda ou fora do solo: o efeito usa a portadora
+    gerada. Lê o projeto ANTES do estado, porque depois dele o campo já foi trocado por vazio."""
+    silenced = silenced_audio_tracks(project)
+    return [
+        f"{place}: o Vocoder pede a portadora da trilha {carrier}, que está muda ou fora do solo; usa a portadora gerada."
+        for host, place, effects in project.carrier_hosts()
+        if host not in silenced  # o item de uma trilha que não soa não vai a lugar nenhum: nada a avisar
+        for effect in effects
+        if effect.enabled and (carrier := effect.carrier_track_id()) in silenced
+    ]
 
 
 def _summed_pan(first: float, second: float) -> float:

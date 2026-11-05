@@ -32,7 +32,7 @@ from ..domain.brand import Theme, load_theme
 from ..domain.outputs import frame_preset
 from ..domain.spec import Project
 from ..domain.timeline import transitions_of
-from ..domain.tracks import apply_track_state
+from ..domain.tracks import apply_track_state, silenced_carrier_warnings
 from ..filtergraph.audio import StemTaps
 from ..filtergraph.audio_output import encode_args, format_filters
 from ..filtergraph.common import Inputs
@@ -257,6 +257,7 @@ class AudioRenderPipeline:
             lambda: prepare_voice_files(layout.project, self.prober, effect_processor(ctx)), "a voz gravada"
         )
         music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        ctx.warnings.extend(silenced_carrier_warnings(self.project))
         install_carrier_tracks(
             ctx,
             CarrierInputs(

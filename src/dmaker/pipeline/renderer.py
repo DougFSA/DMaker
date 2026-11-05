@@ -14,7 +14,7 @@ from ..domain.presets import Preset, get_preset
 from ..domain.sfx import plan_sfx
 from ..domain.spec import HtmlOverlay, Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
-from ..domain.tracks import apply_track_state
+from ..domain.tracks import apply_track_state, silenced_carrier_warnings
 from ..media.browser import BrowserUnavailable
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
@@ -148,6 +148,7 @@ class RenderPipeline:
         ctx.log(
             f"render {p.name}: {ctx.preset.id} {ctx.width}x{ctx.height}" + (" (preview)" if o.preview else "")
         )
+        carrier_warnings = silenced_carrier_warnings(p)  # lido antes do estado, que troca a trilha por vazio
         p = apply_track_state(p)  # mudo/oculto por trilha da interface, paridade com o Shotcut
         p = self._sliced(p, o, ctx)
         resolution = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
@@ -192,6 +193,7 @@ class RenderPipeline:
             lambda: prepare_voice_files(p, self.prober, effect_processor(ctx)), "a voz gravada"
         )
         music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        ctx.warnings.extend(carrier_warnings)
         install_carrier_tracks(
             ctx,
             CarrierInputs(

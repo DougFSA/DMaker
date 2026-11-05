@@ -49,8 +49,8 @@ def check_carrier_pair(host: str, carrier: str) -> str | None:
         return f"a trilha {host} não pode ter a si mesma como portadora; escolha outra trilha ou deixe a portadora gerada"
     if host == "A1" and is_external(carrier):
         return (
-            f"o A1 já contém as faixas externas, então não usa a {carrier} como portadora; para a câmera falar na harmonia "
-            f"da {carrier}, deixe a portadora gerada"
+            f"o A1 já contém as faixas externas, então não usa a {carrier} como portadora; escolha MUS, NAR, VO ou SFX, "
+            "ou deixe a portadora gerada"
         )
     return None
 
