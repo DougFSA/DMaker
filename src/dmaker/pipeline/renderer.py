@@ -29,7 +29,7 @@ from .assembly import (
     plan_master_effects,
 )
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
-from .auto_duck import begin_ducks, finish_ducks, project_track_origin
+from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .generated_sounds import check_generated_files
@@ -181,8 +181,23 @@ class RenderPipeline:
         check_generated_files(p)
         self._check_html(ctx)
 
-        # o Auto Duck: as regras de chave externa já se planejam, porque a faixa de fundo abaixa dentro do mezanino
-        begin_ducks(ctx, timeline_spans(durations, transitions), track_origin)
+        # o que não depende dos mezaninos fica pronto antes deles: o Auto Duck mede a chave de uma faixa externa de fundo
+        # (que abaixa dentro do mezanino) na narração, nas vozes gravadas e na música já processadas
+        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
+        voice_files = prepare_voice_files(p, self.prober, effect_processor(ctx))
+        music_path = processed_music(ctx, self._music_path())
+        begin_ducks(
+            ctx,
+            DuckInputs(
+                timeline_spans(durations, transitions),
+                sources,
+                total,
+                track_origin,
+                voiceovers,
+                voice_files,
+                music_path,
+            ),
+        )
         prepared = self.mezzanines.prepare(ctx, sources)
         pending = sum(1 for item in prepared if item.command is not None)
         ctx.log(f"trechos: {len(prepared)} ({pending} a gerar, {len(prepared) - pending} em cache)")
@@ -191,9 +206,7 @@ class RenderPipeline:
         total = timeline_total(durations, transitions)
         spans = timeline_spans(durations, transitions)
         tones = [item.tone for item in prepared]
-        voiceovers = processed_voiceovers(ctx, self.voiceover.prepare(ctx))
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
-        voice_files = prepare_voice_files(p, self.prober, effect_processor(ctx))
 
         if p.captions and p.captions.enabled and not o.no_captions:
             ctx.log(
@@ -211,7 +224,6 @@ class RenderPipeline:
             layer.behind_doc.write(ctx.job_dir / "overlay_behind.ass")
         processed_pips(ctx, layer.video_overlays)
 
-        music_path = processed_music(ctx, self._music_path())
         sfx = self._effects(
             ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays, voice_files
         )
@@ -380,9 +392,7 @@ class RenderPipeline:
     ) -> tuple[dict | None, bool, float]:
         """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`). Antes dela, mede a
         mistura que cada efeito do master pede, para a medição do loudness já enxergar o master pronto."""
-        finish_ducks(
-            ctx, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
-        )
+        finish_ducks(ctx, music_path, total, voiceovers, sfx, voice_files)
         plan_master_effects(
             ctx,
             self.master_meter,

@@ -17,12 +17,13 @@ describe('trilhas do Auto Duck', () => {
   })
 
   it('oferece como chave só as combinações que o servidor aceita', () => {
-    // a faixa externa só abaixa sob outra faixa externa
-    expect(keyOptions('A2', TRACKS)).toEqual(['A3'])
+    // a faixa externa abaixa sob a câmera, outra faixa externa, a música e as vozes
+    expect(keyOptions('A2', TRACKS)).toEqual(['A1', 'A3', 'MUS', 'NAR', 'VO'])
     // o A1 já contém as faixas externas
     expect(keyOptions('A1', TRACKS)).toEqual(['MUS', 'NAR', 'VO'])
     expect(keyOptions('MUS', TRACKS)).toEqual(['A1', 'A2', 'A3', 'NAR', 'VO'])
-    expect(keyOptions('A2', ['A1', 'A2'])).toEqual([])
+    expect(keyOptions('A2', ['A1', 'A2'])).toEqual(['A1'])
+    expect(keyOptions('A2', ['A2'])).toEqual([])
   })
 })
 

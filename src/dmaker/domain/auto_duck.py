@@ -3,11 +3,13 @@
 O Auto Duck do Audacity abaixa o volume das trilhas selecionadas pela hora em que a trilha de controle passa de um
 nível. Aqui cada regra (`audio.ducks`) diz qual trilha abaixa (`background`) e qual a comanda (`key`), pelos ids de
 trilha da vista multitrilha: `A1` (o som dos trechos), `A2`, `A3`... (as faixas externas), `MUS`, `NAR`, `VO` e `SFX`.
-A regra vale entre quaisquer duas trilhas, com duas exceções que vêm de onde cada som é misturado:
+A regra vale entre quaisquer duas trilhas, com uma exceção que vem de onde cada som é misturado: `A1` já contém as faixas
+externas, então não abaixa sob uma delas (abaixe a faixa externa de fundo sob a chave).
 
-- uma faixa externa vive dentro do mezanino do clipe, que é montado antes da narração, da música e dos efeitos
-  existirem; por isso ela só abaixa sob OUTRA faixa externa;
-- `A1` já contém as faixas externas, então não abaixa sob uma delas.
+A chave `A1` é o som dos próprios trechos (a câmera com os efeitos e o volume do clipe), sem as faixas externas e sem os
+PiPs: é isso que permite a faixa externa abaixar sob a câmera, e vale para toda regra com chave `A1`, de qualquer fundo.
+Uma faixa externa vive dentro do mezanino do clipe, que é montado antes da narração, da música e dos efeitos existirem;
+por isso a chave de uma regra de fundo externo é medida antes dos mezaninos (ver `AutoDuck.measured_early`).
 
 O `music.ducking` antigo (o `sidechaincompress`, ligado por padrão) continua igual enquanto não há regra para a
 música. Uma regra com `background: "MUS"` o substitui: os dois não rodam juntos.
@@ -98,16 +100,10 @@ class AutoDuck(BaseModel):
             raise ValueError(
                 f"Auto Duck: a trilha {self.key} não abaixa sob ela mesma; escolha outra para comandar"
             )
-        if is_external(self.background) and not is_external(self.key):
-            raise ValueError(
-                f"Auto Duck: a faixa externa {self.background} só abaixa sob outra faixa externa (A2, A3...). Ela é misturada "
-                "dentro do clipe, antes da música e das vozes existirem; para abaixar sob a narração ou a voz gravada, "
-                "abaixe a música ou o som do clipe (A1)"
-            )
         if self.background == "A1" and is_external(self.key):
             raise ValueError(
-                f"Auto Duck: A1 já contém as faixas externas, então não abaixa sob {self.key}. Abaixe a faixa externa "
-                "de fundo sob ela"
+                f"Auto Duck: A1 já contém as faixas externas, então não abaixa sob {self.key}: abaixá-lo abaixaria a "
+                f"própria {self.key}. Para a câmera aparecer por cima dela, abaixe a faixa externa {self.key} sob o A1"
             )
         return self
 
@@ -116,6 +112,13 @@ class AutoDuck(BaseModel):
         """A pausa que de fato separa duas regiões: a `max_pause`, ou a soma das rampas de fora quando esta é maior (a
         subida de uma e a descida da outra não cabem numa pausa menor, e o fundo nunca chegaria a voltar)."""
         return max(self.max_pause, self.outer_fade_down + self.outer_fade_up)
+
+    @property
+    def measured_early(self) -> bool:
+        """Se a chave se mede antes de os mezaninos existirem: a chave `A1` (só a câmera) e a externa vêm do arquivo, e as
+        outras (`MUS`, `NAR`, `VO`, `SFX`) vêm da cópia da mixagem quando o fundo é uma faixa externa, porque ela é
+        abaixada dentro do clipe. Nos demais fundos a medida espera a mixagem pronta (`finish_ducks`)."""
+        return self.key == "A1" or is_external(self.key) or is_external(self.background)
 
     @property
     def is_music_rule(self) -> bool:
@@ -152,6 +155,30 @@ def merge_runs(runs: Sequence[Region], pause: float) -> list[Region]:
 def key_regions(runs: Sequence[Region], rule: AutoDuck) -> list[Region]:
     """As regiões em que a chave comanda: os trechos que soam, juntados pela pausa da regra."""
     return merge_runs(runs, rule.settle_pause)
+
+
+def clip_runs(
+    file_runs: Sequence[Region], start: float, end: float, file_in: float, speed: float
+) -> list[Region]:
+    """Os trechos do arquivo que um clipe toca (de `file_in`, durante `end - start` segundos da linha do tempo, na
+    velocidade `speed`), no tempo da linha do tempo final."""
+    heard_until = file_in + (end - start) * speed
+    mapped = []
+    for first, last in file_runs:
+        low, high = max(first, file_in), min(last, heard_until)
+        if high > low:
+            mapped.append((start + (low - file_in) / speed, start + (high - file_in) / speed))
+    return mapped
+
+
+def camera_runs(
+    file_runs: Sequence[Region], span: tuple[float, float], speed: float, file_in: float, lead: float = 0.0
+) -> list[Region]:
+    """Os trechos em que a câmera de um clipe soa na linha do tempo final: `file_runs` são os trechos do arquivo da câmera
+    (no tempo dele), `span` é onde o clipe cai, `file_in` o ponto do arquivo em que o clipe começa a ouvir e `lead` o
+    silêncio, em segundos de fonte, que antecede o som (o som deslocado para antes do começo do arquivo). Só o som do
+    próprio clipe: as faixas externas e os PiPs não entram."""
+    return clip_runs(file_runs, span[0] + lead / speed, span[1], file_in, speed)
 
 
 # ---------- a curva de ganho do fundo ----------

@@ -61,7 +61,6 @@ def test_the_rule_has_the_audacity_defaults_and_stays_out_of_an_old_dump():
     "fields, expected",
     [
         ({"background": "MUS", "key": "MUS"}, "não abaixa sob ela mesma"),
-        ({"background": "A2", "key": "NAR"}, "só abaixa sob outra faixa externa"),
         ({"background": "A1", "key": "A3"}, "já contém as faixas externas"),
         ({"background": "XX", "key": "VO"}, "trilha desconhecida"),
         ({"background": "MUS", "key": "VO", "amount_db": 3}, "less than or equal"),
@@ -81,6 +80,12 @@ def test_every_other_combination_is_accepted():
         ("A1", "NAR"),
         ("SFX", "VO"),
         ("VO", "MUS"),
+        # a faixa externa abaixa sob a câmera, a narração, a voz gravada, os efeitos e a música (a chave se mede antes do mezanino)
+        ("A2", "A1"),
+        ("A3", "NAR"),
+        ("A2", "VO"),
+        ("A2", "MUS"),
+        ("A4", "SFX"),
     ]:
         AutoDuck(background=background, key=key)
 
@@ -257,8 +262,8 @@ def test_edits_add_set_and_remove_rules_and_refuse_a_bad_pair():
     changed = set_duck(added, 0, {"amount_db": -15})
     assert (changed.audio.ducks[0].amount_db, changed.audio.ducks[0].key) == (-15, "VO")
     assert remove_duck(changed, 0).audio.ducks == []
-    with pytest.raises(EditError, match="só abaixa sob outra faixa externa"):
-        add_duck(start, {"background": "A2", "key": "NAR"})
+    with pytest.raises(EditError, match="já contém as faixas externas"):
+        add_duck(start, {"background": "A1", "key": "A2"})
     with pytest.raises(EditError, match="informe"):
         add_duck(start, {"background": "MUS"})
     with pytest.raises(EditError, match="fora do intervalo"):

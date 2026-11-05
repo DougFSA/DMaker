@@ -3951,7 +3951,7 @@ def duck_add(
     ] = None,
 ) -> None:
     """Acrescenta uma regra (por exemplo: audio duck add spec.json MUS VO -p amount_db=-15). Uma regra para a música
-    substitui o ducking antigo dela; a faixa externa só abaixa sob outra faixa externa."""
+    substitui o ducking antigo dela; a faixa externa (A2...) abaixa sob qualquer trilha, e o A1 é só a câmera dos clipes."""
     _run_wave_edit(
         spec,
         {"type": "auto_duck_add", "background": background, "key": key, **_parse_effect_params(param)},
