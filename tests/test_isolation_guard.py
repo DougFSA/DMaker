@@ -39,6 +39,9 @@ DATA_NAMES = (
     "VOICES_DIR",
     "LEXICON_DIR",
     "LAYOUTS_FILE",
+    "PLUGINS_DIR",
+    "PLUGINS_FILE",
+    "PLUGIN_SCAN_DIR",
 )
 
 # caminhos reais que não existem de propósito: abrir para escrever aqui falha, mas o gancho já viu a tentativa
@@ -48,12 +51,14 @@ REAL_PATHS_THAT_MUST_NOT_BE_WRITTEN = [
     REAL_ROOT / "projects" / "__guarda__" / "spec.json",
     REAL_ROOT / "assets" / "voices" / "__guarda__" / "voice.json",
     REAL_ROOT / "assets" / "brands" / "__guarda__" / "pronunciation.json",
+    REAL_ROOT / "plugins" / "__guarda__" / "eco.lv2" / "manifest.ttl",
 ]
 
 # arquivos que existem de verdade (ou podem existir): o gancho recebe o evento direto, sem abrir nada
 REAL_FILES_THAT_MUST_NOT_BE_WRITTEN = [
     REAL_ROOT / "assets" / "pronunciation.json",
     REAL_ROOT / "layouts.json",
+    REAL_ROOT / "plugins.json",
 ]
 
 

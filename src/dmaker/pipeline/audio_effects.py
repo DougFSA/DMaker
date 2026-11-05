@@ -434,7 +434,9 @@ def effect_processor(ctx: RenderContext) -> EffectProcessor:
     """O processador do render em curso, criado na primeira vez que algum item tem efeito."""
     if ctx.audio_fx is None:
         ctx.audio_fx = EffectProcessor(
-            ctx.runner, profiles=ProfileLocator(ctx.project, ctx.session), on_warning=ctx.warn
+            ctx.runner,
+            profiles=ProfileLocator(ctx.project, ctx.session),
+            on_warning=getattr(ctx, "warn", None),
         )
     return ctx.audio_fx
 
