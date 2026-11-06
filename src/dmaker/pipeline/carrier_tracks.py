@@ -20,7 +20,7 @@ import os
 import struct
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Generic, TypeVar
 
@@ -108,10 +108,55 @@ def uses_carrier_tracks(project: Project) -> bool:
     )
 
 
-def install_carrier_tracks(ctx: RenderContext, inputs: CarrierInputs) -> None:
+@dataclass(frozen=True)
+class HeardView:
+    """O projeto como o Vocoder o ouve (`domain.tracks.carrier_heard_project`), já resolvido pelos mesmos passos da mistura: o
+    projeto físico, a sessão, as fontes e a origem das faixas externas. `lazies` recebe o contexto da visão ouvida e devolve a
+    narração, a voz gravada e a música dela já processadas, preguiçosas, para a narração muda só ser sintetizada se alguém a pedir."""
+
+    project: Project
+    session: dict
+    sources: Sequence[Source]
+    track_origin: Sequence[int] | None
+    lazies: Callable[
+        [RenderContext], tuple[Callable[[], Sequence], Callable[[], Sequence], Callable[[], Path | None]]
+    ]
+
+
+def install_carrier_tracks(ctx: RenderContext, inputs: CarrierInputs, heard: HeardView | None = None) -> None:
     """Põe em `ctx.carrier_tracks` a passada prévia deste render, ou None quando nenhum efeito usa `carrier_track`. Os três
-    pontos de entrada chamam isto antes do primeiro `process`: o item que ouve outra trilha precisa dela na hora de ser processado."""
-    ctx.carrier_tracks = CarrierTracks(ctx, inputs) if uses_carrier_tracks(ctx.project) else None
+    pontos de entrada chamam isto antes do primeiro `process`: o item que ouve outra trilha precisa dela na hora de ser processado.
+
+    Com `heard` (um efeito pediu para ouvir uma trilha muda) a passada trabalha num contexto próprio, o da visão ouvida: o resto
+    do render segue com a mistura, e a linha do tempo (`spans` e `total`) é a mesma nas duas."""
+    if not uses_carrier_tracks(ctx.project):
+        ctx.carrier_tracks = None
+        return
+    if heard is None:
+        ctx.carrier_tracks = CarrierTracks(ctx, inputs)
+        return
+    from .audio_effects import effect_processor
+
+    effect_processor(ctx)  # criado antes da cópia, para as duas visões dividirem o processador e o cache dele
+    heard_ctx = replace(
+        ctx,
+        project=heard.project,
+        session=heard.session,
+        track_audio=None,
+        carrier_tracks=None,
+        duck_plan=None,
+    )
+    voiceovers, voice_files, music_path = heard.lazies(heard_ctx)
+    tracks = CarrierTracks(
+        heard_ctx,
+        CarrierInputs(
+            inputs.spans, heard.sources, inputs.total, heard.track_origin, voiceovers, voice_files, music_path
+        ),
+    )
+    heard_ctx.carrier_tracks = (
+        tracks  # o item de uma trilha muda lida também acha a posição dele na linha do tempo
+    )
+    ctx.carrier_tracks = tracks
 
 
 def wav_layout(path: Path) -> tuple[int, int]:
@@ -406,6 +451,7 @@ def _fitted_frames(samples: np.ndarray, frames: int) -> np.ndarray:
 
 __all__ = [
     "CarrierInputs",
+    "HeardView",
     "CarrierTracks",
     "Deferred",
     "install_carrier_tracks",

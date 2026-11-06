@@ -2,8 +2,9 @@
 na linha do tempo). Não importa a `spec`: quem monta os pares a partir do projeto é o `Project`, e quem lê o som é o
 pipeline (`pipeline/carrier_tracks.py`).
 
-Os ids são os do Auto Duck (`A1`, `A2`..., `MUS`, `NAR`, `VO`, `SFX`), e os limites são os que o DMK-69 deixou: a mesma trilha é
-recusada e o `A1` não ouve uma faixa externa. O resto vale, inclusive a cadeia (a voz com portadora na música, e a música com
+Os ids são os do Auto Duck (`A1`, `A2`..., `MUS`, `NAR`, `VO`, `SFX`). Só a mesma trilha e o id desconhecido são recusados: o
+Vocoder do clipe age no som da câmera antes da mistura, então o `A1` pode ouvir uma faixa externa (a recusa do Auto Duck, que
+mede a chave dentro do mezanino, não vale aqui). O resto vale, inclusive a cadeia (a voz com portadora na música, e a música com
 portadora na narração), desde que não feche um ciclo.
 """
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .auto_duck import is_external, is_track_id
+from .auto_duck import is_track_id
 
 
 @dataclass(frozen=True)
@@ -47,11 +48,6 @@ def check_carrier_pair(host: str, carrier: str) -> str | None:
         return f"trilha desconhecida: {carrier!r}. Use A1, A2 (A3...), MUS, NAR, VO ou SFX, os ids da linha do tempo"
     if carrier == host:
         return f"a trilha {host} não pode ter a si mesma como portadora; escolha outra trilha ou deixe a portadora gerada"
-    if host == "A1" and is_external(carrier):
-        return (
-            f"o A1 já contém as faixas externas, então não usa a {carrier} como portadora; escolha MUS, NAR, VO ou SFX, "
-            "ou deixe a portadora gerada"
-        )
     return None
 
 

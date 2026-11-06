@@ -38,7 +38,7 @@ def tone(hz: float, seconds: float = 6.0) -> np.ndarray:
     return (0.5 * np.sin(2 * np.pi * hz * np.arange(round(seconds * RATE)) / RATE)).astype(np.float32)
 
 
-def build_project(folder: Path, states: dict, carrier: str | None) -> Project:
+def build_project(folder: Path, states: dict, carrier: str | None, ignores: bool = False) -> Project:
     folder.mkdir(parents=True, exist_ok=True)
     make_video(folder, 6.0)
     write_wav(folder / "fala.wav", noise(3.0))
@@ -60,7 +60,13 @@ def build_project(folder: Path, states: dict, carrier: str | None) -> Project:
                     {
                         "src": "fala.wav",
                         "start": 1.0,
-                        "effects": [{**vocoder, **({"carrier_track": carrier} if carrier else {})}],
+                        "effects": [
+                            {
+                                **vocoder,
+                                **({"carrier_track": carrier} if carrier else {}),
+                                **({"carrier_ignores_mute": True} if ignores else {}),
+                            }
+                        ],
                     }
                 ],
             },
@@ -109,10 +115,10 @@ def tone_level(samples: np.ndarray, hz: float) -> float:
 
 @pytest.fixture
 def scenario(tmp_path, monkeypatch):
-    def run(name: str, states: dict, carrier: str | None = "A3"):
+    def run(name: str, states: dict, carrier: str | None = "A3", ignores: bool = False):
         monkeypatch.setattr(config, "AUDIO_FX_DIR", tmp_path / f"fx-{name}")
         folder = tmp_path / name
-        project = build_project(folder, states, carrier)
+        project = build_project(folder, states, carrier, ignores)
         mix, warnings = render(project, folder)
         return project, folder, mix, warnings, processed_voice()
 
@@ -158,3 +164,64 @@ def test_the_preview_also_warns_when_the_carrier_track_is_muted(scenario):
     project, folder, _, _, _ = scenario("a3-muda", {"A3": {"muted": True}})
     builder = PreviewAudioBuilder(offset_finder=no_sync, cache_dir=folder / "pa", jobs_dir=folder / "pj")
     assert any(warning.endswith(WARNING_PART) for warning in builder.build(project).warnings)
+
+
+# ---------- a escolha "ouvir a trilha mesmo muda" ----------
+
+
+def test_a_muted_track_the_vocoder_chose_to_hear_is_still_the_carrier_and_stays_out_of_the_mix(scenario):
+    _, _, base_mix, _, base = scenario("base", {})
+    _, _, mix, warnings, heard = scenario("a3-muda-ouvida", {"A3": {"muted": True}}, ignores=True)
+    assert dominant_hz(heard) == pytest.approx(TONES["b"], abs=15)
+    assert float(np.max(np.abs(heard - base))) == 0.0  # o mesmo item processado do projeto sem mudo
+    assert not any(
+        WARNING_PART in warning for warning in warnings
+    )  # a escolha era de ouvir: nada foi perdido
+    # depois que a voz acaba (4 s) só tocam as faixas que soam: o tom da A3 (1000 Hz) está fora da mistura, e o da A2 segue nela
+    after = slice(round(4.5 * RATE), round(5.8 * RATE))
+    assert tone_level(mix[after], TONES["b"]) < -80.0
+    assert tone_level(mix[after], TONES["a"]) > -60.0
+    assert tone_level(base_mix[after], TONES["b"]) > -60.0  # no projeto sem mudo ela toca
+
+
+def test_a_track_outside_the_solo_is_heard_when_the_choice_is_on_and_is_the_generated_carrier_when_off(
+    scenario,
+):
+    _, _, _, _, base = scenario("base", {})
+    _, _, _, warnings, heard = scenario("solo-ouvida", {"VO": {"solo": True}}, ignores=True)
+    assert float(np.max(np.abs(heard - base))) == 0.0
+    assert not any(WARNING_PART in warning for warning in warnings)
+    _, _, _, _, off = scenario("solo-desligada", {"VO": {"solo": True}})
+    _, _, _, _, generated = scenario("gerada", {"VO": {"solo": True}}, carrier=None)
+    assert float(np.max(np.abs(off - generated))) == 0.0
+    assert float(np.max(np.abs(off - heard))) > 1e-3
+
+
+def test_the_preview_hears_the_muted_track_as_the_render_does(scenario):
+    project, folder, render_mix, _, _ = scenario("a3-muda-ouvida", {"A3": {"muted": True}}, ignores=True)
+    builder = PreviewAudioBuilder(offset_finder=no_sync, cache_dir=folder / "pa", jobs_dir=folder / "pj")
+    preview = decode(builder.build(project).path, RATE, 1)[:, 0]
+    window = slice(round(1.2 * RATE), round(3.8 * RATE))
+    assert dominant_hz(preview[window]) == pytest.approx(TONES["b"], abs=15)
+    gap = abs(tone_level(preview[window], TONES["b"]) - tone_level(render_mix[window], TONES["b"]))
+    assert gap < 0.5  # a prévia e o render soam iguais nessa medida
+
+
+def test_changing_the_file_of_the_muted_track_changes_the_item_and_the_preview_key(tmp_path, monkeypatch):
+    def processed_after(name: str, hz: float) -> tuple[np.ndarray, str]:
+        monkeypatch.setattr(config, "AUDIO_FX_DIR", tmp_path / f"fx-{name}")
+        folder = tmp_path / "mesma-pasta"
+        project = build_project(folder, {"A3": {"muted": True}}, "A3", True)
+        write_wav(folder / "b.wav", tone(hz))  # o arquivo da trilha muda troca
+        builder = PreviewAudioBuilder(
+            offset_finder=no_sync, cache_dir=tmp_path / "pa", jobs_dir=tmp_path / "pj"
+        )
+        key = builder.key(project)
+        render(project, folder)
+        return processed_voice(), key
+
+    first, first_key = processed_after("antes", TONES["b"])
+    second, second_key = processed_after("depois", 1600.0)
+    assert dominant_hz(first) == pytest.approx(TONES["b"], abs=15)
+    assert dominant_hz(second) == pytest.approx(1600.0, abs=15)
+    assert first_key != second_key

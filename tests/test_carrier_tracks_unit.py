@@ -61,12 +61,10 @@ def test_every_pair_the_auto_duck_accepts_is_accepted(host, carrier):
     assert check_carrier_pair(host, carrier) is None
 
 
-def test_the_same_track_and_the_camera_under_an_external_track_are_refused_with_what_to_do():
+def test_the_same_track_is_refused_with_what_to_do_and_the_camera_hears_an_external_track():
     same = check_carrier_pair("MUS", "MUS")
     assert same is not None and "MUS" in same and "portadora gerada" in same
-    camera = check_carrier_pair("A1", "A3")
-    assert camera is not None and "A1" in camera and "A3" in camera and "portadora gerada" in camera
-    assert "escolha MUS, NAR, VO ou SFX" in camera and "harmonia" not in camera
+    assert check_carrier_pair("A1", "A2") is None and check_carrier_pair("A1", "A3") is None
     assert "desconhecida" in (check_carrier_pair("MUS", "XYZ") or "")
 
 
@@ -77,6 +75,10 @@ def test_a_cycle_of_two_and_of_three_is_found_and_a_chain_without_one_is_not():
     assert find_cycle([("VO", "MUS"), ("MUS", "NAR"), ("NAR", "A2")]) is None
     assert find_cycle([("VO", "MUS"), ("NAR", "MUS")]) is None  # duas trilhas ouvindo a mesma não é ciclo
     assert find_cycle([]) is None
+
+
+def test_the_camera_and_an_external_track_that_hear_each_other_close_a_cycle():
+    assert find_cycle([("A1", "A2"), ("A2", "A1")]) == ["A1", "A2", "A1"]
 
 
 # ---------- a spec ----------
@@ -132,7 +134,16 @@ def vocoder(track: str | None) -> dict:
 def test_the_project_refuses_the_pair_that_does_not_hold_and_says_which_item_and_what_to_do():
     with pytest.raises(ValueError, match=r"audio\.music.*MUS.*portadora gerada"):
         audio_project(music={"src": "m.mp3", "effects": [vocoder("MUS")]})
-    with pytest.raises(ValueError, match=r"timeline\[0\].*A1.*A2.*portadora gerada"):
+    camera = Project.model_validate(
+        {
+            "name": "p",
+            "sources": {"c": {"src": "v.mp4"}, "r": {"src": "r.wav"}},
+            "timeline": [{"type": "clip", "source": "c", "start": 0, "end": 5, "effects": [vocoder("A2")]}],
+            "audio": {"tracks": [{"source": "r"}]},
+        }
+    )
+    assert uses_carrier_tracks(camera)  # a câmera ouve a faixa externa
+    with pytest.raises(ValueError, match="ciclo"):
         Project.model_validate(
             {
                 "name": "p",
@@ -140,7 +151,7 @@ def test_the_project_refuses_the_pair_that_does_not_hold_and_says_which_item_and
                 "timeline": [
                     {"type": "clip", "source": "c", "start": 0, "end": 5, "effects": [vocoder("A2")]}
                 ],
-                "audio": {"tracks": [{"source": "r"}]},
+                "audio": {"tracks": [{"source": "r", "effects": [vocoder("A1")]}]},
             }
         )
 

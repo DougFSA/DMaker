@@ -38,6 +38,14 @@ function catalog(): AudioEffectCatalog {
         parameters: [
           param({ name: 'carrier', label: 'Portadora', kind: 'carrier', default: carrier as never, shown_when: { carrier_track: null } }),
           param({ name: 'carrier_track', label: 'Trilha da portadora', kind: 'carrier_track', hint: 'De que trilha vem a portadora.' }),
+          param({
+            name: 'carrier_ignores_mute',
+            label: 'Ouvir a trilha mesmo muda',
+            kind: 'boolean',
+            default: false,
+            hint: 'O mudo e o solo só tiram a trilha da mistura.',
+            shown_when: { carrier_track: '*' },
+          }),
           param({ name: 'bands', label: 'Bandas', kind: 'integer', default: 40, minimum: 1, maximum: 50 }),
         ],
       },
@@ -74,6 +82,7 @@ function view(): TimelineView {
       timelineTrack('V1', [timelineItem(0, { id: 'V1-0', kind: 'clip', label: 'clip.0' })]),
       timelineTrack('V2', [timelineItem(0, { id: 'V2-0', kind: 'video', label: 'pip.0' })]),
       timelineTrack('A1', [timelineItem(0, { id: 'A1-0', kind: 'clip', label: 'clip.0' })], { kind: 'audio' }),
+      timelineTrack('A2', [timelineItem(0, { id: 'A2-0', kind: 'audio', label: 'gravador' })], { kind: 'audio' }),
       timelineTrack('MUS', [timelineItem(0, { id: 'MUS-0', kind: 'music', label: 'musica' })], { kind: 'audio' }),
       timelineTrack('VO', [timelineItem(0, { id: 'VO-0', kind: 'voiceover', label: 'voiceover.0' })], { kind: 'audio' }),
     ],
@@ -101,16 +110,16 @@ describe('o seletor da trilha da portadora', () => {
   it('na música oferece o som gerado e as outras trilhas do projeto, nunca a própria música', async () => {
     const { wrapper } = await mountOn('MUS-0')
     expect(wrapper.find('[data-effect-param="carrier_track"]').exists()).toBe(true)
-    expect(values(wrapper)).toEqual(['', 'A1', 'VO'])
+    expect(values(wrapper)).toEqual(['', 'A1', 'A2', 'VO'])
     expect(wrapper.find('[data-effect-param="carrier_track"]').text()).toContain('Som gerado')
   })
 
   it('na voz gravada oferece a música e o som dos clipes', async () => {
     const { wrapper } = await mountOn('VO-0')
-    expect(values(wrapper)).toEqual(['', 'A1', 'MUS'])
+    expect(values(wrapper)).toEqual(['', 'A1', 'A2', 'MUS'])
   })
 
-  it('no som do clipe (A1) só oferece o que o par aceita', async () => {
+  it('no som do clipe (A1) oferece também as faixas externas', async () => {
     const opened = await openEditor(
       { ...spec(), timeline: [{ type: 'clip', src: 'a.mp4', start: 0, speed: 1, volume: 1, mute: false, effects: [{ type: 'vocoder' }] }] },
       { 'GET /api/audio-effects': catalog(), 'POST /api/projects/demo/timeline': () => view() },
@@ -119,7 +128,7 @@ describe('o seletor da trilha da portadora', () => {
     mounted.push(wrapper)
     opened.store.select(['A1-0'])
     await flushPromises()
-    expect(values(wrapper)).toEqual(['', 'MUS', 'VO'])
+    expect(values(wrapper)).toEqual(['', 'A2', 'MUS', 'VO'])
   })
 
   it('no PiP a escolha não existe', async () => {
@@ -157,5 +166,32 @@ describe('escolher a trilha', () => {
     const { wrapper } = await mountOn('VO-0', { type: 'vocoder', carrier_track: 'A5' })
     expect(values(wrapper)).toContain('A5')
     expect(wrapper.find('[data-effect-param="carrier_track"]').text()).toContain('não existe')
+  })
+})
+
+describe('ouvir a trilha mesmo muda', () => {
+  const choice = '[data-effect-param="carrier_ignores_mute"]'
+
+  it('a caixa só aparece com uma trilha escolhida e some quando se volta ao som gerado', async () => {
+    const { wrapper } = await mountOn('VO-0')
+    expect(wrapper.find(choice).exists()).toBe(false)
+    await wrapper.find('[data-effect-param="carrier_track"] select').setValue('A2')
+    await flushPromises()
+    expect(wrapper.find(choice).exists()).toBe(true)
+    expect(wrapper.find(choice).text()).toContain('Ouvir a trilha mesmo muda')
+    await wrapper.find('[data-effect-param="carrier_track"] select').setValue('')
+    await flushPromises()
+    expect(wrapper.find(choice).exists()).toBe(false)
+  })
+
+  it('marcar grava a escolha na spec e o desfazer a tira, num passo só', async () => {
+    const { opened, wrapper } = await mountOn('VO-0', { type: 'vocoder', carrier_track: 'MUS' })
+    await wrapper.find(`${choice} input`).setValue(true)
+    await flushPromises()
+    expect(opened.store.get('audio.voiceover.0.effects.0.carrier_ignores_mute')).toBe(true)
+    opened.store.undo()
+    await flushPromises()
+    expect(opened.store.get('audio.voiceover.0.effects.0.carrier_ignores_mute')).toBeUndefined()
+    expect(opened.store.get('audio.voiceover.0.effects.0.carrier_track')).toBe('MUS')
   })
 })

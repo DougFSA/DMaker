@@ -26,6 +26,10 @@ EPSILON = 1e-6
 EFFECT_SAMPLE_RATE = 48000
 
 
+# valor de `shown_when` que quer dizer "qualquer valor preenchido" (nem vazio, nem nulo): mostra o campo enquanto o outro estiver escolhido
+SHOWN_WHEN_FILLED = "*"
+
+
 def param(
     default: Any,
     *,
@@ -45,7 +49,8 @@ def param(
     `band_gains` e `freq_points`: as listas do EQ). `low` e `high` dão a faixa dos ITENS de uma lista (que `ge` e `le`
     não expressam), e `options` os nomes das posições de uma lista de tamanho fixo. `shown_when` é a condição para a
     interface mostrar o campo: `{"mode": "semitones"}` o esconde enquanto o campo `mode` do mesmo efeito tiver outro
-    valor (os modos de unidade do Mudar Tom). Só esconde: a spec aceita o campo sempre."""
+    valor (os modos de unidade do Mudar Tom); `SHOWN_WHEN_FILLED` no lugar do valor mostra o campo com qualquer valor preenchido
+    no outro. Só esconde: a spec aceita o campo sempre."""
     extra: dict[str, Any] = {"label": label, "unit": unit}
     if kind:
         extra["kind"] = kind
@@ -181,6 +186,11 @@ class EffectBase(BaseModel):
         """A trilha do projeto (`A1`, `MUS`, `NAR`...) de onde vem a segunda entrada do efeito, ou None quando ela é o som gerado
         de `carrier_sound()`. Só o Vocoder escolhe a trilha; o resto da spec e dos pares recusados está em `domain.carrier_tracks`."""
         return None
+
+    def hears_silenced_carrier(self) -> bool:
+        """Se o efeito continua ouvindo a trilha da portadora quando ela está muda ou fora do solo: o mudo e o solo só a tiram da
+        mistura. Falso (o padrão) faz a trilha que não soa valer como ausente, e o efeito usa a portadora gerada."""
+        return False
 
     def alters_duration(self) -> bool:
         """Se ESTA instância muda a duração do item. É `changes_duration` para quase todos; o Cortar decide pelo
