@@ -12,7 +12,7 @@ import type {
   TimelineItem,
   TimelineView,
 } from '@/api'
-import { keyOptions, trackLabel } from './autoDuck'
+import { isDuckTrack, trackLabel } from './autoDuck'
 import { getPath, setPath } from './editorPaths'
 import { displayLabel } from './timeline'
 
@@ -121,9 +121,13 @@ export function hostTrackOf(listPath: string): string | null {
 /** O valor de `carrier_track` que não guarda trilha: o som gerado do Vocoder. */
 export const GENERATED_CARRIER = ''
 
+/** O valor de `shown_when` que quer dizer "qualquer valor preenchido" no outro campo (a mesma constante do servidor). */
+export const SHOWN_WHEN_FILLED = '*'
+
 /**
- * As opções da portadora do Vocoder: o som gerado e as trilhas que o par aceita (as mesmas do Auto Duck). Nulo onde a
- * escolha não existe (PiP, master). A trilha que a spec cita e o projeto não tem fica na lista, marcada, para não sumir.
+ * As opções da portadora do Vocoder: o som gerado e qualquer trilha do projeto menos a do próprio item. A regra é só dela: o
+ * Vocoder do clipe age no som da câmera antes da mistura, então o A1 também ouve uma faixa externa (o Auto Duck não deixa).
+ * Nulo onde a escolha não existe (PiP, master). A trilha que a spec cita e o projeto não tem fica na lista, marcada, para não sumir.
  */
 export function carrierTrackOptions(
   host: string | null,
@@ -133,7 +137,7 @@ export function carrierTrackOptions(
   if (host === null) return null
   const options = [
     { value: GENERATED_CARRIER, label: 'Som gerado' },
-    ...keyOptions(host, present).map((id) => ({ value: id, label: trackLabel(id) })),
+    ...present.filter((id) => id !== host && isDuckTrack(id)).map((id) => ({ value: id, label: trackLabel(id) })),
   ]
   if (current && !options.some((option) => option.value === current)) options.push({ value: current, label: `${trackLabel(current)} (não existe)` })
   return options
@@ -224,7 +228,10 @@ export function isParamShown(
   return Object.entries(condition).every(([field, expected]) => {
     const stored = values[field]
     const fallback = siblings.find((sibling) => sibling.name === field)?.default
-    return (stored === undefined || stored === null ? fallback : stored) === expected
+    const value = stored === undefined || stored === null ? fallback : stored
+    // `SHOWN_WHEN_FILLED`: qualquer valor preenchido (a trilha escolhida, por exemplo), nem vazio nem nulo
+    if (expected === SHOWN_WHEN_FILLED) return value !== undefined && value !== null && value !== ''
+    return value === expected
   })
 }
 

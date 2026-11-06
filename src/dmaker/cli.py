@@ -16,6 +16,7 @@ from rich.table import Column, Table
 from typer.core import TyperGroup
 
 from . import __version__, config
+from .domain.audio_effects.base import SHOWN_WHEN_FILLED
 from .domain.audio_presets import list_audio_presets
 from .domain.models import format_size
 from .domain.outputs import resolve_output
@@ -2705,7 +2706,12 @@ def _effect_param_text(param: dict) -> str:
     only = (
         ", só com "
         + ", ".join(
-            f"{field} vazio" if value is None else f"{field}={value}" for field, value in when.items()
+            f"{field} vazio"
+            if value is None
+            else f"{field} preenchido"
+            if value == SHOWN_WHEN_FILLED
+            else f"{field}={value}"
+            for field, value in when.items()
         )
         if when
         else ""
@@ -2779,7 +2785,8 @@ def audio_effect_add(
 ) -> None:
     """Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify
     -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim"; ou o Vocoder cantando
-    na harmonia da música: ... audio.voiceover.0 vocoder -p carrier_track=MUS)."""
+    na harmonia da música: ... audio.voiceover.0 vocoder -p carrier_track=MUS; para ele ouvir a trilha mesmo muda ou fora
+    do solo, acrescente -p carrier_ignores_mute=true)."""
     data: dict = {"type": effect, **_parse_effect_params(param)}
     if start is not None:
         data["start"] = start

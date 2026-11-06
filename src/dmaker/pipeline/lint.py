@@ -31,12 +31,14 @@ def lint(
     offsets: list[float] | None = None,
     known_voices: Collection[str] | None = None,
     voiceover_playtimes: Sequence[float | None] = (),
+    carrier_view: Project | None = None,
 ) -> list[str]:
     """Devolve avisos; levanta ValueError só para o que não tem como renderizar. `offsets` é onde cada
     fonte começa no relógio da sessão (0 para arquivos avulsos). `known_voices` são os ids da biblioteca
     de vozes; sem ele, a existência da voz de cada narração não é conferida. `voiceover_playtimes` é quanto
     toca de cada arquivo de `audio.voiceover` (ver `voice_file_playtimes`); sem ele só a existência dos
-    arquivos é conferida, porque medir a duração exige o ffprobe."""
+    arquivos é conferida, porque medir a duração exige o ffprobe. `carrier_view` é o projeto como o Vocoder o ouve, quando um efeito
+    pediu uma trilha muda: é nele que as trilhas das portadoras se contam."""
     warnings: list[str] = []
     segments = project.timeline
     _check_look_names(project, theme)
@@ -105,7 +107,7 @@ def lint(
     warnings += _sfx_warnings(project, total)
     warnings += _generated_warnings(project, total)
     warnings += _marker_warnings(project, total)
-    warnings += _carrier_track_warnings(project)
+    warnings += _carrier_track_warnings(carrier_view or project)
     warnings += crossfade_warnings(project, durations, infos, offsets)
     if project.tracks:
         known = known_track_ids(project)

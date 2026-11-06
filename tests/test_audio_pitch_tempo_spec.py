@@ -20,6 +20,7 @@ from dmaker.domain.audio_effects import (
     chain_refusal,
     parse_effect,
 )
+from dmaker.domain.audio_effects.base import SHOWN_WHEN_FILLED
 from dmaker.domain.audio_effects.pitch_tempo import PAULSTRETCH_MAX_SECONDS, ChangeTempo
 from dmaker.domain.edits import EditError
 from dmaker.domain.effect_edits import apply_effect_op
@@ -165,7 +166,11 @@ def test_every_shown_when_names_a_choice_of_the_same_effect_and_one_of_its_optio
                 for field, value in param.shown_when.items():
                     # o Vocoder esconde a portadora gerada enquanto `carrier_track` tem uma trilha (valor nulo)
                     names_a_choice = params[field].kind == "choice" and value in params[field].options
-                    assert names_a_choice or (params[field].kind == "carrier_track" and value is None), (
+                    # e mostra o campo da trilha escolhida (qualquer valor preenchido) com `SHOWN_WHEN_FILLED`
+                    names_a_track = params[field].kind == "carrier_track" and (
+                        value is None or value == SHOWN_WHEN_FILLED
+                    )
+                    assert names_a_choice or names_a_track, (
                         info.type,
                         param.name,
                     )

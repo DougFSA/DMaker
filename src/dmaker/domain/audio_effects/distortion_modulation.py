@@ -21,7 +21,7 @@ from pydantic import (
 
 from ..auto_duck import is_track_id
 from ..generators import normalized_params, parse_generator
-from .base import EffectBase, param, register_effect
+from .base import SHOWN_WHEN_FILLED, EffectBase, param, register_effect
 
 # O Vocoder gera a portadora na duração do item, e o gerador de som vai até 10 minutos
 MAX_VOCODER_SECONDS = 600.0
@@ -328,6 +328,13 @@ class Vocoder(EffectBase):
         "ou ainda não toca, o efeito usa a portadora gerada.",
         kind="carrier_track",
     )
+    carrier_ignores_mute: bool = param(
+        False,
+        label="Ouvir a trilha mesmo muda",
+        hint="Ligado: o mudo e o solo só tiram a trilha da mistura, e o Vocoder continua ouvindo a portadora dela. Desligado: a "
+        "trilha que não soa não serve de portadora, e o efeito usa a portadora gerada.",
+        shown_when={"carrier_track": SHOWN_WHEN_FILLED},
+    )
     bands: int = param(
         40,
         label="Bandas",
@@ -388,10 +395,13 @@ class Vocoder(EffectBase):
 
     @model_serializer(mode="wrap")
     def _omit_unset_track(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Sem trilha o campo some do dump: o efeito de um projeto que nunca o usou segue com os mesmos bytes e o mesmo hash."""
+        """Sem trilha, e sem a escolha de ouvi-la muda, os campos somem do dump: o efeito de um projeto que nunca os usou segue
+        com os mesmos bytes e o mesmo hash."""
         data = handler(self)
         if data.get("carrier_track") is None:
             data.pop("carrier_track", None)
+        if not data.get("carrier_ignores_mute"):
+            data.pop("carrier_ignores_mute", None)
         return data
 
     def carrier_sound(self) -> tuple[str, dict[str, Any]]:
@@ -399,6 +409,9 @@ class Vocoder(EffectBase):
 
     def carrier_track_id(self) -> str | None:
         return self.carrier_track
+
+    def hears_silenced_carrier(self) -> bool:
+        return self.carrier_ignores_mute
 
     def refusal(self, duration: float) -> str | None:
         if duration > MAX_VOCODER_SECONDS:

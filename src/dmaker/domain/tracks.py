@@ -97,6 +97,42 @@ def _ducks_after_state(project: Project, audio, silenced: set[str]):
     return audio if rules == audio.ducks else audio.model_copy(update={"ducks": rules})
 
 
+def kept_carriers(project: Project) -> set[str]:
+    """As trilhas que não soam (mudas ou fora do solo) e que um Vocoder ligado pediu de volta com `carrier_ignores_mute`: o
+    mudo e o solo só tiram a trilha da mistura, e o Vocoder continua a ouvindo. Vale só para o item cuja trilha soa ou que também
+    foi mantida (a voz ouve a música muda, e a música tem um Vocoder que ouve a narração muda), por isso a conta é de ponto fixo."""
+    silenced = silenced_audio_tracks(project)
+    if not silenced:
+        return set()
+    asks = [
+        (host, carrier)
+        for host, _, effects in project.carrier_hosts()
+        for effect in effects
+        if effect.enabled
+        and effect.hears_silenced_carrier()
+        and (carrier := effect.carrier_track_id()) in silenced
+    ]
+    kept: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for host, carrier in asks:
+            if carrier not in kept and (host not in silenced or host in kept):
+                kept.add(carrier)
+                changed = True
+    return kept
+
+
+def carrier_heard_project(project: Project) -> Project | None:
+    """O projeto como o Vocoder o OUVE: o mesmo estado de trilha da mistura, mas com de volta as trilhas mudas que algum efeito
+    pediu (`kept_carriers`). None quando ninguém pede, e então a mistura e a ouvida são a mesma coisa. A passada prévia das
+    portadoras lê só esta visão; a mistura segue sem a trilha, exatamente como qualquer trilha muda."""
+    kept = kept_carriers(project)
+    if not kept:
+        return None
+    return _with_state(project, silenced_audio_tracks(project) - kept, kept)
+
+
 def apply_track_state(project: Project) -> Project:
     """Spec equivalente com o mudo/solo/ganho/pan/oculto de `project.tracks` já embutido nos campos que o render
     realmente olha, para o resto do pipeline não precisar saber que trilhas da interface existem:
@@ -119,12 +155,19 @@ def apply_track_state(project: Project) -> Project:
       `locked` nunca muda o render, só a edição na interface.
 
     O ganho em dB multiplica o `volume` do item e o pan soma ao do item, preso a -1..1. Nunca modifica
-    `project`; devolve o mesmo objeto quando não há nada a aplicar."""
-    tracks = project.tracks
-    if not tracks:
-        return project
+    `project`; devolve o mesmo objeto quando não há nada a aplicar.
 
-    silenced = silenced_audio_tracks(project)
+    A portadora do Vocoder que pediu a trilha muda (`carrier_ignores_mute`) mantém o id, numerado pela visão ouvida
+    (`carrier_heard_project`), que é quem a lê."""
+    if not project.tracks:
+        return project
+    return _with_state(project, silenced_audio_tracks(project), kept_carriers(project))
+
+
+def _with_state(project: Project, silenced: set[str], kept: set[str]) -> Project:
+    """O corpo de `apply_track_state` com o conjunto de trilhas que não soam já decidido: a mistura passa as silenciadas, a
+    visão ouvida passa as silenciadas menos as mantidas. `kept` só serve à portadora, que numera pela visão ouvida."""
+    tracks = project.tracks
     audio = project.audio
     timeline = project.timeline
 
@@ -165,7 +208,7 @@ def apply_track_state(project: Project) -> Project:
             audio = audio.model_copy(update={"sfx_gain_db": gain, "sfx_pan": pan})
 
     audio = _ducks_after_state(project, audio, silenced)
-    audio, timeline = _carriers_after_state(project, audio, timeline, silenced)
+    audio, timeline = _carriers_after_state(project, audio, timeline, silenced, kept)
 
     captions = project.captions
     if _hidden(tracks, "CC") and captions is not None and captions.enabled:
@@ -203,34 +246,37 @@ def apply_track_state(project: Project) -> Project:
     return updated
 
 
-def _carrier_effects(effects: list, silenced: set[str], renamed: dict[str, str]) -> list:
+def _carrier_effects(effects: list, silenced: set[str], kept: set[str], renamed: dict[str, str]) -> list:
     """A cadeia com a trilha portadora de cada efeito posta no estado: a que não soa vira `None` (o efeito usa a portadora
-    gerada) e a de faixa externa segue a renumeração. Devolve a própria lista quando nada muda."""
+    gerada), a menos que o efeito peça para ouvi-la mesmo muda e outro item a mantenha (`kept`); a de faixa externa segue a
+    renumeração. Devolve a própria lista quando nada muda."""
     result = []
     for effect in effects:
         carrier = effect.carrier_track_id()
         if carrier is not None:
-            target = None if carrier in silenced else renamed.get(carrier, carrier)
+            heard = effect.hears_silenced_carrier() and carrier in kept
+            target = None if carrier in silenced and not heard else renamed.get(carrier, carrier)
             if target != carrier:
                 effect = effect.model_copy(update={"carrier_track": target})
         result.append(effect)
     return effects if all(new is old for new, old in zip(result, effects, strict=True)) else result
 
 
-def _carriers_after_state(project: Project, audio, timeline, silenced: set[str]):
+def _carriers_after_state(project: Project, audio, timeline, silenced: set[str], kept: set[str]):
     """Os itens que sobraram com a portadora do Vocoder acompanhando o mudo e o solo: a trilha que não soa não pode ser
-    ouvida (o id dela passaria a apontar para outra fonte, ou para um barramento calado) e as demais seguem a renumeração das
-    faixas externas. Sem `carrier_track` em lugar nenhum devolve os mesmos objetos."""
+    ouvida (o id dela passaria a apontar para outra fonte, ou para um barramento calado), salvo a que o efeito pediu de volta, e
+    as demais seguem a renumeração das faixas externas. A renumeração é a da visão ouvida (`silenced - kept`), em que o id do
+    efeito sempre aponta. Sem `carrier_track` em lugar nenhum devolve os mesmos objetos."""
     if not any(
         effect.carrier_track_id() is not None
         for _, _, effects in project.carrier_hosts()
         for effect in effects
     ):
         return audio, timeline
-    renamed = _renumbered_externals(project, silenced)
+    renamed = _renumbered_externals(project, silenced - kept)
 
     def fixed(item):
-        effects = _carrier_effects(item.effects, silenced, renamed)
+        effects = _carrier_effects(item.effects, silenced, kept, renamed)
         return item if effects is item.effects else item.model_copy(update={"effects": effects})
 
     timeline = [fixed(seg) if isinstance(seg, ClipSegment) else seg for seg in timeline]
@@ -247,14 +293,17 @@ def _carriers_after_state(project: Project, audio, timeline, silenced: set[str])
 
 def silenced_carrier_warnings(project: Project) -> list[str]:
     """Um aviso por item cujo Vocoder pede a portadora de uma trilha que está muda ou fora do solo: o efeito usa a portadora
-    gerada. Lê o projeto ANTES do estado, porque depois dele o campo já foi trocado por vazio."""
+    gerada. Não avisa o efeito que escolheu ouvi-la mesmo muda (`carrier_ignores_mute`). Lê o projeto ANTES do estado, porque
+    depois dele o campo já foi trocado por vazio."""
     silenced = silenced_audio_tracks(project)
     return [
         f"{place}: o Vocoder pede a portadora da trilha {carrier}, que está muda ou fora do solo; usa a portadora gerada."
         for host, place, effects in project.carrier_hosts()
         if host not in silenced  # o item de uma trilha que não soa não vai a lugar nenhum: nada a avisar
         for effect in effects
-        if effect.enabled and (carrier := effect.carrier_track_id()) in silenced
+        if effect.enabled
+        and not effect.hears_silenced_carrier()
+        and (carrier := effect.carrier_track_id()) in silenced
     ]
 
 

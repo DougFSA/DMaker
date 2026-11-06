@@ -22,7 +22,7 @@ from ..domain.brand import load_theme
 from ..domain.outputs import frame_preset
 from ..domain.spec import ClipSegment, Project, Segment, VideoOverlay
 from ..domain.timeline import transitions_of
-from ..domain.tracks import apply_track_state, silenced_carrier_warnings
+from ..domain.tracks import apply_track_state, carrier_heard_project, silenced_carrier_warnings
 from ..filtergraph.pip import ResolvedVideoOverlay
 from ..filtergraph.preview_audio import clip_audio_piece, preview_encode_args, silence_piece
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner
@@ -57,7 +57,7 @@ from .auto_duck import (
     spill_long_graph,
     track_duck_lookup,
 )
-from .carrier_tracks import CarrierInputs, Deferred, install_carrier_tracks
+from .carrier_tracks import CarrierInputs, Deferred, HeardView, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
@@ -208,9 +208,13 @@ class PreviewAudioBuilder:
     def key(self, project: Project) -> str:
         """Hash da parte de áudio da spec, dos arquivos que ela usa (data e tamanho) e das narrações já em
         cache: o que não muda o som (cor, texto, legendas) não muda a chave."""
+        heard = carrier_heard_project(project)
         project = apply_track_state(project)
         base = project.base_dir
         stamps = [file_stamp(project.resolve(raw)) for raw, _ in media_references(project)]
+        if heard is not None:
+            # a trilha muda que o Vocoder ouve não está na mistura, mas o som dela entra no item: trocar o arquivo muda a chave
+            stamps += [file_stamp(heard.resolve(raw)) for raw, _ in media_references(heard)]
         scripts = [
             file_stamp(project.resolve(narration.script))
             for narration in project.audio.narration
@@ -253,6 +257,12 @@ class PreviewAudioBuilder:
         missing = MissingMedia.scan(project)
         project = without_missing_audio(project, missing)
         layout = project_layout(project, self.prober, self.offset_finder, missing)
+        heard_project = carrier_heard_project(original)
+        heard_layout = None
+        if heard_project is not None:
+            heard_missing = MissingMedia.scan(heard_project)
+            heard_project = without_missing_audio(heard_project, heard_missing)
+            heard_layout = project_layout(heard_project, self.prober, self.offset_finder, heard_missing)
         # medir a sincronia grava o `sync.json`, que entra na chave: a mixagem fica guardada sob a chave de depois,
         # a que o próximo pedido da mesma spec vai calcular, senão a primeira mixagem nunca seria reaproveitada
         key = self.key(original)
@@ -287,6 +297,7 @@ class PreviewAudioBuilder:
                 voice_files_of,
                 music_of,
             ),
+            self._heard_view(heard_project, heard_layout) if heard_layout is not None else None,
         )
         voiceovers, voice_files, music_path = voiceovers_of(), voice_files_of(), music_of()
         begin_ducks(
@@ -357,6 +368,22 @@ class PreviewAudioBuilder:
         )
         self._drop_old_mixes(project.name, keep=out)
         return PreviewAudio(out, key, total, warnings)
+
+    def _heard_view(self, source: Project, layout: ProjectLayout) -> HeardView:
+        """A visão ouvida do Vocoder (uma trilha muda que ele pediu de volta), com a narração, a voz gravada e a música dela
+        preguiçosas: a narração muda só é falada se alguém a pedir."""
+
+        def lazies(heard_ctx: RenderContext):
+            music = heard_ctx.project.audio.music
+            music_file = heard_ctx.project.resolve(music.src) if music else None
+            spoken = Deferred(lambda: self._voiceovers(heard_ctx), "a narração muda")
+            return (
+                Deferred(lambda: processed_voiceovers(heard_ctx, spoken()), "a narração"),
+                Deferred(lambda: self._voice_files(heard_ctx), "a voz gravada"),
+                Deferred(lambda: processed_music(heard_ctx, music_file), "a música"),
+            )
+
+        return HeardView(layout.project, layout.session, layout.sources, project_track_origin(source), lazies)
 
     def _context(self, layout: ProjectLayout, job_dir: Path, pieces_dir: Path) -> RenderContext:
         project = layout.project

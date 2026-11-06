@@ -17,7 +17,7 @@ A narração foi gravada sem sala, a vinheta pede eco, a voz tem de parecer de t
 - O projeto (`name`) e o item (`target`): `audio.voiceover.N`, `audio.narration.N`, `audio.music`, `timeline.N` ou `audio.master`. A **ordem conta**.
 - **Eco** (`echo`): `delay_seconds` e `decay`. **Atraso** (`delay`): `delay_type`, `echoes`, `decay_db`, `pitch_semitones`. **Reverb** (`reverb`): sala, reverberância, amortecimento, `wet_db` e `dry_db`; as predefinições do Audacity (`reverb_small_room_bright`, `reverb_cathedral`...) saem prontas, e as de uso são `phone_voice`, `old_radio_voice`, `room_narration` e `ethereal_music`.
 - **Distorção**, **Phaser**, **Tremolo**, **Wahwah** e **Vocoder** (`carrier` gerado, uma dente de serra por padrão).
-- **Vocoder na harmonia de outra trilha:** `carrier_track` (`MUS`, `A1`...); sem a trilha, ou com ela muda ou fora do solo, usa a gerada.
+- **Vocoder na harmonia de outra trilha:** `carrier_track` (`MUS`, `A1`...); sem ela usa a gerada; muda só serve com `carrier_ignores_mute`.
 - O item **mantém a duração**: a cauda do eco e do reverb é cortada no fim. `extend_tail` a estica, só em voz gravada e em música.
 - Distorção, Phaser, Wahwah e Vocoder não valem em `audio.master`.
 - Na narração sintetizada, Vocoder, Distorção e Phaser apagam a marca d'água inaudível, e ela não é reaplicada (decisão de 03/11).

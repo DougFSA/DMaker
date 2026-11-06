@@ -30,6 +30,7 @@ import {
   removeEffectIn,
   setEffectFieldIn,
   setEnabledIn,
+  SHOWN_WHEN_FILLED,
   targetMayGrow,
   targetOfList,
 } from './audioEffects'
@@ -269,13 +270,13 @@ describe('a portadora de outra trilha', () => {
     expect(carrierTrackOptions(hostTrackOf('overlays.0.effects'), present)).toBeNull()
   })
 
-  it('oferece o som gerado e só as trilhas que o par aceita, com os rótulos do Auto Duck', () => {
+  it('oferece o som gerado e qualquer trilha menos a do item, com os rótulos do Auto Duck', () => {
     const music = carrierTrackOptions('MUS', present)!
     expect(music.map((option) => option.value)).toEqual(['', 'A1', 'A2', 'NAR', 'VO'])
     expect(music[0]).toEqual({ value: '', label: 'Som gerado' })
     expect(music.find((option) => option.value === 'A2')?.label).toBe('Faixa externa (A2)')
-    // a câmera já contém as faixas externas, e nenhuma trilha ouve a si mesma
-    expect(carrierTrackOptions('A1', present)!.map((option) => option.value)).toEqual(['', 'MUS', 'NAR', 'VO'])
+    // a câmera ouve a faixa externa (o Vocoder age no som dela antes da mistura), e nenhuma trilha ouve a si mesma
+    expect(carrierTrackOptions('A1', present)!.map((option) => option.value)).toEqual(['', 'A2', 'MUS', 'NAR', 'VO'])
     expect(carrierTrackOptions('A2', present)!.map((option) => option.value)).toEqual(['', 'A1', 'MUS', 'NAR', 'VO'])
   })
 
@@ -290,6 +291,15 @@ describe('a portadora de outra trilha', () => {
     const siblings = [{ name: 'carrier_track', default: null }] as never
     expect(isParamShown(generated, { type: 'vocoder' }, siblings)).toBe(true)
     expect(isParamShown(generated, { type: 'vocoder', carrier_track: 'MUS' }, siblings)).toBe(false)
+  })
+
+  it('o campo de ouvir a trilha muda só aparece com uma trilha escolhida', () => {
+    const ignores = { name: 'carrier_ignores_mute', shown_when: { carrier_track: SHOWN_WHEN_FILLED } }
+    const siblings = [{ name: 'carrier_track', default: null }] as never
+    expect(isParamShown(ignores, { type: 'vocoder' }, siblings)).toBe(false)
+    expect(isParamShown(ignores, { type: 'vocoder', carrier_track: null }, siblings)).toBe(false)
+    expect(isParamShown(ignores, { type: 'vocoder', carrier_track: '' }, siblings)).toBe(false)
+    expect(isParamShown(ignores, { type: 'vocoder', carrier_track: 'A2' }, siblings)).toBe(true)
   })
 
   it('escolher a trilha grava a chave e escolher o som gerado a apaga', () => {

@@ -32,7 +32,7 @@ from ..domain.brand import Theme, load_theme
 from ..domain.outputs import frame_preset
 from ..domain.spec import Project
 from ..domain.timeline import transitions_of
-from ..domain.tracks import apply_track_state, silenced_carrier_warnings
+from ..domain.tracks import apply_track_state, carrier_heard_project, silenced_carrier_warnings
 from ..filtergraph.audio import StemTaps
 from ..filtergraph.audio_output import encode_args, format_filters
 from ..filtergraph.common import Inputs
@@ -54,7 +54,7 @@ from .audio_duration import NOTHING_TO_PLAY, audio_extent
 from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
 from .audio_lint import audio_output_warnings
 from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
-from .carrier_tracks import CarrierInputs, Deferred, install_carrier_tracks
+from .carrier_tracks import CarrierInputs, Deferred, HeardView, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions, RenderResult
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia
@@ -221,6 +221,10 @@ class AudioRenderPipeline:
         pieces_dir = self.pieces.cache_dir / "pieces"
         pieces_dir.mkdir(parents=True, exist_ok=True)
         layout = project_layout(project, self.prober, self.offset_finder)
+        heard_state = carrier_heard_project(
+            self.project
+        )  # a mistura com as trilhas mudas que um Vocoder pediu de volta
+        heard_layout = project_layout(heard_state, self.prober, self.offset_finder) if heard_state else None
         ctx = RenderContext(
             project=layout.project,
             options=self.options,
@@ -269,6 +273,7 @@ class AudioRenderPipeline:
                 voice_files_of,
                 music_of,
             ),
+            self._heard_view(heard_state, heard_layout) if heard_layout is not None else None,
         )
         voiceovers, voice_files = voiceovers_of(), voice_files_of()
         ctx.warnings.extend(audio_output_warnings(project, total))
@@ -314,6 +319,25 @@ class AudioRenderPipeline:
         return PreparedAudio(
             ctx, layout, prepared, total, voiceovers, voice_files, pips, sfx, music_path, provenance
         )
+
+    def _heard_view(self, source: Project, layout: ProjectLayout) -> HeardView:
+        """A visão ouvida do Vocoder (uma trilha muda que ele pediu de volta): a narração, a voz gravada e a música dela são
+        preguiçosas, e a narração muda só é sintetizada se alguém a pedir."""
+
+        def lazies(heard_ctx: RenderContext):
+            music = heard_ctx.project.audio.music
+            music_file = heard_ctx.project.resolve(music.src) if music else None
+            spoken = Deferred(lambda: self.voiceover.prepare(heard_ctx), "a narração muda")
+            return (
+                Deferred(lambda: processed_voiceovers(heard_ctx, spoken()), "a narração"),
+                Deferred(
+                    lambda: prepare_voice_files(heard_ctx.project, self.prober, effect_processor(heard_ctx)),
+                    "a voz gravada",
+                ),
+                Deferred(lambda: processed_music(heard_ctx, music_file), "a música"),
+            )
+
+        return HeardView(layout.project, layout.session, layout.sources, project_track_origin(source), lazies)
 
     def loudness(self, job: PreparedAudio) -> LoudnessPlan:
         """A medição da mixagem inteira e o ganho que a normalização dá (uma vez por preparação)."""
