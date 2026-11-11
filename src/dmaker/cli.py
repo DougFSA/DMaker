@@ -201,6 +201,11 @@ def doctor(
         _doctor_offline()
         return
     console.print(f"[bold]DMaker {__version__}[/bold]  raiz: {config.ROOT}")
+    if config.INSTALL:
+        console.print(
+            f"  [green]instalado[/green]: versão {config.INSTALL.version or '?'}, "
+            f"programa em {config.INSTALL.root}, dados em {config.DATA_DIR}"
+        )
     exe = config.find_tool("ffmpeg")
     if not exe or not config.find_tool("ffprobe"):
         console.print("[red]FFmpeg/ffprobe não encontrados.[/red] Rode: dmaker setup")
@@ -1666,6 +1671,10 @@ manual_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(manual_app, name="manual")
+
+from .release.cli import release_app  # noqa: E402
+
+app.add_typer(release_app, name="release")
 
 
 @manual_app.command("build")

@@ -1,30 +1,89 @@
-"""Caminhos do projeto. Tudo fica dentro da pasta raiz, que é a do clone (ou a de `DMAKER_HOME`); os dados
-gerados vão para `DMAKER_DATA_DIR` quando definido."""
+"""Caminhos do projeto. Tudo fica dentro da pasta raiz, que é a do clone, a do programa instalado (achada pelo
+`instalacao.json`) ou a de `DMAKER_HOME`; os dados gerados vão para `DMAKER_DATA_DIR` ou, no instalado, para a pasta
+do marcador."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
+# O marcador que o instalador grava na raiz do programa instalado: `{"versao": "...", "dados": "<pasta dos dados>"}`.
+INSTALL_MARKER_NAME = "instalacao.json"
+# O pacote instalado mora em `<programa>/python/Lib/site-packages/dmaker` (Windows) ou em
+# `<programa>/python/lib/python3.13/site-packages/dmaker` (Linux): do `site-packages` até o programa são no máximo 4 níveis.
+_SITE_PACKAGES = "site-packages"
+_MARKER_SEARCH_LEVELS = 5
 
-def _detect_root() -> Path:
-    env = os.environ.get("DMAKER_HOME")
-    if env:
-        return Path(env).expanduser().resolve()
+
+@dataclass(frozen=True)
+class InstallInfo:
+    """O que o marcador `instalacao.json` diz: a pasta do programa, a versão instalada e a pasta dos dados."""
+
+    root: Path
+    version: str
+    data_dir: Path
+
+
+def find_install_root(package_dir: Path) -> Path | None:
+    """Sobe do pacote até achar o marcador; só vale para um pacote dentro de `site-packages`, nunca para o clone
+    editável, para um `instalacao.json` solto numa pasta acima do clone não virar a raiz dele."""
+    if package_dir.parent.name != _SITE_PACKAGES:
+        return None
+    for level, folder in enumerate(package_dir.parents):
+        if level > _MARKER_SEARCH_LEVELS:
+            break
+        if (folder / INSTALL_MARKER_NAME).is_file():
+            return folder
+    return None
+
+
+def read_install_info(root: Path) -> InstallInfo | None:
+    """Lê o marcador da raiz; um marcador ilegível conta como "não instalado", para o clone nunca quebrar por ele."""
+    try:
+        data = json.loads((root / INSTALL_MARKER_NAME).read_text(encoding="utf-8-sig"))
+        data_dir = Path(str(data["dados"])).expanduser().resolve()
+        return InstallInfo(root=root.resolve(), version=str(data.get("versao", "")), data_dir=data_dir)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _detect_install() -> InstallInfo | None:
+    root = find_install_root(PACKAGE_DIR)
+    return read_install_info(root) if root else None
+
+
+def resolve_root(env_home: str | None, install: InstallInfo | None, package_dir: Path, cwd: Path) -> Path:
+    """A raiz do programa: `DMAKER_HOME`, depois o marcador do instalado, depois o clone (pyproject), depois a pasta atual."""
+    if env_home:
+        return Path(env_home).expanduser().resolve()
+    if install:
+        return install.root
     # instalação editável: <raiz>/src/dmaker/config.py
-    candidate = PACKAGE_DIR.parents[1]
+    candidate = package_dir.parents[1]
     if (candidate / "pyproject.toml").exists():
         return candidate
-    return Path.cwd()
+    return cwd
 
 
-ROOT = _detect_root()
+def resolve_data_dir(env_data: str | None, install: InstallInfo | None, root: Path) -> Path:
+    """Os dados: `DMAKER_DATA_DIR` manda; sem ele, o `dados` do marcador no modo instalado; senão a própria raiz."""
+    if env_data:
+        return Path(env_data).expanduser().resolve()
+    if install:
+        return install.data_dir
+    return root.resolve()
+
+
+INSTALL = _detect_install()
+ROOT = resolve_root(os.environ.get("DMAKER_HOME"), INSTALL, PACKAGE_DIR, Path.cwd())
 # Onde nascem os dados gerados (cache, saída, projetos, vozes, léxico, layouts). Por padrão é a própria raiz;
 # os testes apontam DMAKER_DATA_DIR para uma pasta temporária para nunca tocar nos dados de quem usa o editor.
-DATA_DIR = Path(os.environ.get("DMAKER_DATA_DIR") or ROOT).expanduser().resolve()
+DATA_DIR = resolve_data_dir(os.environ.get("DMAKER_DATA_DIR"), INSTALL, ROOT)
 BIN_DIR = ROOT / "bin"
 FFMPEG_DIR = BIN_DIR / "ffmpeg"
 # Chromium do Playwright (composição em HTML, PDF do manual): mora dentro do clone, como o ffmpeg, para o DMaker

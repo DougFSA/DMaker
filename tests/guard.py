@@ -50,6 +50,7 @@ class Guard:
             _key(root / "assets" / "voices"),
             _key(root / "assets" / "macros"),
             _key(root / "plugins"),
+            _key(root / "releases"),
         ]
         self.protected_files = [
             _key(root / "assets" / LEXICON_NAME),
