@@ -159,7 +159,7 @@ Ubuntu 22.04 e 24.04 (x64) foram testados.
 
 **Atualizar** é rodar o `.run` da versão nova: ele acha a instalação pelo marcador `instalacao.json`, troca o programa e mantém os dados (os modelos só são copiados se não existem). **Desinstalar**: `~/.local/opt/dmaker/desinstalar.sh`. Tira o programa, os comandos e o atalho; o Ollama e o serviço dele só saem se foi o instalador do DMaker que os pôs. Com terminal, pergunta se apaga os dados (o padrão é não); `--sim` nunca apaga; `--apagar-dados` apaga sem perguntar.
 
-O que o Linux não tem: o FFmpeg do pacote do Linux (o build estático do BtbN) **não tem o filtro `ladspa`**, então os plugins **LADSPA** não rodam nele (o `dmaker doctor` mostra "plugins LADSPA: indisponível" como aviso, não como erro, e o render só pula o efeito de plugin LADSPA). Os plugins **LV2** funcionam: o filtro `lv2` está lá, e `bin/ffmpeg-lv2` aponta para o mesmo FFmpeg. Por isso, no Linux, não rode `dmaker setup` para tentar trazer o LADSPA: ele só baixa o FFmpeg do Windows. O resto é igual ao Windows. Depois de instalado, o programa ocupa uns 6 GB e os modelos uns 4,5 GB.
+O que o Linux não tem: o FFmpeg do pacote do Linux (o build estático do BtbN) **não tem o filtro `ladspa`**, então os plugins **LADSPA** não rodam nele (o `dmaker doctor` mostra "plugins LADSPA: indisponível" como aviso, não como erro, e o render só pula o efeito de plugin LADSPA). Os plugins **LV2** funcionam: o filtro `lv2` está lá, e `bin/ffmpeg-lv2` aponta para o mesmo FFmpeg. Por isso, no Linux, não rode `dmaker setup` para tentar trazer o LADSPA: ele só baixa o FFmpeg do Windows. Para usar LADSPA no Linux, aponte `DMAKER_FFMPEG_LADSPA_DIR` para a pasta de um FFmpeg que tenha o filtro (a do executável ou a que contém `bin/`; o do apt do Ubuntu tem); o `dmaker doctor` diz isso. O resto é igual ao Windows. Depois de instalado, o programa ocupa uns 6 GB e os modelos uns 4,5 GB.
 
 ### Ligar o servidor MCP ao Claude Code (a partir do instalado)
 
@@ -1438,7 +1438,7 @@ O vídeo mostra uma pessoa de frente, com a câmera parada, e você quer um tít
 
 - O trecho tem uma pessoa de frente (cartão e foto não têm: o `validate` avisa) e o texto já está na spec com `start` e `end`. Se ainda não está, crie-o antes (um texto de papel `title`, no meio).
 - Custo: perto de 0,5 s por quadro do intervalo em 1080x1920 (3 s de efeito somam uns 50 s ao render final). O recorte fica em cache: trocar só a frase ou a cor do texto não recorta de novo.
-- Modelos: o render final usa o `resnet50` (o `dmaker setup` baixa) e a prévia usa o `mobilenetv3`, que baixa na primeira vez (15 MB).
+- Modelos: o render final usa o `resnet50` (o `dmaker setup` baixa) e a prévia usa o `mobilenetv3`, que baixa na primeira vez (15 MB). Sem internet e sem esse modelo no disco, a prévia usa o `resnet50` (mais lenta) e avisa no log, em vez de falhar.
 
 #### Pela IA
 

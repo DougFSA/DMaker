@@ -273,8 +273,10 @@ def _doctor_plugins() -> None:
         if found:
             console.print(f"  plugins {name.upper()}: [green]disponível[/green]  ({found})")
         else:
-            fix = "dmaker setup --plugins" if name == "lv2" else "dmaker setup"
-            console.print(f"  plugins {name.upper()}: [yellow]indisponível[/yellow] (rode {fix})")
+            from .setup_tools import plugin_fix_advice
+
+            fix = escape(plugin_fix_advice(name))
+            console.print(f"  plugins {name.upper()}: [yellow]indisponível[/yellow] ({fix})")
     console.print(
         "  plugins instalados: `dmaker audio plugins list`; pasta do DMaker: " + str(config.PLUGINS_DIR)
     )
@@ -3528,6 +3530,8 @@ def _plugin_state(info: dict) -> str:
 
 
 def _print_plugin_table(payload: dict) -> None:
+    from .setup_tools import plugin_fix_advice
+
     table = Table("id", "formato", "nome", "controles", "estado", title="Plugins de efeito")
     for info in payload["plugins"]:
         table.add_row(
@@ -3535,9 +3539,7 @@ def _print_plugin_table(payload: dict) -> None:
         )
     console.print(table)
     for name, found in payload["hosts"].items():
-        shown = (
-            found or "indisponível (" + ("dmaker setup --plugins" if name == "lv2" else "dmaker setup") + ")"
-        )
+        shown = found or f"indisponível ({plugin_fix_advice(name)})"
         console.print(f"  ffmpeg do {name.upper()}: {escape(shown)}", highlight=False)
     for note in payload["notes"]:
         console.print(f"  [yellow]{escape(note)}[/yellow]", highlight=False)

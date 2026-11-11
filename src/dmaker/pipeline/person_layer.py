@@ -6,6 +6,7 @@ os intervalos de texto `behind-person` são recortados, e cada um fica em cache 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from ..domain.timeline import TimelineWindow, timeline_window
 from ..filtergraph.behind_person import ResolvedPersonLayer
 from ..filtergraph.person_layer import person_layer_command, window_command
 from ..media.ffmpeg import FFmpegCommand
-from ..media.matting import DEFAULT_MODEL, PREVIEW_MODEL, PersonRequest
+from ..media.matting import DEFAULT_MODEL, PREVIEW_MODEL, PersonRequest, ensure_model, model_path
 from .context import RenderContext
 from .segments import PreparedSegment, cache_key
 
@@ -38,6 +39,7 @@ class PreparedPersonLayer:
     partial: Path
     scratch: Path  # a janela sem perdas que o recortador lê; some assim que a camada fica pronta
     commands: tuple[FFmpegCommand, ...] = ()
+    model: str = DEFAULT_MODEL  # o modelo que de fato recortou (a prévia pode cair no do render final)
 
 
 def _needs_render(out: Path, ctx: RenderContext) -> bool:
@@ -48,14 +50,43 @@ class PersonLayerBuilder:
     """Prepara e gera (quando não está em cache) a camada da pessoa de cada intervalo atrás da pessoa.
 
     No `--preview` o modelo é o leve (`preview_model`, 2,5x mais rápido): o rascunho serve para conferir a posição
-    do texto, e o modelo entra na chave do cache, então rascunho e render final não se misturam."""
+    do texto, e o modelo entra na chave do cache, então rascunho e render final não se misturam. Se o leve não está
+    em disco e não dá para baixá-lo (sem internet), a prévia usa o do render final: um rascunho mais lento vale mais
+    que um erro, e a camada sai com a mesma chave do render final, que a reaproveita."""
 
-    def __init__(self, model: str = DEFAULT_MODEL, preview_model: str = PREVIEW_MODEL):
+    def __init__(
+        self,
+        model: str = DEFAULT_MODEL,
+        preview_model: str = PREVIEW_MODEL,
+        *,
+        fetch_model: Callable[[str], Path] = ensure_model,
+        model_on_disk: Callable[[str], bool] = lambda name: model_path(name).exists(),
+    ):
         self.model = model
         self.preview_model = preview_model
+        self.fetch_model = fetch_model  # injetada: o pipeline não fala com a rede direto
+        self.model_on_disk = model_on_disk
 
     def model_for(self, ctx: RenderContext) -> str:
+        """O modelo pedido para este render, sem checar se dá para obtê-lo (quem decide é `resolve_model`)."""
         return self.preview_model if ctx.options.preview else self.model
+
+    def resolve_model(self, ctx: RenderContext) -> str:
+        """O modelo que este render vai usar: o leve da prévia só se já está em disco ou se baixa agora."""
+        wanted = self.model_for(ctx)
+        if wanted == self.model:
+            return wanted
+        if ctx.options.dry_run:
+            return wanted if self.model_on_disk(wanted) else self.model  # o dry-run nunca baixa nada
+        try:
+            self.fetch_model(wanted)
+        except OSError:  # URLError, TimeoutError e gaierror descendem dela: é a falta de rede
+            ctx.log(
+                f"sem internet para baixar o modelo leve do recorte ({wanted}): "
+                f"a prévia usa o {self.model}, mais lento"
+            )
+            return self.model
+        return wanted
 
     def prepare(
         self,
@@ -69,7 +100,7 @@ class PersonLayerBuilder:
         if ctx.matter is None:
             raise RuntimeError("overlays: texto `behind-person` precisa de um recortador (ctx.matter)")
         durations = [item.duration for item in prepared]
-        model = self.model_for(ctx)
+        model = self.resolve_model(ctx)
         layers: list[PreparedPersonLayer] = []
         for start, end in intervals:
             window = timeline_window(durations, transitions, start, end, ctx.fps, WARMUP_FRAMES)
@@ -132,7 +163,7 @@ class PersonLayerBuilder:
                         label=f"recorte da pessoa ({label})",
                     ),
                 )
-            layers.append(PreparedPersonLayer(resolved, window, partial, scratch, commands))
+            layers.append(PreparedPersonLayer(resolved, window, partial, scratch, commands, model))
         return layers
 
     def build(self, ctx: RenderContext, layers: list[PreparedPersonLayer]) -> None:
