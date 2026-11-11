@@ -44,6 +44,9 @@ assets/brands/*/macros/
 # vozes clonadas (referências são dados pessoais)
 assets/voices/
 
+# instaladores gerados por `dmaker release build` e os downloads que ele guarda (dezenas de GB)
+releases/
+
 # projetos de vídeo (mídia pesada e dados de clientes ficam só na máquina)
 projects/
 
