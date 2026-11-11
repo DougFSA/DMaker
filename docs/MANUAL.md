@@ -174,7 +174,7 @@ Os pesos do OmniVoice (a voz padrão da narração) são **CC BY-NC 4.0**, por c
 
 ### Montar e publicar o pacote (quem lança a versão)
 
-`dmaker release build` gera os dois instaladores em `releases/v<versão>` (`--plataforma windows|linux|todas`; o Linux é montado num contêiner Docker `ubuntu:22.04`), com o `SHA256SUMS.txt` e as `NOTAS.md`. Depois do release e da tag, `dmaker release publish --versao <X>` sobe tudo para a aba Releases pelo `gh`: recusa sem a tag no `origin`, com a versão do pacote diferente da tag, com arquivo de 2 GiB ou mais ou com SHA-256 que não bate, e pode ser repetido depois de uma queda (só sobe o que falta).
+`dmaker release build` gera os dois instaladores em `releases/v<versão>` (`--plataforma windows|linux|todas`; o Linux é montado num contêiner Docker `ubuntu:22.04`), com o `SHA256SUMS.txt` e as `NOTAS.md`. Depois do release e da tag, `dmaker release publish --versao <X>` sobe tudo para a aba Releases pelo `gh`: recusa sem a tag no `origin`, com a versão do pacote diferente da tag, com arquivo de 2 GiB ou mais ou com SHA-256 que não bate, e pode ser repetido depois de uma queda (só sobe o que falta e, no fim, publica a release que a queda deixou como rascunho).
 
 ---
 

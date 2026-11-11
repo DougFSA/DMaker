@@ -36,6 +36,10 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Fixed
+
+- **DMK-76**: o `dmaker release publish`, rodado de novo depois de um envio interrompido, subia os arquivos que faltavam mas deixava a release como rascunho no GitHub, invisível na aba Releases (o `gh release create` cria o rascunho, sobe os arquivos e só então publica). Agora a retomada publica o rascunho depois de conferir que todos os arquivos estão lá, e o comando avisa quando fez isso; uma release já pública não é tocada.
+
 ## v3 — 2026-11-11
 
 ### Added

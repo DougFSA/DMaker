@@ -125,3 +125,5 @@ def publish(
         raise typer.Exit(code=1) from exc
     console.print(f"Release {result.tag}: {result.url}", markup=False, highlight=False)
     console.print(f"  enviados agora: {len(result.uploaded)}; já estavam lá: {len(result.already_there)}")
+    if result.published_draft:
+        console.print("  a release estava como rascunho e foi publicada agora")
