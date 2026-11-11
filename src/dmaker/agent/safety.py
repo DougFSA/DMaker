@@ -56,6 +56,7 @@ PATH_ARGUMENTS = frozenset(
         "others",
         "reference_audio",
         "file_path",
+        "file",
         "music",
         "sheet",
     }
@@ -427,6 +428,11 @@ OVERWRITES_EXISTING_OUTPUT = (
     "isolate_vocals",
     "dub_render",
     "dub_stems",
+    "markers_export",
+    "audio_export",
+    "apply_macro",
+    "audio_analyze",
+    "audio_generate",
 )
 # Ferramentas que gravam o projeto de dublagem (`.dub.json`) e, com a flag de sobrescrita ligada, o substituem
 # inteiro, com as traduções que a pessoa revisou. Sem a flag o próprio servidor recusa o projeto que já existe
@@ -515,6 +521,17 @@ def _isolation_outputs(arguments: Mapping[str, Any]) -> list[str]:
     return [str(folder / export_name(Path(path), role, audio_format, start, end)) for role, _ in EXPORT_ROLES]
 
 
+def _markers_export_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """O `.txt` dos marcadores em `output/<projeto>-marcadores.txt`. Com o caminho de uma spec no lugar do nome, o nome
+    do projeto só sai de abrir o arquivo: o gate não adivinha e a ferramenta grava sozinha."""
+    name = _text_argument(arguments, "name")
+    if name is None or name.endswith(".json"):
+        return []
+    from ..pipeline.markers import default_export_path
+
+    return [str(default_export_path(name))]
+
+
 DubProjectReader = Callable[[str], "DubProject | None"]
 
 
@@ -544,12 +561,110 @@ def _dub_stems_outputs(project: DubProject) -> list[str]:
     return [str(default_stems_dir(Path(project.source), project.target_language))]
 
 
+def _audio_export_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """Os arquivos da exportação de áudio: um por região, por trilha ou o da mixagem, com o nome que o servidor
+    escolheria (a mesma função de `audio_export`). Considera o `out` e o `out_dir` da chamada, e só devolve os
+    arquivos de fato gravados, e não a pasta inteira. Pedido que o servidor recusa (modo inválido, marcador que não
+    existe) não grava nada, então não há o que perguntar."""
+    name = _text_argument(arguments, "name")
+    if name is None or name.endswith(".json"):
+        return []
+    from ..pipeline.audio_service import export_request, planned_outputs
+
+    try:
+        request = export_request(
+            str(arguments.get("mode") or "mix"),
+            group=_text_argument(arguments, "group"),
+            pauses=flag_is_on(arguments, "pauses"),
+            numbered=flag_is_on(arguments, "numbered"),
+            start=arguments.get("start"),
+            end=arguments.get("end"),
+            tracks=[track for track in arguments.get("tracks") or [] if isinstance(track, str)],
+        )
+        return [
+            str(path)
+            for path in planned_outputs(
+                name,
+                request,
+                preset=_text_argument(arguments, "preset"),
+                out=_text_argument(arguments, "out"),
+                out_dir=_text_argument(arguments, "out_dir"),
+            )
+        ]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def _apply_macro_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """Os arquivos que a macro aplicada a arquivos grava na pasta de saída, com o nome que o servidor escolheria (a mesma
+    função de `apply_macro`). Na retomada, o que o estado do tratamento já tem por pronto não conta: não é sobrescrito.
+    Pedido que o servidor recusa (macro que não existe, pasta sem áudio) não grava nada, então não há o que perguntar."""
+    macro, out_dir = _text_argument(arguments, "macro"), _text_argument(arguments, "out_dir")
+    inputs = [item for item in arguments.get("inputs") or [] if isinstance(item, str)]
+    if macro is None or out_dir is None or not inputs:
+        return []
+    from ..domain.audio_effects import get_effect_preset
+    from ..pipeline.macro_run import MacroRunService, plan_macro_run
+
+    try:
+        plan = plan_macro_run(
+            get_effect_preset(macro, _text_argument(arguments, "brand")),
+            inputs,
+            out_dir,
+            _text_argument(arguments, "format"),
+        )
+        return [
+            str(path) for path in MacroRunService().planned_outputs(plan, flag_is_on(arguments, "resume"))
+        ]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def _import_raw_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """O WAV que a importação de áudio bruto grava na pasta do projeto."""
+    name, src = _text_argument(arguments, "name"), _text_argument(arguments, "src")
+    if name is None or src is None:
+        return []
+    from ..pipeline.audio_import import RawImportError, raw_wav_path
+    from ..pipeline.projects import project_path
+
+    try:
+        return [
+            str(raw_wav_path(project_path(name).parent, Path(src), _text_argument(arguments, "wav_name")))
+        ]
+    except RawImportError:
+        return []
+
+
+def _analysis_outputs(arguments: Mapping[str, Any]) -> list[str]:
+    """A análise de áudio só devolve dados: sem `out` ela não grava arquivo nenhum (os marcadores vão para a spec, num
+    passo do histórico que o `undo_edit` desfaz), então não há destino padrão a conferir."""
+    return []
+
+
+# Ferramentas cuja função de destino já considera o `out` e o `out_dir` da chamada: o gate usa só ela (o padrão
+# geral trataria a pasta `out_dir` como o destino e perguntaria mesmo sem nenhum arquivo igual dentro dela).
+EXACT_OUTPUTS = frozenset({"audio_export", "apply_macro"})
+
+# Ferramentas que gravam um arquivo e só o substituem com a flag de sobrescrita ligada (sem ela o servidor recusa o
+# arquivo que já existe): ferramenta -> (a flag, os arquivos que ela grava). A pergunta exige as duas coisas, a flag
+# ligada e o arquivo no disco; sem a flag, pedir o sim levaria a pessoa a autorizar o que o servidor vai recusar.
+OVERWRITES_WITH_FLAG: dict[str, tuple[str, Callable[[Mapping[str, Any]], list[str]]]] = {
+    "import_raw_audio": ("overwrite", _import_raw_outputs),
+}
+
 # Ferramenta -> os arquivos que ela grava quando a chamada não traz o `out` nem o `out_dir`.
 DEFAULT_OUTPUTS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "synthesize_speech": _narration_outputs,
     "fix_speech": _speech_fix_outputs,
     "convert_voice": _voice_conversion_outputs,
     "isolate_vocals": _isolation_outputs,
+    "markers_export": _markers_export_outputs,
+    "audio_export": _audio_export_outputs,
+    "apply_macro": _apply_macro_outputs,
+    "audio_analyze": _analysis_outputs,
+    # o `out` é obrigatório em `audio_generate`: sem ele a ferramenta nem roda, então não há destino padrão a conferir
+    "audio_generate": _analysis_outputs,
 }
 # O mesmo, para as ferramentas cujo destino padrão sai do projeto de dublagem (o argumento `project`).
 DUB_PROJECT_OUTPUTS: dict[str, Callable[[DubProject], list[str]]] = {
@@ -562,6 +677,8 @@ def output_targets(
     tool: str, arguments: Mapping[str, Any], read_project: DubProjectReader = read_dub_project
 ) -> list[str]:
     """Onde a ferramenta grava: o `out` ou o `out_dir` da chamada ou, sem eles, o destino padrão dela."""
+    if tool in EXACT_OUTPUTS:
+        return DEFAULT_OUTPUTS[tool](arguments)
     given = [value for name in OUTPUT_ARGUMENTS if isinstance(value := arguments.get(name), str) and value]
     if given:
         return given
@@ -710,6 +827,11 @@ class ToolGate:
         if tool in OVERWRITES_EXISTING_OUTPUT:
             targets = output_targets(tool, arguments, self.read_dub_project)
             existing = [target for target in targets if self.exists(target)]
+            if existing:
+                requests.append(ConfirmationRequest(tool, arguments, overwrite_question(existing)))
+        with_flag = OVERWRITES_WITH_FLAG.get(tool)
+        if with_flag and flag_is_on(arguments, with_flag[0]):
+            existing = [target for target in with_flag[1](arguments) if self.exists(target)]
             if existing:
                 requests.append(ConfirmationRequest(tool, arguments, overwrite_question(existing)))
         if tool in REPLACES_EXISTING_DUB_PROJECT and flag_is_on(arguments, DUB_OVERWRITE_FLAG):

@@ -23,7 +23,9 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, config
+from ..domain.audio_presets import list_audio_presets
 from ..domain.brand import available_brands, load_theme
+from ..domain.outputs import frame_preset, output_extension, resolve_output
 from ..domain.presets import get_preset, list_presets
 from ..domain.spec import Project
 from ..media.probe import MEDIA_EXTS
@@ -34,6 +36,11 @@ from ..pipeline.jobs import Job, JobManager
 from ..pipeline.preview_audio_tasks import PreviewAudioStatus, PreviewAudioTasks
 from . import layouts as layout_files
 from .agent_routes import build_agent_router
+from .audio_analysis_routes import build_audio_analysis_router
+from .audio_effect_routes import build_audio_effects_router
+from .audio_panel_routes import build_audio_panel_router
+from .audio_plugin_routes import build_audio_plugins_router
+from .audio_routes import audio_catalog, build_audio_router
 from .autocut_routes import build_autocut_router
 from .batch_routes import build_batch_router
 from .dub_routes import build_dub_router
@@ -42,6 +49,7 @@ from .look_routes import build_looks_router
 from .models_routes import build_models_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
+from .recording_routes import build_recording_router
 from .speech_routes import build_speech_router
 from .transition_routes import build_transitions_router
 from .voice_routes import Services, VoiceServices, build_voice_router
@@ -72,10 +80,16 @@ app.include_router(build_voice_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))
+app.include_router(build_audio_router(jobs))
 app.include_router(build_models_router(jobs))
 app.include_router(build_autocut_router(jobs))
 app.include_router(build_batch_router(jobs))
 app.include_router(build_transitions_router())
+app.include_router(build_audio_effects_router())
+app.include_router(build_audio_plugins_router())
+app.include_router(build_audio_analysis_router())
+app.include_router(build_audio_panel_router())
+app.include_router(build_recording_router())
 app.include_router(build_looks_router())
 app.include_router(build_infographics_router())
 app.include_router(build_agent_router(jobs))
@@ -165,6 +179,24 @@ class PreviewAudioRequest(BaseModel):
     spec: dict | None = None  # a spec que o editor tem na tela (ainda não salva); sem ela vale a do disco
 
 
+class NoiseProfileRequest(BaseModel):
+    spec: dict  # a spec da tela (ainda não salva): o perfil que se mede mora nela
+    profile: str
+
+
+class EffectCompareRequest(BaseModel):
+    """Um trecho de um item de áudio para ouvir com um efeito da cadeia desligado e ligado."""
+
+    spec: dict
+    target: str  # o item, como em `edit_project` (audio.voiceover.0, timeline.2...)
+    index: int = Field(ge=0)  # a posição do efeito na cadeia do item
+    start: float = Field(0.0, ge=0, allow_inf_nan=False)  # segundos do item
+    at: float | None = Field(
+        None, ge=0, allow_inf_nan=False
+    )  # segundos da linha do tempo (o cursor); vale no lugar de start
+    duration: float = Field(6.0, gt=0, le=30, allow_inf_nan=False)
+
+
 class LayoutModel(BaseModel):
     """Layout salvo da interface: onde cada painel fica, o tamanho dos divisores e o que está oculto."""
 
@@ -212,7 +244,12 @@ def _output_entry(path: Path) -> dict:
 def _project_outputs(name: str) -> list[dict]:
     if not config.OUTPUT_DIR.exists():
         return []
-    files = sorted(config.OUTPUT_DIR.glob(f"{name}__*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    suffixes = (".mp4", *(preset.extension for preset in list_audio_presets()))
+    files = sorted(
+        (p for suffix in suffixes for p in config.OUTPUT_DIR.glob(f"{name}__*{suffix}")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return [_output_entry(p) for p in files]
 
 
@@ -220,7 +257,7 @@ def _summary_dict(summary: Any) -> dict:
     return {
         "name": summary.name,
         "preset": summary.preset.id,
-        "resolution": f"{summary.preset.width}x{summary.preset.height}",
+        "resolution": summary.preset.resolution,
         "theme": summary.theme.name,
         "total_s": round(summary.total, 2),
         "segments": [
@@ -250,7 +287,7 @@ def _result_dict(result: Any) -> dict:
         "duration_s": round(result.duration, 2),
         "size_mb": round(result.size_bytes / 1e6, 2),
         "preset": result.preset.id,
-        "resolution": f"{result.preset.width}x{result.preset.height}",
+        "resolution": result.preset.resolution,
         "captions_file": str(result.captions_file) if result.captions_file else None,
         "warnings": result.warnings,
     }
@@ -258,7 +295,7 @@ def _result_dict(result: Any) -> dict:
 
 def _run_render(job: Job, name: str, req: RenderRequest, preset: str | None = None) -> dict:
     from ..media.ffmpeg import SubprocessRunner
-    from ..pipeline import RenderOptions, RenderPipeline
+    from ..pipeline import RenderOptions, create_renderer
     from ..pipeline.projects import load_project, parse_segments
 
     project = load_project(name)
@@ -271,7 +308,7 @@ def _run_render(job: Job, name: str, req: RenderRequest, preset: str | None = No
         quiet=True,
         segments=parse_segments(req.segments),
     )
-    pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
+    pipeline = create_renderer(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     return _result_dict(pipeline.run())
 
 
@@ -301,6 +338,7 @@ def state() -> dict:
             }
             for p in list_presets()
         ],
+        **audio_catalog(),
         "brands": [
             {"key": b, "name": load_theme(b).name, "colors": load_theme(b).colors} for b in available_brands()
         ],
@@ -486,7 +524,7 @@ def project_boxes(name: str, services: Services, req: BoxesRequest | None = None
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=_validation_detail(exc)) from exc
     try:
-        preset = get_preset(project.output.preset)
+        preset = frame_preset(project.output.preset)
         theme = load_theme(project.brand, project.theme)
     except (KeyError, FileNotFoundError, ValueError) as exc:
         raise _error(422, str(exc)) from exc
@@ -593,9 +631,9 @@ def qa_project(name: str, req: QaRequest | None = None) -> dict:
             if not _allowed_file(output):
                 raise _error(404, "arquivo não encontrado ou não permitido")
         else:
-            preset_id = get_preset(project.output.preset).id.replace("/", "-")
+            preset = resolve_output(project.output.preset)
             files = sorted(
-                config.OUTPUT_DIR.glob(f"{name}__{preset_id}.mp4"),
+                config.OUTPUT_DIR.glob(f"{name}__{preset.id.replace('/', '-')}{output_extension(preset)}"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -610,7 +648,7 @@ def qa_project(name: str, req: QaRequest | None = None) -> dict:
 def render_project(name: str, req: RenderRequest) -> dict:
     if req.preset:
         try:
-            get_preset(req.preset)
+            resolve_output(req.preset)
         except KeyError as exc:
             raise _error(400, str(exc)) from exc
     job = jobs.start(
@@ -625,7 +663,7 @@ def render_project(name: str, req: RenderRequest) -> dict:
 def export_project(name: str, req: ExportRequest) -> dict:
     for p in req.presets:
         try:
-            get_preset(p)
+            resolve_output(p)
         except KeyError as exc:
             raise _error(400, str(exc)) from exc
 
@@ -714,16 +752,20 @@ def project_timeline(name: str, req: TimelineRequest, services: Services) -> dic
 @app.post("/api/projects/{name}/edit")
 def project_edit(name: str, req: EditRequest, services: Services) -> dict:
     from ..domain.edits import EditError
-    from ..pipeline.edits import apply_edit
+    from ..pipeline.edits import apply_edit_report
 
     project = _project_from_body(name, req.spec)
     try:
-        new_project = apply_edit(project, req.op)
+        report = apply_edit_report(project, req.op)
     except EditError as exc:
         raise _error(400, str(exc)) from exc
+    new_project = report.project
     return {
         "spec": json.loads(new_project.model_dump_json(exclude_none=True)),
         "timeline": _timeline_view_dict(new_project, services),
+        # o que a edição apagou dos marcadores (estavam no trecho cortado), para a interface avisar
+        "edit_warnings": report.warnings,
+        "edit_notes": report.notes,
     }
 
 
@@ -791,6 +833,52 @@ def request_preview_audio(name: str, req: PreviewAudioRequest, services: Service
     except (FileNotFoundError, KeyError, ValueError, FFmpegError) as exc:
         raise _error(422, str(exc)) from exc
     return _preview_audio_dict(status)
+
+
+@app.post("/api/projects/{name}/noise-profile")
+def measure_noise_profile(name: str, req: NoiseProfileRequest, services: Services) -> dict:
+    """O nível do ruído por banda do perfil `profile` da spec da tela (o gráfico que a interface mostra ao pegar o perfil)."""
+    from ..domain.edits import EditError
+    from ..media.ffmpeg import FFmpegError
+    from ..media.probe import probe
+    from ..pipeline.noise_profiles import measure_saved_profile
+
+    project = _project_from_body(name, req.spec)
+    try:
+        return measure_saved_profile(project, req.profile, services.prober or probe)
+    except (EditError, ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+
+
+@app.post("/api/projects/{name}/effect-compare")
+def effect_compare(name: str, req: EffectCompareRequest, services: Services) -> dict:
+    """Um trecho do item com o efeito desligado (`before_url`) e ligado (`after_url`), para ouvir a diferença sem gravar
+    nada na spec. Os dois passam pelo processador do render."""
+    from ..domain.edits import EditError
+    from ..media.ffmpeg import FFmpegError, SubprocessRunner
+    from ..media.probe import probe
+    from ..pipeline.effect_compare import compare_effect
+
+    project = _project_from_body(name, req.spec)
+    try:
+        compared = compare_effect(
+            project,
+            req.target,
+            req.index,
+            req.start,
+            req.duration,
+            services.runner or SubprocessRunner(quiet=True),
+            services.prober or probe,
+            at=req.at,
+        )
+    except (EditError, ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _error(422, str(exc)) from exc
+    return {
+        "before_url": _file_url(compared.before),
+        "after_url": _file_url(compared.after),
+        "duration_s": round(compared.duration, 3),
+        "warning": compared.warning,
+    }
 
 
 @app.get("/api/projects/{name}/preview-audio")

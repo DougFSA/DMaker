@@ -80,8 +80,8 @@ describe('remover, lift e duplicar', () => {
 
   it('áudio, música e legendas não se removem nem se duplicam: o aviso pede um trecho ou sobreposição', () => {
     const audio = entry('A1', timelineItem(0, { kind: 'clip-audio' }))
-    expect(planRemove(view(), [audio])).toEqual({ ok: false, message: 'Selecione um trecho ou sobreposição para remover.' })
-    expect(planRemove(view(), [], 'o lift')).toEqual({ ok: false, message: 'Selecione um trecho ou sobreposição para o lift.' })
+    expect(planRemove(view(), [audio])).toEqual({ ok: false, message: 'Selecione um trecho, sobreposição ou marcador para remover.' })
+    expect(planRemove(view(), [], 'o lift')).toEqual({ ok: false, message: 'Selecione um trecho, sobreposição ou marcador para o lift.' })
     expect(planDuplicate(view(), [])).toEqual({ ok: false, message: 'Selecione um trecho ou sobreposição para duplicar.' })
   })
 

@@ -148,6 +148,18 @@ export const TRANSITION_DURATION_FIELD: FieldDef = num('Transition', 'transition
   fallback: 0.5,
 })
 
+/** O crossfade do som no corte de entrada de um clipe (J-cut e L-cut): quanto dura e a curva (soma de amplitude ou de potência). */
+export const AUDIO_CROSSFADE_DURATION_FIELD: FieldDef = num('AudioCrossfade', 'audio_crossfade.duration', 'Duração (s)', {
+  prop: 'duration',
+  fallback: 0.5,
+  max: 5,
+})
+export const AUDIO_CROSSFADE_TYPE_FIELD: FieldDef = select('AudioCrossfade', 'audio_crossfade.curve', 'Tipo', {
+  prop: 'curve',
+  fallback: 'constant_power_1',
+  hint: 'Potência constante (1 e 2) para sons diferentes; ganho constante para o mesmo som dos dois lados.',
+})
+
 export const REFRAME_MODE_FIELD: FieldDef = select('Reframe', 'reframe.mode', 'Modo', { prop: 'mode', fallback: 'auto' })
 
 /** O foco só vale no modo "cortar": diz de onde o corte se aproxima. */
@@ -224,6 +236,16 @@ export const MUSIC_FIELDS: FieldDef[] = [
   num('Music', 'music.fade_out', 'Fade out (s)', { prop: 'fade_out' }),
   num('Music', 'music.start_at', 'Começar em (s)', { prop: 'start_at' }),
   check('Music', 'music.loop', 'Repetir em loop', { prop: 'loop' }),
+  num('Music', 'music.bpm', 'Andamento da música (BPM)', { prop: 'bpm', step: 0.01, optional: true }),
+  num('Music', 'music.beat_offset', 'Primeiro tempo no arquivo (s)', { prop: 'beat_offset', step: 0.001 }),
+  check('Music', 'music.stretch_to_tempo', 'Esticar para o andamento do projeto', { prop: 'stretch_to_tempo' }),
+]
+
+/** O andamento do projeto (`audio.tempo`): a grade da régua em compassos, do encaixe e das referências beat: e bar:. */
+export const TEMPO_FIELDS: FieldDef[] = [
+  num('Tempo', 'tempo.bpm', 'Andamento (BPM)', { prop: 'bpm', step: 0.01 }),
+  text('Tempo', 'tempo.time_signature', 'Compasso (ex.: 4/4)', { prop: 'time_signature', fallback: '4/4' }),
+  num('Tempo', 'tempo.offset', 'Tempo 1 cai em (s)', { prop: 'offset', step: 0.001, min: 0 }),
 ]
 
 export const AUDIO_FIELDS: FieldDef[] = [
@@ -233,6 +255,18 @@ export const AUDIO_FIELDS: FieldDef[] = [
 ]
 
 export const AUDIO_TRACK_VOLUME_FIELD: FieldDef = num('AudioTrack', 'volume', 'Volume')
+
+/* ---------- marcadores ---------- */
+
+/** Os campos de um marcador (a trilha MK): o texto e o grupo valem sempre; o instante ou as duas pontas da região,
+ * conforme o tipo dele. A cor é um seletor próprio na tela, porque o schema só a conhece como texto. */
+export const MARKER_FIELDS = {
+  text: text('Marker', 'text', 'Texto', { optional: true, placeholder: 'o que este ponto marca' }),
+  group: text('Marker', 'group', 'Grupo (trilha)', { optional: true, placeholder: 'trilha padrão' }),
+  at: num('Marker', 'at', 'Instante (s)', { min: 0 }),
+  start: num('Marker', 'start', 'Início (s)', { min: 0 }),
+  end: num('Marker', 'end', 'Fim (s)', { min: 0 }),
+}
 
 /** O campo do schema que o `FieldDef` aponta. */
 export function propOf(field: FieldDef): string {

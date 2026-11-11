@@ -120,8 +120,9 @@ chave `"prepare": "<nome>"` aponta para uma função pura registrada em `PARAM_P
 (`src/dmaker/domain/templates.py`). Ela recebe os parâmetros já validados, devolve os mesmos mais os valores
 derivados, e o JSON usa o resultado como qualquer outro parâmetro. Um `ValueError` da função vira
 `TemplateError` com o nome do template. Um template novo nessa situação registra a sua função, sem mexer no
-resto do motor. Hoje usam o `explicativo` (`src/dmaker/domain/explainer.py`) e o `audiograma`
-(`src/dmaker/domain/audiogram_template.py`, que confere o estilo e monta o trecho de fundo).
+resto do motor. Hoje usam o `explicativo` (`src/dmaker/domain/explainer.py`), o `audiograma`
+(`src/dmaker/domain/audiogram_template.py`, que confere o estilo e monta o trecho de fundo) e o `podcast`
+(`src/dmaker/domain/podcast_template.py`, que soma abertura, voz e encerramento e junta as etiquetas).
 
 Um parâmetro numérico pode declarar `"duration_of": "<outro parâmetro>"` (um arquivo de áudio ou vídeo): se o
 pedido o omite, quem cria o projeto (`new-from-template`, `new_from_template`, a interface) mede o arquivo com o
@@ -150,15 +151,16 @@ falta ou o que está errado, e chega assim até a CLI e o MCP.
 | Arquivo | Descrição | Parâmetros principais |
 | --- | --- | --- |
 | `reel-medlycare-produto.json` | Reel de produto MedlyCare: abertura, capturas de tela com movimento, CTA. | `titulo`, `subtitulo`, `prints` (obrigatório), `cta_titulo`, `cta_subtitulo`, `musica` (opcional), `legendas` |
-| `reel-medlycare-depoimento.json` | Reel de depoimento: um corte do vídeo com gancho, crédito e CTA. | `video`, `nome`, `cargo`, `hook` (obrigatórios), `cta` |
+| `reel-medlycare-depoimento.json` | Reel de depoimento: um corte do vídeo com gancho, crédito e CTA. | `video`, `nome`, `cargo`, `hook`, `musica` (obrigatórios), `cta` |
 | `stories-medlycare.json` | Story de uma dica: captura de tela de fundo, gancho, texto, CTA. | `titulo`, `texto`, `print` (obrigatório) |
-| `pessoal-vlog-reel.json` | Reel pessoal de vlog/viagem: vídeos em sequência, título, trilha. | `videos` (obrigatório), `titulo`, `musica` |
+| `pessoal-vlog-reel.json` | Reel pessoal de vlog/viagem: vídeos em sequência, título, trilha. | `videos`, `musica` (obrigatórios), `titulo` |
 | `youtube-longo.json` | Vídeo longo para YouTube: abertura, gravação principal, CTA. | `titulo`, `video` (obrigatório) |
 | `casamento-multicam.json` | Cerimônia multicâmera sincronizada por áudio. | `cam_principal`, `cam_secundaria`, `audio_externo` (obrigatórios), `nomes`, `data` |
 | `tutorial-tela-webcam.json` | Tutorial com tela gravada e webcam em picture-in-picture. | `tela`, `webcam` (obrigatórios), `titulo`, `subtitulo`, `nome`, `cargo` |
 | `explicativo.json` | Vídeo explicativo em formato de reel: a gravação do apresentador num quadro arredondado embaixo, a área de cima (região `topo`) livre para a imagem ou o infográfico de cada assunto, legenda sobre o quadro e o fundo trocando a cada assunto. | `gravacao`, `assuntos` (obrigatórios), `legendas`, `legenda_modo`, `foco`, `marca` |
 | `audiograma.json` | Audiograma para divulgar um corte de podcast, entrevista ou áudio de WhatsApp sem vídeo: a capa num círculo no meio, a onda ou as barras animadas no ritmo da fala (em volta da foto ou embaixo dela), o título no alto e a legenda automática. | `audio`, `capa` (obrigatórios), `titulo`, `estilo` (`circle`, `bars`, `wave`), `seguir`, `cor`, `fundo`, `legendas`, `legenda_modo`, `idioma`, `marca`; `duracao` omitida é a do áudio |
-| `casamento-pascom.json` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (bloco `multicam`), cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data` (obrigatórios), `titulo`, `igreja`, `cidade`, `celebrante`, `diacono`, `cerimonial`, `musicos`, `trilha`, `inicio`, `fim` |
+| `podcast.json` | Episódio de podcast só de áudio: música de abertura, a voz gravada e música de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio. Sem imagem; a limpeza da voz entra quando o editor de áudio a oferecer. | `voz`, `trilha` (arquivos, obrigatórios), `abertura`, `encerramento`, `artista`, `titulo`, `album`, `faixa`, `ano`, `genero`, `comentario`, `loudness`, `formato`, `marca`; `duracao_voz` omitida é a do áudio |
+| `casamento-pascom.json` | Casamento comunitário padrão da PASCOM: duas câmeras com corte automático pela fala (bloco `multicam`), cartões da marca `pascom-sjb` e trilha na abertura e no encerramento. | `camera_altar`, `camera_lateral` (pastas, obrigatórios), `nomes`, `data`, `trilha` (obrigatórios), `titulo`, `igreja`, `cidade`, `celebrante`, `diacono`, `cerimonial`, `musicos`, `inicio`, `fim` |
 
 Todos validam como `Project` quando renderizados com os valores padrão (mais valores fictícios
 para os parâmetros obrigatórios) — é o que `tests/test_templates.py` confere a cada mudança.
@@ -197,9 +199,13 @@ Alguns templates simplificam o exemplo original para caber num conjunto pequeno 
   seja o fundo) e o estilo `rounded` por padrão. A sombra do quadro fica desligada: a moldura do
   picture-in-picture corta a própria sombra e a borda aparece sobre fundo claro.
 
-Caminhos de mídia que mudam a cada uso (vídeos, prints, gravações) ficam sempre `required`, sem
-`default`. Textos e caminhos que servem de exemplo claro (trilha padrão, nomes de exemplo) ficam
-com `default`, editável a qualquer momento.
+Caminhos de arquivo (vídeos, prints, gravações e a música) ficam sempre `required`, sem `default`: um
+caminho padrão aponta para um arquivo de uma máquina só, e o modelo deixa de funcionar em todas as outras.
+Um modelo que usa música (`pessoal-vlog-reel`, `reel-medlycare-depoimento`, `casamento-pascom`) pede o
+arquivo ao criar o projeto, e a mensagem diz qual parâmetro falta. Só os textos que servem de exemplo
+claro (títulos, nomes de exemplo) ficam com `default`, editáveis a qualquer momento. Um caminho de
+unidade só aparece num `"example"` (o valor de exemplo que `list_templates` mostra), e o teste
+`tests/test_portable_paths.py` reprova qualquer outro.
 
 ## Infográficos prontos (`html/`)
 

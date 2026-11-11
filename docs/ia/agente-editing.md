@@ -4,7 +4,7 @@ Criar o vídeo (reel, short, story, explicativo), cortar pausas e vícios, edita
 
 ## Ferramentas deste kit
 
-`probe_media`, `job_status`, `search_manual`, `list_templates`, `new_from_template`, `quick_edit`, `build_explainer_video`, `autocut`, `cut_pauses_and_caption`, `list_cuts`, `undo_cut`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `timeline_view`, `render_project`, `export_project`, `qa_report`, `presets`, `brands`.
+`probe_media`, `job_status`, `search_manual`, `list_templates`, `new_from_template`, `quick_edit`, `build_explainer_video`, `autocut`, `cut_pauses_and_caption`, `list_cuts`, `undo_cut`, `list_projects`, `get_project`, `validate_project`, `edit_project`, `undo_edit`, `redo_edit`, `audio_effects`, `audio_analyze`, `timeline_view`, `render_project`, `export_project`, `qa_report`, `presets`, `brands`.
 
 ## Pedidos e as chamadas certas
 
@@ -44,7 +44,7 @@ Pergunte antes, se faltar:
 
 Pergunte antes, se faltar:
 - Que tipo de vídeo é (produto, depoimento, story, vlog, tutorial, explicativo) para escolher o modelo.
-- Os arquivos que o modelo pede (prints, vídeos) com o caminho completo: são os parâmetros obrigatórios (`list_templates` marca quais). Pergunte só o que falta deles.
+- Os arquivos que o modelo pede (prints, vídeos, e a música dos modelos `pessoal-vlog-reel`, `reel-medlycare-depoimento` e `casamento-pascom`) com o caminho completo: são os parâmetros obrigatórios (`list_templates` marca quais). Não há música padrão: sem ela o projeto não é criado, e a mensagem diz qual parâmetro falta (`musica`, ou `trilha` no casamento). Pergunte só o que falta deles.
 - Os textos (título, gancho, CTA) têm padrão no modelo: se o usuário não deu um texto, use o padrão e siga em frente, sem perguntar.
 
 ### Pedido: "Corta as pausas dessa gravação"

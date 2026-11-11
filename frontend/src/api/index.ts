@@ -11,6 +11,7 @@ import { speechApi } from './speech'
 import { voiceApi } from './voice'
 import type {
   AppState,
+  AudioExportRequest,
   AutoCutRequest,
   BatchListItem,
   BatchReport,
@@ -58,6 +59,9 @@ export const api = {
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/render`, request),
     export: (name: string, presets: string[]) =>
       http.post<JobStartResponse>(`/api/projects/${enc(name)}/export`, { presets }),
+    /** Exporta só o áudio (inteiro, por região, por trilha ou um trecho); um arquivo que já existe devolve 409. */
+    exportAudio: (name: string, request: AudioExportRequest) =>
+      http.post<JobStartResponse>(`/api/projects/${enc(name)}/audio-export`, request),
     /** Devolve ao projeto o trecho de um corte automático; responde com a lista de cortes atualizada. */
     undoCut: (name: string, cutId: number) =>
       http.post<CutReport>(`/api/projects/${enc(name)}/cuts/${cutId}/undo`),
@@ -146,9 +150,15 @@ export { subscribeJson, subscribeSse } from './sse'
 export type { SseOptions, SseStatus, SseSubscription } from './sse'
 export type * from './types'
 export type * from './types/agent'
+export type * from './types/audioAnalysis'
+export type * from './types/audioEffects'
+export type * from './types/audioGenerators'
+export type * from './types/audioPlugins'
+export type * from './types/audioPanel'
 export type * from './types/dub'
 export type * from './types/editor'
 export type * from './types/models'
 export type * from './types/queue'
+export type * from './types/recordings'
 export type * from './types/speech'
 export type * from './types/voice'

@@ -21,11 +21,11 @@ O vídeo é uma conversa ou entrevista com duas ou mais pessoas. O modo `per_spe
 1. `dub_prepare`: preparar separando as duas pessoas
    Argumentos de exemplo: `{"path": "C:/videos/entrevista.mp4", "target_language": "en", "speaker_mode": "per_speaker", "num_speakers": 2}`
 2. `dub_get`: ver o falante de cada fala
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json"}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/entrevista.en.dub.json"}`
 3. `dub_update_segment`: corrigir quem fala uma fala
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/entrevista.en.dub.json", "segment_id": "s4", "speaker": "Falante 2"}`
 4. `dub_render`: gerar a dublagem
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/entrevista.en.dub.json", "draft": true}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/entrevista.en.dub.json", "draft": true}`
 
 ## Equivalente na CLI
 

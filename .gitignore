@@ -28,9 +28,24 @@ desktop.ini
 
 # layouts salvos da interface (dado da pessoa usando, não do repositório)
 layouts.json
+# predefinições de efeitos de áudio salvas pela pessoa (dado de quem usa o editor, não do repositório)
+effect-presets.json
+effect-presets.json.importado*
+
+# plugins de efeito de terceiros (LV2 e LADSPA) que a pessoa pôs para o DMaker, e a lista dos que ela desligou
+# (dado de quem usa o editor, não do repositório)
+/plugins/
+/plugins.json
+
+# macros de áudio salvas pela pessoa, globais e de cada marca (dado de quem usa o editor, não do repositório)
+assets/macros/
+assets/brands/*/macros/
 
 # vozes clonadas (referências são dados pessoais)
 assets/voices/
+
+# instaladores gerados por `dmaker release build` e os downloads que ele guarda (dezenas de GB)
+releases/
 
 # projetos de vídeo (mídia pesada e dados de clientes ficam só na máquina)
 projects/

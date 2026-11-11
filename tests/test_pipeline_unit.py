@@ -565,3 +565,52 @@ def test_a_caption_can_ignore_the_tone_of_the_background(workspace):
     assert "Style: CapDark," in following  # a cue cai sobre o fundo escuro do primeiro assunto
     ignoring = caption_styles(False)
     assert "Style: Cap," in ignoring and "CapDark" not in ignoring
+
+
+def test_render_measures_the_camera_before_the_mezzanines_and_ducks_the_external_track_inside_them(tmp_path):
+    """Auto Duck da faixa externa sob a câmera (A1): a chave é medida antes dos mezaninos, e o comando do mezanino do clipe
+    leva a curva. Sem a regra, ninguém mede nada e o mezanino não leva filtro de abaixamento."""
+    for name in ("take.mp4", "rec.wav"):
+        (tmp_path / name).write_bytes(b"x")
+    bursts = "\n".join(
+        f"lavfi.astats.Overall.RMS_level={-10.0 if 100 <= window < 150 else -80.0}" for window in range(400)
+    )  # a câmera soa de 2 a 3 s
+
+    class CameraRunner(RecordingRunner):
+        def capture(self, args, label="ffmpeg"):
+            self.commands.append(["ffmpeg", *args, f"#{label}"])
+            return bursts if "Auto Duck" in label else self.capture_stderr
+
+    def render(ducks: list[dict], name: str):
+        project = Project.model_validate(
+            {
+                "name": name,
+                "output": {"preset": "instagram/reels"},
+                "sources": {"cam": {"src": "take.mp4"}, "rec": {"src": "rec.wav", "sync": 0.0}},
+                "timeline": [{"type": "clip", "source": "cam", "start": 0, "end": 4}],
+                "audio": {"tracks": [{"source": "rec"}], "normalize": "off", "ducks": ducks},
+            }
+        )
+        project.base_dir = tmp_path
+        runner = CameraRunner(on_run=touch_output)
+        RenderPipeline(
+            project,
+            RenderOptions(preview=True, quiet=True, out=tmp_path / f"{name}.mp4", no_captions=True),
+            runner=runner,
+            prober=fake_prober,
+            cache_dir=tmp_path / f"mez-{name}",
+            jobs_dir=tmp_path / f"jobs-{name}",
+            output_dir=tmp_path / "output",
+        ).run()
+        return runner
+
+    plain = render([], "sem")
+    ducked = render([{"background": "A2", "key": "A1", "amount_db": -12}], "com")
+
+    assert not [c for c in plain.commands if c[-1].startswith("#nível")]
+    assert not any("pow(10" in " ".join(c) for c in plain.commands)
+    measured = [i for i, c in enumerate(ducked.commands) if c[-1].startswith("#nível")]
+    mezzanine = [i for i, c in enumerate(ducked.commands) if c[-1].endswith(".mov")]
+    assert len(measured) == 1 and "take.mp4" in " ".join(ducked.commands[measured[0]])
+    assert measured[0] < mezzanine[0]  # a chave existe antes de o primeiro mezanino
+    assert "pow(10" in " ".join(ducked.commands[mezzanine[0]])  # e a curva entra no comando dele

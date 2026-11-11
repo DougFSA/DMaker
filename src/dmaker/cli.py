@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from pydantic import ValidationError
@@ -15,26 +16,44 @@ from rich.table import Column, Table
 from typer.core import TyperGroup
 
 from . import __version__, config
+from .domain.audio_effects.base import SHOWN_WHEN_FILLED
+from .domain.audio_presets import list_audio_presets
 from .domain.models import format_size
+from .domain.outputs import resolve_output
 from .domain.presets import get_preset, list_presets
 
-app = typer.Typer(
+
+def _console_utf8() -> None:
+    """Põe o stdout e o stderr em UTF-8: redirecionados, o Windows os abre em cp1252 e o Rich cai para ASCII.
+
+    Mantém o tratamento de erro de cada fluxo (`errors`): o stderr segue sem estourar com um caractere raro.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors=stream.errors)
+        except (AttributeError, ValueError):
+            pass
+
+
+class _Utf8Typer(typer.Typer):
+    """App que põe o console em UTF-8 ao ser chamado, não ao ser importado nem num `@app.callback()`.
+
+    O `--help`, o `--version` e os erros de uso saem antes do corpo de qualquer callback, e o Typer guarda só
+    um por app; já a chamada do app é a única porta por onde todos eles passam, e um teste que importa
+    `dmaker.cli` (ou usa o `CliRunner`) não a atravessa, então a codificação do processo dele não muda.
+    """
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        _console_utf8()
+        return super().__call__(*args, **kwargs)
+
+
+app = _Utf8Typer(
     help="DMaker: editor de vídeos curtos por comando (Instagram, Facebook, YouTube, TikTok, WhatsApp).",
     no_args_is_help=True,
     rich_markup_mode="rich",
     add_completion=False,
 )
-
-
-@app.callback()
-def _console_utf8() -> None:
-    """Acentos no console do Windows: só quando a CLI roda de verdade, não ao importar o módulo
-    (um teste que importa `dmaker.cli` não pode mudar a codificação do stderr do processo)."""
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8")
-        except (AttributeError, ValueError):
-            pass
 
 
 console = Console()
@@ -65,7 +84,7 @@ def _print_result(result) -> None:
     mb = result.size_bytes / 1e6
     console.print(
         f"[green]Pronto:[/green] {result.output}  ({result.duration:.1f}s, {mb:.1f} MB, "
-        f"{result.preset.id} {result.preset.width}x{result.preset.height})"
+        f"{result.preset.id} {result.preset.resolution})"
     )
     if result.thumbnail:
         console.print(f"  thumbnail: {result.thumbnail}")
@@ -143,11 +162,21 @@ def _print_ui_result(result: dict) -> None:
         console.print(f"[yellow]aviso:[/yellow] {escape(w)}")
 
 
-@app.callback()
-def _main(version: Annotated[bool, typer.Option("--version", help="Mostra a versão.")] = False) -> None:
-    if version:
+def _show_version(requested: bool) -> None:
+    """Imprime a versão e encerra: roda como opção eager, antes de o Typer exigir um comando."""
+    if requested:
         console.print(f"dmaker {__version__}")
         raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_show_version, is_eager=True, help="Mostra a versão."),
+    ] = False,
+) -> None:
+    """Callback do app: existe para hospedar a opção global `--version`; o Typer guarda só um por app."""
 
 
 # ---------- ambiente ----------
@@ -172,6 +201,11 @@ def doctor(
         _doctor_offline()
         return
     console.print(f"[bold]DMaker {__version__}[/bold]  raiz: {config.ROOT}")
+    if config.INSTALL:
+        console.print(
+            f"  [green]instalado[/green]: versão {config.INSTALL.version or '?'}, "
+            f"programa em {config.INSTALL.root}, dados em {config.DATA_DIR}"
+        )
     exe = config.find_tool("ffmpeg")
     if not exe or not config.find_tool("ffprobe"):
         console.print("[red]FFmpeg/ffprobe não encontrados.[/red] Rode: dmaker setup")
@@ -190,6 +224,7 @@ def doctor(
         console.print(
             f"  filtros: {'ok' if not missing else '[red]faltam: ' + ', '.join(missing) + '[/red]'}"
         )
+        _doctor_plugins()
         if hw:
             from .media.ffmpeg import hardware_encoder
 
@@ -229,6 +264,24 @@ def doctor(
         console.print(f"  {name}: {d}")
 
 
+def _doctor_plugins() -> None:
+    """Os plugins de efeito: qual ffmpeg hospeda o LADSPA e o LV2, e quantos plugins a última varredura achou."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+    for name, found in service.hosts().items():
+        if found:
+            console.print(f"  plugins {name.upper()}: [green]disponível[/green]  ({found})")
+        else:
+            from .setup_tools import plugin_fix_advice
+
+            fix = escape(plugin_fix_advice(name))
+            console.print(f"  plugins {name.upper()}: [yellow]indisponível[/yellow] ({fix})")
+    console.print(
+        "  plugins instalados: `dmaker audio plugins list`; pasta do DMaker: " + str(config.PLUGINS_DIR)
+    )
+
+
 def _doctor_offline() -> None:
     """O relatório de "funciona sem internet?": cada item com onde procurei e o comando para baixar."""
     from .agent.offline import DiskOfflineProbe, build_report, render_report
@@ -255,15 +308,30 @@ def setup(
             help="Instala só o Chromium da composição em HTML e do PDF do manual (em bin/playwright).",
         ),
     ] = False,
+    plugins: Annotated[
+        bool,
+        typer.Option(
+            "--plugins",
+            help="Instala só o FFmpeg que hospeda os plugins LV2 (em bin/ffmpeg-lv2). O LADSPA já vem no FFmpeg principal.",
+        ),
+    ] = False,
 ) -> None:
-    """Baixa FFmpeg (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o Chromium."""
-    from .setup_tools import install_chromium
+    """Baixa o FFmpeg completo (bin/ffmpeg), a fonte Poppins (assets/fonts) e o modelo de recorte de pessoa; com --html, o
+    Chromium; com --plugins, o FFmpeg dos plugins LV2."""
+    from .setup_tools import install_chromium, install_lv2_ffmpeg
 
     if html:
         try:
             install_chromium()
         except RuntimeError as exc:
             _fail(escape(str(exc)))  # a mensagem traz `[html]`, que o Rich leria como marcação
+        return
+    if plugins:
+        config.ensure_dirs()
+        try:
+            install_lv2_ffmpeg(force=force)
+        except RuntimeError as exc:
+            _fail(escape(str(exc)))
         return
     from .media.matting import ensure_model, model_path
     from .setup_tools import install_ffmpeg, install_fonts
@@ -298,6 +366,13 @@ def presets(
             p.notes,
         )
     console.print(table)
+    if platform is None or platform.lower() == "audio":
+        audio_table = Table(title="Presets de áudio (saída só de som, sem imagem)")
+        for col in ("id", "formato", "taxa e canais", "padrão", "obs"):
+            audio_table.add_column(col)
+        for a in list_audio_presets():
+            audio_table.add_row(a.id, a.name, a.resolution, a.default_label, a.notes)
+        console.print(audio_table)
 
 
 @app.command()
@@ -596,7 +671,7 @@ def validate(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")])
         _fail(str(exc))
     console.print(
         f"[green]Spec válida.[/green] {s.name}: {len(s.segments)} trechos, {s.total:.1f}s, "
-        f"{s.preset.id} ({s.preset.width}x{s.preset.height}), tema {s.theme.name}"
+        f"{s.preset.id} ({s.preset.resolution}), tema {s.theme.name}"
     )
     for seg in s.segments:
         console.print(f"  [{seg.index}] {seg.type:5s} {seg.duration:6.2f}s  {seg.label}")
@@ -627,7 +702,7 @@ def render(
 ) -> None:
     """Renderiza o projeto no formato da plataforma. Por padrão abre a interface para acompanhar."""
     from .media.ffmpeg import FFmpegError, NullSink, RichSink
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
     from .pipeline.projects import parse_segments
 
     project = _load(spec)
@@ -661,7 +736,7 @@ def render(
         return
 
     try:
-        result = RenderPipeline(project, options).run()
+        result = create_renderer(project, options).run()
     except (FFmpegError, *RENDER_ERRORS) as exc:
         _fail(str(exc))
     if dry_run:
@@ -687,11 +762,11 @@ def export(
 ) -> None:
     """Exporta o mesmo projeto para vários formatos de uma vez. Por padrão abre a interface para acompanhar."""
     from .media.ffmpeg import FFmpegError, RichSink
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
 
     project = _load(spec)
     for p in presets:
-        get_preset(p)
+        resolve_output(p)
 
     dispatcher = None
     ui_name = None if no_ui else _project_name_for_ui(spec, project)
@@ -715,7 +790,7 @@ def export(
             _print_ui_result(snapshot.get("result") or {})
             continue
         try:
-            result = RenderPipeline(project, RenderOptions(preview=preview, preset=p)).run()
+            result = create_renderer(project, RenderOptions(preview=preview, preset=p)).run()
         except (FFmpegError, *RENDER_ERRORS) as exc:
             _fail(str(exc))
         _print_result(result)
@@ -1286,8 +1361,8 @@ def clean(
     ] = False,
 ) -> None:
     """Limpa o cache de trechos intermediários (cache/mez), proxies de prévia (cache/proxy), formas de
-    onda (cache/waveform), o áudio da prévia da linha do tempo (cache/preview-audio) e os quadros que o editor
-    pede ao pipeline (cache/frames)."""
+    onda (cache/waveform), os espectrogramas (cache/spectrogram), o áudio da prévia da linha do tempo (cache/preview-audio), os itens de áudio com
+    efeitos aplicados (cache/audio-fx), os sons gerados (cache/generated) e os quadros que o editor pede ao pipeline (cache/frames)."""
     import shutil
 
     n = 0
@@ -1295,7 +1370,10 @@ def clean(
         config.MEZ_DIR,
         config.PROXY_DIR,
         config.WAVEFORM_DIR,
+        config.SPECTROGRAM_DIR,
         config.PREVIEW_AUDIO_DIR,
+        config.AUDIO_FX_DIR,
+        config.GENERATED_DIR,
         config.FRAMES_DIR,
     ):
         if d.exists():
@@ -1595,6 +1673,10 @@ manual_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(manual_app, name="manual")
+
+from .release.cli import release_app  # noqa: E402
+
+app.add_typer(release_app, name="release")
 
 
 @manual_app.command("build")
@@ -2534,7 +2616,11 @@ def lexicon_remove(
 # ---------- áudio ----------
 
 audio_app = typer.Typer(
-    help="Áudio: isolamento vocal (voz de um lado, música e ruído do outro) com o modelo local Demucs.",
+    help="Áudio: exportar o projeto como WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF (inteiro, por região, por trilha ou só "
+    "um trecho), importar áudio bruto, isolar a voz (voz de um lado, música e ruído do outro) com o modelo local "
+    "Demucs, a cadeia de efeitos de qualquer item de áudio ou do master (Amplificar, Normalizar, Inverter, Reverter, "
+    "Repetir) e a edição de onda como no Audacity (silenciar, cortar, envelope, canais, colar, dividir, juntar, "
+    "aparar, deslocar no tempo e o ganho e o pan da trilha).",
     no_args_is_help=True,
 )
 app.add_typer(audio_app, name="audio")
@@ -2584,6 +2670,411 @@ def audio_isolate(
     console.print(f"  {duration:.1f}s de áudio em {elapsed:.1f}s (fator {elapsed / max(duration, 0.1):.1f}x)")
 
 
+@audio_app.command("effects")
+def audio_effects_list(
+    effect: Annotated[
+        str | None, typer.Argument(help="Tipo de um efeito, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os efeitos de áudio que a spec aceita em `effects` (e em `audio.master_effects`): o nome em
+    português e no Audacity, o que faz e os parâmetros com unidade, faixa e padrão."""
+    from .domain.audio_effects import catalog_payload
+
+    try:
+        payload = catalog_payload(effect)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Efeitos de áudio",
+    )
+    for info in payload["effects"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["effects"]:
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}", highlight=False)
+    console.print("Em todo efeito: `enabled` (liga e desliga), `start` e `end` (o intervalo, em segundos).")
+    console.print("Alvos: " + ", ".join(t["target"] for t in payload["targets"]), highlight=False)
+
+
+def _effect_param_text(param: dict) -> str:
+    unit = f" {param['unit']}" if param["unit"] else ""
+    low, high = param["minimum"], param["maximum"]
+    span = (
+        ""
+        if low is None and high is None
+        else f" [{'' if low is None else f'{low:g}'}..{'' if high is None else f'{high:g}'}]"
+    )
+    when = param.get("shown_when")
+    only = (
+        ", só com "
+        + ", ".join(
+            f"{field} vazio"
+            if value is None
+            else f"{field} preenchido"
+            if value == SHOWN_WHEN_FILLED
+            else f"{field}={value}"
+            for field, value in when.items()
+        )
+        if when
+        else ""
+    )
+    return f"{param['name']} ({param['label']}{unit}{span}, padrão {param['default']!r}{only})"
+
+
+audio_effect_app = typer.Typer(
+    help="Cadeia de efeitos de um item de áudio: adicionar, remover, mover, ligar, desligar e ajustar.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_effect_app, name="effect")
+
+_EFFECT_SPEC = Annotated[Path, typer.Argument(help="Caminho do spec.json.")]
+_EFFECT_TARGET = Annotated[
+    str,
+    typer.Argument(
+        help="Onde fica a cadeia: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.music, "
+        "audio.tracks.N ou audio.master."
+    ),
+]
+
+
+def _parse_effect_params(raw: list[str] | None) -> dict:
+    """`gain_db=6` vira {"gain_db": 6}: o valor é lido como JSON (número, true/false) e, se não for, fica texto."""
+    params: dict = {}
+    for item in raw or []:
+        name, separator, value = item.partition("=")
+        if not separator or not name:
+            _fail(f"Parâmetro mal escrito: {item!r}. Use nome=valor, por exemplo gain_db=6.")
+        try:
+            params[name] = json.loads(value)
+        except json.JSONDecodeError:
+            params[name] = value
+    return params
+
+
+def _apply_effect_op(spec: Path, op: dict) -> None:
+    """Aplica a operação à spec e a grava de volta, com o passo no histórico (`dmaker undo` o desfaz); erro de
+    pedido ou de spec sai como mensagem, sem traceback."""
+    from .domain.edits import EditError
+    from .pipeline.edit_history import edit_and_record
+
+    _load(spec)  # a spec ilegível sai com a mensagem de sempre
+    try:
+        edit_and_record(spec, {"type": "audio_effect", **op})
+    except EditError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Cadeia de efeitos atualizada:[/green] {spec}", highlight=False, soft_wrap=True)
+
+
+@audio_effect_app.command("add")
+def audio_effect_add(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito (veja `dmaker audio effects`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do efeito, nome=valor (repetível).")
+    ] = None,
+    start: Annotated[float | None, typer.Option(help="Início do intervalo, em segundos do item.")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim do intervalo, em segundos do item.")] = None,
+    position: Annotated[int | None, typer.Option(help="Posição na cadeia (padrão: no fim).")] = None,
+    disabled: Annotated[bool, typer.Option(help="Adiciona já desligado.")] = False,
+    region: Annotated[
+        str | None,
+        typer.Option(
+            help="Uma região de marcador (marker:<texto>) no lugar de --start e --end; se o marcador for "
+            "espectral, traz também low_hz e high_hz (o intervalo vem em segundos da linha do tempo)."
+        ),
+    ] = None,
+) -> None:
+    """Acrescenta um efeito à cadeia do item (por exemplo: audio effect add spec.json audio.voiceover.0 amplify
+    -p gain_db=6; ou um efeito espectral numa região: ... spectral_delete --region "marker:plim"; ou o Vocoder cantando
+    na harmonia da música: ... audio.voiceover.0 vocoder -p carrier_track=MUS; para ele ouvir a trilha mesmo muda ou fora
+    do solo, acrescente -p carrier_ignores_mute=true)."""
+    data: dict = {"type": effect, **_parse_effect_params(param)}
+    if start is not None:
+        data["start"] = start
+    if end is not None:
+        data["end"] = end
+    if disabled:
+        data["enabled"] = False
+    op: dict = {"action": "add", "target": target, "effect": data}
+    if position is not None:
+        op["index"] = position
+    if region is not None:
+        op["region"] = region
+    _apply_effect_op(spec, op)
+
+
+@audio_effect_app.command("remove")
+def audio_effect_remove(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Tira o efeito da posição `index` da cadeia."""
+    _apply_effect_op(spec, {"action": "remove", "target": target, "index": index})
+
+
+@audio_effect_app.command("move")
+def audio_effect_move(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição atual na cadeia.")],
+    to: Annotated[int, typer.Argument(help="Nova posição.")],
+) -> None:
+    """Muda a ordem da cadeia: o efeito de `index` vai para `to`."""
+    _apply_effect_op(spec, {"action": "move", "target": target, "index": index, "to": to})
+
+
+@audio_effect_app.command("enable")
+def audio_effect_enable(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Liga o efeito da posição `index`."""
+    _apply_effect_op(spec, {"action": "enable", "target": target, "index": index})
+
+
+@audio_effect_app.command("disable")
+def audio_effect_disable(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+) -> None:
+    """Desliga o efeito da posição `index` sem apagá-lo (o botão de bypass)."""
+    _apply_effect_op(spec, {"action": "disable", "target": target, "index": index})
+
+
+@audio_effect_app.command("set")
+def audio_effect_set(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    index: Annotated[int, typer.Argument(help="Posição na cadeia.")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro a mudar, nome=valor (repetível).")
+    ] = None,
+) -> None:
+    """Muda os parâmetros do efeito da posição `index` (os que não forem citados ficam como estão)."""
+    params = _parse_effect_params(param)
+    if not params:
+        _fail("Informe ao menos um parâmetro: --param nome=valor.")
+    _apply_effect_op(spec, {"action": "set", "target": target, "index": index, "params": params})
+
+
+# ---------- analisadores de áudio ----------
+
+audio_analyze_app = typer.Typer(
+    help="Analisar o áudio sem mudar o som: Contraste, Achar Clipping, Medir RMS, Espectro de Frequência (CSV e PNG), "
+    "Marcar Sons, Achar Batidas, Exportar Amostras e cortar no ritmo.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_analyze_app, name="analyze")
+
+
+@audio_analyze_app.command("catalog")
+def audio_analyze_catalog(
+    analyzer: Annotated[
+        str | None, typer.Argument(help="Tipo de um analisador, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os analisadores de áudio: o nome em português e no Audacity, o que fazem e os parâmetros."""
+    from .analysis import analyzer_catalog
+
+    try:
+        payload = analyzer_catalog(analyzer)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Analisadores de áudio",
+    )
+    for info in payload["analyzers"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["analyzers"]:
+        marks = f" Marca no grupo '{info['marker_group']}'." if info["marker_group"] else ""
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}{marks}", highlight=False)
+    console.print("De onde vem o som: " + ", ".join(s["source"] for s in payload["sources"]), highlight=False)
+
+
+def _analysis_request(
+    analyzer: str,
+    target: str | None,
+    file: Path | None,
+    start: str | None,
+    end: str | None,
+    param: list[str] | None,
+    mark: bool | None,
+    group: str | None,
+):
+    from .pipeline.audio_analysis import AnalysisRequest
+
+    def instant(value: str | None) -> float | str | None:
+        if value is None or value.strip().lower().startswith(("marker:", "beat:", "bar:")):
+            return value
+        try:
+            return float(value)
+        except ValueError:
+            _fail(f"Instante inválido: {value!r}. Use segundos (12.5), marker:<texto>, beat:<n> ou bar:<n>.")
+
+    return AnalysisRequest(
+        analyzer,
+        _parse_effect_params(param),
+        target=target,
+        file=str(file) if file else None,
+        start=instant(start),
+        end=instant(end),
+        mark=mark,
+        group=group,
+    )
+
+
+def _print_outcome(outcome) -> None:
+    console.print(f"[green]{escape(outcome.result.summary)}[/green]", highlight=False, soft_wrap=True)
+    console.print(
+        f"Som analisado: {escape(outcome.label)}, de {outcome.interval[0]:g} s a {outcome.interval[1]:g} s."
+    )
+    for note in (*outcome.notes, *outcome.result.warnings):
+        console.print(f"[yellow]{escape(note)}[/yellow]", highlight=False, soft_wrap=True)
+    if outcome.marker_group is not None:
+        console.print(
+            f"Marcadores no grupo '{escape(outcome.marker_group)}': {outcome.markers_written} (os marcadores "
+            "de outros grupos ficaram como estavam).",
+            highlight=False,
+        )
+        for warning in outcome.edit_warnings:
+            console.print(f"[yellow]{escape(warning)}[/yellow]", highlight=False)
+    if outcome.exported:
+        console.print(f"Arquivo gravado: {outcome.exported}", highlight=False, soft_wrap=True)
+
+
+@audio_analyze_app.command("run")
+def audio_analyze_run(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json.")],
+    analyzer: Annotated[str, typer.Argument(help="O analisador (veja `dmaker audio analyze catalog`).")],
+    target: Annotated[
+        str | None,
+        typer.Option(
+            help="De onde vem o som: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.music, "
+            "audio.tracks.N ou output (a saída final já renderizada, o padrão)."
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option(help="Um arquivo de áudio ou vídeo solto, no lugar do alvo.")
+    ] = None,
+    start: Annotated[
+        str | None, typer.Option(help="Início do trecho, em segundos do item ou marker:<texto>.")
+    ] = None,
+    end: Annotated[
+        str | None, typer.Option(help="Fim do trecho, em segundos do item ou marker:<texto>.")
+    ] = None,
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Parâmetro do analisador, nome=valor (repetível)."),
+    ] = None,
+    mark: Annotated[
+        bool | None,
+        typer.Option(
+            "--mark/--no-mark",
+            help="Grava os marcadores da análise (padrão: sim para Marcar Sons e Achar Batidas, não nos outros).",
+        ),
+    ] = None,
+    group: Annotated[
+        str | None, typer.Option(help="Grupo de marcadores onde gravar (padrão: o do analisador).")
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Exporta o resultado: .csv ou .txt (tabela), .png (espectro) ou .json."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Resultado completo em JSON, como a ferramenta MCP.")
+    ] = False,
+) -> None:
+    """Roda um analisador sobre o áudio do projeto (por exemplo: audio analyze run spec.json clipping --target
+    audio.voiceover.0)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import analyze_project
+
+    request = _analysis_request(analyzer, target, file, start, end, param, mark, group)
+    try:
+        outcome = analyze_project(spec, request, out=out)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(outcome.to_dict(), ensure_ascii=False))
+        return
+    _print_outcome(outcome)
+
+
+@audio_analyze_app.command("cut-on-beat")
+def audio_cut_on_beat(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json.")],
+    source: Annotated[
+        str,
+        typer.Option(
+            help="De onde vêm as batidas: a música (padrão, audio.music) ou grid, os tempos do andamento do projeto."
+        ),
+    ] = "audio.music",
+    tolerance: Annotated[
+        float, typer.Option(help="Quanto, em segundos, um corte pode andar para cair numa batida.")
+    ] = 0.2,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Anda os cortes (por padrão só propõe e mostra a lista).")
+    ] = False,
+    group: Annotated[
+        str | None,
+        typer.Option(help="Usa as batidas de um grupo de marcadores que já existe, no lugar da análise."),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Resultado completo em JSON.")] = False,
+) -> None:
+    """Propõe (ou, com --apply, aplica) o corte de cada fronteira entre clipes na batida da música mais perto."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.beat_cut import cut_on_beat
+
+    try:
+        outcome = cut_on_beat(spec, source=source, tolerance=tolerance, apply=apply, group=group)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(outcome.to_dict(), ensure_ascii=False))
+        return
+    bpm = f", cerca de {outcome.bpm:g} batidas por minuto" if outcome.bpm else ""
+    console.print(f"{outcome.beats} batida(s){bpm}. Tolerância de {outcome.tolerance:g} s.", highlight=False)
+    table = Table("Trecho", "Corte hoje", "Batida", "Andaria", "Obs.", title="Fronteiras entre os trechos")
+    for proposal in outcome.proposals:
+        table.add_row(
+            str(proposal.index + 1),
+            f"{proposal.boundary:.3f} s",
+            "" if proposal.beat is None else f"{proposal.beat:.3f} s",
+            "" if proposal.shift is None else f"{proposal.shift * 1000:+.0f} ms",
+            escape(proposal.reason or ""),
+        )
+    console.print(table)
+    for warning in outcome.warnings:
+        console.print(f"[yellow]{escape(warning)}[/yellow]", highlight=False)
+    if apply:
+        console.print(f"[green]{outcome.moved} corte(s) andaram para a batida.[/green]")
+    else:
+        console.print("Nada foi gravado. Use --apply para andar os cortes.")
+
+
 # ---------- efeitos sonoros ----------
 
 sfx_app = typer.Typer(
@@ -2619,6 +3110,1934 @@ def sfx_build(
 
     for path in write_library(out_dir):
         console.print(f"[green]gravado[/green] {path}", highlight=False, soft_wrap=True)
+
+
+# ---------- marcadores ----------
+
+# ---------- edição de onda e histórico ----------
+
+_WAVE_SPEC = Annotated[Path, typer.Argument(help="Caminho do spec.json.")]
+_WAVE_TARGET = Annotated[
+    str,
+    typer.Argument(
+        help="O item de áudio: timeline.N (som do clipe), overlays.N (PiP), audio.voiceover.N, audio.narration.N, "
+        "audio.tracks.N, audio.music ou audio.master."
+    ),
+]
+_WAVE_START = Annotated[
+    str | None, typer.Option("--start", help="Início, em segundos do vídeo final (ou marker:<texto>).")
+]
+_WAVE_END = Annotated[
+    str | None, typer.Option("--end", help="Fim, em segundos do vídeo final (ou marker:<texto>).")
+]
+_WAVE_REGION = Annotated[
+    str | None,
+    typer.Option("--region", help="Uma região de marcador (marker:<texto>), no lugar de --start e --end."),
+]
+
+
+def _instant_arg(value: str | None) -> float | str | None:
+    """Um instante da linha de comando: um número de segundos, ou `marker:<texto>` (que o servidor resolve)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _wave_op(operation: str, target: str | None = None, **fields: object) -> dict:
+    """O pedido de `edit_project` a partir dos argumentos da linha de comando: só entra o que foi dado."""
+    op: dict = {"type": operation}
+    if target is not None:
+        op["target"] = target
+    op.update({name: value for name, value in fields.items() if value is not None})
+    return op
+
+
+def _run_wave_edit(spec: Path, op: dict, done: str) -> None:
+    """Aplica a edição à spec, guarda o passo no histórico (`dmaker undo` o desfaz) e grava; recusa sai como mensagem."""
+    from .domain.edits import EditError
+    from .pipeline.edit_history import edit_and_record
+
+    try:
+        report, _ = edit_and_record(spec, op)
+    except EditError as exc:
+        _fail(str(exc))
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]{done}[/green] (desfaça com `dmaker undo`)", highlight=False)
+    for note in report.notes:
+        console.print(escape(note), highlight=False)
+    for warning in report.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("truncate-silence")
+def audio_truncate_silence_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    threshold_db: Annotated[
+        float, typer.Option("--threshold-db", help="Abaixo deste nível (dBFS, de -80 a -20) é silêncio.")
+    ] = -20.0,
+    min_duration: Annotated[
+        float, typer.Option("--min-duration", help="Só pausas de pelo menos isto (segundos) são encurtadas.")
+    ] = 0.5,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help="truncate: cada pausa vira --truncate-to segundos; compress: o que passa da duração mínima "
+            "encolhe para --compress-percent %.",
+        ),
+    ] = "truncate",
+    truncate_to: Annotated[
+        float, typer.Option("--truncate-to", help="No modo truncate, a duração que a pausa passa a ter (s).")
+    ] = 0.5,
+    compress_percent: Annotated[
+        float, typer.Option("--compress-percent", help="No modo compress, quanto do excesso fica (0 a 100).")
+    ] = 50.0,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Encurta as pausas de um clipe (imagem e som juntos) ou de uma voz gravada, sem cortar fala (o Truncate Silence
+    do Audacity). A boca continua sincronizada e os marcadores acompanham."""
+    op = _wave_op(
+        "audio_truncate_silence",
+        target,
+        threshold_db=threshold_db,
+        min_duration=min_duration,
+        mode=mode,
+        truncate_to=truncate_to,
+        compress_percent=compress_percent,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+    )
+    _run_wave_edit(spec, op, "Silêncios truncados.")
+
+
+noise_profile_app = typer.Typer(
+    help="Perfis de ruído do projeto, o primeiro passo da Redução de ruído (efeito noise_reduction).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(noise_profile_app, name="noise-profile")
+
+
+@noise_profile_app.command("add")
+def noise_profile_add(
+    spec: _WAVE_SPEC,
+    name: Annotated[str, typer.Argument(help="O nome do perfil (a Redução de ruído o cita em `profile`).")],
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Guarda o trecho que só tem chiado como perfil e mostra o nível do ruído por banda. Sem --start e --end, o perfil
+    é o trecho mais quieto do item. Desfaça com `dmaker undo`."""
+    from .domain.edits import EditError
+    from .pipeline.noise_profiles import capture_noise_profile
+
+    try:
+        report = capture_noise_profile(spec, name, target, _instant_arg(start), _instant_arg(end))
+    except (EditError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"[green]Perfil {escape(name)} guardado[/green]: {escape(report['target'])} de {report['start']:.3f} a "
+        f"{report['end']:.3f} s, nível {report['level_db']:.1f} dBFS (desfaça com `dmaker undo`)",
+        highlight=False,
+    )
+    table = Table("Banda (Hz)", "Nível (dBFS)")
+    for band in report["bands"]:
+        table.add_row(f"{band['hz']:g}", f"{band['db']:.1f}")
+    console.print(table)
+
+
+@noise_profile_app.command("list")
+def noise_profile_list(spec: _WAVE_SPEC) -> None:
+    """Lista os perfis de ruído do projeto."""
+    project = _load(spec)
+    profiles = project.audio.noise_profiles
+    if not profiles:
+        console.print("O projeto não tem perfis de ruído (crie com `dmaker audio noise-profile add`).")
+        return
+    table = Table("Perfil", "Item", "Início (s)", "Fim (s)")
+    for key, profile in profiles.items():
+        table.add_row(key, profile.target, f"{profile.start:.3f}", f"{profile.end:.3f}")
+    console.print(table)
+
+
+@noise_profile_app.command("remove")
+def noise_profile_remove(
+    spec: _WAVE_SPEC, name: Annotated[str, typer.Argument(help="O nome do perfil.")]
+) -> None:
+    """Apaga um perfil de ruído (recusa se algum efeito ainda o usa)."""
+    _run_wave_edit(spec, {"type": "noise_profile_remove", "name": name}, f"Perfil {name} apagado.")
+
+
+tempo_app = typer.Typer(
+    help="Andamento do projeto (BPM e compasso) e da música: a grade, a detecção do BPM e a música esticada até ela.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(tempo_app, name="tempo")
+
+
+@tempo_app.command("show")
+def tempo_show(
+    spec: _WAVE_SPEC, as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False
+) -> None:
+    """Mostra o andamento do projeto e o da música."""
+    from .pipeline.tempo_detect import tempo_summary
+
+    summary = tempo_summary(_load(spec))
+    if as_json:
+        typer.echo(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    tempo, music = summary["tempo"], summary["music"]
+    if tempo is None:
+        console.print("O projeto não tem andamento (defina com `dmaker audio tempo set`).")
+    else:
+        console.print(
+            f"Projeto: {tempo['bpm']:g} BPM, compasso {tempo['time_signature']}, tempo 1 em {tempo['offset']:g} s "
+            f"(um tempo dura {tempo['beat_seconds']:.4f} s, um compasso {tempo['bar_seconds']:.4f} s).",
+            highlight=False,
+        )
+    if music is not None:
+        bpm = "sem andamento definido" if music["bpm"] is None else f"{music['bpm']:g} BPM"
+        stretch = "esticada até o andamento do projeto" if music["stretch_to_tempo"] else "não esticada"
+        console.print(
+            f"Música: {bpm}, primeiro tempo em {music['beat_offset']:g} s do arquivo, {stretch}.",
+            highlight=False,
+        )
+
+
+@tempo_app.command("set")
+def tempo_set(
+    spec: _WAVE_SPEC,
+    bpm: Annotated[float | None, typer.Option(help="Batidas por minuto (de 20 a 400).")] = None,
+    time_signature: Annotated[
+        str | None, typer.Option("--time-signature", help="Fórmula de compasso: 4/4, 3/4, 6/8...")
+    ] = None,
+    offset: Annotated[
+        str | None,
+        typer.Option(help="Onde cai o tempo 1, em segundos do vídeo final (ou marker:<texto>)."),
+    ] = None,
+) -> None:
+    """Define o andamento do projeto (ou muda só os campos dados). Com ele valem `beat:<n>` e `bar:<n>` onde vale
+    `marker:<texto>`, a régua em compassos e o encaixe da interface."""
+    op = {
+        "type": "tempo_set",
+        "bpm": bpm,
+        "time_signature": time_signature,
+        "offset": _instant_arg(offset),
+    }
+    _run_wave_edit(
+        spec, {key: value for key, value in op.items() if value is not None}, "Andamento definido."
+    )
+
+
+@tempo_app.command("clear")
+def tempo_clear(spec: _WAVE_SPEC) -> None:
+    """Tira o andamento do projeto (a régua em compassos e as referências beat:/bar: deixam de existir)."""
+    _run_wave_edit(spec, {"type": "tempo_remove"}, "Andamento removido.")
+
+
+@tempo_app.command("music")
+def tempo_music(
+    spec: _WAVE_SPEC,
+    bpm: Annotated[float | None, typer.Option(help="O andamento da música, em batidas por minuto.")] = None,
+    beat_offset: Annotated[
+        float | None, typer.Option("--beat-offset", help="Onde cai o primeiro tempo dentro do arquivo (s).")
+    ] = None,
+    stretch: Annotated[
+        bool | None,
+        typer.Option(
+            "--stretch/--no-stretch",
+            help="Estica a música, sem mudar o tom, até o andamento do projeto.",
+        ),
+    ] = None,
+) -> None:
+    """Define o andamento da música e se ela é esticada até o do projeto."""
+    op = {"type": "music_tempo_set", "bpm": bpm, "beat_offset": beat_offset, "stretch_to_tempo": stretch}
+    _run_wave_edit(spec, {key: value for key, value in op.items() if value is not None}, "Música ajustada.")
+
+
+@tempo_app.command("detect")
+def tempo_detect(
+    spec: _WAVE_SPEC,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Grava o BPM e o primeiro tempo na música (por padrão só sugere)."),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Sugere o BPM e o primeiro tempo do arquivo da música (e, com --apply, os grava num passo do histórico)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.tempo_detect import detect_music_tempo
+
+    try:
+        detection = detect_music_tempo(spec, apply=apply)
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(detection.to_dict(), ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"{escape(detection.source)}: {detection.bpm:g} BPM, primeiro tempo em {detection.beat_offset:.3f} s "
+        f"(confiança {detection.confidence:.2f}).",
+        highlight=False,
+    )
+    if detection.alternatives:
+        others = ", ".join(f"{value:g}" for value in detection.alternatives)
+        console.print(f"Se o seu ouvido marca outro tempo: {others} BPM.", highlight=False)
+    for warning in detection.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+    console.print(
+        "[green]Gravado na música (desfaça com `dmaker undo`).[/green]"
+        if detection.applied
+        else "Nada foi gravado: use --apply, ou `dmaker audio tempo music --bpm ...`."
+    )
+
+
+@tempo_app.command("grid")
+def tempo_grid(
+    spec: _WAVE_SPEC,
+    start: Annotated[float, typer.Option(help="Do instante (s).")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Até o instante (s); padrão: o fim do vídeo.")] = None,
+    level: Annotated[str, typer.Option(help="beat (cada tempo) ou bar (cada início de compasso).")] = "beat",
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Lista os instantes da grade do andamento do projeto."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.tempo_detect import grid_listing
+    from .pipeline.timeline_service import project_timeline_view
+
+    project = _load(spec)
+    try:
+        listing = grid_listing(
+            project, start, project_timeline_view(project).total if end is None else end, level
+        )
+    except (FFmpegError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(listing, ensure_ascii=False, indent=2))
+        return
+    table = Table("Número", "Instante (s)", title=f"Grade ({'compassos' if level == 'bar' else 'tempos'})")
+    for point in listing["points"]:
+        table.add_row(str(point["number"]), f"{point['at']:.3f}")
+    console.print(table)
+
+
+@audio_effect_app.command("preset")
+def audio_effect_preset(
+    spec: _EFFECT_SPEC,
+    target: _EFFECT_TARGET,
+    preset: Annotated[str, typer.Argument(help="O id da predefinição (veja `dmaker audio effects`).")],
+    position: Annotated[int | None, typer.Option(help="Posição na cadeia (padrão: no fim).")] = None,
+) -> None:
+    """Põe no item uma cadeia pronta (por exemplo: audio effect preset spec.json audio.narration.0 podcast_voice). Cada
+    efeito entra separado, e a pessoa ajusta ou tira depois."""
+    op: dict = {"action": "preset", "target": target, "preset": preset}
+    if position is not None:
+        op["index"] = position
+    _apply_effect_op(spec, op)
+
+
+@audio_effect_app.command("action")
+def audio_effect_action_command(
+    spec: _EFFECT_SPEC,
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito (por exemplo noise_gate).")],
+    action: Annotated[str, typer.Argument(help="A ação do efeito (por exemplo analyze_noise).")],
+    target: Annotated[
+        str | None, typer.Option(help="O item de onde sai o trecho (por exemplo audio.voiceover.0).")
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(help="Um perfil de ruído do projeto, ou auto (o trecho mais quieto do item)."),
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Roda uma ação de um efeito e mostra o que ela sugere para os campos (o Analisar ruído do Noise Gate mede um trecho
+    sem fala e sugere o limiar). Só lê: para gravar o valor, use `dmaker audio effect set`."""
+    from .domain.edits import EditError
+    from .pipeline.effect_actions import run_effect_action
+
+    params = {"target": target, "profile": profile, "start": _instant_arg(start), "end": _instant_arg(end)}
+    try:
+        report = run_effect_action(
+            _load(spec), effect, action, {key: value for key, value in params.items() if value is not None}
+        )
+    except (EditError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    console.print(escape(report.get("message", "Pronto.")), highlight=False)
+    for name, value in report["fills"].items():
+        console.print(f"  {name} = {value}", highlight=False)
+
+
+RESPONSE_TABLE_ROWS = 24
+
+
+@audio_effect_app.command("response")
+def audio_effect_response_command(
+    effect: Annotated[str, typer.Argument(help="Tipo do efeito de equalização (por exemplo highpass).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do efeito, nome=valor (repetível).")
+    ] = None,
+    points: Annotated[int, typer.Option(help="Quantas frequências, de 20 Hz a 20 kHz em oitavas.")] = 256,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Saída em JSON {hz, db}, como a ferramenta MCP.")
+    ] = False,
+) -> None:
+    """Mostra a resposta de frequência de um efeito de equalização (o ganho em dB por frequência), a mesma curva que o
+    gráfico da interface desenha, por exemplo: audio effect response highpass -p frequency_hz=80 -p slope_db=24."""
+    from .pipeline.effect_response import effect_frequency_response
+
+    try:
+        response = effect_frequency_response({"type": effect, **_parse_effect_params(param)}, points)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(response, ensure_ascii=False))
+        return
+    step = max(1, len(response["hz"]) // RESPONSE_TABLE_ROWS)
+    table = Table(Column("Hz", justify="right"), Column("dB", justify="right"), title=f"Resposta de {effect}")
+    for hz, db in list(zip(response["hz"], response["db"], strict=True))[::step]:
+        table.add_row(f"{hz:g}", f"{db:+.2f}")
+    console.print(table)
+
+
+audio_plugins_app = typer.Typer(
+    help="Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity: varrer as pastas, listar "
+    "com os controles que cada plugin declara, habilitar e desabilitar. O efeito `plugin` os usa (`dmaker audio effect add`).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_plugins_app, name="plugins")
+
+
+def _plugin_state(info: dict) -> str:
+    if not info["usable"]:
+        return "não usável: " + info["problem"]
+    return "habilitado" if info["enabled"] else "desabilitado"
+
+
+def _print_plugin_table(payload: dict) -> None:
+    from .setup_tools import plugin_fix_advice
+
+    table = Table("id", "formato", "nome", "controles", "estado", title="Plugins de efeito")
+    for info in payload["plugins"]:
+        table.add_row(
+            info["id"], info["format"], info["name"], str(len(info["controls"])), escape(_plugin_state(info))
+        )
+    console.print(table)
+    for name, found in payload["hosts"].items():
+        shown = found or f"indisponível ({plugin_fix_advice(name)})"
+        console.print(f"  ffmpeg do {name.upper()}: {escape(shown)}", highlight=False)
+    for note in payload["notes"]:
+        console.print(f"  [yellow]{escape(note)}[/yellow]", highlight=False)
+    console.print(
+        f"  Ponha plugins seus em {escape(payload['install_to'])} e rode `dmaker audio plugins scan`."
+    )
+
+
+def _plugins_command(action: Callable[[], dict], as_json: bool, show_key: str | None = None) -> None:
+    from .pipeline.plugins import PluginUnavailable
+
+    try:
+        payload = action()
+    except PluginUnavailable as exc:
+        _fail(escape(str(exc)))
+    if as_json:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if show_key is None:
+        _print_plugin_table(payload)
+        return
+    (info,) = payload["plugins"]
+    console.print(
+        f"[bold]{escape(info['name'])}[/bold] ({info['format'].upper()}, id {info['id']})", highlight=False
+    )
+    console.print(f"  na spec: format={info['format']!r} plugin={escape(repr(info['ref']))}", highlight=False)
+    console.print(f"  estado: {escape(_plugin_state(info))}", highlight=False)
+    table = Table("nome na spec", "rótulo", "padrão", "mínimo", "máximo")
+    for control in info["controls"]:
+        table.add_row(
+            control["name"],
+            escape(control["label"]),
+            f"{control['default']:g}",
+            "-" if control["minimum"] is None else f"{control['minimum']:g}",
+            "-" if control["maximum"] is None else f"{control['maximum']:g}",
+        )
+    console.print(table)
+
+
+_PLUGIN_JSON = Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")]
+_PLUGIN_KEY = Annotated[
+    str, typer.Argument(help="O id (lv2-1a2b3c4d5e) ou a referência do plugin (a URI, arquivo#rótulo).")
+]
+
+
+@audio_plugins_app.command("scan")
+def audio_plugins_scan(as_json: _PLUGIN_JSON = False) -> None:
+    """Varre as pastas de plugins (as do sistema, só para leitura, e a do DMaker) e pergunta ao ffmpeg o que cada um expõe."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def scan() -> dict:
+        service.scan()
+        return service.catalog()
+
+    _plugins_command(scan, as_json)
+
+
+@audio_plugins_app.command("list")
+def audio_plugins_list(as_json: _PLUGIN_JSON = False) -> None:
+    """Lista os plugins da última varredura (faz uma se nunca houve) com o estado de cada um."""
+    from .pipeline.plugins import plugin_service
+
+    _plugins_command(plugin_service().catalog, as_json)
+
+
+@audio_plugins_app.command("show")
+def audio_plugins_show(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Mostra um plugin: a referência para a spec e os controles com faixa e padrão, lidos do próprio plugin."""
+    from .pipeline.plugins import plugin_service
+
+    _plugins_command(lambda: plugin_service().catalog(key), as_json, show_key=key)
+
+
+@audio_plugins_app.command("enable")
+def audio_plugins_enable(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Habilita um plugin (o padrão de todo plugin achado)."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def run() -> dict:
+        service.set_enabled(key, True)
+        return service.catalog(key)
+
+    _plugins_command(run, as_json, show_key=key)
+
+
+@audio_plugins_app.command("disable")
+def audio_plugins_disable(key: _PLUGIN_KEY, as_json: _PLUGIN_JSON = False) -> None:
+    """Desabilita um plugin: ele continua na lista, e os efeitos que o usam são pulados com um aviso."""
+    from .pipeline.plugins import plugin_service
+
+    service = plugin_service()
+
+    def run() -> dict:
+        service.set_enabled(key, False)
+        return service.catalog(key)
+
+    _plugins_command(run, as_json, show_key=key)
+
+
+audio_preset_app = typer.Typer(
+    help="Predefinições de efeitos de áudio que você salva por nome (a cadeia de efeitos já ajustada) para pôr em outros "
+    "itens com `dmaker audio effect preset`. São as mesmas macros de `dmaker audio macro` (guardadas em assets/macros).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(audio_preset_app, name="preset")
+
+
+@audio_preset_app.command("list")
+def audio_preset_list(
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista as predefinições que você salvou (as embutidas aparecem em `dmaker audio effects --json`)."""
+    from .domain.audio_effects import list_user_presets
+
+    try:
+        presets = [preset.to_dict() for preset in list_user_presets()]
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps({"presets": presets}, ensure_ascii=False, indent=2))
+        return
+    if not presets:
+        console.print("Nenhuma predefinição salva. Salve uma com `dmaker audio preset save`.")
+        return
+    table = Table(Column("id", no_wrap=True), "nome", "efeitos", title="Predefinições salvas")
+    for preset in presets:
+        table.add_row(
+            preset["id"], preset["label"], ", ".join(effect["type"] for effect in preset["effects"])
+        )
+    console.print(table)
+
+
+@audio_preset_app.command("save")
+def audio_preset_save(
+    name: Annotated[
+        str, typer.Argument(help="O nome da predefinição (salvar de novo com o mesmo nome a troca).")
+    ],
+    effect: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--effect",
+            "-e",
+            help='Um efeito em JSON, por exemplo \'{"type": "highpass", "frequency_hz": 80}\' (repetível).',
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option("--file", help="Um arquivo JSON com a lista de efeitos da cadeia.")
+    ] = None,
+    summary: Annotated[str, typer.Option(help="Uma frase do que a predefinição faz.")] = "",
+) -> None:
+    """Salva uma cadeia de efeitos com um nome, na pasta de macros (assets/macros). O intervalo e o bypass de cada
+    efeito não entram: a predefinição vale para qualquer item."""
+    from .domain.audio_effects import save_user_preset
+
+    effects: list = []
+    try:
+        for text in effect or []:
+            effects.append(json.loads(text))
+        if file is not None:
+            loaded = json.loads(file.read_text(encoding="utf-8"))
+            effects.extend(loaded if isinstance(loaded, list) else [loaded])
+    except (OSError, ValueError) as exc:
+        _fail(f"Não consegui ler os efeitos: {exc}")
+    try:
+        preset = save_user_preset(name, effects, summary)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Predefinição salva:[/green] {preset.label} (id {preset.id})", highlight=False)
+
+
+@audio_preset_app.command("remove")
+def audio_preset_remove(
+    preset_id: Annotated[str, typer.Argument(help="O id da predefinição (veja `dmaker audio preset list`).")],
+) -> None:
+    """Apaga uma predefinição salva. As embutidas não se apagam."""
+    from .domain.audio_effects import remove_user_preset
+
+    try:
+        preset = remove_user_preset(preset_id)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Predefinição removida:[/green] {preset.label}", highlight=False)
+
+
+macro_app = typer.Typer(
+    help="Macros de áudio: uma cadeia de efeitos salva com nome, que se põe num item (`dmaker audio effect preset`) ou se "
+    "aplica a uma pasta inteira de arquivos (`dmaker audio macro run`). As embutidas e as suas.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(macro_app, name="macro")
+
+
+def _macro_table(presets: list[dict], title: str) -> Table:
+    table = Table(Column("id", no_wrap=True), "nome", "onde", "efeitos", "saída", title=title)
+    for preset in presets:
+        output = (preset.get("output") or {}).get("preset", "")
+        table.add_row(
+            preset["id"],
+            preset["label"],
+            preset.get("scope", ""),
+            ", ".join(effect["type"] for effect in preset["effects"]),
+            output,
+        )
+    return table
+
+
+@macro_app.command("list")
+def macro_list(
+    brand: Annotated[str | None, typer.Option(help="Junta as macros desta marca às globais.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista as macros: as embutidas e as que você salvou (globais e da marca)."""
+    from .domain.audio_effects import preset_catalog
+
+    try:
+        presets = preset_catalog(brand)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps({"presets": presets}, ensure_ascii=False, indent=2))
+        return
+    console.print(_macro_table(presets, "Macros de áudio"))
+
+
+@macro_app.command("show")
+def macro_show(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    brand: Annotated[str | None, typer.Option(help="Busca também entre as macros desta marca.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Mostra uma macro: a cadeia de efeitos, com os parâmetros, e a saída (formato) que ela traz."""
+    from .domain.audio_effects import get_effect_preset
+
+    try:
+        preset = get_effect_preset(macro, brand).to_dict()
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        typer.echo(json.dumps(preset, ensure_ascii=False, indent=2))
+        return
+    console.print(f"[bold]{preset['label']}[/bold] (id {preset['id']}, {preset['scope']})", highlight=False)
+    if preset["summary"]:
+        console.print(preset["summary"], highlight=False)
+    for position, effect in enumerate(preset["effects"], start=1):
+        params = ", ".join(f"{key}={value}" for key, value in effect.items() if key != "type")
+        console.print(f"  {position}. {effect['type']}" + (f" ({params})" if params else ""), highlight=False)
+    if preset.get("output"):
+        console.print(f"Saída: {json.dumps(preset['output'], ensure_ascii=False)}", highlight=False)
+
+
+@macro_app.command("save")
+def macro_save(
+    name: Annotated[str, typer.Argument(help="O nome da macro (salvar de novo com o mesmo nome a troca).")],
+    effect: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--effect",
+            "-e",
+            help='Um efeito em JSON, por exemplo \'{"type": "highpass", "frequency_hz": 80}\' (repetível).',
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None, typer.Option("--file", help="Um arquivo JSON com a lista de efeitos da cadeia.")
+    ] = None,
+    from_project: Annotated[
+        str | None,
+        typer.Option(
+            "--from-project", help="Salva a cadeia de um item deste projeto (nome ou caminho da spec)."
+        ),
+    ] = None,
+    target: Annotated[
+        str | None,
+        typer.Option(help="O item do projeto, como audio.voiceover.0, audio.narration.0 ou timeline.2."),
+    ] = None,
+    scope: Annotated[
+        str, typer.Option(help="`global` (padrão) ou `brand`: a marca do projeto de --from-project.")
+    ] = "global",
+    brand: Annotated[
+        str | None, typer.Option(help="Guarda na pasta desta marca (quando não vem de um projeto).")
+    ] = None,
+    format: Annotated[
+        str | None,
+        typer.Option(
+            "--format",
+            help="O formato que vale ao aplicar a arquivos (mp3, wav, flac, ogg, opus, m4a, aiff).",
+        ),
+    ] = None,
+    summary: Annotated[str, typer.Option(help="Uma frase do que a macro faz.")] = "",
+) -> None:
+    """Salva uma cadeia de efeitos como macro em assets/macros (ou na pasta da marca). A cadeia vem de --effect/--file ou
+    de um item de projeto (--from-project e --target). O intervalo e o bypass de cada efeito não entram."""
+    from .domain.audio_effects import save_user_preset
+
+    output = {"preset": format} if format else None
+    try:
+        if from_project or target:
+            if not (from_project and target):
+                _fail("para salvar a cadeia de um item, informe --from-project e --target")
+            from .pipeline.macros import save_chain_as_macro
+
+            saved = save_chain_as_macro(
+                _load_named(from_project),
+                target,
+                name,
+                scope=scope,
+                summary=summary,
+                output=output,
+            )
+        else:
+            effects: list = []
+            for text in effect or []:
+                effects.append(json.loads(text))
+            if file is not None:
+                loaded = json.loads(file.read_text(encoding="utf-8"))
+                effects.extend(loaded if isinstance(loaded, list) else [loaded])
+            saved = save_user_preset(name, effects, summary, output=output, brand=brand)
+    except (OSError, ValueError) as exc:
+        _fail(f"Não consegui salvar a macro: {exc}")
+    console.print(
+        f"[green]Macro salva:[/green] {saved.label} (id {saved.id}, {saved.scope})", highlight=False
+    )
+
+
+def _load_named(name: str):
+    from .pipeline.projects import load_project
+
+    try:
+        return load_project(name)
+    except (OSError, ValueError, KeyError) as exc:
+        _fail(f"Não consegui abrir o projeto {name}: {exc}")
+
+
+@macro_app.command("remove")
+def macro_remove(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    brand: Annotated[
+        str | None, typer.Option(help="Remove da pasta desta marca (sem isso, da global).")
+    ] = None,
+) -> None:
+    """Apaga uma macro salva. As embutidas não se apagam."""
+    from .domain.audio_effects import remove_user_preset
+
+    try:
+        preset = remove_user_preset(macro, brand)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Macro removida:[/green] {preset.label}", highlight=False)
+
+
+@macro_app.command("run")
+def macro_run(
+    macro: Annotated[str, typer.Argument(help="O id da macro (veja `dmaker audio macro list`).")],
+    inputs: Annotated[
+        list[Path], typer.Argument(help="Uma pasta (os arquivos de áudio dela) e/ou arquivos.")
+    ],
+    out: Annotated[Path, typer.Option("--out", help="A pasta onde os arquivos tratados caem.")],
+    format: Annotated[
+        str | None,
+        typer.Option(
+            "--format", help="mp3, wav, flac, ogg, opus, m4a ou aiff (padrão: o formato que a macro traz)."
+        ),
+    ] = None,
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            help="Retoma o que parou (queda, Ctrl+C): pula o que já saiu inteiro e refaz o que ficou pela metade.",
+        ),
+    ] = False,
+    brand: Annotated[str | None, typer.Option(help="Busca a macro também entre as desta marca.")] = None,
+) -> None:
+    """Aplica a macro a cada arquivo (o Apply Macro to Files do Audacity): a cadeia, e mais nada, sem normalização final
+    do master. O original não muda. O estado fica em <pasta de saída>/.dmaker-macro. Ctrl+C interrompe; retome com --resume."""
+    from .domain.audio_effects import get_effect_preset
+    from .pipeline.macro_run import MacroRunBusyError, MacroRunError, MacroRunService, plan_macro_run
+
+    service = MacroRunService()
+    try:
+        plan = plan_macro_run(get_effect_preset(macro, brand), inputs, out, format)
+        report = service.run(plan, resume=resume, log=_console_log)
+    except KeyboardInterrupt:
+        _fail(f"Interrompido. O que já saiu fica; retome com a mesma linha e --resume ({out})")
+    except (MacroRunError, MacroRunBusyError, ValueError, FileNotFoundError) as exc:
+        _fail(str(exc))
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
+    if report.failed:
+        raise typer.Exit(code=1)
+
+
+@macro_app.command("status")
+def macro_status(
+    out: Annotated[Path, typer.Argument(help="A pasta de saída de um `dmaker audio macro run`.")],
+) -> None:
+    """Mostra o andamento de um tratamento: o que saiu, o que falhou e o que falta (para o `--resume`)."""
+    from .pipeline.macro_run import MacroRunService
+
+    try:
+        report = MacroRunService().report(out)
+    except (KeyError, RuntimeError, OSError) as exc:
+        _fail(f"Não há tratamento em {out}: {exc}")
+    console.print(report.to_text(), markup=False, highlight=False, soft_wrap=True)
+
+
+duck_app = typer.Typer(
+    help="Auto Duck: abaixa uma trilha enquanto outra fala (a música sob a voz, o DJ sob o celebrante).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(duck_app, name="duck")
+
+_DUCK_OPTIONS = {
+    "amount_db": "Quanto o fundo abaixa, em dB (padrão -12).",
+    "threshold_db": "Nível RMS da chave a partir do qual ela conta como som (padrão -30).",
+    "max_pause": "Pausa da chave, em segundos, que ainda não deixa o fundo voltar (padrão 1).",
+    "outer_fade_down": "Descida antes da chave soar, em segundos (padrão 0,5).",
+    "inner_fade_down": "Descida dentro do trecho da chave (padrão 0).",
+    "inner_fade_up": "Subida dentro do trecho da chave (padrão 0).",
+    "outer_fade_up": "Subida depois da chave calar, em segundos (padrão 0,5).",
+}
+
+
+@duck_app.command("add")
+def duck_add(
+    spec: _EFFECT_SPEC,
+    background: Annotated[str, typer.Argument(help="A trilha que abaixa: A1, A2..., MUS, NAR, VO ou SFX.")],
+    key: Annotated[str, typer.Argument(help="A trilha que comanda: o fundo abaixa quando ela soa.")],
+    param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--param", "-p", help="Ajuste da regra, nome=valor (amount_db, threshold_db, max_pause...)."
+        ),
+    ] = None,
+) -> None:
+    """Acrescenta uma regra (por exemplo: audio duck add spec.json MUS VO -p amount_db=-15). Uma regra para a música
+    substitui o ducking antigo dela; a faixa externa (A2...) abaixa sob qualquer trilha, e o A1 é só a câmera dos clipes."""
+    _run_wave_edit(
+        spec,
+        {"type": "auto_duck_add", "background": background, "key": key, **_parse_effect_params(param)},
+        "Regra de Auto Duck acrescentada.",
+    )
+
+
+@duck_app.command("set")
+def duck_set(
+    spec: _EFFECT_SPEC,
+    index: Annotated[int, typer.Argument(help="A posição da regra (veja `dmaker audio duck list`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Ajuste da regra, nome=valor.")
+    ] = None,
+) -> None:
+    """Muda campos de uma regra (os que não forem citados ficam como estão)."""
+    _run_wave_edit(
+        spec,
+        {"type": "auto_duck_set", "index": index, **_parse_effect_params(param)},
+        "Regra de Auto Duck mudada.",
+    )
+
+
+@duck_app.command("remove")
+def duck_remove(
+    spec: _EFFECT_SPEC, index: Annotated[int, typer.Argument(help="A posição da regra.")]
+) -> None:
+    """Tira uma regra de Auto Duck."""
+    _run_wave_edit(spec, {"type": "auto_duck_remove", "index": index}, "Regra de Auto Duck removida.")
+
+
+@duck_app.command("list")
+def duck_list(spec: _EFFECT_SPEC) -> None:
+    """Lista as regras de Auto Duck do projeto."""
+    project = _load(spec)
+    rules = project.audio.ducks
+    music = project.audio.music
+    if not rules:
+        legacy = "ligado" if music is not None and music.ducking else "desligado"
+        console.print(
+            f"O projeto não tem regra de Auto Duck (o ducking antigo da música está {legacy}). "
+            "Crie com `dmaker audio duck add`."
+        )
+        return
+    table = Table("#", "Abaixa", "Sob", "Quantidade (dB)", "Limiar (dB)", "Pausa (s)", "Rampas (s)")
+    for position, rule in enumerate(rules):
+        ramps = (
+            f"{rule.outer_fade_down:g}/{rule.inner_fade_down:g}/{rule.inner_fade_up:g}/{rule.outer_fade_up:g}"
+        )
+        table.add_row(
+            str(position),
+            rule.background,
+            rule.key,
+            f"{rule.amount_db:g}",
+            f"{rule.threshold_db:g}",
+            f"{rule.max_pause:g}",
+            ramps,
+        )
+    console.print(table)
+    console.print("Rampas: descida de fora / de dentro, subida de dentro / de fora.")
+    if any(rule.is_music_rule for rule in rules):
+        console.print("A regra da música substitui o ducking antigo (`music.ducking`).")
+
+
+@audio_app.command("silence")
+def audio_silence_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Silencia um intervalo do som de um item, sem mexer na duração nem na imagem (o Silence Audio do Audacity)."""
+    op = _wave_op("audio_silence", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Intervalo silenciado.")
+
+
+@audio_app.command("cut")
+def audio_cut_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Corta um intervalo do som: o resto recua. Em clipe e PiP o fim completa com silêncio; na voz gravada e na
+    música o item encolhe, e a voz gravada que vem depois recua junto (o Delete do Audacity)."""
+    op = _wave_op("audio_cut", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Intervalo cortado.")
+
+
+@audio_app.command("envelope")
+def audio_envelope_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    point: Annotated[
+        list[str],
+        typer.Option(
+            "--point",
+            "-p",
+            help="Um ponto da curva, instante=ganho em dB (repetível): -p 10=0 -p 12=-12 baixa 12 dB entre 10 e 12 s.",
+        ),
+    ],
+) -> None:
+    """Desenha o volume ao longo do item por pontos, com retas em dB entre eles (a ferramenta Envelope do Audacity)."""
+    points = []
+    for raw in point:
+        instant, separator, gain = raw.rpartition("=")
+        if not separator or not instant:
+            _fail(f"Ponto mal escrito: {raw!r}. Use instante=ganho, por exemplo 10=0.")
+        try:
+            points.append({"at": _instant_arg(instant), "db": float(gain)})
+        except ValueError:
+            _fail(f"Ganho inválido em {raw!r}: use um número de dB.")
+    _run_wave_edit(spec, _wave_op("audio_envelope", target, points=points), "Envelope aplicado.")
+
+
+@audio_app.command("channels")
+def audio_channels_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    mode: Annotated[
+        str,
+        typer.Argument(
+            help="mono (mistura os dois canais), swap (troca esquerdo e direito), left ou right (esse canal sai "
+            "nos dois lados)."
+        ),
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+) -> None:
+    """Mexe nos canais do som de um item (estéreo para mono, trocar canais, usar só um lado: o caso da lapela)."""
+    op = _wave_op("audio_channels", target, mode=mode, start=_instant_arg(start), end=_instant_arg(end))
+    _run_wave_edit(spec, op, "Canais ajustados.")
+
+
+@audio_app.command("fade")
+def audio_fade_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    side: Annotated[str, typer.Argument(help="in (abre no começo do item) ou out (fecha no fim).")],
+    duration: Annotated[
+        float,
+        typer.Argument(help="Quanto dura o fade, em segundos, contado da borda do item. 0 tira o fade."),
+    ],
+    curve: Annotated[
+        str | None,
+        typer.Option(
+            "--curve",
+            help="linear (padrão), logarithmic, exponential, sine (S) ou quadratic. Sem ela, mantém a que o fade já tem.",
+        ),
+    ] = None,
+) -> None:
+    """Põe, muda ou tira o fade da borda de um item de áudio, com a curva escolhida (o Fade In e o Fade Out do Audacity).
+    É o fade que a alça da linha do tempo mexe; para um fade em um trecho marcado, use `audio effect add`."""
+    op = _wave_op("audio_fade", target, side=side, duration=duration, curve=curve)
+    _run_wave_edit(spec, op, "Fade ajustado." if duration > 0 else "Fade removido.")
+
+
+@audio_app.command("crossfade-tracks")
+def audio_crossfade_tracks_command(
+    spec: _WAVE_SPEC,
+    out_target: Annotated[
+        str, typer.Argument(help="O item que some (mesma forma do alvo de `audio silence`).")
+    ],
+    in_target: Annotated[str, typer.Argument(help="O item que entra.")],
+    start: Annotated[str, typer.Option("--start", help="Início do cruzamento, em segundos do vídeo final.")],
+    end: Annotated[str, typer.Option("--end", help="Fim do cruzamento, em segundos do vídeo final.")],
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help="constant_gain (soma de amplitudes: sons iguais), constant_power_1 (padrão), constant_power_2 ou custom.",
+        ),
+    ] = "constant_power_1",
+    curve: Annotated[
+        str | None,
+        typer.Option("--curve", help="Só no custom: a forma (up, down, s_up, s_down, sine_up, sine_down)."),
+    ] = None,
+    mid_adjust: Annotated[
+        float | None, typer.Option("--mid-adjust", help="Só no custom: o ajuste do meio, de -100 a 100.")
+    ] = None,
+) -> None:
+    """Uma trilha some enquanto outra entra, no intervalo dado (o Crossfade Tracks do Audacity). Grava um Fade Ajustável
+    em cada item, com as curvas casadas, num passo só do histórico; a mixagem não muda."""
+    op = {
+        "type": "audio_crossfade_tracks",
+        "out_target": out_target,
+        "in_target": in_target,
+        "start": _instant_arg(start),
+        "end": _instant_arg(end),
+        "kind": kind,
+    }
+    if curve is not None:
+        op["curve"] = curve
+    if mid_adjust is not None:
+        op["mid_adjust"] = mid_adjust
+    _run_wave_edit(spec, op, "Crossfade de trilhas feito.")
+
+
+@audio_app.command("crossfade-clips")
+def audio_crossfade_clips_command(
+    spec: _WAVE_SPEC,
+    index: Annotated[
+        int, typer.Argument(help="O clipe que entra no corte (1 é o segundo trecho da linha do tempo).")
+    ],
+    duration: Annotated[
+        float,
+        typer.Argument(
+            help="Quanto dura o cruzamento do som, em segundos (metade antes e metade depois do corte). 0 tira."
+        ),
+    ] = 0.5,
+    curve: Annotated[
+        str | None,
+        typer.Option("--curve", help="constant_gain, constant_power_1 (padrão) ou constant_power_2."),
+    ] = None,
+) -> None:
+    """Cruza o som de dois clipes vizinhos sem mexer na imagem, que continua trocando no quadro exato do corte (o J-cut e o
+    L-cut). O som de cada lado vem da sobra da fonte além do ponto de entrada e do de saída."""
+    op = {"type": "audio_crossfade_clips", "index": index, "duration": duration}
+    if curve is not None:
+        op["curve"] = curve
+    _run_wave_edit(spec, op, "Crossfade de som ajustado." if duration > 0 else "Crossfade de som removido.")
+
+
+@audio_app.command("paste")
+def audio_paste_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    at: Annotated[
+        str, typer.Option("--at", help="Onde colar, em segundos do vídeo final (ou marker:<texto>).")
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Copia um trecho do som de um item (sem --start e --end, o item inteiro) e cola num instante como uma voz
+    gravada nova, que aponta para o mesmo arquivo (Copy e Paste do Audacity)."""
+    op = _wave_op(
+        "audio_paste",
+        target,
+        at=_instant_arg(at),
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+    )
+    _run_wave_edit(spec, op, "Trecho colado.")
+
+
+@audio_app.command("duplicate")
+def audio_duplicate_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Duplica o item (ou um trecho dele) como uma voz gravada nova, logo depois do original."""
+    op = _wave_op("audio_duplicate", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Som duplicado.")
+
+
+@audio_app.command("split")
+def audio_split_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    at: Annotated[
+        str, typer.Option("--at", help="Onde dividir, em segundos do vídeo final (ou marker:<texto>).")
+    ],
+) -> None:
+    """Divide uma voz gravada em duas, que se encontram no ponto, no mesmo arquivo."""
+    _run_wave_edit(spec, _wave_op("audio_split", target, at=_instant_arg(at)), "Voz dividida.")
+
+
+@audio_app.command("join")
+def audio_join_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    other: Annotated[
+        str | None,
+        typer.Option("--with", help="A voz a juntar (audio.voiceover.M ou só o número); padrão: a seguinte."),
+    ] = None,
+) -> None:
+    """Junta duas vozes gravadas vizinhas que são pedaços seguidos do mesmo arquivo (o contrário de dividir)."""
+    value: object = None
+    if other is not None:
+        value = int(other) if other.isdigit() else other
+    _run_wave_edit(spec, _wave_op("audio_join", target, **{"with": value}), "Vozes juntadas.")
+
+
+@audio_app.command("trim")
+def audio_trim_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+) -> None:
+    """Apara o item fora da seleção: a voz gravada fica só com o trecho; nos outros itens o resto é silenciado."""
+    op = _wave_op("audio_trim", target, start=_instant_arg(start), end=_instant_arg(end), region=region)
+    _run_wave_edit(spec, op, "Item aparado.")
+
+
+@audio_app.command("shift")
+def audio_shift_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    delta: Annotated[
+        float | None, typer.Option("--delta", help="Quanto mover, em segundos (positivo atrasa).")
+    ] = None,
+    to: Annotated[float | None, typer.Option("--to", help="O deslocamento final, em segundos.")] = None,
+) -> None:
+    """Desloca o som no tempo: em clipe, PiP e faixa externa muda o `audio_offset` (corrige câmera dessincronizada);
+    na voz gravada e na narração muda o instante de início."""
+    _run_wave_edit(spec, _wave_op("audio_shift", target, delta=delta, to=to), "Som deslocado.")
+
+
+@audio_app.command("split-stereo")
+def audio_split_stereo_command(spec: _WAVE_SPEC, target: _WAVE_TARGET) -> None:
+    """Divide um som estéreo em dois itens mono: um com o canal esquerdo e outro com o direito."""
+    _run_wave_edit(spec, _wave_op("audio_split_stereo", target), "Estéreo dividido.")
+
+
+@audio_app.command("track")
+def audio_track_command(
+    spec: _WAVE_SPEC,
+    track: Annotated[str, typer.Argument(help="A trilha: A1, A2..., MUS, NAR, VO ou SFX.")],
+    gain_db: Annotated[float | None, typer.Option("--gain-db", help="Ganho da trilha, em dB.")] = None,
+    pan: Annotated[
+        float | None, typer.Option("--pan", help="Equilíbrio, de -1 (esquerda) a 1 (direita).")
+    ] = None,
+    mute: Annotated[bool | None, typer.Option("--mute/--no-mute", help="Muda ou desmuda a trilha.")] = None,
+    solo: Annotated[
+        bool | None, typer.Option("--solo/--no-solo", help="Solo: as outras trilhas de áudio ficam mudas.")
+    ] = None,
+) -> None:
+    """Ganho, pan, mudo e solo de uma trilha de áudio (os controles do cabeçalho de trilha do Audacity)."""
+    op = _wave_op("track_set", track=track, gain_db=gain_db, pan=pan, muted=mute, solo=solo)
+    _run_wave_edit(spec, op, f"Trilha {track} ajustada.")
+
+
+def _history_outcome(outcome) -> None:
+    console.print(
+        f"[green]{outcome.label}[/green]: feito. Restam {outcome.undo_steps} para desfazer e {outcome.redo_steps} para refazer.",
+        highlight=False,
+    )
+    for warning in outcome.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@app.command("undo")
+def undo_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Desfaz a última edição gravada no projeto: a spec volta exatamente a como estava antes dela."""
+    from .pipeline.edit_history import HistoryError, undo_edit
+
+    try:
+        outcome = undo_edit(spec)
+    except (HistoryError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print("[bold]Desfeito.[/bold]", end=" ")
+    _history_outcome(outcome)
+
+
+@app.command("redo")
+def redo_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Refaz a última edição desfeita por `dmaker undo`."""
+    from .pipeline.edit_history import HistoryError, redo_edit
+
+    try:
+        outcome = redo_edit(spec)
+    except (HistoryError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print("[bold]Refeito.[/bold]", end=" ")
+    _history_outcome(outcome)
+
+
+@app.command("history")
+def history_command(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Lista os passos do histórico de edições do projeto (o que `undo` desfaria e o que `redo` refaria)."""
+    from .pipeline.edit_history import history_listing
+
+    try:
+        listing = history_listing(spec)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    for title, steps in (
+        ("Para desfazer (do mais recente)", listing["undo"]),
+        ("Para refazer", listing["redo"]),
+    ):
+        console.print(f"[bold]{title}[/bold]", highlight=False)
+        for step in steps or [{"label": "nenhum", "at": ""}]:
+            console.print(f"  {escape(step['label'])}  [dim]{step['at']}[/dim]", highlight=False)
+
+
+markers_app = typer.Typer(
+    help="Marcadores da linha do tempo (trilha MK): ver, acrescentar, importar e exportar o .txt do Audacity e gerar regulares.",
+    no_args_is_help=True,
+)
+app.add_typer(markers_app, name="markers")
+
+MARKERS_NEWLINES = ("auto", "lf", "crlf")
+
+
+@markers_app.command("list")
+def markers_list(spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")]) -> None:
+    """Lista os marcadores do projeto, por trilha (grupo), com o tempo, a cor e o texto."""
+    project = _load(spec)
+    if not project.markers:
+        console.print("O projeto não tem marcadores.")
+        return
+    table = Table("Nº", "Grupo", "Tempo", "Cor", "Texto")
+    for index, marker in enumerate(project.markers):
+        when = f"{marker.begin:g} s" if not marker.is_region else f"{marker.begin:g} a {marker.finish:g} s"
+        table.add_row(str(index), marker.group or "(padrão)", when, marker.color or "", escape(marker.text))
+    console.print(table)
+
+
+@markers_app.command("add")
+def markers_add(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    at: Annotated[
+        float | None, typer.Option(help="Instante do marcador, em segundos do vídeo final.")
+    ] = None,
+    start: Annotated[float | None, typer.Option(help="Início de uma região (use com --end).")] = None,
+    end: Annotated[float | None, typer.Option(help="Fim de uma região (use com --start).")] = None,
+    text: Annotated[str, typer.Option(help="Texto do marcador.")] = "",
+    color: Annotated[str | None, typer.Option(help="Cor #RRGGBB.")] = None,
+    group: Annotated[str, typer.Option(help="Trilha de marcadores (vazio = a padrão).")] = "",
+) -> None:
+    """Acrescenta um marcador (um instante com --at, ou uma região com --start e --end)."""
+    from .pipeline.edit_history import edit_and_record
+
+    operation = {"type": "marker_add", "text": text, "group": group}
+    for key, value in (("at", at), ("start", start), ("end", end), ("color", color)):
+        if value is not None:
+            operation[key] = value
+    _load(spec)
+    try:
+        report, _ = edit_and_record(spec, operation)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]Marcador acrescentado.[/green] O projeto tem {len(report.project.markers)}.")
+
+
+@markers_app.command("remove")
+def markers_remove(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    ref: Annotated[str, typer.Argument(help="O número do marcador (dmaker markers list) ou marker:<texto>.")],
+) -> None:
+    """Remove um marcador pelo número ou pelo texto (`marker:refrão`, ou `marker:grupo/refrão`)."""
+    from .pipeline.edit_history import edit_and_record
+
+    operation: dict[str, Any] = {"type": "marker_remove"}
+    operation["index" if ref.strip().isdigit() else "ref"] = int(ref) if ref.strip().isdigit() else ref
+    _load(spec)
+    try:
+        report, _ = edit_and_record(spec, operation)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]Marcador removido.[/green] Sobram {len(report.project.markers)}.")
+
+
+@markers_app.command("import")
+def markers_import_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    file: Annotated[Path, typer.Argument(help="O .txt de marcadores exportado do Audacity.")],
+    group: Annotated[str, typer.Option(help="Trilha de marcadores que recebe (vazio = a padrão).")] = "",
+    replace: Annotated[
+        bool, typer.Option(help="Troca o que a trilha já tinha em vez de acrescentar.")
+    ] = False,
+) -> None:
+    """Importa o .txt de marcadores do Audacity (início, fim e texto separados por tabulação). Os tempos valem
+    para o vídeo final; linha ilegível é pulada com aviso."""
+    from .pipeline.markers import import_labels
+
+    try:
+        result = import_labels(spec, file, group, replace)
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{result.added} marcador(es) importado(s).[/green] O projeto tem {len(result.project.markers)}."
+    )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@markers_app.command("export")
+def markers_export_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Arquivo .txt de saída (padrão: output/<projeto>-marcadores.txt)."),
+    ] = None,
+    group: Annotated[
+        str | None, typer.Option(help="Só esta trilha (vazio = a padrão); sem a opção, todas.")
+    ] = None,
+    newline: Annotated[
+        str, typer.Option(help="Quebra de linha: auto (a do sistema, como o Audacity), lf ou crlf.")
+    ] = "auto",
+) -> None:
+    """Exporta os marcadores no formato do Audacity (Arquivo > Importar > Rótulos), com seis casas decimais."""
+    from .pipeline.markers import export_labels
+
+    if newline not in MARKERS_NEWLINES:
+        _fail(f"Quebra de linha {newline!r} não existe; use {', '.join(MARKERS_NEWLINES)}.")
+    try:
+        exported = export_labels(spec, out, group, newline)  # type: ignore[arg-type]
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{exported.count} marcador(es) exportado(s):[/green] {exported.path}",
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+@markers_app.command("regular")
+def markers_regular_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json")],
+    interval: Annotated[
+        float | None, typer.Option(help="Segundos entre os marcadores (ou use --parts).")
+    ] = None,
+    parts: Annotated[int | None, typer.Option(help="Quantas partes iguais (ou use --interval).")] = None,
+    start: Annotated[float, typer.Option(help="Onde começar, em segundos.")] = 0.0,
+    end: Annotated[float | None, typer.Option(help="Onde terminar (padrão: o fim do vídeo).")] = None,
+    prefix: Annotated[str, typer.Option(help="Texto antes do número (ex.: 'Parte ').")] = "",
+    first_number: Annotated[int, typer.Option(help="Número do primeiro marcador.")] = 1,
+    digits: Annotated[int, typer.Option(help="Casas do número (2 dá 01, 02...).")] = 1,
+    group: Annotated[str, typer.Option(help="Trilha de marcadores (vazio = a padrão).")] = "",
+    color: Annotated[str | None, typer.Option(help="Cor #RRGGBB.")] = None,
+    kind: Annotated[
+        str, typer.Option(help="region (cobre o intervalo) ou instant (marca o começo).")
+    ] = "region",
+    replace: Annotated[bool, typer.Option(help="Troca o que a trilha já tinha.")] = False,
+) -> None:
+    """Gera marcadores regulares (a cada N segundos ou em N partes iguais), como o Regular Interval Labels do Audacity."""
+    from .pipeline.markers import add_regular_markers
+
+    if kind not in ("region", "instant"):
+        _fail(f"Tipo {kind!r} não existe; use region ou instant.")
+    try:
+        result = add_regular_markers(
+            spec,
+            interval,
+            parts,
+            start,
+            end,
+            prefix,
+            first_number,
+            digits,
+            group,
+            color,
+            kind,
+            replace,  # type: ignore[arg-type]
+        )
+    except RENDER_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]{result.added} marcador(es) criado(s).[/green] O projeto tem {len(result.project.markers)}."
+    )
+
+
+# ---------- áudio: projeto só de som, exportação e áudio bruto ----------
+
+
+def _seconds_or_marker(value: str | None) -> float | str | None:
+    """Um tempo da linha de comando: segundos (`12.5`) ou uma referência a marcador (`marker:Introdução`)."""
+    if value is None:
+        return None
+    try:
+        return float(value.replace(",", "."))
+    except ValueError:
+        return value
+
+
+@audio_app.command("presets")
+def audio_presets_command() -> None:
+    """Lista os formatos de arquivo de áudio com o padrão de cada um e os alvos de loudness."""
+    from .domain.loudness import LOUDNESS_TARGETS
+
+    table = Table(title="Formatos de áudio")
+    for col in ("id", "formato", "taxa e canais", "padrão", "opções", "obs"):
+        table.add_column(col)
+    for a in list_audio_presets():
+        if a.bit_depths:
+            options = "bits: " + ", ".join(str(depth) for depth in a.bit_depths)
+        else:
+            options = "modos: " + ", ".join(a.bitrate_modes)
+        table.add_row(a.id, a.name, a.resolution, a.default_label, options, a.notes)
+    console.print(table)
+    targets = ", ".join(f"{name} ({lufs:g})" for name, lufs in LOUDNESS_TARGETS.items())
+    console.print(f"Alvos de loudness (--loudness): {targets} LUFS, ou um número.")
+
+
+@audio_app.command("export")
+def audio_export_command(
+    spec: Annotated[Path, typer.Argument(help="Caminho do spec.json (ou o nome do projeto).")],
+    preset: Annotated[
+        str | None,
+        typer.Option(help="Formato do arquivo: audio/mp3, audio/wav, audio/flac... (padrão: o do projeto)."),
+    ] = None,
+    mode: Annotated[
+        str, typer.Option(help="mix (inteiro), regions (um por região), stems (um por trilha) ou selection.")
+    ] = "mix",
+    out: Annotated[Path | None, typer.Option(help="Arquivo de saída (mix e seleção).")] = None,
+    out_dir: Annotated[Path | None, typer.Option(help="Pasta de saída (regiões e trilhas).")] = None,
+    group: Annotated[str | None, typer.Option(help="Regiões: só deste grupo de marcadores.")] = None,
+    pauses: Annotated[
+        bool, typer.Option("--pauses", help="Regiões: exporta também o áudio entre elas (pausa-01...).")
+    ] = False,
+    numbered: Annotated[bool, typer.Option("--numbered", help="Regiões: número na frente do nome.")] = False,
+    start: Annotated[str | None, typer.Option(help="Seleção: início em segundos ou marker:<texto>.")] = None,
+    end: Annotated[
+        str | None, typer.Option(help="Seleção: fim em segundos ou marker:<texto> (padrão: o fim).")
+    ] = None,
+    tracks: Annotated[
+        str | None, typer.Option(help="Trilhas: quais, separadas por vírgula (NAR,VO,MUS,SFX,A1).")
+    ] = None,
+    loudness: Annotated[
+        str | None,
+        typer.Option(
+            help="Alvo de loudness: redes (-14), podcast (-16), broadcast (-23) ou um número em LUFS."
+        ),
+    ] = None,
+    sample_rate: Annotated[int | None, typer.Option(help="Taxa de amostragem em Hz.")] = None,
+    channels: Annotated[int | None, typer.Option(help="1 (mono) ou 2 (estéreo).")] = None,
+    bit_depth: Annotated[
+        int | None, typer.Option(help="16, 24 ou 32 (ponto flutuante); WAV, FLAC e AIFF.")
+    ] = None,
+    bitrate: Annotated[int | None, typer.Option(help="Taxa de bits em kbps (MP3, OGG, Opus, M4A).")] = None,
+    bitrate_mode: Annotated[str | None, typer.Option(help="cbr, vbr ou abr.")] = None,
+    quality: Annotated[
+        float | None, typer.Option(help="Qualidade do modo VBR (MP3: 0 a 9; OGG: -1 a 10).")
+    ] = None,
+) -> None:
+    """Exporta o áudio do projeto, sem imagem, como um arquivo (ou vários, por região ou por trilha)."""
+    from .domain.audio_presets import AudioFormatError, EncodingChoices
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_service import export_audio_project, export_request, result_dict
+
+    choices = EncodingChoices(sample_rate, channels, bit_depth, bitrate_mode, bitrate, quality)  # type: ignore[arg-type]
+    try:
+        request = export_request(
+            mode,
+            group=group,
+            pauses=pauses,
+            numbered=numbered,
+            start=_seconds_or_marker(start),
+            end=_seconds_or_marker(end),
+            tracks=[item.strip() for item in tracks.split(",") if item.strip()] if tracks else None,
+        )
+        result = export_audio_project(
+            spec,
+            request,
+            preset=preset,
+            out=out,
+            out_dir=out_dir,
+            loudness=loudness,
+            choices=None if choices.empty else choices,
+        )
+    except (FFmpegError, AudioFormatError, ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    for item in result_dict(result)["files"]:
+        console.print(
+            f"[green]Pronto:[/green] {item['path']}  ({item['duration_s']:.2f}s, {item['size_mb']:.2f} MB)",
+            highlight=False,
+            soft_wrap=True,
+        )
+    for warning in result.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("import-raw")
+def audio_import_raw_command(
+    spec: Annotated[
+        Path, typer.Argument(help="Caminho do spec.json ou nome do projeto (criado se não existir).")
+    ],
+    raw: Annotated[Path, typer.Argument(help="Arquivo de áudio bruto (PCM sem cabeçalho).")],
+    encoding: Annotated[
+        str, typer.Option(help="s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw.")
+    ] = "s16",
+    byte_order: Annotated[str, typer.Option(help="little ou big.")] = "little",
+    channels: Annotated[int, typer.Option(help="Canais (1 mono, 2 estéreo).")] = 1,
+    sample_rate: Annotated[int, typer.Option(help="Taxa de amostragem em Hz.")] = 44100,
+    offset_bytes: Annotated[int, typer.Option(help="Bytes a pular no começo do arquivo.")] = 0,
+    percent: Annotated[float, typer.Option(help="Quanto do arquivo importar, em por cento.")] = 100.0,
+    start: Annotated[
+        float, typer.Option(help="Instante do projeto em que o áudio entra, em segundos.")
+    ] = 0.0,
+    volume: Annotated[float, typer.Option(help="Volume do áudio importado.")] = 1.0,
+    name: Annotated[str | None, typer.Option(help="Nome do WAV gerado (sem a extensão).")] = None,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Troca um WAV que já exista.")] = False,
+) -> None:
+    """Importa áudio bruto como voz gravada do projeto: converte para um WAV na pasta dele (o arquivo original não muda)."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_import import RawImportError, import_raw_audio
+
+    try:
+        imported = import_raw_audio(
+            spec,
+            raw,
+            encoding=encoding,
+            byte_order=byte_order,
+            channels=channels,
+            sample_rate=sample_rate,
+            offset_bytes=offset_bytes,
+            percent=percent,
+            start=start,
+            volume=volume,
+            name=name,
+            overwrite=overwrite,
+        )
+    except (FFmpegError, RawImportError, ValidationError, *RENDER_ERRORS) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Importado:[/green] {imported.wav}  ({imported.duration:.2f}s) como voz gravada em {start:g}s.",
+        highlight=False,
+        soft_wrap=True,
+    )
+    if imported.created_project:
+        console.print("Projeto novo, só de áudio (saída audio/wav).")
+
+
+# ---------- sons gerados ----------
+
+
+@audio_app.command("generators")
+def audio_generators_list(
+    generator: Annotated[
+        str | None, typer.Argument(help="Tipo de um gerador, para ver só os parâmetros dele.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON, como a ferramenta MCP.")] = False,
+) -> None:
+    """Lista os geradores de som (o menu Gerar do Audacity): Tom, Chirp, Ruído, DTMF, Silêncio, Pluck, Tambor de Risset,
+    Faixa de ritmo e Importar amostras, com os parâmetros, as unidades, as faixas e os padrões."""
+    from .domain.generators import catalog_payload
+
+    try:
+        payload = catalog_payload(generator)
+    except ValueError as exc:
+        _fail(str(exc))
+    if as_json:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    table = Table(
+        Column("tipo", no_wrap=True),
+        Column("nome", no_wrap=True),
+        "no Audacity",
+        "parâmetros",
+        title="Geradores de som",
+    )
+    for info in payload["generators"]:
+        params = "; ".join(_effect_param_text(p) for p in info["parameters"]) or "nenhum"
+        table.add_row(info["type"], info["label"], info["audacity_name"], params)
+    console.print(table)
+    for info in payload["generators"]:
+        console.print(f"[bold]{info['label']}[/bold]: {info['summary']}", highlight=False)
+    console.print(
+        "No projeto, todo som gerado tem `start`, `duration`, `volume`, `pan` e `effects`; "
+        "ponha um com `dmaker audio generated add`."
+    )
+
+
+@audio_app.command("generate")
+def audio_generate_command(
+    generator: Annotated[str, typer.Argument(help="Tipo do gerador (veja `dmaker audio generators`).")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="O arquivo .wav de destino.")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do gerador, nome=valor (repetível).")
+    ] = None,
+    duration: Annotated[
+        float | None,
+        typer.Option("--duration", help="Segundos de som (padrão: a duração que o gerador pede, ou 1)."),
+    ] = None,
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Troca o arquivo se ele já existir.")
+    ] = False,
+) -> None:
+    """Gera um som solto num WAV, sem projeto (por exemplo: audio generate tone -p frequency_hz=1000 -p amplitude_db=-6
+    --duration 2 --out tom.wav). O arquivo é estéreo, de ponto flutuante de 32 bits."""
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.generated_sounds import generate_sound_file
+
+    try:
+        made = generate_sound_file(generator, _parse_effect_params(param), duration, out, overwrite=overwrite)
+    except (ValueError, FileExistsError, FileNotFoundError, FFmpegError) as exc:
+        _fail(str(exc))
+    peak = "mudo" if made.peak_db == float("-inf") else f"pico {made.peak_db:.2f} dBFS"
+    console.print(
+        f"[green]Pronto:[/green] {made.path}  ({made.duration:.2f}s, {peak})", highlight=False, soft_wrap=True
+    )
+
+
+generated_app = typer.Typer(
+    help="Sons gerados no projeto (audio.generated): acrescentar, listar, mudar e tirar. Entram no barramento dos efeitos "
+    "sonoros (trilha SFX) e aceitam a cadeia de efeitos (`audio effect add <spec> audio.generated.N ...`).",
+    no_args_is_help=True,
+)
+audio_app.add_typer(generated_app, name="generated")
+
+
+@generated_app.command("add")
+def generated_add(
+    spec: _WAVE_SPEC,
+    generator: Annotated[str, typer.Argument(help="Tipo do gerador (veja `dmaker audio generators`).")],
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="Parâmetro do gerador, nome=valor (repetível).")
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    duration: Annotated[
+        float | None, typer.Option("--duration", help="Segundos de som (padrão: a que o gerador pede).")
+    ] = None,
+    region: _WAVE_REGION = None,
+    volume: Annotated[float | None, typer.Option("--volume", help="Ganho linear do item (padrão 1).")] = None,
+    pan: Annotated[
+        float | None, typer.Option("--pan", help="Equilíbrio de -1 (esquerda) a 1 (direita).")
+    ] = None,
+) -> None:
+    """Põe um som gerado no projeto (por exemplo: audio generated add spec.json tone -p frequency_hz=1000 --start 4
+    --duration 0.5)."""
+    op = _wave_op(
+        "generated_add",
+        None,
+        generator=generator,
+        params=_parse_effect_params(param) or None,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        duration=duration,
+        region=region,
+        volume=volume,
+        pan=pan,
+    )
+    _run_wave_edit(spec, op, "Som gerado acrescentado.")
+
+
+@generated_app.command("set")
+def generated_set(
+    spec: _WAVE_SPEC,
+    index: Annotated[int, typer.Argument(help="A posição do som (veja `dmaker audio generated list`).")],
+    generator: Annotated[
+        str | None, typer.Option("--generator", help="Troca o gerador (os parâmetros voltam aos padrões).")
+    ] = None,
+    param: Annotated[
+        list[str] | None,
+        typer.Option("--param", "-p", help="Parâmetro do gerador a mudar, nome=valor (os outros ficam)."),
+    ] = None,
+    start: _WAVE_START = None,
+    duration: Annotated[float | None, typer.Option("--duration", help="Segundos de som.")] = None,
+    volume: Annotated[float | None, typer.Option("--volume", help="Ganho linear do item.")] = None,
+    pan: Annotated[float | None, typer.Option("--pan", help="Equilíbrio de -1 a 1.")] = None,
+) -> None:
+    """Muda campos de um som gerado (os que não forem citados ficam como estão)."""
+    op = _wave_op(
+        "generated_set",
+        None,
+        index=index,
+        generator=generator,
+        params=_parse_effect_params(param) or None,
+        start=_instant_arg(start),
+        duration=duration,
+        volume=volume,
+        pan=pan,
+    )
+    _run_wave_edit(spec, op, "Som gerado mudado.")
+
+
+@generated_app.command("remove")
+def generated_remove(
+    spec: _WAVE_SPEC, index: Annotated[int, typer.Argument(help="A posição do som.")]
+) -> None:
+    """Tira um som gerado do projeto."""
+    _run_wave_edit(spec, {"type": "generated_remove", "index": index}, "Som gerado removido.")
+
+
+@generated_app.command("list")
+def generated_list(spec: _WAVE_SPEC) -> None:
+    """Lista os sons gerados do projeto."""
+    from .domain.generators import parse_generator
+
+    project = _load(spec)
+    if not project.audio.generated:
+        console.print("O projeto não tem som gerado. Ponha um com `dmaker audio generated add`.")
+        return
+    table = Table("#", Column("Som", no_wrap=True), "Início (s)", "Duração (s)", "Volume", "Pan", "Efeitos")
+    for position, sound in enumerate(project.audio.generated):
+        table.add_row(
+            str(position),
+            parse_generator(sound.generator, sound.params).describe(),
+            f"{sound.start:g}",
+            f"{sound.duration:g}",
+            f"{sound.volume:g}",
+            f"{sound.pan:g}",
+            str(len(sound.effects)),
+        )
+    console.print(table)
+
+
+@audio_app.command("censor")
+def audio_censor_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    word: Annotated[
+        str | None,
+        typer.Option("--word", help="A palavra a bipar, achada na transcrição do item (Whisper local)."),
+    ] = None,
+    occurrence: Annotated[
+        int | None, typer.Option("--occurrence", help="Qual das vezes que a palavra aparece (1, 2...).")
+    ] = None,
+    search_from: Annotated[
+        str | None,
+        typer.Option("--search-from", help="Onde começar a procurar a palavra (segundos ou marker:<texto>)."),
+    ] = None,
+    search_to: Annotated[
+        str | None, typer.Option("--search-to", help="Onde parar de procurar a palavra.")
+    ] = None,
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    region: _WAVE_REGION = None,
+    margin: Annotated[
+        float | None, typer.Option("--margin", help="Folga, em segundos, que alarga o bipe dos dois lados.")
+    ] = None,
+    frequency_hz: Annotated[
+        float | None, typer.Option("--frequency", help="Frequência do bipe (padrão 1000 Hz).")
+    ] = None,
+    amplitude_db: Annotated[
+        float | None, typer.Option("--amplitude-db", help="Pico do bipe em dBFS (padrão -12).")
+    ] = None,
+    language: Annotated[str | None, typer.Option("--language", help="Idioma da fala (padrão pt).")] = None,
+) -> None:
+    """Bipa uma palavra (ou um intervalo): silencia o item e põe um Tom de 1 kHz no mesmo lugar, num passo só que o
+    `dmaker undo` desfaz. Por palavra, o item é transcrito pelo Whisper local (sem rede)."""
+    op = _wave_op(
+        "censor_beep",
+        target,
+        word=word,
+        occurrence=occurrence,
+        search_from=_instant_arg(search_from),
+        search_to=_instant_arg(search_to),
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        region=region,
+        margin=margin,
+        frequency_hz=frequency_hz,
+        amplitude_db=amplitude_db,
+        language=language,
+    )
+    _run_wave_edit(spec, op, "Bipe posto.")
+
+
+recordings_app = typer.Typer(
+    help="Gravações do microfone no projeto: as que a aba deixou abertas, recuperar e pôr na linha do tempo.",
+    no_args_is_help=True,
+)
+audio_app.add_typer(recordings_app, name="recordings")
+
+
+@recordings_app.command("list")
+def audio_recordings_list_command(
+    spec: _WAVE_SPEC,
+    unfinished: Annotated[
+        bool, typer.Option("--unfinished", help="Só as abertas (a aba fechou antes de parar).")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Saída em JSON.")] = False,
+) -> None:
+    """Lista as gravações do projeto, com a duração que chegou ao disco e os pedaços que faltam."""
+    from .pipeline.recording_attach import listing
+
+    items = listing(spec, unfinished)
+    if as_json:
+        console.print_json(json.dumps({"recordings": items}))
+        return
+    if not items:
+        console.print("Nenhuma gravação.")
+        return
+    for item in items:
+        state = "aberta" if item["state"] == "open" else "finalizada"
+        gaps = f", faltam os pedaços {item['gaps']}" if item["gaps"] else ""
+        console.print(
+            f"{item['id']}  {state}  {item['duration']:.1f} s  {item['rate']} Hz, {item['channels']} canal(is){gaps}",
+            highlight=False,
+        )
+
+
+@recordings_app.command("recover")
+def audio_recordings_recover_command(
+    spec: _WAVE_SPEC,
+    recording: Annotated[
+        str | None, typer.Option("--id", help="A gravação (padrão: a única que está aberta).")
+    ] = None,
+    punch: Annotated[
+        bool,
+        typer.Option("--punch", help="Aplica como punch-in, se a gravação abriu para regravar um trecho."),
+    ] = False,
+) -> None:
+    """Finaliza uma gravação com o que chegou ao disco e a põe na linha do tempo (um passo do `dmaker undo`)."""
+    from .domain.edits import EditError
+    from .pipeline.recording_attach import attach_recording
+    from .pipeline.recordings import RecordingError
+
+    try:
+        status, report = attach_recording(spec, recording, punch)
+    except (RecordingError, EditError) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Gravação {status.id} posta na linha do tempo[/green] ({status.duration:.1f} s; "
+        "desfaça com `dmaker undo`)",
+        highlight=False,
+    )
+    for warning in report.warnings:
+        console.print(f"[yellow]aviso:[/yellow] {escape(warning)}")
+
+
+@audio_app.command("take")
+def audio_take_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    take: Annotated[int, typer.Argument(help="A posição do take na lista da voz (0 é o primeiro).")],
+) -> None:
+    """Troca o take que toca numa voz gravada regravada por punch-in; o que tocava vai para a lista."""
+    _run_wave_edit(spec, _wave_op("voiceover_take_set", target, take=take), "Take trocado.")
+
+
+@audio_app.command("punch")
+def audio_punch_command(
+    spec: _WAVE_SPEC,
+    target: _WAVE_TARGET,
+    recording: Annotated[
+        str, typer.Argument(help="A gravação finalizada (veja `dmaker audio recordings list`).")
+    ],
+    start: _WAVE_START = None,
+    end: _WAVE_END = None,
+    recorded_at: Annotated[
+        float | None,
+        typer.Option(
+            "--recorded-at", help="Onde a gravação começa na linha do tempo (padrão: o que ela guardou)."
+        ),
+    ] = None,
+) -> None:
+    """Regrava o trecho --start..--end da voz com uma gravação já finalizada: o trecho passa a tocar o take novo, o
+    antigo fica na lista de takes e as emendas levam um fade de 10 ms."""
+    from .pipeline.recording_attach import store_of
+    from .pipeline.recordings import RecordingError
+
+    try:
+        status = store_of(spec).status(recording)
+    except RecordingError as exc:
+        _fail(str(exc))
+    if status.state != "finished" or status.src is None:
+        _fail("a gravação ainda não foi finalizada: use `dmaker audio recordings recover`")
+    op = _wave_op(
+        "audio_punch",
+        target,
+        start=_instant_arg(start),
+        end=_instant_arg(end),
+        src=status.src,
+        recorded_at=status.start if recorded_at is None else recorded_at,
+        duration=round(status.duration, 6),
+    )
+    _run_wave_edit(spec, op, "Punch-in feito.")
 
 
 # ---------- modelos ----------

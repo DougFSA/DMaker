@@ -21,6 +21,7 @@ class SfxTrack:
     at: float
     gain_db: float
     origin: str = ""
+    pan: float = 0.0
 
 
 def resolve_files(project: Project, items: Sequence[SfxItem]) -> list[tuple[SfxItem, Path]]:
@@ -35,12 +36,19 @@ def resolve_files(project: Project, items: Sequence[SfxItem]) -> list[tuple[SfxI
     return resolved
 
 
-def level_tracks(resolved: Sequence[tuple[SfxItem, Path]], reference_db: float | None) -> list[SfxTrack]:
+def level_tracks(
+    resolved: Sequence[tuple[SfxItem, Path]],
+    reference_db: float | None,
+    bus_gain_db: float = 0.0,
+    bus_pan: float = 0.0,
+) -> list[SfxTrack]:
     """Efeitos com o ganho que os põe abaixo do pico de referência da voz. Sem voz medida (simulação, vídeo
-    sem fala), vale um pico de voz típico, o que mantém o nível dos efeitos previsível."""
+    sem fala), vale um pico de voz típico, o que mantém o nível dos efeitos previsível. O ganho e o pan do
+    barramento dos efeitos (a trilha SFX) entram por cima do nível já acertado contra a voz."""
     reference = FALLBACK_VOICE_PEAK_DB if reference_db is None else reference_db
     return [
-        SfxTrack(path, item.at, sfx_gain_db(item.volume, reference), item.origin) for item, path in resolved
+        SfxTrack(path, item.at, sfx_gain_db(item.volume, reference) + bus_gain_db, item.origin, bus_pan)
+        for item, path in resolved
     ]
 
 
@@ -60,9 +68,10 @@ def leveled_effects(
     A voz é medida sozinha (barato, só áudio) e só quando há efeitos; na simulação não se mede nada. É a mesma
     conta para o render e para a prévia da linha do tempo.
     """
+    generated = _generated(ctx)
     items = plan_sfx(ctx.project, spans)
     if not items:
-        return []
+        return generated
     resolved = resolve_files(ctx.project, items)
     reference = None
     if not ctx.options.dry_run:
@@ -81,4 +90,27 @@ def leveled_effects(
             else " (sem voz medida)"
         )
     )
-    return level_tracks(resolved, reference)
+    return _tracks(ctx, generated, resolved, reference)
+
+
+def unleveled_effects(ctx: RenderContext, spans) -> list[SfxTrack]:
+    """Os mesmos efeitos de `leveled_effects`, sem medir a voz: com o volume da spec e o pico de voz típico que vale sem
+    voz medida. Serve ao Auto Duck cuja chave são os efeitos e cujo fundo é uma faixa externa, que precisa da curva antes
+    dos mezaninos, e a voz só se mede depois deles."""
+    items = plan_sfx(ctx.project, spans)
+    resolved = resolve_files(ctx.project, items) if items else []
+    return _tracks(ctx, _generated(ctx), resolved, None)
+
+
+def _generated(ctx: RenderContext) -> list[SfxTrack]:
+    from .generated_sounds import generated_tracks  # import tardio: o módulo importa `SfxTrack` daqui
+
+    return generated_tracks(ctx)
+
+
+def _tracks(
+    ctx: RenderContext, generated: list[SfxTrack], resolved, reference: float | None
+) -> list[SfxTrack]:
+    """Os efeitos do projeto com o nível acertado contra `reference` (None: o pico de voz típico), mais os sons gerados."""
+    leveled = level_tracks(resolved, reference, ctx.project.audio.sfx_gain_db, ctx.project.audio.sfx_pan)
+    return sorted([*leveled, *generated], key=lambda track: track.at) if generated else leveled

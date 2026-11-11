@@ -6,6 +6,7 @@ from collections.abc import Collection, Sequence
 
 from ..domain.audiogram import project_has_voice
 from ..domain.brand import Theme
+from ..domain.generators import parse_generator
 from ..domain.infographics import infographic_warnings
 from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
@@ -13,6 +14,7 @@ from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, T
 from ..domain.timeline import TIME_EPSILON, timeline_spans, transitions_of
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
+from .crossfade_lint import crossfade_warnings
 from .voicefiles import voice_file_warnings
 from .voiceover import estimate_narration_duration
 
@@ -29,12 +31,14 @@ def lint(
     offsets: list[float] | None = None,
     known_voices: Collection[str] | None = None,
     voiceover_playtimes: Sequence[float | None] = (),
+    carrier_view: Project | None = None,
 ) -> list[str]:
     """Devolve avisos; levanta ValueError só para o que não tem como renderizar. `offsets` é onde cada
     fonte começa no relógio da sessão (0 para arquivos avulsos). `known_voices` são os ids da biblioteca
     de vozes; sem ele, a existência da voz de cada narração não é conferida. `voiceover_playtimes` é quanto
     toca de cada arquivo de `audio.voiceover` (ver `voice_file_playtimes`); sem ele só a existência dos
-    arquivos é conferida, porque medir a duração exige o ffprobe."""
+    arquivos é conferida, porque medir a duração exige o ffprobe. `carrier_view` é o projeto como o Vocoder o ouve, quando um efeito
+    pediu uma trilha muda: é nele que as trilhas das portadoras se contam."""
     warnings: list[str] = []
     segments = project.timeline
     _check_look_names(project, theme)
@@ -49,7 +53,7 @@ def lint(
                 warnings.append(
                     f"{where}: contém travessão/meia-risca. Regra da marca {theme.name}: usar vírgula, ponto ou dois-pontos."
                 )
-    if segments[0].transition:
+    if segments and segments[0].transition:
         warnings.append("timeline[0].transition é ignorada (não existe trecho anterior).")
     for i in range(1, len(segments)):
         tr = segments[i].transition
@@ -101,6 +105,10 @@ def lint(
     warnings += _audiogram_warnings(project, infos)
     warnings += _behind_person_warnings(project, total, durations)
     warnings += _sfx_warnings(project, total)
+    warnings += _generated_warnings(project, total)
+    warnings += _marker_warnings(project, total)
+    warnings += _carrier_track_warnings(carrier_view or project)
+    warnings += crossfade_warnings(project, durations, infos, offsets)
     if project.tracks:
         known = known_track_ids(project)
         for track_id in project.tracks:
@@ -109,6 +117,31 @@ def lint(
         v1_state = project.tracks.get("V1")
         if v1_state and v1_state.hidden:
             warnings.append("tracks.V1.hidden é ignorado: V1 é a linha do tempo principal.")
+    return warnings
+
+
+def _carrier_track_warnings(project: Project) -> list[str]:
+    """O Vocoder cuja trilha-portadora não existe no projeto: não é erro, ele cai na portadora gerada na hora do render. A `SFX`
+    não entra: os sons de entrada das sobreposições também a alimentam e a spec não os lista num lugar só."""
+    audio = project.audio
+    present = {f"A{i + 2}" for i in range(len(audio.tracks))}
+    if any(isinstance(segment, ClipSegment) for segment in project.timeline):
+        present.add("A1")
+    if audio.music is not None:
+        present.add("MUS")
+    if audio.narration:
+        present.add("NAR")
+    if audio.voiceover:
+        present.add("VO")
+    warnings = []
+    for _, place, effects in project.carrier_hosts():
+        for effect in effects:
+            carrier = effect.carrier_track_id()
+            if carrier and carrier != "SFX" and carrier not in present and effect.enabled:
+                warnings.append(
+                    f"{place}: o {effect.label} pede a portadora da trilha {carrier}, que o projeto não tem; "
+                    "usa a portadora gerada."
+                )
     return warnings
 
 
@@ -183,6 +216,45 @@ def _sfx_warnings(project: Project, total: float) -> list[str]:
             warnings.append(f"audio.sfx[{i}]: toca em {cue.at:g}s, depois do fim do vídeo ({total:.1f}s).")
         elif cue.volume <= 0:
             warnings.append(f"audio.sfx[{i}]: volume 0, o efeito não toca.")
+    return warnings
+
+
+def _generated_warnings(project: Project, total: float) -> list[str]:
+    """Som gerado que começa depois do fim do vídeo, que passa do fim (a mixagem o corta), que nunca soaria (sem volume) ou
+    cujo texto de amostras não existe."""
+    warnings = []
+    for i, sound in enumerate(project.audio.generated):
+        where = f"audio.generated[{i}]"
+        if sound.start >= total:
+            warnings.append(f"{where}: toca em {sound.start:g}s, depois do fim do vídeo ({total:.1f}s).")
+        elif sound.start + sound.duration > total + 0.05:
+            warnings.append(f"{where}: passa do fim do vídeo ({total:.1f}s) e a mixagem corta o resto.")
+        if sound.volume <= 0:
+            warnings.append(f"{where}: volume 0, o som não toca.")
+        for name in parse_generator(sound.generator, sound.params).files():
+            if not project.resolve(name).exists():
+                warnings.append(f"{where}: arquivo de amostras não encontrado: {name}")
+    return warnings
+
+
+def _marker_warnings(project: Project, total: float) -> list[str]:
+    """Marcador depois do fim do vídeo e texto repetido no mesmo grupo (o `marker:<texto>` do edit_project fica ambíguo)."""
+    warnings = []
+    seen: dict[tuple[str, str], int] = {}
+    for i, marker in enumerate(project.markers):
+        if marker.begin >= total:
+            warnings.append(
+                f"markers[{i}]: começa em {marker.begin:g}s, depois do fim do vídeo ({total:.1f}s)."
+            )
+        if marker.text:
+            key = (marker.group, marker.text.strip())
+            if key in seen:
+                warnings.append(
+                    f"markers[{i}]: o texto {marker.text!r} já é de markers[{seen[key]}]; "
+                    "marker:<texto> não saberá qual escolher (use outro texto ou o grupo)."
+                )
+            else:
+                seen[key] = i
     return warnings
 
 

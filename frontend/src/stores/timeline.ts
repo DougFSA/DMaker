@@ -12,6 +12,7 @@ import {
   WHEEL_ZOOM_STEP,
   ZOOM_STEP,
 } from '@/lib/timeline'
+import { gridSnapPoints, loadRulerMode, saveRulerMode, type RulerMode } from '@/lib/tempoGrid'
 import { useEditorStore } from './editor'
 
 /** A janela de itens desenhados anda em blocos deste tamanho (pixels), para rolar não refazer a lista a cada pixel. */
@@ -41,6 +42,9 @@ export const useTimelineStore = defineStore('timeline', () => {
 
   const pxPerSec = ref(DEFAULT_PX_PER_SEC)
   const snapEnabled = ref(true)
+  /** A régua da linha do tempo e do painel Áudio: segundos ou compassos. Lembrada no navegador; sem andamento no projeto,
+   *  a régua em compassos não existe e vale a de segundos. */
+  const rulerPreference = ref<RulerMode>(loadRulerMode())
   /** O botão "Ripple": só o rótulo muda. A V1 sempre fecha as lacunas, e o servidor decide isso. */
   const rippleAlways = ref(false)
   const hoverTrackId = ref<string | null>(null)
@@ -48,11 +52,24 @@ export const useTimelineStore = defineStore('timeline', () => {
   const viewportWidth = ref(0)
   const scrollRequest = ref<ScrollRequest | null>(null)
   const mediaDropHandler = ref<MediaDropHandler | null>(null)
+  /** O marcador (id do item da vista) cujo texto está sendo editado na própria trilha; nulo se nenhum. */
+  const editingMarkerId = ref<string | null>(null)
+  /** O fade que a alça arrastada mostra enquanto o gesto não termina (o item, a ponta e a duração em segundos do item);
+   *  nulo fora do gesto. A spec só muda ao soltar. */
+  const fadePreview = ref<{ itemId: string; side: 'in' | 'out'; duration: number } | null>(null)
   let requestToken = 0
 
   const effectiveViewport = computed(() => (viewportWidth.value > 0 ? viewportWidth.value : FALLBACK_VIEWPORT_PX))
   /** Até quantos segundos o encaixe atrai (zero com o encaixe desligado). */
   const snapTolerance = computed(() => (snapEnabled.value ? SNAP_PX / pxPerSec.value : 0))
+  /** O andamento do projeto (nulo se não tem): a régua em compassos e os tempos do encaixe só existem com ele. */
+  const tempo = computed(() => editor.view?.tempo ?? null)
+  /** A régua que vale agora: compassos só com andamento e só se a pessoa escolheu. */
+  const rulerMode = computed<RulerMode>(() => (tempo.value && rulerPreference.value === 'bars' ? 'bars' : 'seconds'))
+  /** Os tempos do andamento como alvos do encaixe (vazio com o encaixe desligado ou sem andamento). */
+  const gridPoints = computed<number[]>(() =>
+    snapEnabled.value && tempo.value && editor.view ? gridSnapPoints(tempo.value, editor.view.total, pxPerSec.value) : [],
+  )
   /** A janela visível da área das trilhas, em pixels da área, arredondada para blocos e com um bloco de folga. */
   const windowLeftPx = computed(
     () => Math.max(0, Math.floor((scrollLeft.value - TRACK_HEADER_WIDTH) / WINDOW_CHUNK_PX) * WINDOW_CHUNK_PX - WINDOW_CHUNK_PX),
@@ -100,6 +117,14 @@ export const useTimelineStore = defineStore('timeline', () => {
     return snapEnabled.value
   }
 
+  /** Alterna a régua entre segundos e compassos e lembra a escolha no navegador. Sem andamento não há o que alternar. */
+  function toggleRuler(): RulerMode {
+    if (!tempo.value) return 'seconds'
+    rulerPreference.value = rulerPreference.value === 'bars' ? 'seconds' : 'bars'
+    saveRulerMode(rulerPreference.value)
+    return rulerPreference.value
+  }
+
   function toggleRipple(): boolean {
     rippleAlways.value = !rippleAlways.value
     return rippleAlways.value
@@ -108,6 +133,15 @@ export const useTimelineStore = defineStore('timeline', () => {
   function setScroll(left: number, width: number): void {
     scrollLeft.value = left
     viewportWidth.value = width
+  }
+
+  /** Abre a caixa de texto do marcador na trilha (duplo clique, ou logo depois de criar um). */
+  function editMarker(id: string): void {
+    editingMarkerId.value = id
+  }
+
+  function stopEditingMarker(): void {
+    editingMarkerId.value = null
   }
 
   /** O painel Mídia registra aqui o que fazer ao receber um arquivo arrastado; devolve como desregistrar. */
@@ -126,18 +160,25 @@ export const useTimelineStore = defineStore('timeline', () => {
       scrollLeft.value = 0
       hoverTrackId.value = null
       scrollRequest.value = null
+      editingMarkerId.value = null
     },
   )
 
   return {
     pxPerSec,
     snapEnabled,
+    rulerPreference,
+    rulerMode,
+    tempo,
+    gridPoints,
     rippleAlways,
     hoverTrackId,
     scrollLeft,
     viewportWidth,
     scrollRequest,
     mediaDropHandler,
+    editingMarkerId,
+    fadePreview,
     effectiveViewport,
     snapTolerance,
     windowLeftPx,
@@ -148,8 +189,11 @@ export const useTimelineStore = defineStore('timeline', () => {
     zoomWheel,
     zoomFit,
     toggleSnap,
+    toggleRuler,
     toggleRipple,
     setScroll,
     onMediaDrop,
+    editMarker,
+    stopEditingMarker,
   }
 })

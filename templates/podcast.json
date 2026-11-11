@@ -1,0 +1,120 @@
+{
+  "description": "Episódio de podcast só de áudio: música de abertura, a voz gravada e música de encerramento, normalizado a -16 LUFS e gravado como MP3 com as etiquetas do episódio (artista, título, álbum, faixa, ano, gênero, comentário). Sem imagem. A voz passa por uma Redução de ruído automática moderada (desligue com limpeza=false).",
+  "prepare": "podcast",
+  "params": {
+    "voz": {
+      "description": "Arquivo de áudio com a gravação do episódio (wav, mp3, m4a...); é a voz do episódio",
+      "type": "path",
+      "required": true
+    },
+    "duracao_voz": {
+      "description": "Duração da gravação em segundos; omitida, vale a duração do arquivo de voz (o DMaker a mede sozinho)",
+      "type": "number",
+      "duration_of": "voz",
+      "required": true,
+      "example": 600
+    },
+    "trilha": {
+      "description": "Arquivo de áudio da música: o começo dela toca na abertura e o final dela, no encerramento",
+      "type": "path",
+      "required": true
+    },
+    "abertura": {
+      "description": "Segundos de música antes da voz entrar; 0 para começar direto na voz",
+      "default": 8,
+      "type": "number"
+    },
+    "encerramento": {
+      "description": "Segundos de música depois da voz acabar; 0 para terminar com a voz",
+      "default": 10,
+      "type": "number"
+    },
+    "artista": {
+      "description": "Etiqueta artista do arquivo (o programa ou o apresentador); vazio, vale a da marca, se ela tiver",
+      "default": "",
+      "type": "text"
+    },
+    "titulo": {
+      "description": "Etiqueta título do arquivo (o nome do episódio)",
+      "default": "",
+      "type": "text"
+    },
+    "album": {
+      "description": "Etiqueta álbum do arquivo (a temporada ou o nome do podcast)",
+      "default": "",
+      "type": "text"
+    },
+    "faixa": {
+      "description": "Etiqueta faixa do arquivo (o número do episódio, como 12 ou 12/40)",
+      "default": "",
+      "type": "text"
+    },
+    "ano": {
+      "description": "Etiqueta ano do arquivo",
+      "default": "",
+      "type": "text"
+    },
+    "genero": {
+      "description": "Etiqueta gênero do arquivo",
+      "default": "Podcast",
+      "type": "text"
+    },
+    "comentario": {
+      "description": "Etiqueta comentário do arquivo (a descrição curta do episódio)",
+      "default": "",
+      "type": "text"
+    },
+    "limpeza": {
+      "description": "Limpa a voz com uma Redução de ruído automática moderada (8 dB): o perfil é o trecho mais quieto da gravação, e sem uma pausa só de ruído nada é tirado. false deixa a voz como foi gravada",
+      "default": true,
+      "type": "bool"
+    },
+    "loudness": {
+      "description": "Alvo de loudness em LUFS: -16 é o padrão de podcast; -14 para redes e -23 para broadcast",
+      "default": -16,
+      "type": "number"
+    },
+    "formato": {
+      "description": "Formato do arquivo: audio/mp3 (padrão), audio/m4a, audio/wav, audio/flac, audio/ogg, audio/opus ou audio/aiff",
+      "default": "audio/mp3",
+      "type": "text"
+    },
+    "marca": {
+      "description": "Marca (assets/brands/<nome>) cujo modelo de etiquetas (metadata do brand.json) completa as etiquetas acima; sem ela, só as do episódio",
+      "default": null,
+      "type": "text"
+    }
+  },
+  "name": "podcast",
+  "output": { "preset": "{{formato}}", "metadata": "{{etiquetas}}" },
+  "brand": "{{marca}}",
+  "timeline": [],
+  "audio": {
+    "voiceover": [
+      {
+        "src": "{{voz}}",
+        "start": "{{abertura}}",
+        "effects": [
+          { "$if": "{{limpeza}}", "type": "noise_reduction", "reduction_db": 8, "sensitivity": 6, "smoothing_bands": 3, "profile": "auto" }
+        ]
+      }
+    ],
+    "music": {
+      "src": "{{trilha}}",
+      "volume": 0.5,
+      "spans": [
+        { "$if": "{{tem_abertura}}", "start": 0, "end": "{{abertura}}", "fade_in": 0.5, "fade_out": 2 },
+        {
+          "$if": "{{tem_encerramento}}",
+          "start": "{{inicio_encerramento}}",
+          "end": "{{total}}",
+          "fade_in": 2,
+          "fade_out": 3,
+          "tail": true
+        }
+      ]
+    },
+    "normalize": "two-pass",
+    "target_lufs": "{{loudness}}"
+  }
+}

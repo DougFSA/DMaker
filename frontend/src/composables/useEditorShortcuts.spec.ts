@@ -1,7 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { projectSpec, timelineView } from '@/test/editorFixtures'
+import { projectSpec, timelineItem, timelineTrack, timelineView } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
@@ -414,5 +414,165 @@ describe('sair da página com mudança não salva', () => {
     const dirty = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(dirty)
     expect(dirty.defaultPrevented).toBe(true)
+  })
+})
+
+describe('marcadores', () => {
+  /** A vista de dois trechos de 3 s com uma trilha MK: um instante em 1,5 s e uma região de 4 a 5 s. */
+  function viewWithMarkers() {
+    const view = timelineView()
+    const item = (index: number, start: number, end: number) =>
+      timelineItem(index, {
+        id: `MK-${index}`,
+        kind: 'marker',
+        label: `marca ${index}`,
+        start,
+        end,
+        src: null,
+        extra: { color: null, group: '', instant: start === end },
+      })
+    view.tracks.push(timelineTrack('MK', [item(0, 1.5, 1.5), item(1, 4, 5)], { kind: 'markers' }))
+    return view
+  }
+
+  async function mountWithMarkers() {
+    const view = viewWithMarkers()
+    const spec = { ...projectSpec(), markers: [{ at: 1.5, text: 'marca 0' }, { start: 4, end: 5, text: 'marca 1' }] }
+    opened = await openEditor(spec, {
+      'POST /api/projects/demo/timeline': () => view,
+      'POST /api/projects/demo/edit': () => ({ spec: { ...spec, markers: [...spec.markers, { at: 3, text: '' }] }, timeline: view }),
+    })
+    wrapper = await mountEditorPart(Host, opened)
+    return wrapper
+  }
+
+  it('M cria um marcador no cursor, escolhe o novo e abre a caixa de texto dele', async () => {
+    await mountWithMarkers()
+    const editor = useEditorStore()
+    editor.setPlayhead(3)
+    expect(press({ key: 'm' }).defaultPrevented).toBe(true)
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_add', at: 3, text: '' } })
+    expect(editor.selection).toEqual(['MK-2'])
+    expect(useTimelineStore().editingMarkerId).toBe('MK-2')
+  })
+
+  it('M digitado numa caixa de texto não cria marcador', async () => {
+    await mountWithMarkers()
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    press({ key: 'm' }, input)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+  })
+
+  it('vírgula e ponto pulam para o marcador anterior e o seguinte e o escolhem', async () => {
+    await mountWithMarkers()
+    const editor = useEditorStore()
+    press({ key: '.' })
+    expect(editor.playhead).toBe(1.5)
+    expect(editor.selection).toEqual(['MK-0'])
+    press({ key: '.' })
+    expect(editor.playhead).toBe(4)
+    expect(editor.selection).toEqual(['MK-1'])
+    press({ key: ',' })
+    expect(editor.playhead).toBe(1.5)
+  })
+
+  it('sem marcador adiante, avisa em vez de ficar mudo', async () => {
+    await mountWithMarkers()
+    useEditorStore().setPlayhead(5.5)
+    press({ key: '.' })
+    expect(toastTitles()).toContain('Não há marcador depois do cursor.')
+    useEditorStore().setPlayhead(0.5)
+    press({ key: ',' })
+    expect(toastTitles()).toContain('Não há marcador antes do cursor.')
+  })
+
+  it('Delete remove o marcador escolhido, e o Alt+setas das edições segue livre', async () => {
+    await mountWithMarkers()
+    useEditorStore().select(['MK-1'])
+    press({ key: 'Delete' })
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_remove', index: 1 } })
+  })
+
+  it('as teclas dos marcadores estão na tabela e não colidem com nenhuma outra', async () => {
+    await mountShortcuts()
+    const combos = useKeymapStore().byCombo
+    expect(combos.get('m')).toEqual(['add_marker'])
+    expect(combos.get(',')).toEqual(['prev_marker'])
+    expect(combos.get('.')).toEqual(['next_marker'])
+    expect(combos.get('Alt+ArrowLeft')).toEqual(['prev_edit'])
+  })
+})
+
+describe('painel Áudio: as teclas valem só com o foco dentro dele', () => {
+  /** Um elemento do painel, no documento, de onde a tecla nasce. */
+  function insidePanel(): HTMLElement {
+    const panel = document.createElement('section')
+    panel.setAttribute('data-audio-panel', '')
+    const inner = document.createElement('div')
+    panel.appendChild(inner)
+    document.body.appendChild(panel)
+    return inner
+  }
+
+  it('o Espaço dentro do painel faz a ação dele e não toca o vídeo; fora dele, é do player', async () => {
+    await mountShortcuts()
+    const player = usePlayerStore()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    const stop = keymap.register('audio_play', () => calls.push('audio_play'))
+    expect(press({ key: ' ' }, insidePanel()).defaultPrevented).toBe(true)
+    expect(calls).toEqual(['audio_play'])
+    expect(player.playing).toBe(false)
+    press({ key: ' ' }) // foco fora do painel
+    expect(calls).toEqual(['audio_play'])
+    expect(player.playing).toBe(true)
+    stop()
+  })
+
+  it('Ctrl+L silencia dentro do painel e continua bloqueando a trilha fora dele', async () => {
+    await mountShortcuts()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    keymap.register('audio_silence', () => calls.push('silencia'))
+    press({ key: 'l', ctrlKey: true }, insidePanel())
+    expect(calls).toEqual(['silencia'])
+    expect(edits()).toHaveLength(0) // não chegou a mexer no cadeado de trilha nenhuma
+    useEditorStore().select(['V1:0'])
+    press({ key: 'l', ctrlKey: true })
+    await flushPromises()
+    expect(calls).toEqual(['silencia'])
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'set_field', path: 'tracks.V1.locked' } })
+  })
+
+  it('as outras teclas do editor seguem valendo dentro do painel (Ctrl+S salva)', async () => {
+    await mountShortcuts()
+    const editor = useEditorStore()
+    editor.setField('timeline.0.speed', 2)
+    press({ key: 's', ctrlKey: true }, insidePanel())
+    await flushPromises()
+    expect(opened.fetch.to('PUT /api/projects/demo')).toHaveLength(1)
+  })
+
+  it('Ctrl+Z, Ctrl+B e Ctrl+I do painel chegam às ações dele e não às do editor', async () => {
+    await mountShortcuts()
+    const keymap = useKeymapStore()
+    const calls: string[] = []
+    keymap.register('audio_undo', () => calls.push('desfaz'))
+    keymap.register('audio_label', () => calls.push('marcador'))
+    keymap.register('audio_split', () => calls.push('divide'))
+    for (const init of [{ key: 'z', ctrlKey: true }, { key: 'b', ctrlKey: true }, { key: 'i', ctrlKey: true }]) {
+      expect(press(init, insidePanel()).defaultPrevented).toBe(true)
+    }
+    expect(calls).toEqual(['desfaz', 'marcador', 'divide'])
+  })
+
+  it('as ações do painel sem o painel registrado não fazem nada', async () => {
+    await mountShortcuts()
+    expect(() => press({ key: 'c' }, insidePanel())).not.toThrow()
+    expect(edits()).toHaveLength(0)
   })
 })

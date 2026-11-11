@@ -19,23 +19,52 @@ from pathlib import Path
 
 from .. import config
 from ..domain.brand import load_theme
-from ..domain.presets import get_preset
+from ..domain.outputs import frame_preset
 from ..domain.spec import ClipSegment, Project, Segment, VideoOverlay
 from ..domain.timeline import transitions_of
-from ..domain.tracks import apply_track_state
+from ..domain.tracks import apply_track_state, carrier_heard_project, silenced_carrier_warnings
 from ..filtergraph.pip import ResolvedVideoOverlay
 from ..filtergraph.preview_audio import clip_audio_piece, preview_encode_args, silence_piece
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, VoiceLevelMeter, audio_only_graph, graph_args, plan_loudness
+from .assembly import (
+    LoudnessMeter,
+    MasterEffectMeter,
+    VoiceLevelMeter,
+    audio_only_graph,
+    graph_args,
+    plan_loudness,
+    plan_master_effects,
+)
+from .audio_crossfade import CutNeighbors, clip_crossfades, crossfade_key_parts
+from .audio_effects import (
+    clip_camera_audio,
+    effect_processor,
+    noise_profile_parts,
+    processed_music,
+    processed_pips,
+    processed_voiceovers,
+    track_audio_overrides,
+)
+from .auto_duck import (
+    DuckInputs,
+    begin_ducks,
+    duck_key_part,
+    finish_ducks,
+    project_track_origin,
+    spill_long_graph,
+    track_duck_lookup,
+)
+from .carrier_tracks import CarrierInputs, Deferred, HeardView, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions
 from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia, media_references
 from .narration import NarrationService
-from .segments import PreparedSegment, cache_key, isolate_camera_audio
+from .placements import clip_placement
+from .segments import PreparedSegment, cache_key, isolate_camera_audio, pan_key_part
 from .sfx import SfxTrack, leveled_effects
 from .sync import OffsetFinder
 from .track_slices import track_slices
@@ -78,6 +107,10 @@ def piece_recipe(segment: Segment) -> dict:
                 "fade_out",
                 "audio_fade",
                 "audio_mode",
+                "effects",
+                "audio_offset",
+                "pan",
+                "audio_crossfade",  # o serializador tira o campo quando vazio: a receita antiga não muda
             },
         )
     return {"type": segment.type, "duration": getattr(segment, "duration", None)}
@@ -175,9 +208,13 @@ class PreviewAudioBuilder:
     def key(self, project: Project) -> str:
         """Hash da parte de áudio da spec, dos arquivos que ela usa (data e tamanho) e das narrações já em
         cache: o que não muda o som (cor, texto, legendas) não muda a chave."""
+        heard = carrier_heard_project(project)
         project = apply_track_state(project)
         base = project.base_dir
         stamps = [file_stamp(project.resolve(raw)) for raw, _ in media_references(project)]
+        if heard is not None:
+            # a trilha muda que o Vocoder ouve não está na mistura, mas o som dela entra no item: trocar o arquivo muda a chave
+            stamps += [file_stamp(heard.resolve(raw)) for raw, _ in media_references(heard)]
         scripts = [
             file_stamp(project.resolve(narration.script))
             for narration in project.audio.narration
@@ -220,6 +257,12 @@ class PreviewAudioBuilder:
         missing = MissingMedia.scan(project)
         project = without_missing_audio(project, missing)
         layout = project_layout(project, self.prober, self.offset_finder, missing)
+        heard_project = carrier_heard_project(original)
+        heard_layout = None
+        if heard_project is not None:
+            heard_missing = MissingMedia.scan(heard_project)
+            heard_project = without_missing_audio(heard_project, heard_missing)
+            heard_layout = project_layout(heard_project, self.prober, self.offset_finder, heard_missing)
         # medir a sincronia grava o `sync.json`, que entra na chave: a mixagem fica guardada sob a chave de depois,
         # a que o próximo pedido da mesma spec vai calcular, senão a primeira mixagem nunca seria reaproveitada
         key = self.key(original)
@@ -232,16 +275,62 @@ class PreviewAudioBuilder:
         self._drop_old_pieces(pieces_dir)
 
         ctx = self._context(layout, job_dir, pieces_dir)
-        prepared = self._pieces(ctx, layout, missing)
-        transitions = transitions_of(layout.project.timeline)
         total = layout.total
-        voiceovers = self._voiceovers(ctx)
-        voice_files = self._voice_files(ctx)
-        pips = self._pip_audio(ctx, total, missing)
+        # o que não depende dos pedaços fica pronto antes deles, como no render: o Auto Duck mede a chave de uma faixa
+        # externa de fundo (que abaixa dentro do pedaço) na narração, nas vozes gravadas e na música
+        # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
+        spoken = self._voiceovers(ctx)
         music = ctx.project.audio.music
-        music_path = ctx.project.resolve(music.src) if music else None
+        music_file = ctx.project.resolve(music.src) if music else None
+        voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
+        voice_files_of = Deferred(lambda: self._voice_files(ctx), "a voz gravada")
+        music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        ctx.warnings.extend(silenced_carrier_warnings(original))
+        install_carrier_tracks(
+            ctx,
+            CarrierInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers_of,
+                voice_files_of,
+                music_of,
+            ),
+            self._heard_view(heard_project, heard_layout) if heard_layout is not None else None,
+        )
+        voiceovers, voice_files, music_path = voiceovers_of(), voice_files_of(), music_of()
+        begin_ducks(
+            ctx,
+            DuckInputs(
+                layout.spans,
+                layout.sources,
+                total,
+                project_track_origin(project),
+                voiceovers,
+                voice_files,
+                music_path,
+            ),
+        )
+        prepared = self.pieces(ctx, layout, missing)
+        transitions = transitions_of(layout.project.timeline)
+        pips = self.pip_audio(ctx, total, missing)
+        processed_pips(ctx, pips)
         sfx = self._effects(ctx, prepared, transitions, layout, total, voiceovers, pips, voice_files)
 
+        finish_ducks(ctx, music_path, total, voiceovers, sfx, voice_files)
+        plan_master_effects(
+            ctx,
+            MasterEffectMeter(),
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            pips,
+            sfx,
+            voice_files,
+        )
         plan = plan_loudness(
             ctx, LoudnessMeter(), prepared, transitions, music_path, total, voiceovers, pips, sfx, voice_files
         )
@@ -280,9 +369,25 @@ class PreviewAudioBuilder:
         self._drop_old_mixes(project.name, keep=out)
         return PreviewAudio(out, key, total, warnings)
 
+    def _heard_view(self, source: Project, layout: ProjectLayout) -> HeardView:
+        """A visão ouvida do Vocoder (uma trilha muda que ele pediu de volta), com a narração, a voz gravada e a música dela
+        preguiçosas: a narração muda só é falada se alguém a pedir."""
+
+        def lazies(heard_ctx: RenderContext):
+            music = heard_ctx.project.audio.music
+            music_file = heard_ctx.project.resolve(music.src) if music else None
+            spoken = Deferred(lambda: self._voiceovers(heard_ctx), "a narração muda")
+            return (
+                Deferred(lambda: processed_voiceovers(heard_ctx, spoken()), "a narração"),
+                Deferred(lambda: self._voice_files(heard_ctx), "a voz gravada"),
+                Deferred(lambda: processed_music(heard_ctx, music_file), "a música"),
+            )
+
+        return HeardView(layout.project, layout.session, layout.sources, project_track_origin(source), lazies)
+
     def _context(self, layout: ProjectLayout, job_dir: Path, pieces_dir: Path) -> RenderContext:
         project = layout.project
-        preset = get_preset(project.output.preset)
+        preset = frame_preset(project.output.preset)
         return RenderContext(
             project=project,
             options=RenderOptions(quiet=True, thumbnail=False),
@@ -300,12 +405,13 @@ class PreviewAudioBuilder:
 
     # ---------- pedaços: o som de cada trecho ----------
 
-    def _pieces(
+    def pieces(
         self, ctx: RenderContext, layout: ProjectLayout, missing: MissingMedia
     ) -> list[PreparedSegment]:
         """Um WAV por trecho, do cache ou recém-gerado. O que a spec pede e o disco não tem vira silêncio."""
         prepared = []
         count = len(layout.project.timeline)
+        ctx.cut_neighbors = self._neighbors(ctx, layout, missing)
         for index, (segment, source, duration) in enumerate(
             zip(layout.project.timeline, layout.sources, layout.durations, strict=True)
         ):
@@ -329,6 +435,28 @@ class PreviewAudioBuilder:
             prepared.append(PreparedSegment(index, segment, duration, out, None, None))
         return prepared
 
+    @staticmethod
+    def _neighbors(ctx: RenderContext, layout: ProjectLayout, missing: MissingMedia) -> CutNeighbors | None:
+        """A linha do tempo como o crossfade de som entre clipes lê: as mesmas fontes e durações do render, e as fatias de
+        faixa externa sem as que sumiram do disco. None quando nenhum clipe pede crossfade."""
+        timeline = layout.project.timeline
+        if not any(isinstance(seg, ClipSegment) and seg.audio_crossfade for seg in timeline):
+            return None
+
+        def slices_of(i: int) -> tuple:
+            segment = timeline[i]
+            if not (isinstance(segment, ClipSegment) and segment.source):
+                return ()
+            return tuple(
+                piece
+                for piece in track_slices(
+                    ctx.project.audio.tracks, ctx.session, segment, track_audio_overrides(ctx)
+                )
+                if not missing.covers(piece.path)
+            )
+
+        return CutNeighbors(timeline, layout.sources, layout.durations, slices_of)
+
     def _clip_piece(
         self, ctx, index, segment, source, duration, missing
     ) -> tuple[Path, FFmpegCommand | None]:
@@ -338,10 +466,20 @@ class PreviewAudioBuilder:
         if segment.source:
             tracks = tuple(
                 piece
-                for piece in track_slices(ctx.project.audio.tracks, ctx.session, segment)
+                for piece in track_slices(
+                    ctx.project.audio.tracks,
+                    ctx.session,
+                    segment,
+                    track_audio_overrides(ctx),
+                    track_duck_lookup(ctx, index),
+                )
                 if not missing.covers(piece.path)
             )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        placement = clip_placement(ctx, index, duration, segment.speed)
+        crossfades = (
+            clip_crossfades(index, ctx.cut_neighbors, ctx.warn) if ctx.cut_neighbors is not None else None
+        )
         key = cache_key(
             PREVIEW_AUDIO_VERSION,
             piece_recipe(segment),
@@ -350,14 +488,38 @@ class PreviewAudioBuilder:
             source.audio_stream,
             in_point,
             f"{duration:.3f}",
-            [(str(t.path), t.in_point, t.volume, t.audio_stream, file_stamp(t.path)) for t in tracks],
+            [
+                (
+                    str(t.path),
+                    t.in_point,
+                    t.volume,
+                    t.audio_stream,
+                    file_stamp(t.path),
+                    *pan_key_part(t.pan),
+                    *duck_key_part(t.duck),
+                )
+                for t in tracks
+            ],
             camera_audio.key if camera_audio else None,  # o nome carrega a chave dos stems
+            *noise_profile_parts(
+                ctx, segment.effects, placement
+            ),  # o perfil de ruído e a portadora de outra trilha (vazio sem eles)
+            *crossfade_key_parts(crossfades),  # o som emprestado dos vizinhos no crossfade (vazio sem ele)
         )
         out = ctx.cache_dir / f"{key}.wav"
         if out.exists():
             return out, None
         if camera_audio is not None:
             camera_audio.isolate()  # separa a voz (ou o fundo) só se o pedaço precisa ser feito
+        camera_path = camera_audio.path if camera_audio else None
+        camera_lead = camera_audio.lead if camera_audio else 0.0
+        length = max(duration * segment.speed, 0.01)  # tempo de fonte que o trecho consome
+        processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path, placement)
+        if processed is not None:
+            camera_path, camera_lead = (
+                processed,
+                0.0,
+            )  # o silêncio inicial já vem dentro do arquivo processado
         command = clip_audio_piece(
             segment,
             info,
@@ -367,8 +529,14 @@ class PreviewAudioBuilder:
             in_point=in_point,
             tracks=tracks,
             audio_stream=source.audio_stream,
-            camera_audio=camera_audio.path if camera_audio else None,
+            camera_audio=camera_path,
+            camera_lead=camera_lead,
+            crossfades=crossfades,
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"pedaco_{index}.txt")
         return out, command
 
     # ---------- voz, PiP e efeitos ----------
@@ -401,18 +569,25 @@ class PreviewAudioBuilder:
                 ctx.warn(f"A narração {index} não entrou na prévia: {exc}")
                 continue
             prepared.append(
-                PreparedVoiceover(result.path, narration.start, narration.volume, result.duration)
+                PreparedVoiceover(
+                    result.path,
+                    narration.start,
+                    narration.volume,
+                    result.duration,
+                    effects=tuple(narration.effects),
+                    pan=narration.pan,
+                )
             )
         return prepared
 
     def _voice_files(self, ctx: RenderContext) -> list[PreparedVoiceFile]:
         try:
-            return prepare_voice_files(ctx.project, self.prober)
+            return prepare_voice_files(ctx.project, self.prober, effect_processor(ctx))
         except (OSError, ValueError) as exc:
             ctx.warn(f"As locuções não entraram na prévia: {exc}")
             return []
 
-    def _pip_audio(
+    def pip_audio(
         self, ctx: RenderContext, total: float, missing: MissingMedia
     ) -> list[ResolvedVideoOverlay]:
         """Os PiPs com som, só com o que a mixagem lê deles (arquivo, ponto de entrada, instante e volume): o

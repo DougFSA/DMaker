@@ -37,7 +37,8 @@ outras para não depender dele.)
 | **Mergear na `main` e criar a tag**: nunca delegado, em hipótese nenhuma | - |
 | Ler o retorno do smoke e decidir se a versão está de pé | - |
 | - | Coletar as auditorias A, B, C e D (`dmaker-apurador`, em paralelo) |
-| - | Fechar o CHANGELOG e abrir o PR de release (`dmaker-executor`) |
+| - | Fechar o CHANGELOG, subir a versão do pacote e abrir o PR de release (`dmaker-executor`) |
+| - | Gerar os instaladores e publicá-los na aba Releases (`dmaker-executor`, só com o aval) |
 | - | Reinstalar o pacote e rodar o smoke, e resumir (`dmaker-apurador`) |
 
 O apurador traz **fatos**, não veredito: "DMK-12 está em Teste Manual" é fato; "o
@@ -154,6 +155,16 @@ Some a isso a checagem que independe do CHANGELOG, comparando `main` e `develop`
   depois de instalar refaz os mezaninos (mais lento uma vez); avise.
 - **Spec/projetos**: o `domain/spec.py` mudou de forma que projetos antigos em
   `projects/` deixam de validar? Peça a migração ou a compatibilidade.
+- **Para publicar os instaladores (passo 7.5)**, confira antes de pedir o aval, porque
+  os dois builds levam uma hora e meia a duas horas (o do Linux sozinho, uns 80 minutos) e não adianta descobrir no meio que falta algo:
+  - **Docker no ar**: `docker version`. O pacote do Linux é montado num contêiner
+    `ubuntu:22.04`; sem o Docker, o `dmaker release build` para no Linux.
+  - **Espaço livre**: `Get-PSDrive X,C`. O build pede uns `50` GB livres no
+    **X:** (a árvore de trabalho do Linux, as partes dos dois sistemas e os
+    downloads em `releases\_baixados`) e uns `5` GB no **C:** (o disco virtual
+    do WSL, que o Docker usa, e que não encolhe sozinho). Diga o número livre.
+  - **`gh auth status`**: logado como o dono do repositório. Sem isso o
+    `dmaker release publish` recusa na primeira chamada.
 
 Esta auditoria só lê. Se não der para conferir algo (modelo instalado, `ollama
 list`), liste o que precisa ser conferido e **peça a confirmação ao Douglas** em
@@ -190,7 +201,7 @@ subir** ou **bloqueada por N itens**, seguido das quatro auditorias, cada
 bloqueio com o que fazer para destravá-lo.
 
 Se estiver liberada, diga o que vai acontecer quando ele autorizar: o texto do
-bloco da versão no CHANGELOG, a tag `vX`, o que ele precisa instalar ou baixar
+bloco da versão no CHANGELOG, a versão do pacote (`X.0.0`), a tag `vX`, o que ele precisa instalar ou baixar
 (extras, modelos) e o que você vai conferir depois. Então **pare e espere**.
 
 ## 7. Com o aval: feche a versão e faça o release
@@ -199,10 +210,15 @@ Os passos 1 a 3 vão num `dmaker-executor` (o fechamento do CHANGELOG é a **ún
 exceção em que ele commita direto na `develop`, e o briefing precisa dizer isso).
 Os passos 4 e 5 são seus, sempre.
 
-1. **Feche a versão no CHANGELOG, na `develop`, ANTES do merge.** Troque
-   `## [Não lançado]` por `## vX — AAAA-MM-DD` com a data de hoje, e abra um novo
-   `## [Não lançado]` vazio acima dele. Fechar depois do merge faz a seção
-   **duplicar** (`_comum/qualidade.md`). Commit e push na `develop`.
+1. **Feche a versão no CHANGELOG e suba a versão do pacote, na `develop`, ANTES do
+   merge, no mesmo commit.** Troque `## [Não lançado]` por `## vX — AAAA-MM-DD` com a
+   data de hoje, e abra um novo `## [Não lançado]` vazio acima dele. No mesmo commit,
+   troque o `__version__` de `src/dmaker/__init__.py` para `X.0.0` (formato `X.Y.Z`,
+   `X` é o nome da versão no Jira, o mesmo da tag `vX`; o `pyproject.toml` lê dali, não
+   há segundo lugar para editar). Esquecer isso faz o `dmaker --version` da versão
+   lançada mentir, e o `tests/test_version.py` reprova um CHANGELOG fechado sem a versão
+   nova. Fechar depois do merge faz a seção **duplicar** (`_comum/qualidade.md`).
+   Commit e push na `develop`.
 2. **Abra o PR de release `develop` → `main`.** Nunca push direto: o PR dá
    trilha. Corpo do PR = o resumo da versão, com os pré-requisitos na máquina
    listados como já conferidos. **O texto do corpo é seu**: sai da auditoria que
@@ -225,6 +241,37 @@ Os passos 4 e 5 são seus, sempre.
    Confirme com `git ls-remote --tags origin vX` e
    `git rev-parse main origin/main` (devem ser iguais).
 
+## 7.5. Gere os dois instaladores e publique na aba Releases
+
+Depois da tag e antes do smoke: quem baixa o DMaker pelo GitHub não tem o `.venv`, e
+o pacote é o que ele vai instalar. O mesmo "pode subir" do Douglas vale para isto
+(é o ato que torna o pacote público); sem ele, pare no passo 7. Vai para um
+`dmaker-executor`, numerado:
+
+1. **Um worktree limpo da tag**, para o pacote sair do código lançado e não de uma
+   pasta com sobra: `git worktree add ..\dmaker-release-X vX`. Nele: `cd frontend; npm ci`
+   (o `npm run build` do pacote precisa do `node_modules` da tag). Rode tudo abaixo
+   dessa pasta, com o `PYTHONPATH` dela e o Python do `.venv` da pasta principal
+   (`_comum/git.md`, Worktrees).
+2. **Gere os instaladores**: `dmaker release build --pasta <raiz principal>`
+   (padrão: Windows e Linux; `--plataforma windows` ou `linux` para um só). Sai tudo em
+   `<raiz principal>\releases\vX.0.0`, com o `SHA256SUMS.txt` e o `NOTAS.md`, e o
+   trabalho pesado do Linux em `releases\_linux`. O Douglas pode mandar tirar um
+   modelo do pacote (`--sem-modelo omnivoice`): ele passa a baixar no primeiro uso.
+   **Antes e depois, compare a listagem do `site-packages` de usuário** (o pip do
+   pacote é isolado, mas é isto que prova): nada pode mudar.
+3. **Publique**: `dmaker release publish --versao X --pasta <raiz principal>`. Ele
+   recusa sem a tag no `origin`, com a versão do pacote diferente da tag, com arquivo de
+   2 GiB ou mais e com SHA-256 que não bate. Se cair no meio do upload, rode de novo:
+   só sobe o que falta.
+4. **Informe**: onde ficaram os arquivos, o tamanho e o SHA-256 de cada um, o tempo de
+   cada build e o **link da release** (`gh release view vX --json url`).
+5. Tire o worktree (`git worktree remove`, depois de `rmdir` em qualquer junção).
+
+Se o build do Linux falhar por falta do Docker ou de espaço, **não publique só o do
+Windows em silêncio**: diga ao Douglas e deixe a decisão com ele. O smoke do passo 8
+não depende deste passo.
+
 ## 8. Depois do release: reinstale e confirme que está de pé
 
 Um release não termina no merge: termina quando o pacote instalado na máquina é o
@@ -240,8 +287,8 @@ da `main` e funciona. Vai para o `dmaker-apurador`, numerado:
    release **roda o build do front** antes do smoke: `cd frontend; npm ci; npm run build`.
    Sem o `dist`, `dmaker ui` continua servindo a interface clássica em `/`.
 2. Smoke: `dmaker --help`, `dmaker presets` e `dmaker doctor` (saída de exit
-   code 0, e `doctor` sem item vermelho novo). `dmaker --version` deve mostrar a
-   versão do pacote.
+   code 0, e `doctor` sem item vermelho novo). `dmaker --version` deve mostrar
+   `dmaker X.0.0`, a versão da tag.
 3. Se a versão trouxe comando ou ferramenta MCP nova, rodar o `--help` dela.
 4. **Erros** de inicialização, citados. Peça as linhas de erro, não o log.
 

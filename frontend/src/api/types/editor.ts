@@ -1,6 +1,7 @@
 /* Tipos das rotas do editor (src/dmaker/ui/server.py): salvar a spec, legendas, linha do tempo, edição por
    operação, tema, proxies, sondagem de mídia, forma de onda, sincronização, conferência do vídeo e layouts. */
 import type { JobSnapshot } from '../types'
+import type { AudioEffectSettings } from './audioEffects'
 
 /** A spec do projeto como o servidor a aceita (PUT /api/projects/{nome}); a validação completa é do backend. */
 export type SpecDocument = Record<string, unknown>
@@ -57,13 +58,13 @@ export interface CaptionsSaved {
 
 /* ---------- linha do tempo ---------- */
 
-export type TrackKind = 'video' | 'audio' | 'text' | 'graphics' | 'captions'
+export type TrackKind = 'video' | 'audio' | 'text' | 'graphics' | 'captions' | 'markers'
 
-/** Um item de uma trilha da vista (trecho, sobreposição, faixa de áudio, narração, música ou legenda). */
+/** Um item de uma trilha da vista (trecho, sobreposição, faixa de áudio, narração, música, legenda ou marcador). */
 export interface TimelineItem {
   id: string
   kind: string
-  /** Posição de origem do item: em `timeline`, `overlays` ou `audio.tracks`. */
+  /** Posição de origem do item: em `timeline`, `overlays`, `audio.tracks` ou `markers`. */
   index: number
   label: string
   start: number
@@ -89,6 +90,12 @@ export interface TimelineTrack {
   muted: boolean
   hidden: boolean
   locked: boolean
+  /** Controles de mixagem salvos em `tracks` (só as trilhas de áudio os usam): ganho em dB, pan de -1 a 1 e solo. */
+  gain_db?: number
+  pan?: number
+  solo?: boolean
+  /** A trilha não soa: está muda, ou outra trilha de áudio está em solo. */
+  silenced?: boolean
   items: TimelineItem[]
 }
 
@@ -104,6 +111,18 @@ export interface TimelineSource {
 }
 
 /** POST /api/projects/{nome}/timeline e o campo `timeline` da resposta de editar. */
+/** O andamento do projeto (`audio.tempo`) como a vista o entrega: a base da régua em compassos e do encaixe nos tempos. */
+export interface TimelineTempo {
+  bpm: number
+  /** A fórmula de compasso, como `4/4`. */
+  time_signature: string
+  beats_per_bar: number
+  /** Onde cai o tempo 1, em segundos do vídeo final. */
+  offset: number
+  /** Quanto dura um tempo, em segundos. */
+  period: number
+}
+
 export interface TimelineView {
   total: number
   fps: number
@@ -112,6 +131,8 @@ export interface TimelineView {
   tracks: TimelineTrack[]
   sources: Record<string, TimelineSource>
   warnings: string[]
+  /** Só quando o projeto tem andamento. */
+  tempo?: TimelineTempo
 }
 
 /* ---------- caixas das sobreposições ---------- */
@@ -194,7 +215,8 @@ export interface InstantFrame {
   percent?: number
 }
 
-/** As dez operações de POST /api/projects/{nome}/edit. */
+/** As operações de POST /api/projects/{nome}/edit que a interface usa: as da linha do tempo, as de marcador e as de
+ * edição de onda (`audio_*`, `track_set`). Os tempos das `audio_*` são da linha do tempo do projeto. */
 export type EditOperation =
   | { type: 'split'; index: number; at: number }
   | { type: 'remove'; index: number }
@@ -206,10 +228,110 @@ export type EditOperation =
   | { type: 'overlay_remove'; index: number }
   | { type: 'overlay_duplicate'; index: number }
   | { type: 'set_field'; path: string; value: unknown }
+  | { type: 'marker_add'; at?: number; start?: number; end?: number; text?: string; color?: string; group?: string }
+  | {
+      type: 'marker_set'
+      index: number
+      at?: number
+      start?: number
+      end?: number
+      text?: string
+      color?: string | null
+      group?: string
+    }
+  | { type: 'marker_remove'; index: number }
+  | {
+      type: 'audio_effect'
+      action: 'add' | 'remove' | 'move' | 'enable' | 'disable' | 'set'
+      target: string
+      /** O efeito novo (`add`), com o intervalo em tempo do item. */
+      effect?: AudioEffectSettings
+      index?: number
+      to?: number
+      params?: Record<string, unknown>
+    }
+  | { type: 'audio_silence'; target: string; start: number; end: number }
+  /** Os sons gerados (`audio.generated`): o início e a duração são da linha do tempo; `params` se soma aos que o som já tem. */
+  | { type: 'generated_add'; generator: string; params?: Record<string, unknown>; start?: number; duration?: number; volume?: number; pan?: number }
+  | { type: 'generated_set'; index: number; generator?: string; params?: Record<string, unknown>; start?: number; duration?: number; volume?: number; pan?: number }
+  | { type: 'generated_remove'; index: number }
+  /** O bipe de censura: silencia o item `target` no intervalo e põe um Tom de 1 kHz no mesmo lugar, num passo do desfazer. */
+  | { type: 'censor_beep'; target: string; start?: number; end?: number; word?: string; occurrence?: number; margin?: number }
+  | { type: 'audio_cut'; target: string; start: number; end: number }
+  /** A gravação do microfone como voz gravada em `start` (a latência já compensada); `duration` é a do arquivo. */
+  | { type: 'audio_record_add'; src: string; start: number; duration: number; volume?: number }
+  /** O punch-in: regrava `start`..`end` da voz `target` com a gravação `src`, que começou em `recorded_at`; o trecho antigo vira take. */
+  | { type: 'audio_punch'; target: string; start: number; end: number; src: string; recorded_at: number; duration: number; label?: string }
+  /** Troca o take que toca na voz gravada pelo `take` da lista (a posição, de 0). */
+  | { type: 'voiceover_take_set'; target: string; take: number }
+  | { type: 'audio_split'; target: string; at: number }
+  | { type: 'audio_envelope'; target: string; points: Array<{ at: number; db: number }> }
+  /** O Fade In (`in`) ou Fade Out (`out`) preso à borda do item; duração 0 tira o fade e sem `curve` mantém a que ele tinha. */
+  | { type: 'audio_fade'; target: string; side: 'in' | 'out'; duration: number; curve?: string }
+  /** O crossfade de trilhas: um Fade Ajustável de saída num item e de entrada no outro, no mesmo intervalo da linha do tempo. */
+  | {
+      type: 'audio_crossfade_tracks'
+      out_target: string
+      in_target: string
+      start: number
+      end: number
+      kind?: 'constant_gain' | 'constant_power_1' | 'constant_power_2' | 'custom'
+      curve?: string
+      mid_adjust?: number
+    }
+  /** O crossfade do som no corte entre o clipe `index - 1` e o `index` (J-cut e L-cut); `duration` 0 tira. */
+  | { type: 'audio_crossfade_clips'; index: number; duration: number; curve?: string }
+  | { type: 'track_set'; track: string; gain_db?: number; pan?: number; solo?: boolean; muted?: boolean; hidden?: boolean; locked?: boolean }
+  /** Guarda o trecho que só tem chiado como perfil; sem `start` e `end`, é o trecho mais quieto do item. Os tempos são
+   *  segundos da linha do tempo. */
+  | { type: 'noise_profile_set'; name: string; target: string; start?: number; end?: number }
+  | { type: 'noise_profile_remove'; name: string }
 
 export interface EditResponse {
   spec: SpecDocument
   timeline: TimelineView
+  /** Os marcadores que a edição apagou por estarem num trecho cortado (um aviso por marcador). */
+  edit_warnings?: string[]
+  /** O que a operação fez, para mostrar (quantos silêncios foram truncados). */
+  edit_notes?: string[]
+}
+
+/** O nível do ruído de um perfil por banda de um terço de oitava (POST /api/projects/{nome}/noise-profile). */
+export interface NoiseProfileReport {
+  name: string
+  target: string
+  start: number
+  end: number
+  duration: number
+  /** O nível do trecho inteiro, em dBFS. */
+  level_db: number
+  bands: Array<{ hz: number; db: number }>
+}
+
+/** Pedido de POST /api/projects/{nome}/audio-effect-action. */
+export interface EffectActionRequest {
+  effect: string
+  action: string
+  /** O item de onde sai o trecho (`audio.voiceover.0`). */
+  target: string
+  /** Um perfil de ruído do projeto, ou `auto` (o trecho mais quieto do item). */
+  profile?: string
+}
+
+/** Pedido de POST /api/projects/{nome}/effect-compare: um trecho do item com o efeito desligado e ligado. */
+export interface EffectCompareRequest {
+  target: string
+  /** A posição do efeito na cadeia do item. */
+  index: number
+  /** Segundos da linha do tempo onde o trecho começa (o cursor); o item começa em 0 sem ele. */
+  at?: number | null
+  duration: number
+}
+
+export interface EffectCompareResponse {
+  before_url: string
+  after_url: string
+  duration_s: number
 }
 
 /* ---------- tema e cartões ---------- */

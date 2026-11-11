@@ -7,6 +7,7 @@ import {
   IMAGE_FIELDS,
   IMAGE_OVERLAY_FIELDS,
   MUSIC_FIELDS,
+  TEMPO_FIELDS,
   OUTPUT_FIELDS,
   PROGRESS_FIELDS,
   TEXT_OVERLAY_FIELDS,
@@ -50,6 +51,7 @@ describe('listas de campos', () => {
     ...PROGRESS_FIELDS,
     ...CAPTION_FIELDS,
     ...MUSIC_FIELDS,
+    ...TEMPO_FIELDS,
     ...AUDIO_FIELDS,
     ...Object.values(OUTPUT_FIELDS),
   ]

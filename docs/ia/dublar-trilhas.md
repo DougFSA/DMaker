@@ -17,7 +17,7 @@ Você quer controlar o volume da voz e do fundo por conta própria, ou usar a du
 ## Ferramentas MCP, na ordem (nomes de ferramenta para a IA, não comandos do terminal)
 
 1. `dub_stems`: exportar voz dublada, fundo e voz original
-   Argumentos de exemplo: `{"project": "C:/dmaker/output/dublagem/gravacao.en.dub.json", "make_zip": true}`
+   Argumentos de exemplo: `{"project": "C:/videos/dublagem/gravacao.en.dub.json", "make_zip": true}`
 
 ## Equivalente na CLI
 

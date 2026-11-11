@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .. import config
@@ -14,19 +15,31 @@ from ..domain.presets import Preset, get_preset
 from ..domain.sfx import plan_sfx
 from ..domain.spec import HtmlOverlay, Project
 from ..domain.timeline import segment_duration, timeline_spans, timeline_total, transitions_of
-from ..domain.tracks import apply_track_state
+from ..domain.tracks import apply_track_state, carrier_heard_project, silenced_carrier_warnings
 from ..media.browser import BrowserUnavailable
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, RecordingRunner, SubprocessRunner, format_cmd
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from ..voice.library import VoiceLibrary
-from .assembly import LoudnessMeter, VoiceLevelMeter, build_assembly, plan_loudness
+from .assembly import (
+    LoudnessMeter,
+    MasterEffectMeter,
+    VoiceLevelMeter,
+    build_assembly,
+    plan_loudness,
+    plan_master_effects,
+)
+from .audio_effects import effect_processor, processed_music, processed_pips, processed_voiceovers
+from .auto_duck import DuckInputs, begin_ducks, finish_ducks, project_track_origin
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
+from .carrier_tracks import CarrierInputs, Deferred, HeardView, install_carrier_tracks
 from .context import Prober, RenderContext, RenderOptions, RenderResult
+from .generated_sounds import check_generated_files
 from .html_layer import HtmlLayerBuilder, has_html_overlays, resolve_html_source
 from .isolation import IsolationService
 from .lint import lint
 from .narration import NarrationService
+from .output_kinds import register_output_kind
 from .person_layer import PersonLayerBuilder
 from .segments import MezzanineBuilder
 from .sfx import SfxTrack, leveled_effects, resolve_files
@@ -35,6 +48,16 @@ from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
 from .textlayer import build_text_layer
 from .voicefiles import prepare_voice_files, voice_file_playtimes
 from .voiceover import VoiceoverPreparer, known_voices, overrun_warnings, voice_spans
+
+
+@dataclass
+class _ResolvedView:
+    """Um projeto levado às fontes de verdade: o projeto físico, a sessão, a origem das faixas externas e as fontes dos trechos."""
+
+    project: Project
+    session: dict
+    track_origin: list[int]
+    sources: list
 
 
 class RenderPipeline:
@@ -76,6 +99,7 @@ class RenderPipeline:
         self.voiceover = VoiceoverPreparer(voice_library)
         self.captions = CaptionPipeline(transcriber_factory)
         self.loudness = LoudnessMeter()
+        self.master_meter = MasterEffectMeter()
         self.voice_level = VoiceLevelMeter()
         self.log = log or (lambda message: None)
         self.sync = SyncResolver(
@@ -135,14 +159,24 @@ class RenderPipeline:
         ctx.log(
             f"render {p.name}: {ctx.preset.id} {ctx.width}x{ctx.height}" + (" (preview)" if o.preview else "")
         )
+        carrier_warnings = silenced_carrier_warnings(p)  # lido antes do estado, que troca a trilha por vazio
+        heard_project = carrier_heard_project(
+            p
+        )  # a mistura com as trilhas mudas que um Vocoder pediu de volta, ou None
         p = apply_track_state(p)  # mudo/oculto por trilha da interface, paridade com o Shotcut
-        p = self._sliced(p, o, ctx)
-        resolution = self.sync.resolve(p, (p.base_dir or ctx.job_dir) / "sync.json")
-        ctx.warnings.extend(resolution.warnings)
-        ctx.session = resolve_session(p, ctx.prober, resolution.offsets, resolution.parts)
-        p, _origin = expand_parts(p, ctx.session, resolution.parts, ctx.log)
-        ctx.project = p
-        sources = resolve_sources(p, ctx.prober, ctx.session)
+        view = self._resolved(ctx, self._sliced(p, o, ctx), report=True)
+        p, sources, track_origin = view.project, view.sources, view.track_origin
+        ctx.session, ctx.project = view.session, p
+        heard = None
+        if heard_project is not None:
+            heard_view = self._resolved(ctx, self._sliced(heard_project, o, ctx), report=False)
+            heard = HeardView(
+                heard_view.project,
+                heard_view.session,
+                heard_view.sources,
+                heard_view.track_origin,
+                lambda heard_ctx: self._heard_lazies(heard_ctx, heard_view.project),
+            )
         infos = [s.info for s in sources]
         transitions = transitions_of(p.timeline)
         durations = [
@@ -160,13 +194,52 @@ class RenderPipeline:
                 [s.offset for s in sources],
                 known_voices=known_voices(p, self.voiceover.library),
                 voiceover_playtimes=voice_file_playtimes(p, self.prober),
+                carrier_view=heard.project if heard else None,
             )
         )
 
         # um som que não existe falha agora, e não depois de minutos de mezaninos; a composição em HTML também
         resolve_files(p, plan_sfx(p, timeline_spans(durations, transitions)))
+        check_generated_files(p)
         self._check_html(ctx)
 
+        # o que não depende dos mezaninos fica pronto antes deles: o Auto Duck mede a chave de uma faixa externa de fundo
+        # (que abaixa dentro do mezanino) na narração, nas vozes gravadas e na música já processadas
+        # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
+        spoken = self.voiceover.prepare(ctx)
+        music_file = self._music_path()
+        voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
+        voice_files_of = Deferred(
+            lambda: prepare_voice_files(p, self.prober, effect_processor(ctx)), "a voz gravada"
+        )
+        music_of = Deferred(lambda: processed_music(ctx, music_file), "a música")
+        ctx.warnings.extend(carrier_warnings)
+        install_carrier_tracks(
+            ctx,
+            CarrierInputs(
+                timeline_spans(durations, transitions),
+                sources,
+                total,
+                track_origin,
+                voiceovers_of,
+                voice_files_of,
+                music_of,
+            ),
+            heard,
+        )
+        voiceovers, voice_files, music_path = voiceovers_of(), voice_files_of(), music_of()
+        begin_ducks(
+            ctx,
+            DuckInputs(
+                timeline_spans(durations, transitions),
+                sources,
+                total,
+                track_origin,
+                voiceovers,
+                voice_files,
+                music_path,
+            ),
+        )
         prepared = self.mezzanines.prepare(ctx, sources)
         pending = sum(1 for item in prepared if item.command is not None)
         ctx.log(f"trechos: {len(prepared)} ({pending} a gerar, {len(prepared) - pending} em cache)")
@@ -175,9 +248,7 @@ class RenderPipeline:
         total = timeline_total(durations, transitions)
         spans = timeline_spans(durations, transitions)
         tones = [item.tone for item in prepared]
-        voiceovers = self.voiceover.prepare(ctx)
         ctx.warnings.extend(overrun_warnings(voiceovers, total))
-        voice_files = prepare_voice_files(p, self.prober)
 
         if p.captions and p.captions.enabled and not o.no_captions:
             ctx.log(
@@ -193,8 +264,8 @@ class RenderPipeline:
         layer.doc.write(ctx.job_dir / "overlay.ass")
         if layer.has_behind_text:
             layer.behind_doc.write(ctx.job_dir / "overlay_behind.ass")
+        processed_pips(ctx, layer.video_overlays)
 
-        music_path = self._music_path()
         sfx = self._effects(
             ctx, prepared, transitions, spans, total, voiceovers, layer.video_overlays, voice_files
         )
@@ -282,10 +353,34 @@ class RenderPipeline:
             pending = sum(1 for item in people if item.commands)
             ctx.log(
                 f"pessoa atrás do texto: {len(people)} intervalo(s) ({pending} a recortar, "
-                f"{len(people) - pending} em cache), modelo {self.person_layers.model_for(ctx)}"
+                f"{len(people) - pending} em cache), modelo {people[0].model}"
             )
             self.person_layers.build(ctx, people)
         return people
+
+    def _resolved(self, ctx: RenderContext, project: Project, *, report: bool) -> _ResolvedView:
+        """Os passos que levam o projeto às fontes de verdade: sincronia, sessão, origem das faixas externas, partes e fontes. A
+        mistura e a visão ouvida do Vocoder passam por aqui; só a mistura relata os avisos e o log dos passos."""
+        resolution = self.sync.resolve(project, (project.base_dir or ctx.job_dir) / "sync.json")
+        if report:
+            ctx.warnings.extend(resolution.warnings)
+        session = resolve_session(project, ctx.prober, resolution.offsets, resolution.parts)
+        track_origin = project_track_origin(project)  # antes de as fontes com `parts` virarem várias faixas
+        physical, _origin = expand_parts(project, session, resolution.parts, ctx.log if report else None)
+        return _ResolvedView(physical, session, track_origin, resolve_sources(physical, ctx.prober, session))
+
+    def _heard_lazies(self, heard_ctx: RenderContext, heard_project: Project):
+        """A narração, a voz gravada e a música da visão ouvida, preguiçosas: a narração muda só é sintetizada se um Vocoder a ouvir."""
+        spoken = Deferred(lambda: self.voiceover.prepare(heard_ctx), "a narração muda")
+        music_file = self._music_path(heard_project)
+        return (
+            Deferred(lambda: processed_voiceovers(heard_ctx, spoken()), "a narração"),
+            Deferred(
+                lambda: prepare_voice_files(heard_project, self.prober, effect_processor(heard_ctx)),
+                "a voz gravada",
+            ),
+            Deferred(lambda: processed_music(heard_ctx, music_file), "a música"),
+        )
 
     @staticmethod
     def _sliced(project: Project, options: RenderOptions, ctx: RenderContext) -> Project:
@@ -313,11 +408,12 @@ class RenderPipeline:
         sliced.timeline[0] = sliced.timeline[0].model_copy(update={"transition": None})
         return sliced
 
-    def _music_path(self) -> Path | None:
-        music = self.project.audio.music
+    def _music_path(self, project: Project | None = None) -> Path | None:
+        project = project or self.project
+        music = project.audio.music
         if not music:
             return None
-        path = self.project.resolve(music.src)
+        path = project.resolve(music.src)
         if not path.exists():
             raise FileNotFoundError(f"Música não encontrada: {music.src}")
         return path
@@ -361,7 +457,21 @@ class RenderPipeline:
         sfx=(),
         voice_files=(),
     ) -> tuple[dict | None, bool, float]:
-        """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`)."""
+        """A medição, se normaliza e o ganho que a normalização dá (ver `plan_loudness`). Antes dela, mede a
+        mistura que cada efeito do master pede, para a medição do loudness já enxergar o master pronto."""
+        finish_ducks(ctx, music_path, total, voiceovers, sfx, voice_files)
+        plan_master_effects(
+            ctx,
+            self.master_meter,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            video_overlays,
+            sfx,
+            voice_files,
+        )
         plan = plan_loudness(
             ctx,
             self.loudness,
@@ -385,3 +495,7 @@ class RenderPipeline:
         args = ["-ss", f"{t:.3f}", "-i", str(out_path), "-frames:v", "1", "-q:v", "2", str(thumb)]
         ctx.runner.run(FFmpegCommand(args, label="thumbnail"))
         return thumb
+
+
+# o renderizador do tipo `video`: quem pede `create_renderer(...)` com um preset de plataforma chega aqui
+register_output_kind("video", RenderPipeline)

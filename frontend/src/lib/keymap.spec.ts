@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  ALL_SHORTCUTS,
+  AUDIO_SHORTCUT_DEFAULTS,
   comboFromEvent,
   comboIndex,
   comboLabel,
   findConflict,
+  idsForContext,
+  isAudioShortcut,
   isModifierKey,
   isTypingTarget,
   keyBelongsToTarget,
@@ -20,17 +24,19 @@ type KeyInit = Partial<Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altK
 const press = (init: KeyInit) => comboFromEvent({ ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init })
 
 describe('a tabela padrão', () => {
-  it('tem os 34 atalhos, cada um com id único e ao menos uma tecla', () => {
-    expect(SHORTCUT_DEFAULTS).toHaveLength(34)
-    expect(new Set(SHORTCUT_DEFAULTS.map((entry) => entry.id)).size).toBe(34)
+  it('tem os 37 atalhos, cada um com id único e ao menos uma tecla', () => {
+    expect(SHORTCUT_DEFAULTS).toHaveLength(37)
+    expect(new Set(SHORTCUT_DEFAULTS.map((entry) => entry.id)).size).toBe(37)
     for (const entry of SHORTCUT_DEFAULTS) expect(entry.keys.length, entry.id).toBeGreaterThan(0)
   })
 
-  it('cai em seis categorias, todas com atalhos', () => {
-    expect(SHORTCUT_CATEGORIES.map((category) => category.id)).toEqual(['reproducao', 'navegacao', 'edicao', 'midia', 'visualizacao', 'geral'])
+  it('cai em sete categorias, todas com atalhos (a sétima é a do painel Áudio)', () => {
+    expect(SHORTCUT_CATEGORIES.map((category) => category.id)).toEqual(['reproducao', 'navegacao', 'edicao', 'midia', 'visualizacao', 'geral', 'audio'])
     for (const category of SHORTCUT_CATEGORIES) {
-      expect(SHORTCUT_DEFAULTS.some((entry) => entry.category === category.id), category.id).toBe(true)
+      expect(ALL_SHORTCUTS.some((entry) => entry.category === category.id), category.id).toBe(true)
     }
+    // os 37 do editor continuam em seis categorias: o painel Áudio não mexe neles
+    expect(new Set(SHORTCUT_DEFAULTS.map((entry) => entry.category)).size).toBe(6)
   })
 
   it('o padrão não tem duas ações na mesma tecla', () => {
@@ -95,7 +101,7 @@ describe('trocas da pessoa', () => {
     const merged = mergeKeymap({ split: ['b'] })
     expect(merged.find((entry) => entry.id === 'split')?.keys).toEqual(['b'])
     expect(merged.find((entry) => entry.id === 'pause')?.keys).toEqual(['k'])
-    expect(merged).toHaveLength(34)
+    expect(merged).toHaveLength(37)
   })
 
   it('uma troca vazia ou de outro tipo é ignorada', () => {
@@ -202,5 +208,51 @@ describe('quando o teclado fica quieto', () => {
   it('o corpo da página e a janela deixam o editor agir', () => {
     expect(keyBelongsToTarget(document.body, 'Space')).toBe(false)
     expect(keyBelongsToTarget(window, 'Space')).toBe(false)
+  })
+})
+
+describe('os atalhos do painel Áudio', () => {
+  it('têm id único, ao menos uma tecla e as teclas do Audacity que o card pede', () => {
+    expect(new Set(AUDIO_SHORTCUT_DEFAULTS.map((entry) => entry.id)).size).toBe(AUDIO_SHORTCUT_DEFAULTS.length)
+    for (const entry of AUDIO_SHORTCUT_DEFAULTS) {
+      expect(entry.category).toBe('audio')
+      expect(entry.keys.length, entry.id).toBeGreaterThan(0)
+    }
+    const keyOf = (id: string) => AUDIO_SHORTCUT_DEFAULTS.find((entry) => entry.id === id)?.keys
+    expect(keyOf('audio_play')).toEqual(['Space'])
+    expect(keyOf('audio_label')).toEqual(['Ctrl+b'])
+    expect(keyOf('audio_silence')).toEqual(['Ctrl+l'])
+    expect(keyOf('audio_split')).toEqual(['Ctrl+i'])
+    expect(keyOf('audio_undo')).toEqual(['Ctrl+z'])
+  })
+
+  it('não repetem tecla entre si', () => {
+    const seen = new Map<string, string>()
+    for (const entry of AUDIO_SHORTCUT_DEFAULTS) {
+      for (const combo of entry.keys) {
+        expect(seen.get(combo), `${combo} em ${entry.id}`).toBeUndefined()
+        seen.set(combo, entry.id)
+      }
+    }
+  })
+
+  it('os 37 do editor não perdem nenhuma tecla: o painel só as repete dentro dele', () => {
+    const shared = AUDIO_SHORTCUT_DEFAULTS.flatMap((entry) => entry.keys).filter((combo) =>
+      SHORTCUT_DEFAULTS.some((editorEntry) => editorEntry.keys.includes(combo)),
+    )
+    expect(shared).toEqual(expect.arrayContaining(['Space', 'Ctrl+l', 'Ctrl+z', 'Delete']))
+    const index = comboIndex(ALL_SHORTCUTS)
+    expect(index.get('Ctrl+l')).toEqual(['track_lock', 'audio_silence'])
+  })
+
+  it('com o foco no painel a ação dele vale no lugar da do editor, e fora dele ela nem existe', () => {
+    const ids = comboIndex(ALL_SHORTCUTS).get('Space') ?? []
+    expect(ids).toEqual(['play_pause', 'audio_play'])
+    expect(idsForContext(ids, true)).toEqual(['audio_play'])
+    expect(idsForContext(ids, false)).toEqual(['play_pause'])
+    // uma tecla que o painel não usa segue igual dentro dele
+    expect(idsForContext(['save'], true)).toEqual(['save'])
+    expect(isAudioShortcut('audio_cut')).toBe(true)
+    expect(isAudioShortcut('split')).toBe(false)
   })
 })

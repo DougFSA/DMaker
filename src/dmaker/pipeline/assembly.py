@@ -10,11 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import FONTS_DIR
+from ..domain.audio_effects import active_effects
+from ..domain.music_tempo import music_grid
 from ..domain.spec import Transition
-from ..filtergraph.audio import AudioTaps, audio_graph, loudnorm_measure_graph
+from ..filtergraph.audio import AudioTaps, StemTaps, audio_graph, loudnorm_measure_graph, silent_base
+from ..filtergraph.audio_effects import Measure, level_measure_lines, parse_level_measure, span_samples
 from ..filtergraph.audiogram import audiogram_graph, normalization_gain_db
 from ..filtergraph.behind_person import AssBehindLayer, BehindLayer, ResolvedPersonLayer, behind_person_graph
 from ..filtergraph.common import Inputs, ffq
+from ..filtergraph.duck import DuckCurve
 from ..filtergraph.encode import encode_args, resolve_encoder
 from ..filtergraph.html_layer import HtmlBehindLayer, ResolvedHtmlLayer, html_overlay_graph
 from ..filtergraph.overlays import image_overlay_graph
@@ -23,6 +27,7 @@ from ..filtergraph.provenance import inherited_provenance_args
 from ..filtergraph.sfx import SfxInput
 from ..filtergraph.timeline import timeline_graph
 from ..media.ffmpeg import FFmpegCommand, filter_complex_file_args, hardware_encoder
+from .audio_effects import prepare_impulse_responses
 from .context import RenderContext
 from .segments import PreparedSegment
 from .textlayer import TextLayer
@@ -50,11 +55,20 @@ def _finite(value: object) -> float | None:
 
 
 def _music_duration(ctx: RenderContext, music_path: Path | None) -> float | None:
-    """Duração da música, só quando algum span usa `tail` (evita uma sondagem desnecessária)."""
+    """Duração da música (já esticada, quando é o caso), só quando algum span usa `tail` ou o loop da música no andamento
+    precisa dela (evita uma sondagem desnecessária)."""
     music = ctx.project.audio.music
-    if music_path is None or music is None or not any(span.tail for span in music.spans):
+    if music_path is None or music is None:
+        return None
+    if not any(span.tail for span in music.spans) and not (music.loop and music_grid(ctx.project.audio)):
         return None
     return ctx.prober(music_path).duration
+
+
+def plan_curves(ctx: RenderContext) -> list[DuckCurve]:
+    """As curvas do Auto Duck que a mixagem aplica (vazio sem regra)."""
+    plan = ctx.duck_plan
+    return plan.curves() if plan else []
 
 
 def graph_args(ctx: RenderContext, inputs: Inputs, lines: list[str], name: str) -> list[str]:
@@ -82,23 +96,37 @@ def audio_only_graph(
     *,
     include_norm: bool = False,
     measured: dict | None = None,
+    include_master: bool = True,
+    master_upto: int | None = None,
+    stems: StemTaps | None = None,
+    ducks: Sequence[DuckCurve] | None = None,
 ) -> tuple[Inputs, list[str], str]:
     """Entradas e linhas do grafo só de áudio, com a mesma mixagem da montagem final. Sem `include_norm` é a
     mistura antes da normalização (a que se mede); com ele, já normalizada, como sai do render (`measured` é a
-    medição do modo two-pass). É o que o render mede e o que a prévia da linha do tempo mixa."""
+    medição do modo two-pass). É o que o render mede e o que a prévia da linha do tempo mixa. Sem nenhum trecho
+    (projeto só de áudio), a base é um silêncio da duração do projeto no lugar do som dos clipes. A cadeia do master
+    (`audio.master_effects`) vem com as medidas de `ctx.master_measures`; `include_master` e `master_upto` a
+    desligam ou a cortam (ver `filtergraph.audio.audio_graph`). `stems` pede uma cópia de cada trilha, tirada antes
+    do master (ver `StemTaps`). `ducks` são as curvas do Auto Duck; None usa as do plano do render (`ctx.duck_plan`) e uma
+    lista (vazia, na medida da chave) as dispensa."""
     inputs = Inputs()
     for item in prepared:
         inputs.add(item.mezzanine)
-    graph = timeline_graph(
-        len(prepared), [p.duration for p in prepared], transitions, ctx.fps, want_video=False
-    )
-    lines = list(graph.lines)
+    if prepared:
+        graph = timeline_graph(
+            len(prepared), [p.duration for p in prepared], transitions, ctx.fps, want_video=False
+        )
+        lines = list(graph.lines)
+        base = graph.audio
+    else:
+        lines = []
+        base = silent_base(lines, inputs, total)
     # o áudio dos PiPs entra na medição como entra na mixagem final; sem ele a medida não vale
     pip_audio = pip_audio_graph(lines, inputs, list(video_overlays))
     aout = audio_graph(
         lines,
         inputs,
-        graph.audio,
+        base,
         ctx.project.audio,
         music_path,
         total,
@@ -110,11 +138,16 @@ def audio_only_graph(
         narrations=voiceovers,
         sfx=sfx,
         voice_files=voice_files,
+        master_measures=ctx.master_measures,
+        master_upto=master_upto,
+        include_master=include_master,
+        stems=stems,
+        duck_curves=plan_curves(ctx) if ducks is None else ducks,
     )
     return inputs, lines, aout
 
 
-def _loudnorm_report(stderr: str) -> dict | None:
+def loudnorm_report(stderr: str) -> dict | None:
     """O último bloco JSON que o loudnorm imprime em modo de medição (None se não imprimiu nenhum)."""
     blocks = re.findall(r"\{[^{}]*\}", stderr)
     return json.loads(blocks[-1]) if blocks else None
@@ -161,7 +194,7 @@ class LoudnessMeter:
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs))
         args = [*graph_args(ctx, inputs, lines, "loudness.txt"), "-map", "[ameas]", "-f", "null", "-"]
         stderr = ctx.runner.capture(args, label="medição de loudness")
-        data = _loudnorm_report(stderr)
+        data = loudnorm_report(stderr)
         if data is None:
             return LoudnessMeasure(None)
         (ctx.job_dir / "loudnorm.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
@@ -206,6 +239,74 @@ def plan_loudness(
     return LoudnessPlan(measure.values if mode == "two-pass" else None, True, gain)
 
 
+class MasterEffectMeter:
+    """Mede a mistura que entra em um efeito do master (a de antes dele, com os efeitos anteriores já aplicados):
+    o Normalizar e o Amplificar sem clipar dependem do pico dela. É uma passada de análise só de áudio, como a
+    do loudnorm."""
+
+    def measure(
+        self,
+        ctx: RenderContext,
+        index: int,
+        prepared: list[PreparedSegment],
+        transitions: list[Transition | None],
+        music_path: Path | None,
+        total: float,
+        voiceovers: Sequence[PreparedVoiceover] = (),
+        video_overlays: Sequence[ResolvedVideoOverlay] = (),
+        sfx: Sequence[SfxInput] = (),
+        voice_files: Sequence[PreparedVoiceFile] = (),
+    ) -> Measure | None:
+        inputs, lines, aout = audio_only_graph(
+            ctx,
+            prepared,
+            transitions,
+            music_path,
+            total,
+            voiceovers,
+            video_overlays,
+            sfx=sfx,
+            voice_files=voice_files,
+            master_upto=index,
+        )
+        effect = ctx.project.audio.master_effects[index]
+        kind = effect.measure_kind()
+        lines += level_measure_lines(kind, aout, "[mmeas]", span_samples(effect, total))
+        args = [*graph_args(ctx, inputs, lines, "master_effect.txt"), "-map", "[mmeas]", "-f", "null", "-"]
+        return parse_level_measure(kind, ctx.runner.capture(args, label="medida do efeito do master"))
+
+
+def plan_master_effects(
+    ctx: RenderContext,
+    meter: MasterEffectMeter,
+    prepared: list[PreparedSegment],
+    transitions: list[Transition | None],
+    music_path: Path | None,
+    total: float,
+    voiceovers: Sequence[PreparedVoiceover] = (),
+    video_overlays: Sequence[ResolvedVideoOverlay] = (),
+    sfx: Sequence[SfxInput] = (),
+    voice_files: Sequence[PreparedVoiceFile] = (),
+) -> None:
+    """Preenche `ctx.master_measures` com a medida da mistura em cada efeito do master que a pede, na ordem da
+    cadeia (cada medida já vê os efeitos anteriores). Roda antes da medição do loudness, que enxerga o master
+    pronto. Na simulação não mede nada: o efeito cai no valor neutro."""
+    ctx.master_measures.clear()
+    if ctx.options.dry_run:
+        return
+    prepare_impulse_responses(
+        ctx.project.audio.master_effects
+    )  # o Reverb do master lê a resposta ao impulso do cache
+    for index, effect in active_effects(ctx.project.audio.master_effects):
+        if not effect.needs_measure():
+            continue
+        measure = meter.measure(
+            ctx, index, prepared, transitions, music_path, total, voiceovers, video_overlays, sfx, voice_files
+        )
+        if measure is not None:
+            ctx.master_measures[index] = measure
+
+
 @dataclass(frozen=True)
 class VoiceLevel:
     """Loudness integrado (LUFS) e pico verdadeiro (dBFS) da voz, antes da música, dos efeitos e da normalização."""
@@ -240,10 +341,11 @@ class VoiceLevelMeter:
             video_overlays,
             include_music=False,
             voice_files=voice_files,
+            include_master=False,  # a régua é a voz antes do master: os efeitos sonoros se nivelam por ela
         )
         lines.append(loudnorm_measure_graph(aout, ctx.project.audio.target_lufs, "[vmeas]"))
         args = [*graph_args(ctx, inputs, lines, "voice_level.txt"), "-map", "[vmeas]", "-f", "null", "-"]
-        data = _loudnorm_report(ctx.runner.capture(args, label="medição da voz"))
+        data = loudnorm_report(ctx.runner.capture(args, label="medição da voz"))
         if data is None or LoudnessMeasure(data).silent:
             return None
         loudness, true_peak = _finite(data.get("input_i")), _finite(data.get("input_tp"))
@@ -374,6 +476,8 @@ def build_assembly(
         sfx=sfx,
         voice_files=voice_files,
         taps=taps if layer.audiograms else None,
+        master_measures=ctx.master_measures,
+        duck_curves=plan_curves(ctx),
     )
     if layer.audiograms:
         cur_v = audiogram_graph(

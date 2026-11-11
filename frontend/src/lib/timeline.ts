@@ -3,8 +3,8 @@
    a base do painel da linha do tempo e das ações do teclado. */
 import type { TimelineItem, TimelineTrack, TimelineView } from '@/api'
 
-/** Largura do cabeçalho da trilha (rótulo e botões M, H e cadeado), que fica colado à esquerda ao rolar. */
-export const TRACK_HEADER_WIDTH = 92
+/** Largura do cabeçalho da trilha (rótulo e botões M, S, H, cadeado e o de ganho e pan), que fica colado à esquerda ao rolar. */
+export const TRACK_HEADER_WIDTH = 132
 export const TRACK_ROW_HEIGHT = 34
 export const RULER_HEIGHT = 26
 export const MIN_PX_PER_SEC = 4
@@ -73,10 +73,16 @@ export function roundSeconds(seconds: number): number {
 
 /**
  * Os pontos em que o arrasto encaixa: o começo, o fim, o cursor e as bordas de todos os itens (menos o que se
- * arrasta). Ao arrastar o próprio cursor, `playhead` é nulo: ele não encaixa em si mesmo.
+ * arrasta). Ao arrastar o próprio cursor, `playhead` é nulo: ele não encaixa em si mesmo. `grid` são os tempos do andamento
+ * do projeto (`gridSnapPoints`), que entram como mais um alvo do mesmo encaixe.
  */
-export function snapPoints(view: TimelineView, playhead: number | null, excludeId: string | null): number[] {
-  const points = new Set<number>([0, view.total])
+export function snapPoints(
+  view: TimelineView,
+  playhead: number | null,
+  excludeId: string | null,
+  grid: readonly number[] = [],
+): number[] {
+  const points = new Set<number>([0, view.total, ...grid])
   if (playhead !== null) points.add(playhead)
   for (const track of view.tracks) {
     for (const item of track.items) {
@@ -132,13 +138,25 @@ export function isOverlayTrack(trackId: string, item: Pick<TimelineItem, 'kind'>
   return /^V\d+$/.test(trackId) && trackId !== 'V1'
 }
 
-/** O item se arrasta: trecho da V1, sobreposição, ou fala da narração (que só se desloca). */
-export function isDraggable(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
-  return trackId === 'V1' || trackId === 'NAR' || isOverlayTrack(trackId, item)
+/** Uma trilha de marcadores por grupo: `MK` para o grupo padrão e `MK:<grupo>` para os nomeados. */
+export function isMarkerTrack(trackId: string): boolean {
+  return trackId === 'MK' || trackId.startsWith('MK:')
 }
 
-/** As alças de aparar só existem onde aparar faz sentido: a fala da narração tem a duração que a voz levou. */
-export function hasTrimHandles(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
+/** O marcador é um instante (uma linha só), não uma região. */
+export function isInstantMarker(item: Partial<Pick<TimelineItem, 'extra'>>): boolean {
+  return item.extra?.instant === true
+}
+
+/** O item se arrasta: trecho da V1, sobreposição, marcador, som gerado da SFX, ou fala da narração (que só se desloca). */
+export function isDraggable(trackId: string, item: Pick<TimelineItem, 'kind'>): boolean {
+  return trackId === 'V1' || trackId === 'NAR' || trackId === 'SFX' || isMarkerTrack(trackId) || isOverlayTrack(trackId, item)
+}
+
+/** As alças de aparar só existem onde aparar faz sentido: a fala da narração tem a duração que a voz levou, e um
+ * marcador pontual não tem bordas (só a região tem). */
+export function hasTrimHandles(trackId: string, item: Pick<TimelineItem, 'kind'> & Partial<Pick<TimelineItem, 'extra'>>): boolean {
+  if (isMarkerTrack(trackId)) return !isInstantMarker(item)
   return isDraggable(trackId, item) && trackId !== 'NAR'
 }
 
@@ -164,7 +182,9 @@ const TRACK_NAMES: Record<string, string> = {
   GR: 'Gráficos: imagens e barra de progresso',
   A1: 'Áudio dos clipes',
   NAR: 'Narração',
+  VO: 'Voz gravada',
   MUS: 'Música',
+  SFX: 'Sons gerados (efeitos sonoros)',
   CC: 'Legendas automáticas',
 }
 
@@ -174,6 +194,8 @@ export function trackTitle(track: Pick<TimelineTrack, 'id' | 'label'>): string {
   if (known) return `${known} (${track.id})`
   if (/^V\d+$/.test(track.id)) return `Vídeo sobreposto (${track.id})`
   if (/^A\d+$/.test(track.id)) return `Faixa de áudio externa (${track.id})`
+  if (track.id === 'MK') return 'Marcadores (MK)'
+  if (isMarkerTrack(track.id)) return `Marcadores do grupo ${track.id.slice(3)} (${track.id})`
   return track.label
 }
 

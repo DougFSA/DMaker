@@ -12,12 +12,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..domain.audio_shift import shifted_window
 from ..domain.spec import ClipSegment, ColorAdjust, Reframe
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
+from .clip_crossfade import ClipCrossfades, crossfade_lines
 from .common import AUDIO_FMT_MEZZ, Inputs, atempo_chain, audio_edge_fades, fade_chains
+from .duck import duck_filters
 from .encode import mezzanine_output_args
 from .finish import post_video_lines
+from .mix import pan_filter
 from .reframe import reframe_graph
 
 
@@ -48,18 +52,43 @@ class TrackSlice:
     in_point: float
     volume: float = 1.0
     audio_stream: int = 0
+    pan: float = 0.0
+    # curvas do Auto Duck que abaixam esta faixa neste clipe: pontos (segundos de fonte desde o início do trecho, dB); vazio
+    # sem regra, e então o ramo de áudio é o de sempre
+    duck: tuple[tuple[tuple[float, float], ...], ...] = ()
 
 
-def _audio_source_chain(in_point: float, volume: float, length: float) -> list[str]:
-    """Alinha uma fonte de áudio ao início do trecho: atraso quando ela começa depois, ganho e formato."""
+def _audio_source_chain(
+    in_point: float,
+    volume: float,
+    length: float,
+    pan: float = 0.0,
+    pad: bool = False,
+    duck: tuple[tuple[tuple[float, float], ...], ...] = (),
+) -> list[str]:
+    """Alinha uma fonte de áudio ao início do trecho: atraso quando ela começa depois, ganho, equilíbrio e formato.
+    `pad` completa com silêncio o que a fonte não tem até `length`: um som deslocado pode acabar antes da imagem, e
+    o áudio do trecho tem que durar o mesmo que o vídeo para a montagem seguinte não perder o sincronismo."""
     chain = ["asetpts=PTS-STARTPTS"]
     if in_point < 0:
         chain.append(f"adelay={int(round(-in_point * 1000))}:all=1")
     if volume != 1:
         chain.append(f"volume={volume:.3f}")
+    balance = pan_filter(pan)
+    if balance:
+        chain.append(balance)
+    for curve in duck:  # depois do atraso: `t` é o instante do trecho, em segundos de fonte
+        chain += duck_filters(curve)
+    if pad:
+        chain.append("apad")
     chain.append(f"atrim=0:{length:.3f}")
     chain.append(AUDIO_FMT_MEZZ)
     return chain
+
+
+def _borrowed_chain(in_point: float, volume: float, length: float, pan: float) -> list[str]:
+    """O ramo de uma fatia de som emprestada do clipe vizinho: a mesma receita das faixas externas do trecho."""
+    return _audio_source_chain(in_point, volume, length, pan)
 
 
 def uses_camera_audio(seg: ClipSegment, info: MediaInfo) -> bool:
@@ -79,40 +108,65 @@ def clip_audio_lines(
     tracks: tuple[TrackSlice, ...] = (),
     audio_stream: int = 0,
     camera_audio: Path | None = None,
+    src: Path | None = None,
+    in_point: float = 0.0,
+    camera_lead: float = 0.0,
+    crossfades: ClipCrossfades | None = None,
 ) -> None:
     """Acrescenta a `lines` o ramo de áudio do trecho, terminado em `[aout]`: câmera (se houver e não estiver
     muda) + faixas externas, tudo alinhado ao início do trecho, com velocidade e fades. `source_index` é a
     entrada do arquivo do clipe. É a mesma receita para o mezanino do render e para o áudio da prévia
-    (`filtergraph/preview_audio.py`), que por isso soam iguais."""
+    (`filtergraph/preview_audio.py`), que por isso soam iguais.
+
+    Com `audio_offset` o som anda em relação à imagem, então sai de uma entrada própria do arquivo `src`, lida a
+    partir de onde o som deslocado começa (`in_point` é o ponto da fonte em que a imagem começa); `camera_lead` é o
+    silêncio que antecede um `camera_audio` já recortado (som isolado) cujo início cai antes do começo do arquivo.
+
+    `crossfades` traz o cruzamento do som com o clipe vizinho nas duas pontas (J-cut e L-cut): o som emprestado dele
+    entra por cima do trecho e o trecho abaixa por baixo, sem mudar a duração (ver `filtergraph.clip_crossfade`)."""
     afades = _audio_fades(seg.fade_in, seg.fade_out, duration)
     afades += audio_edge_fades(seg.audio_fade, duration)
     voices: list[str] = []
     if uses_camera_audio(seg, info):
+        lead = 0.0
         if camera_audio is not None:
             index = inputs.add(camera_audio, "-t", f"{length:.3f}")
             camera = f"[{index}:a:0]"
+            lead = camera_lead
+        elif seg.audio_offset and src is not None:
+            window = shifted_window(in_point, seg.speed, seg.audio_offset)
+            index = inputs.add(src, "-ss", f"{window.read_from:.3f}", "-t", f"{length:.3f}")
+            camera = f"[{index}:a:{audio_stream}]"
+            lead = window.lead
         else:
             camera = f"[{source_index}:a:{audio_stream}]"
-        lines.append(camera + ",".join(_audio_source_chain(0.0, seg.volume, length)) + "[mz_cam]")
+        chain = _audio_source_chain(-lead, seg.volume, length, seg.pan, pad=bool(seg.audio_offset))
+        lines.append(camera + ",".join(chain) + "[mz_cam]")
         voices.append("[mz_cam]")
     for k, track in enumerate(tracks):
         idx = inputs.add(track.path, "-ss", f"{max(track.in_point, 0):.3f}", "-t", f"{length:.3f}")
-        chain = _audio_source_chain(min(track.in_point, 0.0), track.volume, length)
+        chain = _audio_source_chain(
+            min(track.in_point, 0.0), track.volume, length, track.pan, duck=track.duck
+        )
         lines.append(f"[{idx}:a:{track.audio_stream}]" + ",".join(chain) + f"[mz_trk{k}]")
         voices.append(f"[mz_trk{k}]")
 
     tail = ([atempo_chain(seg.speed)] if seg.speed != 1 else []) + [AUDIO_FMT_MEZZ] + afades
+    # com crossfade nas pontas, o som do próprio trecho passa por mais uma etapa antes de ser a saída
+    final = "[mz_body]" if crossfades else "[aout]"
     if not voices:
-        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}[aout]")
+        lines.append(f"[{inputs.add_silence(duration)}:a]{AUDIO_FMT_MEZZ}{final}")
     elif len(voices) == 1:
-        lines.append(voices[0] + ",".join(tail) + "[aout]")
+        lines.append(voices[0] + ",".join(tail) + final)
     else:
         lines.append(
             "".join(voices)
             + f"amix=inputs={len(voices)}:duration=longest:dropout_transition=0:normalize=0,"
             + ",".join(tail)
-            + "[aout]"
+            + final
         )
+    if crossfades:
+        lines += crossfade_lines(inputs, final, "[aout]", duration, crossfades, _borrowed_chain)
 
 
 def clip_mezzanine(
@@ -129,11 +183,13 @@ def clip_mezzanine(
     tracks: tuple[TrackSlice, ...] = (),
     audio_stream: int = 0,
     camera_audio: Path | None = None,
+    camera_lead: float = 0.0,
     backdrop: Path | None = None,
     reframe: Reframe | None = None,
     has_brand: bool = False,
     look: ColorAdjust | None = None,
     label: str = "trecho",
+    crossfades: ClipCrossfades | None = None,
 ) -> FFmpegCommand:
     """`in_point` é o tempo no arquivo onde o trecho começa (padrão: seg.start, para arquivo avulso);
     `tracks` são faixas externas sincronizadas misturadas ao áudio da câmera; `camera_audio` é um áudio
@@ -165,6 +221,10 @@ def clip_mezzanine(
         tracks=tracks,
         audio_stream=audio_stream,
         camera_audio=camera_audio,
+        src=src,
+        in_point=start,
+        camera_lead=camera_lead,
+        crossfades=crossfades,
     )
     return _finish(inputs, lines, fps, duration, out, label)
 

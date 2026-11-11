@@ -21,6 +21,9 @@ picture-in-picture, legendas e receitas. Leia isto pela ferramenta MCP `dmaker_g
 
 Atalhos aceitos: reels, stories, shorts, youtube, feed, square, tiktok, status, linkedin.
 
+Os formatos só de áudio (`audio_presets` no MCP, `dmaker audio presets` na CLI) são `audio/wav`, `audio/mp3`, `audio/flac`,
+`audio/ogg`, `audio/opus`, `audio/m4a` e `audio/aiff`; veja "Saída só de áudio e exportação" mais abaixo.
+
 ## Templates parametrizados
 
 `list_templates()` lista os templates de `templates/*.json` com descrição, resumo e parâmetros (tipo,
@@ -208,6 +211,68 @@ internet); `dmaker sfx list` mostra o que há e `dmaker sfx build` os gera de no
   biblioteca). Um nome que não é da biblioteca e não é um arquivo existente falha antes de gerar qualquer trecho.
 - `audio.sfx` marca tempos do vídeo final: o render parcial (`segments`) o ignora, e `validate_project` avisa de
   efeito marcado depois do fim do vídeo.
+
+### Efeitos de áudio (cadeia por item e no master)
+
+Qualquer item com som tem uma lista ordenada `effects`: o clipe (`timeline[i].effects`, o som da câmera), o PiP
+(`overlays[i].effects`), `audio.voiceover[i]`, `audio.narration[i]`, `audio.music` e `audio.tracks[i]`; a mistura
+inteira tem `audio.master_effects` (depois de música, voz e efeitos sonoros e antes da normalização final). O
+catálogo (tipos, parâmetros, unidades e faixas, nos nomes do Audacity) vem da ferramenta `audio_effects`; hoje:
+`amplify` (`gain_db`, `prevent_clipping`), `normalize` (`peak_db`, `remove_dc`, `stereo_independent`), `invert`,
+`reverse`, `repeat` (`times`, as passagens no total: 2 dobra), os de edição de onda `silence`, `cut`, `envelope` (`points`: `at` e `db`) e `channels` (`mode`), e os de limpeza e reparo `noise_reduction` (`reduction_db` 12,
+`sensitivity` 6, `smoothing_bands` 3 e `profile`: `auto` ou o nome de um perfil de `audio.noise_profiles`),
+`click_removal` (`threshold` 200, `max_spike_width` 20), `clip_fix` (`threshold_percent`, `reduce_db`) e `repair`
+(`start` e `end`, no máximo 128 amostras). Todo efeito tem `enabled` (liga e desliga sem
+apagar) e `start`/`end` (intervalo em segundos do item; fora dele o som passa intacto, com emenda de 10 ms).
+O arquivo original nunca muda: o item tratado fica em cache e o render e a prévia usam o mesmo.
+
+- Mexa na cadeia com `edit_project` (`{"type": "audio_effect", "action": "add", "target": "audio.voiceover.0",
+  "effect": {"type": "amplify", "gain_db": 6}}`; `action` também é `remove`, `move`, `enable`, `disable` ou `set`;
+  `target` é `timeline.N`, `overlays.N`, `audio.voiceover.N`, `audio.narration.N`, `audio.tracks.N`,
+  `audio.music` ou `audio.master`). A ordem conta: normalizar depois de amplificar mede o som já amplificado.
+- `repeat` muda a duração e só vale em voz gravada e em música; nos outros a spec o recusa dizendo onde vale.
+  Com ele, a vista da linha do tempo (trilha `VO`) e o `validate_project` mostram a duração nova.
+- Tirar chiado é em dois passos: `noise_profile` (`name`, `profile`, `target`, `start`, `end`, o trecho que só tem
+  ruído; sem `start` e `end`, o mais quieto do item) guarda o perfil em `audio.noise_profiles` e devolve o nível por
+  banda; depois o efeito `noise_reduction` com `profile` apontando o nome. `profile: "auto"` usa o trecho mais quieto,
+  mas só se for uma pausa de verdade. `noise_reduction` e `repair` trabalham sobre as amostras do item e não valem no
+  master. `audio_truncate_silence` (`target`: clipe ou voz gravada; `threshold_db` -20, `min_duration` 0.5, `mode`
+  `truncate` ou `compress`, `truncate_to` 0.5, `compress_percent` 50) encurta as pausas: no clipe corta a imagem junto
+  (a boca continua sincronizada e os marcadores acompanham), na voz gravada é um `cut` por pausa.
+
+### Edição de onda, ganho e pan por trilha, desfazer e refazer
+
+O `edit_project` também faz o que o Audacity faz numa seleção, sempre sem mexer na imagem e sem sobrescrever o
+arquivo. `target` é o item (o mesmo de `audio_effect`) e `start`, `end` e `at` são **segundos do vídeo final**, como
+na `timeline_view`; em qualquer um vale `marker:<texto>` (e `region: "marker:<texto>"` pega começo e fim de uma região).
+
+- `audio_silence` (`start`, `end`): zera o intervalo, com emenda de 10 ms; é o efeito `silence`.
+- `audio_cut` (`start`, `end`): tira o intervalo e o resto recua. No clipe, no PiP e na narração o fim completa com
+  silêncio (a duração é presa à imagem); na voz gravada e na música o item encolhe, e a voz gravada seguinte recua.
+  Faixa externa e `audio.master` não se cortam.
+- `audio_envelope` (`points`: `[{"at": 10, "db": 0}, {"at": 12, "db": -12}]`): volume por pontos, retas em dB; pontos
+  novos entram na curva do item. "Subir a música no fim" é um envelope em `audio.music` (tempo do arquivo da música).
+- `audio_channels` (`mode`: `mono`, `swap`, `left`, `right`; `start`/`end` opcionais): a lapela só de um lado é `left`.
+- `audio_paste` (`at`; `start`/`end` do trecho, ou o item todo) e `audio_duplicate`: copiam o som de um clipe, PiP,
+  voz gravada ou música como uma **voz gravada nova**, no mesmo arquivo, com o volume, o pan e os efeitos recortados.
+  `audio_split` (`at`) e `audio_join` (`with` opcional) valem só para a voz gravada; `audio_trim` apara fora da
+  seleção (na voz gravada encolhe o trecho do arquivo; nos outros, silencia o resto).
+- Efeito que troca o tempo (`repeat`, `reverse`, `cut`) impede dividir, aparar e copiar o trecho; clipe de fonte com
+  `parts` não aceita edição por intervalo; copiar de clipe com `speed` diferente de 1 é recusado.
+- `audio_shift` (`delta` ou `to`, segundos): `audio_offset` no clipe, no PiP e na faixa externa (positivo atrasa o som
+  em relação à imagem; o som pode vir de fora de `start`/`end`); `start` na voz gravada e na narração.
+- `audio_split_stereo`: o item vira dois, `left` e `right` (na faixa externa, duas trilhas com pan duro).
+- `track_set` (`track`: `A1`, `A2`..., `MUS`, `NAR`, `VO`, `SFX`; `gain_db`, `pan` de -1 a 1, `muted`, `solo`): fica em
+  `tracks` da spec e vale na prévia e no render. Com alguma trilha de áudio em solo, as outras ficam mudas.
+- Gravação do microfone (feita pelo navegador, em pedaços de um segundo para `projects/<nome>/recordings/<id>/`):
+  `audio_record_add` (`src`, `start`, `duration`) põe a gravação como voz gravada; `audio_punch` (`target` de uma voz
+  gravada, `start`/`end`, `src`, `recorded_at`, `duration`) regrava o trecho e guarda o antigo em `takes` do item, com
+  fade de 10 ms nas emendas; `voiceover_take_set` (`target`, `take`) troca o take que toca. A ferramenta
+  `audio_recordings` lista as gravações e recupera a que a aba deixou aberta.
+
+Toda edição do `edit_project` (e as de marcadores) entra no histórico do projeto, na pasta `history`: `undo_edit`
+desfaz a última e devolve a spec **byte a byte** como estava, `redo_edit` refaz (uma edição nova esvazia o refazer)
+e `edit_history` lista os passos; são até 50. O `undo_cut` segue valendo e também entra no histórico.
 
 ### Transições
 
@@ -469,8 +534,8 @@ Fluxo completo, do pedido ao render final:
 
 1. `new_from_template("casamento-pascom", nome, params)` com `camera_altar`/`camera_lateral` (as
    pastas das duas câmeras, tipo `dir`: viram sozinhas a lista dos arquivos, em ordem), `nomes` (lista
-   de casais, "Nome & Nome") e `data`; o resto tem padrão (marca `pascom-sjb`, celebrante, diácono,
-   cerimonial, músicos, trilha).
+   de casais, "Nome & Nome"), `data` e `trilha` (o arquivo da música; não há música padrão, pergunte qual usar);
+   o resto tem padrão (marca `pascom-sjb`, celebrante, diácono, cerimonial, músicos).
 2. `plan_multicam(nome)` (CLI: `dmaker plan <nome>`): transcreve a câmera de áudio do bloco `multicam`,
    reconhece as fases da cerimônia pela fala e substitui o bloco pelos clipes de verdade, alternando as
    câmeras. Devolve avisos e a lista de fases reconhecidas com o instante de cada uma.
@@ -527,14 +592,16 @@ um bloco `multicam` pendente (chame `plan_multicam` antes).
 
 `edit_project(name, op)` carrega o projeto, aplica uma operação e salva, sem reescrever a spec inteira.
 `timeline_view(name)` devolve a vista multitrilha (V2/V3... picture-in-picture, TX texto, GR imagem/barra
-de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, MUS música, CC legendas), útil para
-descobrir índices e tempos antes de editar.
+de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, MUS música, CC legendas, MK marcadores:
+uma trilha por grupo, `MK` ou `MK:<grupo>`), útil para descobrir índices e tempos antes de editar.
 
 Operações (`op["type"]`): `split` (`index`, `at` em segundos desde o início do trecho), `remove`
 (`index`), `move` (`index`, `to`), `trim` (`index`, `side`: "in"/"out", `delta` em segundos), `duplicate`
 (`index`), `insert` (`index`, `segment`: dict do trecho novo), `overlay_span` (`index`, `start`, `end`),
 `overlay_remove` (`index`), `overlay_duplicate` (`index`), `set_field` (`path` com pontos e índices, ex.:
-`"timeline.2.speed"`, `"overlays.0.style.size"`, `"sources.cam1.sync"`; `value` = `None` volta ao padrão).
+`"timeline.2.speed"`, `"overlays.0.style.size"`, `"sources.cam1.sync"`; `value` = `None` volta ao padrão),
+`marker_add` (`at`, ou `start` e `end`; `text`, `color` `#RRGGBB`, `group`), `marker_set` (`index` ou
+`ref`: `"marker:<texto>"`; os campos a mudar) e `marker_remove` (`index` ou `ref`).
 
 ```
 edit_project("meu-reel", {"type": "split", "index": 1, "at": 2.5})
@@ -545,6 +612,57 @@ edit_project("meu-reel", {"type": "set_field", "path": "timeline.2.speed", "valu
 `project.tracks` (`dict[id da trilha] -> {"muted", "hidden", "locked"}`, ex.: `{"A2": {"muted": true}}`)
 guarda o mudo/oculto/bloqueio por trilha da interface (botões M/H/cadeado); vale para a prévia E para o
 render final (`domain.tracks.apply_track_state`), então uma faixa marcada aqui some do vídeo exportado.
+
+### Marcadores (`markers`, a trilha MK)
+
+`markers` é uma lista no tempo do **vídeo final**: `{"at": 42}` (instante) ou `{"start": 60, "end": 75}` (região),
+com `text`, `color` (`#RRGGBB`) e `group` (cada grupo é uma trilha, `MK:<grupo>`; vazio é a trilha padrão `MK`).
+Não entram em hash de mezanino nem mudam a imagem ou o som.
+
+- **Nome no lugar do instante**: onde a operação do `edit_project` pede um instante vale `"marker:<texto>"` (ou
+  `"marker:<grupo>/<texto>"` se o texto se repete): `{"type": "split", "at": "marker:refrão"}` corta exatamente no
+  marcador (sem `index`, no trecho que o contém) e `overlay_span` aceita o marcador em `start` e `end`. A busca
+  ignora maiúscula, acento e espaço; nome repetido ou que não existe é erro claro.
+- **Acompanham a edição**: `remove`, `trim`, `move`, `duplicate`, `insert` e `set_field` de trechos deslocam os
+  marcadores (cortar 3 s antes de um marcador o puxa 3 s). O que estava no trecho removido some e o aviso vem em
+  `edit_warnings` na resposta do `edit_project`; uma região que perdeu só uma parte encolhe. Desfazer um corte do
+  `autocut` empurra os marcadores seguintes para a frente.
+- **Audacity**: `markers_import(name, file, group, replace)` lê o `.txt` de rótulos do Audacity (início, fim e texto
+  separados por tabulação, em segundos; a linha de frequência `\` dos rótulos espectrais fica em `low_hz` e `high_hz`),
+  e `markers_export(name, out, group, newline)` escreve o mesmo formato, com seis casas decimais: a ida e volta
+  devolve o arquivo idêntico, byte a byte.
+- **Regulares**: `markers_regular(name, interval | parts, start, end, prefix, first_number, digits, group, color,
+  kind, replace)` cria um marcador a cada `interval` segundos ou em `parts` partes iguais (60 s a cada 15 s dá 4
+  regiões numeradas).
+
+### Saída só de áudio e exportação (`audio_export`, `import_raw_audio`)
+
+Com `output.preset` de áudio (`audio/mp3`...) o render grava só o arquivo de som: nenhum quadro, nenhum mezanino de
+vídeo, nenhum `-c:v`. A `timeline` pode ficar vazia, e a duração vem do que toca: a narração, a voz gravada
+(`audio.voiceover`) e a janela de música com `end`; a música sem janela só decide quando está sozinha (uma passada).
+`validate_project` explica o que falta quando nada dá duração. A saída do `render_project` e do `export_project` com um
+preset de áudio é o arquivo (`.mp3`, `.wav`...), sem miniatura; o `qa_report` confere loudness, pico, taxa e canais.
+
+- **O arquivo** (`output.audio_format`): `sample_rate`, `channels` (1 ou 2), `bit_depth` (16, 24 ou 32 em ponto
+  flutuante; WAV, FLAC e AIFF), `bitrate_mode` (`cbr`, `vbr`, `abr`), `bitrate_k` e `quality` (MP3, OGG, Opus, M4A). O
+  formato recusa o que não existe nele (profundidade num MP3, taxa de bits num WAV, 44,1 kHz num Opus) com uma
+  mensagem. Valem só quando o preset exportado é o da spec.
+- **Etiquetas** (`output.metadata`): `artist`, `title`, `album`, `track`, `year`, `genre`, `comment`. O modelo da marca
+  (`metadata` no `brand.json`) é o ponto de partida e o que vem na spec vale por cima; texto vazio apaga a do modelo.
+  ID3v2.3 no MP3, comentários Vorbis no FLAC, OGG e Opus; o AIFF só guarda título, artista e comentário.
+- **Volume de saída**: `audio.target_lufs`; `loudness` do `audio_export` aceita `redes` (-14), `podcast` (-16),
+  `broadcast` (-23) ou um número.
+- **`audio_export(name, preset, mode, ...)`**: `mix` (inteiro), `regions` (um arquivo por região de marcador, nome pelo
+  texto do marcador saneado, numerado se falta ou se repete; `pauses`, `numbered`, `group`), `stems` (um arquivo por
+  trilha: `A1`, `NAR`, `VO`, `MUS`, `SFX`; todas levam o mesmo ganho linear da normalização do mix e a soma reproduz o
+  mix; os efeitos do master ficam de fora) e `selection` (`start` e `end` em segundos ou `marker:<texto>`). Cada
+  região e a seleção são normalizadas sozinhas. `out` é o arquivo, `out_dir` a pasta. Grava por cima do que existir, e
+  o agente local pergunta antes.
+- **`import_raw_audio(name, src, encoding, byte_order, channels, sample_rate, ...)`**: PCM sem cabeçalho vira um WAV na
+  pasta do projeto e entra em `audio.voiceover`; o original não muda. Um WAV que já existe só é trocado com `overwrite`.
+- **Modelo `podcast`**: `new_from_template("podcast", nome, {"voz": ..., "trilha": ...})` monta abertura, voz e
+  encerramento a -16 LUFS em MP3 com etiquetas (`artista`, `titulo`, `faixa`...); a limpeza da voz entra com o editor de
+  áudio.
 
 ## Legendas automáticas
 
@@ -1003,8 +1121,8 @@ ganha uma seção `card_layouts`:
 - Ritmo típico de reel de produto (15 a 30 s): cartão de abertura com a dor (3 s) -> 2 a 4 telas do
   produto em `brand` com legenda de seção (3 a 4 s cada) -> cartão escuro de CTA (4 s). Gancho nos 3
   primeiros segundos.
-- Prints reais do produto: `C:\Users\Douglas Vasconcelos\Desktop\MedlyCare\Marketing\Prints do Produto\`
-  (1000x620). Identidade visual: `...\Desktop\MedlyCare\Identidade Visual\`.
+- Prints reais do produto (1000x620) e identidade visual: as pastas que o usuário indicar. Pergunte o
+  caminho, não invente (as pastas dele variam de máquina para máquina).
 
 ## Vídeos pessoais (sem brand)
 

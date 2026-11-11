@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /* A barra do editor: salvar, desfazer e refazer, validar e os renders (prévia, final e exportar). Validar e renderizar
    salvam antes, porque o servidor lê a spec do disco. "Só os trechos" fica no diálogo da prévia. */
-import { ref } from 'vue'
-import { api, errorMessage } from '@/api'
+import { computed, ref } from 'vue'
+import { api, errorMessage, type AudioExportRequest } from '@/api'
+import AudioExportDialog from '@/components/projects/AudioExportDialog.vue'
 import RenderDialog, { type RenderChoice } from '@/components/projects/RenderDialog.vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { useAudioExport } from '@/composables/useAudioExport'
 import { useEditorStore } from '@/stores/editor'
 import { useJobsStore } from '@/stores/jobs'
 import { useToastsStore } from '@/stores/toasts'
@@ -20,6 +22,12 @@ const validating = ref(false)
 const starting = ref(false)
 const renderOpen = ref(false)
 const renderMode = ref<RenderChoice['kind']>('preview')
+const audioOpen = ref(false)
+const audioExport = useAudioExport()
+const currentPreset = computed(() => {
+  const preset = editor.get('output.preset')
+  return typeof preset === 'string' ? preset : undefined
+})
 
 /** Grava antes de seguir quando há o que gravar; devolve false se o servidor recusou a spec. */
 async function saveFirst(): Promise<boolean> {
@@ -43,6 +51,13 @@ async function validate(): Promise<void> {
 function openRender(mode: RenderChoice['kind']): void {
   renderMode.value = mode
   renderOpen.value = true
+}
+
+/** Exporta o áudio: grava antes (o servidor lê a spec do disco) e entrega o pedido à API, que confirma o que sobrescreve. */
+async function startAudioExport(request: AudioExportRequest): Promise<void> {
+  const name = editor.name
+  if (!name || !(await saveFirst())) return
+  if (await audioExport.start(name, request)) audioOpen.value = false
 }
 
 async function startRender(choice: RenderChoice): Promise<void> {
@@ -110,6 +125,7 @@ async function startRender(choice: RenderChoice): Promise<void> {
       </AppButton>
       <AppButton @click="openRender('final')">Render final</AppButton>
       <AppButton @click="openRender('export')">Exportar</AppButton>
+      <AppButton @click="audioOpen = true">Exportar áudio</AppButton>
     </div>
 
     <div class="toolbar__group">
@@ -122,6 +138,13 @@ async function startRender(choice: RenderChoice): Promise<void> {
       :busy="starting"
       :initial-mode="renderMode"
       @submit="startRender"
+    />
+    <AudioExportDialog
+      v-model:open="audioOpen"
+      :project-name="editor.name ?? ''"
+      :current-preset="currentPreset"
+      :busy="audioExport.starting.value"
+      @submit="startAudioExport"
     />
   </div>
 </template>

@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .. import config
-from ..domain.presets import get_preset
+from ..domain.outputs import frame_preset
 from ..domain.spec import HtmlOverlay, Project, Transition
 from ..domain.timeline import frame_range, instant_window, transitions_of
 from ..domain.tracks import apply_track_state
@@ -32,6 +32,7 @@ from ..media.html_site import composition_files
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
 from .assembly import Assembly
+from .audio_effects import effect_processor
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
 from .context import Prober, RenderContext, RenderOptions
 from .html_layer import HtmlLayerBuilder, ResolvedHtmlOverlay
@@ -169,7 +170,7 @@ class InstantFrameRenderer:
 
     @staticmethod
     def _fps(project: Project) -> float:
-        return project.output.fps or get_preset(project.output.preset).fps
+        return project.output.fps or frame_preset(project.output.preset).fps
 
     def key(self, project: Project, t: float) -> str:
         """Hash da spec, do quadro pedido e dos arquivos que o quadro lê (data e tamanho): trocar um deles muda a
@@ -186,7 +187,8 @@ class InstantFrameRenderer:
         theme = self._theme_signature(project)
         return cache_key(
             INSTANT_FRAME_VERSION,
-            project.model_dump(mode="json"),
+            # os marcadores não mudam a imagem: de fora do hash, marcar um instante não refaz o quadro
+            project.model_dump(mode="json", exclude={"markers"}),
             frame_index(t, self._fps(project)),
             stamps,
             theme,
@@ -297,7 +299,8 @@ class InstantFrameRenderer:
 
         prepared = self._prepare(ctx, layout, window.first, window.last)
         self.log(f"quadro de {at:.2f} s: trechos {window.first + 1} a {window.last + 1}")
-        voice_files = prepare_voice_files(layout.project, self.prober)
+        # a voz já com os efeitos: é o que o render transcreve, e a chave das legendas em cache depende do arquivo
+        voice_files = prepare_voice_files(layout.project, self.prober, effect_processor(ctx))
         captions = self.captions.produce_cached(ctx, layout.sources, voice_files)
         tones = [item.tone for item in prepared]
         text = build_text_layer(

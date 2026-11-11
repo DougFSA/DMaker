@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /* O painel Filtros: os grupos de campos do item selecionado na linha do tempo (ou os do projeto, sem seleção).
    É dirigido pelo catálogo (`lib/filterCatalog.json`): mostra só os grupos "aplicados", ou seja, os que já saem do
-   padrão do schema; o "+" lista os outros e o "×" de um grupo o devolve ao padrão. A faixa A1 edita o clipe da V1. */
+   padrão do schema; o "+" lista os outros e o "×" de um grupo o devolve ao padrão. A faixa A1 edita o clipe da V1.
+   Abaixo dos grupos vem o bloco "Efeitos de áudio", a cadeia de efeitos do mesmo item (ou a do master, sem seleção). */
 import { computed, onMounted, ref, watch } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -23,7 +24,12 @@ import {
 import { displayLabel } from '@/lib/timeline'
 import { useCatalogStore } from '@/stores/catalog'
 import { useEditorStore } from '@/stores/editor'
+import AudioEffectsSection from './AudioEffectsSection.vue'
+import AudioLevelSection from './AudioLevelSection.vue'
+import AudioSpectrumSection from './AudioSpectrumSection.vue'
+import AutoDuckSection from './AutoDuckSection.vue'
 import FilterGroupCard from './FilterGroupCard.vue'
+import GeneratedSoundsSection from './GeneratedSoundsSection.vue'
 
 interface GroupEntry {
   group: FilterGroup
@@ -43,9 +49,10 @@ onMounted(() => {
   catalog.load().catch(() => undefined)
 })
 
-const presets = computed<OptionItem[]>(() =>
-  catalog.presets.map((preset) => ({ value: preset.id, label: `${preset.platform} · ${preset.name} (${preset.id})` })),
-)
+const presets = computed<OptionItem[]>(() => [
+  ...catalog.presets.map((preset) => ({ value: preset.id, label: `${preset.platform} · ${preset.name} (${preset.id})` })),
+  ...catalog.audioPresets.map((preset) => ({ value: preset.id, label: `Áudio · ${preset.name} (${preset.id})` })),
+])
 
 /** O item de que os filtros falam: o último que a pessoa selecionou (Ctrl soma, e o painel segue o mais recente). */
 const primary = computed(() => {
@@ -162,6 +169,11 @@ const ready = computed(() => !!editor.spec)
         @remove="remove(entry)"
       />
       <p v-if="shown.length === 0" class="filters__empty">Nenhum filtro aplicado. Use o botão Filtro para adicionar.</p>
+      <AudioSpectrumSection />
+      <AudioLevelSection />
+      <GeneratedSoundsSection />
+      <AudioEffectsSection />
+      <AutoDuckSection />
     </div>
   </AppCard>
 </template>

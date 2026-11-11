@@ -75,7 +75,7 @@ describe('zoom', () => {
 
 describe('timeAtX', () => {
   it('traduz a posição do mouse em tempo, descontando o cabeçalho e somando a rolagem', () => {
-    // área rolável começa em x=100; o cabeçalho tem 92 px; 60 px por segundo
+    // área rolável começa em x=100; o cabeçalho tem TRACK_HEADER_WIDTH px; 60 px por segundo
     expect(timeAtX(100 + TRACK_HEADER_WIDTH + 120, 100, 0, 60, 30)).toBe(2)
     expect(timeAtX(100 + TRACK_HEADER_WIDTH + 120, 100, 60, 60, 30)).toBe(3)
   })

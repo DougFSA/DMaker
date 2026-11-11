@@ -222,6 +222,34 @@ def test_edit_split_card_endpoint(client):
     assert bad_op.status_code == 400  # não pode remover o único trecho
 
 
+def test_edit_moves_the_markers_and_reports_the_ones_it_dropped(client):
+    cards = [{"type": "card", "title": f"Trecho {n}", "duration": 2.0, "motion": "none"} for n in (1, 2, 3)]
+    markers = [
+        {"at": 1.0, "text": "no primeiro"},
+        {"at": 3.0, "text": "no segundo"},
+        {"at": 5.0, "text": "no terceiro"},
+    ]
+    spec = {**SPEC, "timeline": cards, "markers": markers}
+    body = client.post(
+        f"/api/projects/{PROJECT}/edit", json={"spec": spec, "op": {"type": "remove", "index": 1}}
+    ).json()
+    assert [(m["text"], m["at"]) for m in body["spec"]["markers"]] == [
+        ("no primeiro", 1.0),
+        ("no terceiro", 3.0),
+    ]
+    assert body["edit_warnings"] == [
+        'O marcador "no segundo" em 3 s estava dentro do trecho removido e foi apagado.'
+    ]
+    track = next(t for t in body["timeline"]["tracks"] if t["id"] == "MK")
+    assert [item["label"] for item in track["items"]] == ["no primeiro", "no terceiro"]
+
+    created = client.post(
+        f"/api/projects/{PROJECT}/edit",
+        json={"spec": spec, "op": {"type": "marker_add", "at": 0.5, "text": "novo"}},
+    ).json()
+    assert created["edit_warnings"] == [] and len(created["spec"]["markers"]) == 4
+
+
 def test_theme_endpoint(client):
     client.put(f"/api/projects/{PROJECT}", json=SPEC)
     theme = client.get(f"/api/projects/{PROJECT}/theme").json()
@@ -494,6 +522,29 @@ def test_clone_with_upload_converts_reference_and_uses_given_text(voice_client, 
     )  # o ffmpeg lê o formato gravado no navegador
     assert (studio.library.root / "ana-julia" / "reference.wav").exists()
     assert [v["id"] for v in _stored_voices(voice_client)] == ["ana-julia"]
+
+
+def test_the_record_to_clone_shortcut_sends_the_wav_straight_to_the_clone_without_a_manual_file(
+    voice_client, studio
+):
+    """O atalho de 15 s da janela Gravar: o WAV mono de 16 bits que o navegador monta vai direto para `/clone`, com o
+    texto da folha de gravação como transcrição (o Whisper não é chamado) e a voz nasce na biblioteca (falsa aqui)."""
+    from dmaker.media.wavio import wav_bytes
+
+    reference = wav_bytes(np.zeros((15 * 48000, 1), dtype=np.float32), 48000)
+    script = "Olá, estou gravando a minha voz para o DMaker."
+    resp = voice_client.post(
+        "/api/voices/clone",
+        data={"name": "Minha voz", "reference_text": script, "language": "pt"},
+        files={"audio": ("gravacao.wav", reference, "audio/wav")},
+    )
+    assert resp.status_code == 200, resp.text
+    voice = resp.json()
+    assert voice["id"] == "minha-voz" and voice["kind"] == "clone" and voice["reference_text"] == script
+    assert studio.transcriber.calls == []
+    assert any(arg.endswith("referencia.wav") for arg in studio.runner.commands[0])
+    assert (studio.library.root / "minha-voz" / "reference.wav").exists()
+    assert [v["id"] for v in _stored_voices(voice_client)] == ["minha-voz"]
 
 
 def test_clone_without_text_transcribes_the_reference(voice_client, studio):

@@ -1,10 +1,37 @@
-/* A tabela de atalhos do editor (o padrão é o de ilhas de edição como o Shotcut): os 34 atalhos, a combinação de
+/* A tabela de atalhos do editor (o padrão é o de ilhas de edição como o Shotcut): os 37 atalhos, a combinação de
    teclas que cada evento representa, as trocas que a pessoa salvou e quando o teclado deve ficar quieto. Tudo puro,
    sem tocar no navegador; quem escuta o teclado é `useEditorShortcuts`. */
 
-export type ShortcutCategory = 'reproducao' | 'navegacao' | 'edicao' | 'midia' | 'visualizacao' | 'geral'
+export type ShortcutCategory = 'reproducao' | 'navegacao' | 'edicao' | 'midia' | 'visualizacao' | 'geral' | 'audio'
+
+/** Os atalhos do painel Áudio: valem só quando o foco está nele (ver `idsForContext`). */
+export type AudioShortcutId =
+  | 'audio_play'
+  | 'audio_loop_play'
+  | 'audio_pause'
+  | 'audio_stop'
+  | 'audio_cut_preview'
+  | 'audio_label'
+  | 'audio_silence'
+  | 'audio_split'
+  | 'audio_cut'
+  | 'audio_undo'
+  | 'audio_redo'
+  | 'audio_select_all'
+  | 'audio_select_next_marker'
+  | 'audio_select_prev_marker'
+  | 'audio_zoom_in'
+  | 'audio_zoom_out'
+  | 'audio_fit_selection'
+  | 'audio_fit_project'
+  | 'audio_tool_select'
+  | 'audio_tool_envelope'
+  | 'audio_tool_draw'
+  | 'audio_tool_zoom'
+  | 'audio_tool_multi'
 
 export type ShortcutId =
+  | AudioShortcutId
   | 'play_pause'
   | 'pause'
   | 'play_reverse'
@@ -39,6 +66,9 @@ export type ShortcutId =
   | 'track_mute'
   | 'track_hide'
   | 'track_lock'
+  | 'add_marker'
+  | 'prev_marker'
+  | 'next_marker'
 
 export interface ShortcutDef {
   id: ShortcutId
@@ -55,6 +85,7 @@ export const SHORTCUT_CATEGORIES: Array<{ id: ShortcutCategory; label: string }>
   { id: 'midia', label: 'Mídia' },
   { id: 'visualizacao', label: 'Visualização' },
   { id: 'geral', label: 'Geral' },
+  { id: 'audio', label: 'Painel Áudio (com o foco nele)' },
 ]
 
 /** O padrão. A ordem aqui é a ordem em que a janela de atalhos lista cada categoria. */
@@ -93,7 +124,62 @@ export const SHORTCUT_DEFAULTS: readonly ShortcutDef[] = [
   { id: 'track_mute', label: 'Mudo na trilha atual', keys: ['Ctrl+m'], category: 'edicao' },
   { id: 'track_hide', label: 'Ocultar a trilha atual', keys: ['Ctrl+h'], category: 'edicao' },
   { id: 'track_lock', label: 'Bloquear a trilha atual', keys: ['Ctrl+l'], category: 'edicao' },
+  { id: 'add_marker', label: 'Criar um marcador no cursor', keys: ['m'], category: 'edicao' },
+  { id: 'prev_marker', label: 'Marcador anterior', keys: [','], category: 'navegacao' },
+  { id: 'next_marker', label: 'Próximo marcador', keys: ['.'], category: 'navegacao' },
 ]
+
+/**
+ * Os atalhos do painel Áudio, nas teclas do Audacity. Valem só com o foco dentro do painel: lá, uma tecla que também é
+ * de um dos 37 atalhos do editor (Espaço, Ctrl+L, Delete, S, 0...) faz a ação do painel, e fora dele tudo segue como
+ * sempre. Por isso a mesma combinação pode aparecer nas duas tabelas sem conflito.
+ */
+export const AUDIO_SHORTCUT_DEFAULTS: readonly ShortcutDef[] = [
+  { id: 'audio_play', label: 'Tocar ou parar a seleção (sem seleção, do cursor ao fim)', keys: ['Space'], category: 'audio' },
+  { id: 'audio_loop_play', label: 'Tocar a seleção em loop', keys: ['Shift+Space'], category: 'audio' },
+  { id: 'audio_pause', label: 'Pausar (o cursor fica onde parou)', keys: ['p'], category: 'audio' },
+  { id: 'audio_stop', label: 'Parar', keys: ['s'], category: 'audio' },
+  { id: 'audio_cut_preview', label: 'Ouvir como ficaria sem a seleção (2 s antes e 2 s depois)', keys: ['c'], category: 'audio' },
+  { id: 'audio_label', label: 'Pôr um marcador na seleção (ou no cursor)', keys: ['Ctrl+b'], category: 'audio' },
+  { id: 'audio_silence', label: 'Silenciar a seleção', keys: ['Ctrl+l'], category: 'audio' },
+  { id: 'audio_split', label: 'Dividir no cursor', keys: ['Ctrl+i'], category: 'audio' },
+  { id: 'audio_cut', label: 'Cortar a seleção', keys: ['Delete'], category: 'audio' },
+  { id: 'audio_undo', label: 'Desfazer a última operação', keys: ['Ctrl+z'], category: 'audio' },
+  { id: 'audio_redo', label: 'Refazer', keys: ['Ctrl+y', 'Ctrl+Shift+z'], category: 'audio' },
+  { id: 'audio_select_all', label: 'Selecionar tudo', keys: ['Ctrl+a'], category: 'audio' },
+  { id: 'audio_select_next_marker', label: 'Selecionar do cursor até o próximo marcador', keys: ['Alt+Shift+ArrowRight'], category: 'audio' },
+  { id: 'audio_select_prev_marker', label: 'Selecionar do cursor até o marcador anterior', keys: ['Alt+Shift+ArrowLeft'], category: 'audio' },
+  { id: 'audio_zoom_in', label: 'Aproximar', keys: ['=', '+'], category: 'audio' },
+  { id: 'audio_zoom_out', label: 'Afastar', keys: ['-'], category: 'audio' },
+  { id: 'audio_fit_selection', label: 'Ajustar o zoom à seleção', keys: ['Ctrl+e'], category: 'audio' },
+  { id: 'audio_fit_project', label: 'Ajustar o zoom ao áudio inteiro', keys: ['0', 'Ctrl+f'], category: 'audio' },
+  { id: 'audio_tool_select', label: 'Ferramenta de seleção', keys: ['1'], category: 'audio' },
+  { id: 'audio_tool_envelope', label: 'Ferramenta de envelope', keys: ['2'], category: 'audio' },
+  { id: 'audio_tool_draw', label: 'Ferramenta de desenho', keys: ['3'], category: 'audio' },
+  { id: 'audio_tool_zoom', label: 'Ferramenta de zoom', keys: ['4'], category: 'audio' },
+  { id: 'audio_tool_multi', label: 'Multiferramenta', keys: ['5'], category: 'audio' },
+]
+
+/** Todos os atalhos que a tela de trocas lista: os 37 do editor e os do painel Áudio. */
+export const ALL_SHORTCUTS: readonly ShortcutDef[] = [...SHORTCUT_DEFAULTS, ...AUDIO_SHORTCUT_DEFAULTS]
+
+const AUDIO_IDS: ReadonlySet<ShortcutId> = new Set(AUDIO_SHORTCUT_DEFAULTS.map((entry) => entry.id))
+
+/** O atalho é do painel Áudio. */
+export function isAudioShortcut(id: ShortcutId): boolean {
+  return AUDIO_IDS.has(id)
+}
+
+/**
+ * Das ações que uma combinação dispara, as que valem onde o foco está. Dentro do painel Áudio, se a combinação tem uma
+ * ação dele, só ela vale (o Espaço toca a seleção, não o vídeo); se não tem, a do editor segue (Ctrl+S salva). Fora do
+ * painel, as ações dele nunca disparam.
+ */
+export function idsForContext(ids: readonly ShortcutId[], inAudioPanel: boolean): ShortcutId[] {
+  const audio = ids.filter(isAudioShortcut)
+  if (!inAudioPanel) return ids.filter((id) => !isAudioShortcut(id))
+  return audio.length > 0 ? audio : [...ids]
+}
 
 /** A chave do navegador onde as trocas ficam: a mesma da interface clássica, no mesmo formato (id para combinações). */
 export const KEYMAP_STORAGE_KEY = 'dmaker.keymap'
@@ -124,9 +210,12 @@ export function comboFromEvent(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'm
   return parts.join('+')
 }
 
-/** A tabela padrão com as trocas salvas por cima (uma combinação por posição: a principal e as alternativas). */
-export function mergeKeymap(overrides: KeymapOverrides): ShortcutDef[] {
-  return SHORTCUT_DEFAULTS.map((entry) => {
+/**
+ * A tabela padrão com as trocas salvas por cima (uma combinação por posição: a principal e as alternativas). Sem `table`
+ * é a dos 37 atalhos do editor; a do painel Áudio (`AUDIO_SHORTCUT_DEFAULTS`) se mescla à parte.
+ */
+export function mergeKeymap(overrides: KeymapOverrides, table: readonly ShortcutDef[] = SHORTCUT_DEFAULTS): ShortcutDef[] {
+  return table.map((entry) => {
     const custom = overrides[entry.id]
     return { ...entry, keys: Array.isArray(custom) && custom.length > 0 ? [...custom] : [...entry.keys] }
   })
@@ -138,7 +227,7 @@ export function parseOverrides(raw: string | null): KeymapOverrides {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    const known = new Set<string>(SHORTCUT_DEFAULTS.map((entry) => entry.id))
+    const known = new Set<string>(ALL_SHORTCUTS.map((entry) => entry.id))
     const clean: KeymapOverrides = {}
     for (const [id, keys] of Object.entries(parsed)) {
       if (!known.has(id) || !Array.isArray(keys)) continue

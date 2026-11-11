@@ -8,7 +8,8 @@ from pathlib import Path
 from .. import config
 from ..domain.atomic_file import content_revision, read_bytes_retrying
 from ..domain.brand import Theme
-from ..domain.presets import Preset, get_preset
+from ..domain.music_tempo import tempo_warnings
+from ..domain.outputs import OutputPreset, resolve_output
 from ..domain.spec import (
     AudioSettings,
     Captions,
@@ -26,12 +27,18 @@ from ..domain.spec import (
 from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
 from ..media.browser import browser_problem
 from ..media.probe import probe
+from .audio_lint import audio_output_warnings, noise_profile_warnings
 from .context import Prober
 from .html_layer import html_warnings
 from .layout import project_layout, to_presentation
 from .lint import lint
+from .plugin_lint import PluginLookup, plugin_warnings
 from .sync import OffsetFinder
-from .voicefiles import voice_file_playtimes
+from .voicefiles import (
+    effect_refusal_warnings,
+    music_playtime_warnings,
+    voice_file_playtimes,
+)
 from .voiceover import known_voices
 
 
@@ -101,7 +108,7 @@ class SegmentSummary:
 @dataclass
 class ProjectSummary:
     name: str
-    preset: Preset
+    preset: OutputPreset  # o de vídeo, ou o formato de áudio quando a saída é um arquivo de som
     theme: Theme
     total: float
     segments: list[SegmentSummary] = field(default_factory=list)
@@ -112,7 +119,10 @@ class ProjectSummary:
 
 
 def summarize(
-    project: Project, prober: Prober = probe, offset_finder: OffsetFinder | None = None
+    project: Project,
+    prober: Prober = probe,
+    offset_finder: OffsetFinder | None = None,
+    plugins: PluginLookup | None = None,
 ) -> ProjectSummary:
     """Confere arquivos, calcula a duração final e reúne avisos (o que `dmaker validate` mostra).
     Fontes com `sync: "auto"` são sincronizadas aqui (e o resultado fica em cache no projeto);
@@ -137,7 +147,13 @@ def summarize(
         known_voices=known_voices(project),
         voiceover_playtimes=voice_file_playtimes(project, prober),
     )
+    warnings += music_playtime_warnings(project, prober)
+    warnings += tempo_warnings(project.audio)
+    warnings += effect_refusal_warnings(project, prober)
     warnings += html_warnings(project, browser_problem)
+    warnings += audio_output_warnings(project, presentation.total)
+    warnings += noise_profile_warnings(project)
+    warnings += plugin_warnings(project, plugins)
     segments = []
     for i, (seg, d) in enumerate(zip(project.timeline, presentation.durations, strict=True)):
         label = getattr(seg, "label", None) or getattr(seg, "src", None) or getattr(seg, "source", None)
@@ -145,7 +161,7 @@ def summarize(
         segments.append(SegmentSummary(i, seg.type, d, str(label)))
     return ProjectSummary(
         project.name,
-        presentation.preset,
+        layout.output or presentation.preset,
         presentation.theme,
         presentation.total,
         segments,
@@ -164,7 +180,7 @@ def scaffold_project(
     prober: Prober = probe,
 ) -> Project:
     """Projeto inicial a partir dos arquivos fonte, na ordem, com transições suaves."""
-    get_preset(preset)
+    resolve_output(preset)
     timeline: list = []
     for i, src in enumerate(sources or []):
         if not src.exists():

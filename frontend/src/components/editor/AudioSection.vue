@@ -1,20 +1,23 @@
 <script setup lang="ts">
-/* O áudio do projeto: música de fundo, ganho da voz, normalização, silenciar os clipes e as faixas externas. */
+/* O áudio do projeto: música de fundo (com o andamento dela e o botão Detectar BPM), o andamento do projeto (a grade da
+   régua em compassos e do encaixe), ganho da voz, normalização, silenciar os clipes e as faixas externas. */
 import { computed } from 'vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import { AUDIO_FIELDS, AUDIO_TRACK_VOLUME_FIELD, MUSIC_FIELDS, type FieldDef } from '@/lib/editorFields'
-import { addAudioTrack, removeFromList, setMusicEnabled, sourceNames } from '@/lib/editorSpec'
+import { AUDIO_FIELDS, AUDIO_TRACK_VOLUME_FIELD, MUSIC_FIELDS, TEMPO_FIELDS, type FieldDef } from '@/lib/editorFields'
+import { addAudioTrack, removeFromList, setMusicEnabled, setTempoEnabled, sourceNames } from '@/lib/editorSpec'
 import { useEditorStore } from '@/stores/editor'
 import EditorSection from './EditorSection.vue'
 import FieldGrid from './FieldGrid.vue'
+import MusicTempoTools from './MusicTempoTools.vue'
 import SpecField from './SpecField.vue'
 
 const open = defineModel<boolean>('open', { default: true })
 const editor = useEditorStore()
 
 const musicOn = computed(() => !!editor.get('audio.music'))
+const tempoOn = computed(() => !!editor.get('audio.tempo'))
 const tracks = computed(() => (editor.get('audio.tracks') as Array<Record<string, unknown>> | undefined) ?? [])
 const names = computed(() => (editor.spec ? sourceNames(editor.spec) : []))
 const sourceChoices = computed(() => names.value.map((name) => ({ value: name, label: name })))
@@ -33,6 +36,21 @@ function removeTrack(index: number): void {
       @update:model-value="editor.mutate((spec) => setMusicEnabled(spec, $event))"
     />
     <FieldGrid v-if="musicOn" :fields="MUSIC_FIELDS" base="audio" />
+    <MusicTempoTools v-if="musicOn" />
+
+    <fieldset class="sub" data-project-tempo>
+      <legend>Andamento do projeto</legend>
+      <AppCheckbox
+        :model-value="tempoOn"
+        label="Definir o andamento (BPM e compasso)"
+        @update:model-value="editor.mutate((spec) => setTempoEnabled(spec, $event))"
+      />
+      <FieldGrid v-if="tempoOn" :fields="TEMPO_FIELDS" base="audio" />
+      <p class="hint">
+        Com o andamento, a régua da linha do tempo e do painel Áudio pode mostrar compassos, o Snap atrai para os tempos e
+        beat:N e bar:N valem como instante. Com a música no BPM dela e "Esticar para o andamento", ela acompanha a grade.
+      </p>
+    </fieldset>
 
     <FieldGrid :fields="AUDIO_FIELDS" base="audio" />
 

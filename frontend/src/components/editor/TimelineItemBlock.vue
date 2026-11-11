@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import type { TimelineItem } from '@/api'
 import { displayLabel, hasTrimHandles, isDraggable, itemTitle, kindClass } from '@/lib/timeline'
 import { itemPieces } from '@/lib/waveform'
+import TimelineFadeHandles from './TimelineFadeHandles.vue'
 import TimelineWaveform from './TimelineWaveform.vue'
 
 const props = defineProps<{
@@ -14,6 +15,8 @@ const props = defineProps<{
   selected: boolean
   /** O item tem forma de onda (áudio de clipe, faixa externa, música ou vídeo sobreposto). */
   waveform: boolean
+  /** O fade em arrasto na alça (ver `TimelineFadeHandles`). */
+  fadePreview?: { itemId: string; side: 'in' | 'out'; duration: number } | null
 }>()
 
 /** Largura mínima para o bloco de um item muito curto continuar clicável. */
@@ -66,6 +69,13 @@ const classes = computed(() => [
       <span class="item__handle item__handle--in" data-handle="in" />
       <span class="item__handle item__handle--out" data-handle="out" />
     </template>
+    <TimelineFadeHandles
+      v-if="!item.missing"
+      :item="item"
+      :track-id="trackId"
+      :px-per-sec="pxPerSec"
+      :preview="fadePreview"
+    />
     <span class="item__label">{{ label }}</span>
   </div>
 </template>
@@ -141,6 +151,12 @@ const classes = computed(() => [
 }
 .item--narration {
   background: var(--tl-narration);
+}
+.item--voiceover {
+  background: var(--tl-voiceover);
+}
+.item--generated {
+  background: var(--tl-generated);
 }
 .item--captions {
   background: var(--tl-captions);

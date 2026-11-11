@@ -1,0 +1,19 @@
+﻿DMaker instalado.
+
+Para abrir a interface, use o atalho "DMaker" do menu Iniciar (ou rode "dmaker ui").
+
+Modelo de linguagem (Ollama)
+----------------------------
+O pacote instala o programa do Ollama (se a sua máquina ainda não tinha), mas nenhum modelo de linguagem.
+A tela Agente, a tradução da dublagem e o "dmaker ajuda" precisam de um. Para baixar o padrão do DMaker,
+abra um terminal e rode:
+
+    ollama pull gpt-oss:20b
+
+Sem ele, o resto do DMaker funciona normalmente: render, legendas, narração, isolamento de voz e recorte de pessoa.
+
+Servidor MCP (Claude Code)
+--------------------------
+Para ligar o DMaker ao Claude Code, aponte o servidor MCP para o lançador dmaker-mcp.cmd, na pasta do programa.
+
+Seus dados (projetos, saídas, vozes e cache) ficam na pasta escolhida na instalação; atualizar nunca os apaga.

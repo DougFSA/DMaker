@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..domain.audio_effects import EffectBase
 from ..domain.spec import Narration, Project
 from ..media.ffmpeg import SubprocessRunner
 from ..text.captions import Cue, Word
@@ -39,6 +40,8 @@ class PreparedVoiceover:
     volume: float
     duration: float
     cues: list[tuple[float, float, str]] = field(default_factory=list)  # tempos relativos ao início da fala
+    effects: tuple[EffectBase, ...] = ()  # cadeia de efeitos da narração (`Narration.effects`)
+    pan: float = 0.0  # equilíbrio esquerda/direita da narração (`Narration.pan`)
 
     @property
     def end(self) -> float:
@@ -157,7 +160,16 @@ class VoiceoverPreparer:
             out = ctx.job_dir / f"narration_{index}.wav"
             if ctx.options.dry_run:  # simulação: nada de sintetizar de verdade (leva minutos na CPU)
                 duration = estimate_speech_duration(text, narration.speed)
-                prepared.append(PreparedVoiceover(out, narration.start, narration.volume, duration))
+                prepared.append(
+                    PreparedVoiceover(
+                        out,
+                        narration.start,
+                        narration.volume,
+                        duration,
+                        effects=tuple(narration.effects),
+                        pan=narration.pan,
+                    )
+                )
                 continue
             voice = self.library.get(narration.voice) if narration.voice else None
             result = self._service(ctx).render(
@@ -172,7 +184,13 @@ class VoiceoverPreparer:
             )
             prepared.append(
                 PreparedVoiceover(
-                    result.path, narration.start, narration.volume, result.duration, result.cues
+                    result.path,
+                    narration.start,
+                    narration.volume,
+                    result.duration,
+                    result.cues,
+                    tuple(narration.effects),
+                    narration.pan,
                 )
             )
         return prepared

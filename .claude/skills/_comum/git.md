@@ -140,18 +140,28 @@ Ao final de uma leva, reporte o que **não** entrou e por quê.
 O Douglas autorizou executores em paralelo **quando os cards são independentes e
 tocam coisas diferentes**. O que isola um do outro é o worktree: cada git worktree
 tem o seu HEAD, o seu index e a sua pasta, então o branch de um não troca debaixo
-do outro. Um executor fica na pasta principal `D:\DMaker`; cada outro roda com
+do outro. Um executor fica na pasta principal (a raiz do clone); cada outro roda com
 `isolation: "worktree"` (ou `git worktree add`) e segue este preparo.
 
-**1. Venv: use o da pasta principal.** O worktree não tem `.venv`, e o pacote
-editável do venv aponta para `D:\DMaker\src`. Para rodar o código **do worktree**:
+**0. Ache a pasta principal pelo git, não por letra de unidade.** O clone pode
+estar em qualquer pasta, então os comandos abaixo partem de `$main`, que o próprio
+git informa: o diretório comum do repositório é o `.git` da pasta principal, e a
+pasta principal é o pai dele. Funciona de dentro de um worktree e da própria pasta
+principal (nela, `$main` e `$wt` são a mesma pasta):
 
 ```powershell
-$wt = (Get-Location).Path
+$wt = (Get-Location).Path                                                  # a raiz do seu worktree
+$main = Split-Path (git rev-parse --path-format=absolute --git-common-dir) # a pasta principal
+```
+
+**1. Venv: use o da pasta principal.** O worktree não tem `.venv`, e o pacote
+editável do venv aponta para `$main\src`. Para rodar o código **do worktree**:
+
+```powershell
 $env:PYTHONPATH = "$wt\src"
-& D:\DMaker\.venv\Scripts\python.exe -m dmaker.cli --help
-& D:\DMaker\.venv\Scripts\python.exe -m pytest -q
-& D:\DMaker\.venv\Scripts\ruff.exe check src tests
+& "$main\.venv\Scripts\python.exe" -m dmaker.cli --help
+& "$main\.venv\Scripts\python.exe" -m pytest -q
+& "$main\.venv\Scripts\ruff.exe" check src tests
 ```
 
 Use `python -m dmaker.cli` em vez de `dmaker.exe`, e confira com
@@ -167,13 +177,16 @@ antes; senão, passe `PYTHONPATH` no `env` do subprocesso do teste.
 então não existe no worktree). Crie com `mklink /J` pelo `cmd`:
 
 ```powershell
-cmd /c mklink /J "$wt\bin" "D:\DMaker\bin"                    # ffmpeg
-cmd /c mklink /J "$wt\cache\models" "D:\DMaker\cache\models"  # modelos baixados
+cmd /c mklink /J "$wt\bin" "$main\bin"                                        # ffmpeg
+cmd /c mklink /J "$wt\cache\models" "$main\cache\models"                      # modelos baixados
+cmd /c mklink /J "$wt\frontend\node_modules" "$main\frontend\node_modules"    # só se o card mexe no front
 # só se o card precisar de dados reais (cache de mezanino, projetos, saídas):
-cmd /c mklink /J "$wt\projects" "D:\DMaker\projects"
-cmd /c mklink /J "$wt\output" "D:\DMaker\output"
+cmd /c mklink /J "$wt\projects" "$main\projects"
+cmd /c mklink /J "$wt\output" "$main\output"
 ```
 
+Cada chamada do PowerShell começa sem as variáveis da anterior: recalcule `$wt` e
+`$main` (passo 0) no começo de cada comando que as usa.
 Crie `$wt\cache` antes, se não existir. Pelas junções, **só acrescente**: nunca
 apague, renomeie nem regenere o que já está lá, porque é o acervo do Douglas e a
 pasta principal enxerga o mesmo conteúdo. Prefira mídia sintética no scratchpad
@@ -186,12 +199,21 @@ Antes de remover o worktree (`git worktree remove`), tire cada junção:
 ```powershell
 cmd /c rmdir "$wt\bin"
 cmd /c rmdir "$wt\cache\models"
+cmd /c rmdir "$wt\frontend\node_modules"
 cmd /c rmdir "$wt\projects"
 cmd /c rmdir "$wt\output"
 ```
 
 `rmdir` sem `/s` remove só o ponto da junção. Confira antes (`dir` mostra
-`<JUNCTION>`).
+`<JUNCTION>`). Se você criou outra junção (um `.venv`, por exemplo, para testar o
+servidor MCP), tire essa também.
+
+**O MCP `dmaker` numa sessão aberta no worktree.** O `.mcp.json` sobe o servidor pelo
+`.venv` da pasta onde a sessão foi aberta (o `CLAUDE_PROJECT_DIR`), e o worktree não
+tem `.venv`: o servidor `dmaker` não conecta nessa sessão, e o erro diz onde procurou.
+O executor não precisa dele (trabalha pela CLI do passo 1). Se mesmo assim quiser o
+MCP no worktree, uma junção `.venv` para `$main\.venv` basta, e o servidor roda o código
+da pasta principal (o pacote editável do venv aponta para lá), não o do worktree.
 
 **5. Porta própria para a interface.** Uma porta por executor: 8771, 8772, 8773...
 A **8769 é do executor da pasta principal** e a **8765 é do Douglas**; nunca as

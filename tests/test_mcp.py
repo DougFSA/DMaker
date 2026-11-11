@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sys
 
 from mcp import ClientSession
@@ -85,6 +86,9 @@ def test_lists_tools_and_prompt():
         "pause_batch",
         "batch_status",
         "search_manual",
+        "markers_import",
+        "markers_export",
+        "markers_regular",
     } <= tools
     assert "editar-video" in prompts
     assert "dmaker://guide" in resources and "dmaker://schema" in resources
@@ -359,8 +363,8 @@ def test_edit_project_and_timeline_view_via_mcp():
     spec_path = config.PROJECTS_DIR / "mcp-edit-teste" / "spec.json"
     saved = json.loads(spec_path.read_text(encoding="utf-8"))
     assert len(saved["timeline"]) == 2
-    spec_path.unlink()
-    spec_path.parent.rmdir()
+    assert (spec_path.parent / "history" / "index.json").exists()  # a edição entrou no histórico do projeto
+    shutil.rmtree(spec_path.parent)
 
 
 def test_read_captions_compact_and_full():

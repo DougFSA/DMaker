@@ -66,6 +66,8 @@ export function routedFetch(routes: Record<string, Handler>): RoutedFetch {
       const result = typeof handler === 'function' ? (handler as (call: RoutedCall) => unknown)(call) : handler
       // o handler pode devolver uma promessa para o teste decidir quando a resposta chega
       return Promise.resolve(result).then((settled) => {
+        // uma `Response` pronta (um arquivo de áudio com os cabeçalhos dele) segue como está
+        if (settled instanceof Response) return settled
         const status = isReply(settled) ? settled.status : 200
         const body = isReply(settled) ? settled.body : settled
         return new Response(JSON.stringify(body), { status })

@@ -4,8 +4,6 @@ gerar o mezanino e calcula a chave de cache. Um tipo novo entra registrando outr
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +11,7 @@ from typing import Protocol
 
 from PIL import Image
 
+from ..domain.audio_shift import shifted_window
 from ..domain.looks import UnknownLookError, effective_look_name, resolve_look
 from ..domain.presets import SafeZone
 from ..domain.spec import CardSegment, ClipSegment, ColorAdjust, ImageSegment, Segment
@@ -34,17 +33,17 @@ from ..visuals.cards import render_backdrop, render_card, save_card
 from ..visuals.geometry import fit_rect
 from ..visuals.motion import plan_motion, render_frames, source_size_for
 from ..visuals.reframe_image import reframe_image
+from .audio_crossfade import CutNeighbors, clip_crossfades, crossfade_key_parts
+from .audio_effects import clip_camera_audio, noise_profile_parts, track_audio_overrides
+from .auto_duck import duck_key_part, spill_long_graph, track_duck_lookup
+from .cache_key import cache_key
 from .context import RenderContext
 from .isolation import default_isolation_service, progress_logger
+from .placements import clip_placement
 from .sources import Source
 from .track_slices import track_slices
 
 MEZZ_VERSION = "m7"  # muda quando a receita do mezanino muda (invalida o cache)
-
-
-def cache_key(*parts: object) -> str:
-    raw = json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
@@ -92,14 +91,25 @@ def _look_part(look: ColorAdjust | None) -> dict | None:
     return look.model_dump(mode="json") if look is not None else None
 
 
+def pan_key_part(pan: float) -> tuple[float, ...]:
+    """O pan de uma faixa para a chave do mezanino: só quando existe, para a chave de um projeto sem pan não mudar."""
+    return (pan,) if pan else ()
+
+
 def _default_variant(ctx: RenderContext) -> str:
     return ctx.theme.style.get("card_variant", "light")
 
 
-def _track_slices(ctx: RenderContext, segment: ClipSegment) -> tuple[TrackSlice, ...]:
+def _track_slices(ctx: RenderContext, segment: ClipSegment, index: int = -1) -> tuple[TrackSlice, ...]:
     """Fatias das faixas externas que soam no trecho, pela mesma conta da vista de linha do tempo
-    (`pipeline.track_slices`)."""
-    return track_slices(ctx.project.audio.tracks, ctx.session, segment)
+    (`pipeline.track_slices`). A faixa que tem efeitos é fatiada do arquivo já processado, inteiro."""
+    return track_slices(
+        ctx.project.audio.tracks,
+        ctx.session,
+        segment,
+        track_audio_overrides(ctx),
+        track_duck_lookup(ctx, index),
+    )
 
 
 @dataclass(frozen=True)
@@ -171,6 +181,7 @@ class CameraAudio:
 
     path: Path
     isolate: Callable[[], Stems]
+    lead: float = 0.0  # silêncio antes do áudio isolado, com o som deslocado para antes do começo do arquivo
 
     @property
     def key(self) -> str:
@@ -191,13 +202,20 @@ def isolate_camera_audio(
     isolator, path, stream = ctx.isolator, source.path, source.audio_stream
     start = max(in_point, 0.0)
     end = start + max(duration * segment.speed, 0.01)
+    lead = 0.0
+    if segment.audio_offset:
+        # o som deslocado vem de outro trecho da fonte: separa a voz ou o fundo dele, e o silêncio que antecede o
+        # arquivo (som pedido antes do começo dele) fica por conta de quem monta o ramo de áudio
+        window = shifted_window(in_point, segment.speed, segment.audio_offset)
+        start, lead = window.read_from, window.lead
+        end = start + max(duration * segment.speed - lead, 0.01)
     stems = isolator.stems_for(path, start, end, stream)
 
     def isolate() -> Stems:
         report = progress_logger(ctx.log, f"isolando a voz do {_label(index, ctx)}")
         return isolator.isolate(path, start, end, stream, report)
 
-    return CameraAudio(stems.vocals if segment.audio_mode == "voice" else stems.background, isolate)
+    return CameraAudio(stems.vocals if segment.audio_mode == "voice" else stems.background, isolate, lead)
 
 
 class ClipPreparer:
@@ -212,7 +230,7 @@ class ClipPreparer:
         mode = resolve_reframe_mode(segment.reframe.mode, info.width, info.height, W, H, ctx.has_brand)
         theme_part = _theme_signature(ctx) if mode == "brand" else None
         in_point = source.in_point(segment.start) if segment.source else segment.start
-        tracks = _track_slices(ctx, segment) if segment.source else ()
+        tracks = _track_slices(ctx, segment, index) if segment.source else ()
         duration = segment_duration(segment, info, source.offset)
         matted = (
             matte_source(index, segment, source, in_point, duration, ctx)
@@ -220,7 +238,14 @@ class ClipPreparer:
             else None
         )
         camera_audio = isolate_camera_audio(index, segment, source, in_point, duration, ctx)
+        placement = clip_placement(
+            ctx, index, duration, segment.speed
+        )  # onde o clipe cai (o Vocoder que ouve outra trilha)
         look = segment_look(index, segment, ctx)
+        # o som emprestado dos clipes vizinhos nas duas pontas (J-cut e L-cut); None sem crossfade
+        crossfades = (
+            clip_crossfades(index, ctx.cut_neighbors, ctx.warn) if ctx.cut_neighbors is not None else None
+        )
         key = cache_key(
             MEZZ_VERSION,
             segment.model_dump(mode="json"),  # inclui o audio_mode
@@ -233,9 +258,24 @@ class ClipPreparer:
             mode,
             theme_part,
             in_point,
-            [(str(t.path), t.in_point, t.volume, t.audio_stream) for t in tracks],
+            [
+                (
+                    str(t.path),
+                    t.in_point,
+                    t.volume,
+                    t.audio_stream,
+                    *pan_key_part(t.pan),
+                    *duck_key_part(t.duck),
+                )
+                for t in tracks
+            ],
             matted.path.name if matted else None,  # o nome carrega a chave do recorte
             camera_audio.key if camera_audio else None,  # e a dos stems (arquivo, trecho e modelo)
+            # o perfil de ruído nomeado que a Redução de ruído do clipe usa: mudar o trecho dele muda o som (vazio, e
+            # fora da chave, sem perfil nomeado)
+            *noise_profile_parts(ctx, segment.effects, placement),
+            # o crossfade de som com os vizinhos: a receita e os arquivos de onde o som é emprestado (vazio sem crossfade)
+            *crossfade_key_parts(crossfades),
         )
         out = ctx.cache_dir / f"{key}.mov"
         if camera_audio is not None and _needs_render(out, ctx) and not ctx.options.dry_run:
@@ -254,6 +294,17 @@ class ClipPreparer:
             if _needs_render(backdrop, ctx) and not ctx.options.dry_run:
                 rect = fit_rect(info.width, info.height, W, H, segment.reframe.margin)
                 save_card(render_backdrop(ctx.theme, W, H, segment.reframe.variant, index, rect), backdrop)
+        camera_path = camera_audio.path if camera_audio else None
+        camera_lead = camera_audio.lead if camera_audio else 0.0
+        if _needs_render(out, ctx):
+            # os efeitos do clipe: o som da câmera (ou a voz isolada) entra no mezanino já processado
+            length = max(duration * segment.speed, 0.01)
+            processed = clip_camera_audio(ctx, segment, source, in_point, length, camera_path, placement)
+            if processed is not None:
+                camera_path, camera_lead = (
+                    processed,
+                    0.0,
+                )  # o silêncio inicial já vem dentro do arquivo processado
         command = clip_mezzanine(
             segment,
             info,
@@ -266,12 +317,18 @@ class ClipPreparer:
             in_point=in_point,
             tracks=tracks,
             audio_stream=source.audio_stream,
-            camera_audio=camera_audio.path if camera_audio else None,
+            camera_audio=camera_path,
+            camera_lead=camera_lead,
             backdrop=backdrop,
             has_brand=ctx.has_brand,
             look=look,
             label=_label(index, ctx),
+            crossfades=crossfades,
         )
+        if any(
+            piece.duck for piece in tracks
+        ):  # a curva de um clipe longo passa do limite da linha de comando
+            command = spill_long_graph(command, ctx.job_dir, f"mezanino_{index}.txt")
         return PreparedSegment(
             index,
             segment,
@@ -473,6 +530,7 @@ class MezzanineBuilder:
         instante precisa de dois ou três trechos, e gerar o mezanino dos outros seria trabalho jogado fora."""
         prepared: list[PreparedSegment] = []
         wanted = None if only is None else set(only)
+        ctx.cut_neighbors = self._neighbors(ctx, sources)
         for i, (segment, source) in enumerate(zip(ctx.project.timeline, sources, strict=True)):
             if wanted is not None and i not in wanted:
                 continue
@@ -481,6 +539,26 @@ class MezzanineBuilder:
                 raise TypeError(f"timeline[{i}]: nenhum preparador para {type(segment).__name__}")
             prepared.append(preparer.prepare(i, segment, source, ctx))
         return prepared
+
+    @staticmethod
+    def _neighbors(ctx: RenderContext, sources: list[Source]) -> CutNeighbors | None:
+        """A linha do tempo como o crossfade de som entre clipes lê (fontes e durações dos vizinhos). Sem nenhum clipe com o
+        campo, nada a calcular: o projeto antigo segue o mesmo caminho de sempre."""
+        timeline = ctx.project.timeline
+        if not any(isinstance(seg, ClipSegment) and seg.audio_crossfade for seg in timeline):
+            return None
+        durations = [
+            segment_duration(seg, source.info, source.offset)
+            for seg, source in zip(timeline, sources, strict=True)
+        ]
+
+        def slices_of(i: int) -> tuple[TrackSlice, ...]:
+            segment = timeline[i]
+            if isinstance(segment, ClipSegment) and segment.source:
+                return _track_slices(ctx, segment, i)
+            return ()
+
+        return CutNeighbors(timeline, sources, durations, slices_of)
 
     def build(self, ctx: RenderContext, prepared: list[PreparedSegment]) -> None:
         for item in prepared:

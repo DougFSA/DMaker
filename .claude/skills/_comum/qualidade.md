@@ -17,7 +17,7 @@ de texto que mexe em código.
 ## Portões: todos verdes antes de mergear e de mover o card
 
 Nenhum card é mergeado, nem vai para `Teste Manual`, com portão vermelho. Rode
-sempre os três, da raiz da sua pasta de trabalho (a principal `D:\DMaker` ou o seu
+sempre os três, da raiz da sua pasta de trabalho (a pasta principal, a raiz do clone, ou o seu
 worktree; em worktree, com o `PYTHONPATH` e o venv de `_comum/git.md` →
 "Worktrees"), com o Python do venv (nunca o global):
 
@@ -210,7 +210,8 @@ do card, essa sim, deve descrever o comportamento final; ajuste-a se o
 redesenvolvimento mudou o que ela promete.
 
 Feche a versão na `develop` antes do merge para a `main`: fechar depois faz o
-merge **duplicar** a seção.
+merge **duplicar** a seção. No mesmo commit, o `__version__` de `src/dmaker/__init__.py`
+sobe para `X.0.0` (`dmaker-producao`, passo 7): é a fonte única da versão do pacote.
 
 ## Testes: prenda o que some sem deixar rastro
 

@@ -20,6 +20,7 @@ import {
   type WorkbenchSlot,
 } from '@/lib/editorLayout'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
+import RecordDialog from './audio/RecordDialog.vue'
 import EditorSlot from './EditorSlot.vue'
 import PanelFrame from './PanelFrame.vue'
 import { panelsIn, type EditorPanelDef } from './panels'
@@ -216,6 +217,7 @@ const rowPerPixel = computed(() => 1 / Math.max(gridHeight.value, 1))
     </div>
 
     <p class="visually-hidden" role="status">{{ announcement }}</p>
+    <RecordDialog />
   </div>
 </template>
 

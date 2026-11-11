@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from .audio_effects import rebase_effect_dicts
 from .spec import ClipSegment, Project, Segment
 
 MIN_SEGMENT_DURATION = 0.1  # segundos; nenhum trecho pode ficar mais curto que isso
@@ -64,6 +65,12 @@ def split_segment(project: Project, index: int, at: float, durations: list[float
             first["end"] = split_point
             second["start"] = split_point
             # second["end"] continua o mesmo do original (pode ser None: até o fim da mídia)
+            if original.get("effects"):  # os intervalos dos efeitos seguem o som para a metade a que ele foi
+                whole = duration * speed  # o item inteiro: o fade preso à borda precisa saber onde ela fica
+                first["effects"] = rebase_effect_dicts(original["effects"], 0.0, at * speed, whole)
+                second["effects"] = rebase_effect_dicts(
+                    original["effects"], at * speed, (duration - at) * speed, whole
+                )
         else:
             first["duration"] = at
             second["duration"] = duration - at
@@ -134,6 +141,10 @@ def trim_segment(
                 new_start = start + delta * speed
                 new_start = min(max(new_start, 0.0), end - MIN_SEGMENT_DURATION * speed)
                 seg["start"] = new_start
+                if seg.get("effects") and new_start != start:  # o tempo do item parte do começo do trecho
+                    seg["effects"] = rebase_effect_dicts(
+                        seg["effects"], new_start - start, end - new_start, end - start
+                    )
             else:
                 new_end = end + delta * speed
                 upper = media_duration if media_duration is not None else new_end
@@ -170,6 +181,48 @@ def insert_segment(project: Project, index: int, segment: dict[str, Any]) -> Pro
         data["timeline"].insert(index, dict(segment))
 
     return _clone(project, mutate)
+
+
+def cut_clip_ranges(
+    project: Project,
+    index: int,
+    removed: list[tuple[float, float]],
+    durations: list[float],
+    audio_fade: float,
+) -> Project:
+    """Tira do clipe `index` os intervalos `removed` (segundos desde o começo do clipe, na linha do tempo final, em ordem
+    e sem se tocar), imagem e som juntos. O clipe vira um clipe por trecho que fica, todos da mesma gravação, como o
+    corte automático monta: a boca continua sincronizada porque cada pedaço leva o seu som e a sua imagem do mesmo
+    ponto da fonte. `audio_fade` (segundos) é o fade de áudio posto em cada pedaço, que tira o estalo da emenda.
+
+    Os cortes são feitos do último para o primeiro, para as posições dos que faltam continuarem valendo."""
+    _check_index(len(project.timeline), index, "trecho")
+    if not isinstance(project.timeline[index], ClipSegment):
+        raise EditError(f"o trecho {index} não é um clipe: só ele tem som para truncar")
+    if not removed:
+        return project
+    lengths = list(durations)
+    current = project
+    for start, end in reversed(removed):
+        duration = lengths[index]
+        if end < duration - GAP_TOLERANCE:  # o que vem depois do corte vira o trecho seguinte
+            current = split_segment(current, index, end, lengths)
+            lengths[index : index + 1] = [end, duration - end]
+        if start > GAP_TOLERANCE:  # o que fica antes: parte do trecho, e o meio sai
+            current = split_segment(current, index, start, lengths)
+            lengths[index : index + 1] = [start, lengths[index] - start]
+            current = remove_segment(current, index + 1)
+            del lengths[index + 1]
+        else:  # o corte começa no começo do clipe: o pedaço da frente sai
+            current = remove_segment(current, index)
+            del lengths[index]
+    pieces = len(current.timeline) - (len(project.timeline) - 1)
+
+    def fade(data: dict) -> None:
+        for piece in data["timeline"][index : index + pieces]:
+            piece["audio_fade"] = max(piece.get("audio_fade", 0.0), audio_fade)
+
+    return _clone(current, fade)
 
 
 def restore_gap(project: Project, start: float, end: float | None, origin: str | None = None) -> Project:

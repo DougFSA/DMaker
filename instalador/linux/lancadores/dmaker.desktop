@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DMaker
+Comment=Editor de vídeos curtos por comando
+Exec=@@BIN@@/dmaker ui
+Path=@@DADOS@@
+Terminal=true
+Categories=AudioVideo;Video;

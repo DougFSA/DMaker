@@ -1,10 +1,12 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TimelineItem, TimelineView } from '@/api'
+import { effectContextFor } from '@/lib/audioEffects'
 import { MEDIA_DND_MIME, TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineItem, timelineTrack } from '@/test/editorFixtures'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { reply } from '@/test/routedFetch'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useTimelineStore } from '@/stores/timeline'
 import { useToastsStore } from '@/stores/toasts'
 import TimelinePanel from './TimelinePanel.vue'
@@ -143,12 +145,12 @@ describe('trilhas e rótulos', () => {
     expect(hatch.attributes('style')).toContain('width: 30px')
   })
 
-  it('o cabeçalho mostra só os botões que a trilha tem: M no áudio, H nas camadas, cadeado em todas', async () => {
+  it('o cabeçalho mostra só os botões que a trilha tem: M e S no áudio, H nas camadas, cadeado em todas', async () => {
     await mountTimeline()
     const letters = (id: string) => (wrapper as VueWrapper).findAll(`.row[data-track-id="${id}"] .row__button`).map((button) => button.text())
     expect(letters('V1')).toEqual(['L'])
     expect(letters('V2')).toEqual(['H', 'L'])
-    expect(letters('A1')).toEqual(['M', 'L'])
+    expect(letters('A1')).toEqual(['M', 'L', 'S']) // o solo é do áudio; o ganho e o pan abrem no popover dB
     expect(letters('CC')).toEqual(['H', 'L'])
     expect((wrapper as VueWrapper).find('.row[data-track-id="A2"] [data-track-action="muted"]').classes()).toContain('row__button--on')
   })
@@ -292,7 +294,7 @@ describe('zoom', () => {
     opened.store.setPlayhead(6)
     useTimelineStore().zoomIn()
     await flushPromises()
-    // 92 de cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
+    // o cabeçalho + 6 s a 78 px/s, menos a metade da largura visível
     expect(area.scrollLeft).toBeCloseTo(TRACK_HEADER_WIDTH + 6 * 78 - 300, 6)
   })
 })
@@ -308,10 +310,10 @@ describe('o cursor fica à vista', () => {
 
   it('ao sair pela direita a área rola uma página, e o cursor fica perto da borda esquerda', async () => {
     const area = await mountMeasured()
-    // 92 px de cabeçalho mais 12 s a 60 px/s
+    // 12 s a 60 px/s, menos a folga (o cabeçalho entra nos dois lados da conta)
     opened.store.setPlayhead(12)
     await flushPromises()
-    expect(area.scrollLeft).toBe(92 + 12 * 60 - TRACK_HEADER_WIDTH - 40)
+    expect(area.scrollLeft).toBe(12 * 60 - 40)
     expect(useTimelineStore().scrollLeft).toBe(area.scrollLeft)
   })
 
@@ -653,5 +655,263 @@ describe('a barra de ferramentas e o timecode', () => {
     expect(panel.find('[role="toolbar"]').exists()).toBe(true)
     expect(panel.find('.timecode__now').text()).toBe('00:00:00:00')
     expect(panel.find('.timecode__total').text()).toBe('/ 00:00:12:00')
+  })
+})
+
+describe('a trilha VO (voz gravada)', () => {
+  /** A V1 com um clipe e a trilha VO com dois arquivos de voz, o segundo com dois efeitos. */
+  function voiceoverView(): TimelineView {
+    const voice = (index: number, extra: Partial<TimelineItem> = {}) =>
+      timelineItem(index, { id: `VO-${index}`, kind: 'voiceover', start: index * 4, end: index * 4 + 4, label: `voz${index}.wav`, path: `C:/voz${index}.wav`, ...extra })
+    return {
+      total: 8,
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      warnings: [],
+      sources: {},
+      tracks: [
+        timelineTrack('V1', [timelineItem(0, { id: 'V1-0', start: 0, end: 8, label: 'clip0.mp4' })]),
+        timelineTrack('VO', [voice(0), voice(1, { extra: { effects: 2 } })], { kind: 'audio' }),
+      ],
+    }
+  }
+
+  it('desenha o item voiceover com a classe e a cor próprias, ao lado da narração', async () => {
+    await mountTimeline(voiceoverView())
+    expect(rows()).toEqual(['V1', 'VO'])
+    expect(item('VO-0').classes()).toContain('item--voiceover')
+    expect(item('VO-0').classes()).not.toContain('item--narration')
+    expect(item('VO-0').text()).toBe('voz0.wav')
+    expect((wrapper as VueWrapper).find('.row[data-track-id="VO"] .row__header').attributes('title')).toBe('Voz gravada (VO)')
+  })
+
+  it('clicar no item o seleciona e o alvo dos efeitos é audio.voiceover.<índice>', async () => {
+    await mountTimeline(voiceoverView())
+    await item('VO-1').trigger('mousedown', { button: 0 })
+    expect(opened.store.selection).toEqual(['VO-1'])
+    const context = effectContextFor(opened.store.selectedItems[0] ?? null, opened.store.view)
+    expect(context).toMatchObject({
+      kind: 'chain',
+      chain: { targetKey: 'audio.voiceover.N', listPath: 'audio.voiceover.1.effects' },
+    })
+  })
+
+  it('o mudo da trilha funciona como nas outras de áudio: M, cadeado e solo, sem ocultar', async () => {
+    await mountTimeline(voiceoverView())
+    const letters = (wrapper as VueWrapper).findAll('.row[data-track-id="VO"] .row__button').map((button) => button.text())
+    expect(letters).toEqual(['M', 'L', 'S'])
+    await (wrapper as VueWrapper).find('.row[data-track-id="VO"] [data-track-action="muted"]').trigger('click')
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'set_field', path: 'tracks.VO.muted', value: true } })
+  })
+
+  it('a trilha VO silenciada fica esmaecida como as outras', async () => {
+    const view = voiceoverView()
+    view.tracks[1]!.muted = true
+    const panel = await mountTimeline(view)
+    expect(panel.find('.row[data-track-id="VO"]').classes()).toContain('row--muted')
+  })
+})
+
+describe('a trilha de marcadores (MK)', () => {
+  /** A vista completa mais as trilhas de marcadores: um instante e uma região na padrão, e um instante no grupo "meus". */
+  function markersView(locked = false): TimelineView {
+    const marker = (index: number, start: number, end: number, label: string, group = '') =>
+      timelineItem(index, {
+        id: `MK-${index}`,
+        kind: 'marker',
+        label,
+        start,
+        end,
+        in_point: 0,
+        out_point: null,
+        src: null,
+        extra: { color: index === 0 ? '#e0a020' : null, group, instant: start === end },
+      })
+    const view = fullView()
+    view.tracks.push(
+      timelineTrack('MK', [marker(0, 9.2, 9.2, 'refrão'), marker(1, 2.5, 4.5, 'verso')], { kind: 'markers', locked }),
+      timelineTrack('MK:meus', [marker(2, 7.3, 7.3, 'coda', 'meus')], { kind: 'markers', label: 'MK meus' }),
+    )
+    return view
+  }
+
+  it('desenha uma trilha por grupo: o instante como linha com o texto, a região com as duas alças', async () => {
+    await mountTimeline(markersView())
+    expect(rows().slice(-3)).toEqual(['CC', 'MK', 'MK:meus'])
+    expect(item('MK-0').classes()).toContain('marker--instant')
+    expect(item('MK-0').text()).toBe('refrão')
+    expect(item('MK-0').attributes('style')).toContain('--marker-color: #e0a020')
+    expect(item('MK-0').find('[data-handle]').exists()).toBe(false)
+    expect(item('MK-1').classes()).toContain('marker--region')
+    expect(item('MK-1').findAll('[data-handle]').map((handle) => handle.attributes('data-handle'))).toEqual(['in', 'out'])
+    expect(item('MK-1').attributes('title')).toBe('verso (2,5 a 4,5 s)')
+    expect(header('MK').attributes('title')).toBe('Marcadores (MK)')
+    expect(header('MK:meus').attributes('title')).toBe('Marcadores do grupo meus (MK:meus)')
+  })
+
+  it('o cabeçalho da trilha de marcadores só tem o cadeado', async () => {
+    await mountTimeline(markersView())
+    const buttons = (wrapper as VueWrapper).findAll('.row[data-track-id="MK"] [data-track-action]')
+    expect(buttons.map((button) => button.attributes('data-track-action'))).toEqual(['locked'])
+  })
+
+  it('clicar escolhe o marcador, e ele é um item como os outros para a seleção', async () => {
+    await mountTimeline(markersView())
+    await item('MK-2').trigger('mousedown', { button: 0, clientX: 100 })
+    mouse(document, 'mouseup', 100)
+    expect(opened.store.selection).toEqual(['MK-2'])
+    expect(item('MK-2').classes()).toContain('marker--selected')
+  })
+
+  it('arrastar um marcador pontual manda marker_set com o novo instante', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 + 30)
+    await flushPromises()
+    expect((wrapper as VueWrapper).find('[data-ghost]').exists()).toBe(true)
+    mouse(document, 'mouseup', 300 + 30)
+    await flushPromises()
+    expect(edits()).toHaveLength(1)
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 0, at: 9.7 } })
+  })
+
+  it('arrastar a região a desloca inteira; puxar uma borda muda só aquela ponta', async () => {
+    await mountTimeline(markersView())
+    await item('MK-1').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 - 30)
+    mouse(document, 'mouseup', 300 - 30)
+    await flushPromises()
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 1, start: 2, end: 4 } })
+
+    await item('MK-1').find('[data-handle="out"]').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 300 + 45)
+    mouse(document, 'mouseup', 300 + 45)
+    await flushPromises()
+    expect(edits()[1]?.body).toMatchObject({ op: { type: 'marker_set', index: 1, start: 2.5, end: 5.25 } })
+  })
+
+  it('o gesto grava o projeto ao soltar, como os outros', async () => {
+    const moved = { ...projectSpec(), markers: [{ at: 9.7, text: 'refrão' }] }
+    await mountTimeline(markersView(), { 'POST /api/projects/demo/edit': () => ({ spec: moved, timeline: currentView }) })
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 330)
+    mouse(document, 'mouseup', 330)
+    await flushPromises()
+    const saves = opened.fetch.to('PUT /api/projects/demo')
+    expect(saves).toHaveLength(1)
+    expect(saves[0]?.body).toMatchObject({ markers: [{ at: 9.7, text: 'refrão' }] })
+    expect(opened.store.dirty).toBe(false)
+  })
+
+  it('numa trilha de marcadores bloqueada, o marcador não se escolhe, não se arrasta e não abre a caixa', async () => {
+    await mountTimeline(markersView(true))
+    await item('MK-0').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 340)
+    mouse(document, 'mouseup', 340)
+    await item('MK-0').trigger('dblclick')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(opened.store.selection).toEqual([])
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+    expect(useToastsStore().items.map((toast) => toast.title)).toContain('A trilha MK está bloqueada (cadeado no cabeçalho).')
+  })
+
+  it('o duplo clique abre a caixa de texto com o texto de agora; Enter grava o texto novo', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    const input = (wrapper as VueWrapper).find<HTMLInputElement>('.marker__input')
+    expect(input.exists()).toBe(true)
+    expect(input.element.value).toBe('refrão')
+    await input.setValue('  coda final ')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+    expect(edits()).toHaveLength(1)
+    expect(edits()[0]?.body).toMatchObject({ op: { type: 'marker_set', index: 0, text: 'coda final' } })
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+  })
+
+  it('Esc desiste, e sair da caixa sem mudar o texto não grava nada', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    const input = (wrapper as VueWrapper).find('.marker__input')
+    await input.setValue('outro')
+    await input.trigger('keydown.esc')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+
+    await item('MK-1').trigger('dblclick')
+    await (wrapper as VueWrapper).find('.marker__input').trigger('blur')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+  })
+
+  it('clicar dentro da caixa de texto não começa um arrasto', async () => {
+    await mountTimeline(markersView())
+    await item('MK-0').trigger('dblclick')
+    await (wrapper as VueWrapper).find('.marker__input').trigger('mousedown', { button: 0, clientX: 300 })
+    mouse(document, 'mousemove', 400)
+    mouse(document, 'mouseup', 400)
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect((wrapper as VueWrapper).find('[data-ghost]').exists()).toBe(false)
+  })
+
+  it('o duplo clique em outro tipo de item não abre caixa nenhuma', async () => {
+    await mountTimeline(markersView())
+    await item('TX-0').trigger('dblclick')
+    expect((wrapper as VueWrapper).find('.marker__input').exists()).toBe(false)
+  })
+})
+
+describe('abrir o painel Áudio e a mixagem no cabeçalho', () => {
+  it('o duplo clique num item de áudio abre o painel nele, no alvo certo', async () => {
+    await mountTimeline()
+    const panel = useAudioPanelStore()
+    await item('MUS-0').trigger('dblclick')
+    expect(panel.open).toBe(true)
+    expect(panel.target).toBe('audio.music')
+    await item('NAR-0').trigger('dblclick')
+    expect(panel.target).toBe('audio.narration.0')
+    panel.close()
+    await item('A1-0').trigger('dblclick')
+    expect(panel.target).toBe('timeline.0')
+  })
+
+  it('o duplo clique no vídeo (V1) não abre o painel Áudio', async () => {
+    await mountTimeline()
+    await item('V1-0').trigger('dblclick')
+    expect(useAudioPanelStore().open).toBe(false)
+  })
+
+  it('o botão Editar áudio da barra depende de um item com som selecionado', async () => {
+    await mountTimeline()
+    const button = (wrapper as VueWrapper).get('[data-open-audio]')
+    expect(button.attributes('disabled')).toBeDefined()
+    await item('MUS-0').trigger('mousedown', { button: 0 })
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    expect(useAudioPanelStore().target).toBe('audio.music')
+  })
+
+  it('o solo do cabeçalho e o ganho mandam a operação da trilha, um passo do desfazer cada', async () => {
+    await mountTimeline()
+    await (wrapper as VueWrapper).get('.row[data-track-id="MUS"] [data-track-action="solo"]').trigger('click')
+    await flushPromises()
+    expect(edits().at(-1)?.body).toMatchObject({ op: { type: 'track_set', track: 'MUS', solo: true } })
+    expect(opened.store.canUndo).toBe(true)
+  })
+
+  it('trilha bloqueada recusa o solo e avisa', async () => {
+    const view = fullView()
+    const music = view.tracks.find((track) => track.id === 'MUS')
+    if (music) music.locked = true
+    await mountTimeline(view)
+    await (wrapper as VueWrapper).get('.row[data-track-id="MUS"] [data-track-action="solo"]').trigger('click')
+    await flushPromises()
+    expect(edits()).toHaveLength(0)
+    expect(useToastsStore().items.some((toast) => toast.title.includes('bloqueada'))).toBe(true)
   })
 })

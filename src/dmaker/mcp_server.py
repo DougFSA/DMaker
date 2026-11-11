@@ -16,7 +16,9 @@ from typing import Any, Literal
 from mcp.server.mcpserver import Image, MCPServer
 
 from . import __version__, config
+from .domain.audio_presets import list_audio_presets
 from .domain.brand import available_brands, load_theme
+from .domain.outputs import resolve_output
 from .domain.presets import get_preset, list_presets
 from .domain.spec import Project
 from .pipeline.jobs import Job, JobManager
@@ -46,7 +48,7 @@ def _result_dict(result: Any) -> dict:
         "duration_s": round(result.duration, 2),
         "size_mb": round(result.size_bytes / 1e6, 2),
         "preset": result.preset.id,
-        "resolution": f"{result.preset.width}x{result.preset.height}",
+        "resolution": result.preset.resolution,
         "captions_file": str(result.captions_file) if result.captions_file else None,
         "warnings": result.warnings,
         "job_dir": str(result.job_dir) if result.job_dir else None,
@@ -62,7 +64,7 @@ def _summary_dict(summary: Any) -> dict:
     return {
         "name": summary.name,
         "preset": summary.preset.id,
-        "resolution": f"{summary.preset.width}x{summary.preset.height}",
+        "resolution": summary.preset.resolution,
         "theme": summary.theme.name,
         "total_s": round(summary.total, 2),
         "segments": [
@@ -240,21 +242,400 @@ def validate_project(name_or_path: str) -> dict:
 @server.tool(
     description=(
         "Aplica uma edição pontual na linha do tempo e salva: split (cortar no cursor), remove, move, "
-        "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate "
-        'e set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"). `op` é um dict com '
-        '"type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}.'
+        "trim (aparar entrada/saída), duplicate, insert, overlay_span/overlay_remove/overlay_duplicate, "
+        'set_field (muda um campo pelo caminho, ex.: "timeline.2.speed"), marker_add/marker_set/marker_remove '
+        "(marcadores) e audio_effect (a cadeia de efeitos de áudio de um item: `action` add, remove, move, "
+        'enable, disable, set ou preset (uma cadeia pronta do catálogo: `preset` é o id, ex. podcast_voice); ver `audio_effects`, ex.: {"type": "audio_effect", "action": "add", "target": '
+        '"audio.voiceover.0", "effect": {"type": "amplify", "gain_db": 6}}). Os efeitos espectrais (spectral_delete, '
+        "spectral_multi_tool, spectral_eq, spectral_shelves) agem num retângulo de tempo e frequência: `start`, `end`, "
+        '`low_hz` e `high_hz` no efeito, ou `region: "marker:<texto>"` no pedido, que traz o intervalo e a faixa de '
+        "um marcador espectral. Edição de onda, sobre o som de um "
+        "item (`target`: timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, audio.tracks.N, audio.music "
+        "ou audio.master; `start`/`end` em segundos da linha do tempo): audio_silence, audio_cut, audio_envelope "
+        "(`points`: [{at, db}]), audio_channels (`mode`: mono, swap, left, right), audio_paste (`at`, e "
+        "`start`/`end` do trecho a copiar), audio_duplicate, audio_split (`at`), audio_join, audio_trim (aparar "
+        "fora da seleção), audio_shift (`delta` ou `to`, em segundos), audio_split_stereo e track_set (`track`: "
+        "A1, A2..., MUS, NAR, VO, SFX; `gain_db`, `pan`, `muted`, `solo`); nada disso mexe na imagem. Limpeza do "
+        "som: noise_profile_set (`name`, `target`, `start`/`end` do trecho só de ruído; sem eles, o trecho mais quieto "
+        "do item) e noise_profile_remove (`name`), que cuidam dos perfis da Redução de ruído (ver `noise_profile`), "
+        "auto_duck_add/auto_duck_set/auto_duck_remove (Auto Duck: `background` é a trilha que abaixa e `key` a que comanda, "
+        "ids A1, A2..., MUS, NAR, VO, SFX; `amount_db` -12, `threshold_db` -30, `max_pause` 1, `outer_fade_down`/`outer_fade_up` "
+        "0.5, `inner_fade_down`/`inner_fade_up` 0; set e remove usam `index`; a faixa externa abaixa sob qualquer trilha, e a chave A1 é só o som dos clipes, sem as faixas externas nem os PiPs; a chave SFX de uma faixa externa se mede antes do nivelamento dos efeitos), "
+        "e audio_truncate_silence (`target`: um clipe, que perde a imagem junto, ou uma voz gravada; `threshold_db` "
+        "-20, `min_duration` 0.5, `mode` truncate ou compress, `truncate_to` 0.5, `compress_percent` 50). Fades: "
+        "audio_fade (o fade da borda de um item: `target`, `side` in ou out, `duration` em segundos, 0 tira, `curve` "
+        "linear, logarithmic, exponential, sine ou quadratic), audio_crossfade_tracks (uma trilha some enquanto outra "
+        "entra: `out_target`, `in_target`, `start`/`end`, `kind` constant_gain, constant_power_1, constant_power_2 ou "
+        "custom, com `curve` e `mid_adjust` no custom; grava um Fade Ajustável em cada item, um passo só) e "
+        "audio_crossfade_clips (o crossfade do SOM no corte entre dois clipes, o J-cut e o L-cut: `index` é o clipe "
+        "que entra, `duration` em segundos, 0 tira, `curve` constant_gain, constant_power_1 ou constant_power_2; a "
+        "imagem continua trocando no quadro exato). Sons gerados (ver `audio_generators`): generated_add (`generator`, "
+        '`params`, `start`, e `duration` ou `end` ou `region: "marker:<texto>"`; `volume`, `pan`), generated_set e '
+        "generated_remove (por `index`; `params` se soma aos que o som já tem) e censor_beep (o bipe de censura: silencia o "
+        "item `target` e põe um Tom de 1 kHz no mesmo intervalo, num passo só; diga o intervalo por `word` (a palavra, "
+        "achada na transcrição do item) com `occurrence` e `search_from`/`search_to`, por `region` ou por `start` e `end`; "
+        "`margin` alarga o bipe, `frequency_hz` e `amplitude_db` o ajustam). Gravação do microfone (ver "
+        "`audio_recordings`): audio_record_add (põe uma gravação como voz gravada: `src`, `start`, `duration`), "
+        "audio_punch (regrava o intervalo `start`/`end` de uma voz gravada `target` com a gravação `src` que começou em "
+        "`recorded_at` e dura `duration`; o trecho antigo fica na lista de takes e as emendas levam fade de 10 ms) e "
+        "voiceover_take_set (troca o take que toca: `target`, `take`, a posição na lista). Andamento (ver `audio_tempo`): "
+        "tempo_set (o andamento do projeto: `bpm`, `time_signature` como 4/4, `offset` do tempo 1 em segundos), "
+        "tempo_remove e music_tempo_set (o andamento da música: `bpm`, `beat_offset` e `stretch_to_tempo`, que a estica "
+        "até o andamento do projeto sem mudar o tom); com o andamento, `beat:<n>` e `bar:<n>` valem como instante. `op` é um "
+        'dict com "type" e os parâmetros da operação, ex.: {"type": "split", "index": 1, "at": 2.5}. Onde a '
+        "operação pede um instante (`at` do split, `start`/`end` do overlay_span e das operações de áudio) vale "
+        '"marker:<texto>", o instante de um marcador (com grupo: "marker:<grupo>/<texto>"), e "beat:<n>" ou '
+        '"bar:<n>", o n-ésimo tempo ou compasso da grade do andamento do projeto; no split, sem '
+        "`index`, corta o trecho que contém o marcador. Cortar, remover, aparar ou mover trechos desloca os "
+        "marcadores junto; um marcador que estava num trecho removido some, e o aviso vem em `edit_warnings`. "
+        "Toda edição entra no histórico do projeto: desfaça com `undo_edit` e refaça com `redo_edit`."
     )
 )
 def edit_project(name: str, op: dict) -> dict:
-    from .pipeline.edits import apply_edit
-    from .pipeline.projects import load_project, summarize
-    from .pipeline.projects import save_project as _save
+    from mcp.server.mcpserver.exceptions import ToolError
 
-    project = load_project(name)
-    new_project = apply_edit(project, op)
-    path = _save(new_project)
-    summary = summarize(new_project)
-    return {"spec_path": str(path), **_summary_dict(summary)}
+    from .domain.edits import EditError
+    from .pipeline.edit_history import edit_and_record
+    from .pipeline.projects import summarize
+
+    try:
+        report, path = edit_and_record(name, op)
+    except EditError as exc:
+        # o pedido recusado chega ao cliente com o motivo (um erro inesperado só diria "falhou")
+        raise ToolError(str(exc)) from exc
+    summary = summarize(report.project)
+    result = {"spec_path": str(path), **_summary_dict(summary)}
+    if report.warnings:
+        result["edit_warnings"] = report.warnings
+    if report.notes:  # o que a operação fez (por exemplo, quantos silêncios foram truncados)
+        result["edit_notes"] = report.notes
+    return result
+
+
+def _history_result(outcome) -> dict:
+    """A resposta de `undo_edit` e `redo_edit`: o que foi desfeito ou refeito, quantos passos sobram e o resumo."""
+    from .pipeline.projects import summarize
+
+    result = {
+        "spec_path": str(outcome.path),
+        "step": outcome.label,
+        "undo_steps": outcome.undo_steps,
+        "redo_steps": outcome.redo_steps,
+        **_summary_dict(summarize(outcome.project)),
+    }
+    if outcome.warnings:
+        result["edit_warnings"] = outcome.warnings
+    return result
+
+
+@server.tool(
+    description=(
+        "Desfaz a última edição gravada no projeto (de `edit_project`, das ferramentas de marcadores e de "
+        "`undo_cut`): a spec volta exatamente a como estava antes. Devolve o nome do passo desfeito e quantos "
+        "passos sobram para desfazer e para refazer. Refaça com `redo_edit`; veja a lista com `edit_history`."
+    )
+)
+def undo_edit(name: str) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.edit_history import HistoryError
+    from .pipeline.edit_history import undo_edit as _undo
+
+    try:
+        return _history_result(_undo(name))
+    except HistoryError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Refaz a última edição desfeita por `undo_edit`. Uma edição nova esvazia a pilha do refazer. Devolve o "
+        "nome do passo refeito e quantos passos sobram."
+    )
+)
+def redo_edit(name: str) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.edit_history import HistoryError
+    from .pipeline.edit_history import redo_edit as _redo
+
+    try:
+        return _history_result(_redo(name))
+    except HistoryError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "A lista dos passos do histórico de edições do projeto, do mais recente para o mais antigo: o que "
+        "`undo_edit` desfaria (`undo`) e o que `redo_edit` refaria (`redo`), com o nome e a hora de cada um."
+    )
+)
+def edit_history(name: str) -> dict:
+    from .pipeline.edit_history import history_listing
+
+    return history_listing(name)
+
+
+@server.tool(
+    description=(
+        "O catálogo dos efeitos de áudio que qualquer item de áudio (clipe, voz gravada, narração, música, "
+        "faixa externa, PiP) ou o master recebe em uma cadeia ordenada (`effects` na spec): para cada efeito, "
+        "o tipo, o nome em português e no Audacity, o que faz e os parâmetros (tipo, unidade, padrão e "
+        "faixa); também os campos comuns (`enabled`, `start`/`end` do intervalo) e os alvos aceitos. Ponha, "
+        "mova, ligue ou desligue um efeito com `edit_project` (operação audio_effect). `type` restringe "
+        "a um efeito; `brand` traz também as macros salvas dessa marca (em `presets`)."
+    )
+)
+def audio_effects(type: str | None = None, brand: str | None = None) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import catalog_payload
+
+    try:
+        return catalog_payload(type, brand)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "A resposta de frequência de um efeito de equalização (`bass_treble`, `graphic_eq`, `filter_curve_eq`, "
+        "`highpass`, `lowpass`, `notch`, `low_shelf`, `high_shelf` ou `classic_filter`, ver `audio_effects`): o ganho em "
+        "dB em cada frequência, de 20 Hz a 20 kHz em oitavas, por conta pura, sem rodar o ffmpeg. É a mesma curva que o "
+        "gráfico da interface desenha e que o render aplica. `effect` é o efeito como a spec o escreve, "
+        '{"type": "highpass", "frequency_hz": 80, "slope_db": 24}; `points` é quantas frequências (padrão 256). '
+        "Devolve {hz: [...], db: [...]}."
+    )
+)
+def audio_effect_response(effect: dict, points: int = 256) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.effect_response import effect_frequency_response
+
+    try:
+        return effect_frequency_response(effect, points)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "As macros de áudio (predefinições de efeitos): cadeias de efeitos com nome, que a pessoa salva uma vez e repete. "
+        "Ficam um JSON por macro em assets/macros (globais) e em assets/brands/<marca>/macros (da marca), e aparecem no "
+        "catálogo `audio_effects` com `origin: user`, ao lado das embutidas (as embutidas incluem `clean_narration`, "
+        "`clean_phone_recording`, `mp3_standard` e `ends_fade`). `action`: `list` (as salvas; `brand` junta as dessa "
+        "marca), `show` (uma macro pelo `id`, embutida ou salva, com os efeitos e a `output`), `save` (`label` é o nome; "
+        "a cadeia vem de `effects`, cada efeito como a spec o escreve, OU de `project` + `target`, a cadeia de um item "
+        "do projeto, como `audio.voiceover.0`; `summary` é uma frase opcional; `output` é o formato que vale ao aplicar a "
+        'arquivos, como {"preset": "audio/mp3", "bitrate_k": 192}; `scope` é `global` ou `brand`: com `project`, a '
+        "marca do projeto, e sem ele, a `brand` dada; salvar com o mesmo nome troca a macro) ou `remove` (`id` é o id "
+        "que `list` mostra; `brand` remove da pasta da marca). O intervalo (`start`/`end`) e o bypass não entram. Para "
+        "pôr a macro num item use `edit_project`: "
+        '{"type": "audio_effect", "action": "preset", "target": "audio.voiceover.0", "preset": "<id>"}; para aplicá-la '
+        "a uma pasta de arquivos, `apply_macro`."
+    )
+)
+def audio_effect_presets(
+    action: str = "list",
+    label: str | None = None,
+    effects: list[dict] | None = None,
+    summary: str = "",
+    id: str | None = None,
+    output: dict | None = None,
+    brand: str | None = None,
+    project: str | None = None,
+    target: str | None = None,
+    scope: str = "global",
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import (
+        get_effect_preset,
+        list_user_presets,
+        remove_user_preset,
+        save_user_preset,
+    )
+
+    try:
+        if action == "list":
+            return {"presets": [preset.to_dict() for preset in list_user_presets(brand)]}
+        if action == "show":
+            if not id:
+                raise ToolError("para mostrar, informe o `id` da macro (veja `action: list`)")
+            return get_effect_preset(id, brand).to_dict()
+        if action == "save":
+            if not label:
+                raise ToolError("para salvar, informe `label` (o nome)")
+            if project or target:
+                if not (project and target):
+                    raise ToolError("para salvar a cadeia de um item, informe `project` e `target`")
+                from .pipeline.macros import save_chain_as_macro
+                from .pipeline.projects import load_project
+
+                return save_chain_as_macro(
+                    load_project(project), target, label, scope=scope, summary=summary, output=output
+                ).to_dict()
+            if not effects:
+                raise ToolError("para salvar, informe `effects` (a lista de efeitos) ou `project` e `target`")
+            return save_user_preset(label, effects, summary, output=output, brand=brand).to_dict()
+        if action == "remove":
+            if not id:
+                raise ToolError("para remover, informe o `id` da macro (veja `action: list`)")
+            return remove_user_preset(id, brand).to_dict()
+    except (ValueError, FileNotFoundError) as exc:
+        raise ToolError(str(exc)) from exc
+    raise ToolError(f"ação desconhecida: {action!r}. Use list, show, save ou remove")
+
+
+@server.tool(
+    description=(
+        "Aplica uma macro de áudio (ver `audio_effect_presets`) a uma pasta de arquivos de áudio ou a uma lista de "
+        "arquivos: cada um passa pela cadeia da macro e sai em `out_dir`, no formato `format` (mp3, wav, flac, ogg, opus, "
+        "m4a ou aiff; omitido, vale o da macro). É o Apply Macro to Files do Audacity. O arquivo de entrada nunca é "
+        "mudado, e a saída não pode cair em cima dele. Nada além da cadeia: sem normalização final do master, então um "
+        "arquivo sai no nível que os efeitos da macro deram. `inputs` são pastas (os arquivos de áudio dentro delas) "
+        "e/ou arquivos; `brand` busca a macro também entre as da marca. Roda em segundo plano: devolve `job_id`, que se "
+        "acompanha por `job_status` (progresso arquivo a arquivo e, ao fim, o relatório de cada um). O estado fica em "
+        "`out_dir/.dmaker-macro`: se o processo cair, `resume=true` retoma de onde parou, pula o que já saiu inteiro e "
+        "refaz o que ficou pela metade; sem `resume`, tudo é refeito."
+    )
+)
+def apply_macro(
+    macro: str,
+    inputs: list[str],
+    out_dir: str,
+    format: str | None = None,
+    resume: bool = False,
+    brand: str | None = None,
+    wait_seconds: float = 0,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.audio_effects import get_effect_preset
+    from .pipeline.macro_run import MacroRunError, MacroRunService, plan_macro_run, run_in_job
+
+    try:
+        plan = plan_macro_run(get_effect_preset(macro, brand), inputs, out_dir, format)
+    except (MacroRunError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+    service = MacroRunService()
+    if service.active(plan.out_dir):
+        raise ToolError(f"já há um tratamento rodando em {plan.out_dir}; acompanhe com job_status")
+    job = jobs.start(
+        f"macro {plan.macro.id} ({len(plan.sources)} arquivo(s))",
+        lambda job: run_in_job(service, plan, job, resume=resume),
+        meta={"kind": "macro", "macro": plan.macro.id, "cancellable": True},
+    )
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "macro": plan.macro.id, "files": len(plan.sources), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Pega o perfil de ruído de um trecho de um item de áudio, o primeiro passo da Redução de ruído (efeito "
+        "`noise_reduction`, ver `audio_effects`). `profile` é o nome do perfil; `target` é o item (timeline.N, "
+        "overlays.N, audio.voiceover.N, audio.tracks.N ou audio.music); `start` e `end` são o trecho que só tem o "
+        "chiado, em segundos da linha do tempo (ou marker:<texto>). Sem `start` e `end`, o perfil é o trecho mais "
+        "quieto do item. O perfil fica guardado em audio.noise_profiles (entra no histórico: `undo_edit` o desfaz) e "
+        "a resposta traz o nível do ruído por banda de um terço de oitava, em dBFS. Aplique com `edit_project`: "
+        '{"type": "audio_effect", "action": "add", "target": "audio.voiceover.0", "effect": {"type": '
+        '"noise_reduction", "profile": "<nome>", "reduction_db": 12}}. Sem `profile`, lista os perfis do projeto.'
+    )
+)
+def noise_profile(
+    name: str,
+    profile: str | None = None,
+    target: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.noise_profiles import capture_noise_profile
+    from .pipeline.projects import load_project
+
+    if profile is None:
+        saved = load_project(name).audio.noise_profiles
+        return {"profiles": {key: value.model_dump() for key, value in saved.items()}}
+    if target is None:
+        raise ToolError(
+            "informe o `target`, o item de onde vem o trecho de ruído (por exemplo audio.voiceover.0)"
+        )
+    try:
+        return capture_noise_profile(name, profile, target, start, end)
+    except (EditError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Executa uma ação de um efeito de áudio (as que o catálogo `audio_effects` lista em `actions`): hoje "
+        "`noise_gate` + `analyze_noise`, que mede o ruído de um trecho em que ninguém fala e sugere o limiar do gate "
+        "(o nível do ruído mais 6 dB). `target` é o item (timeline.N, overlays.N, audio.voiceover.N, audio.tracks.N ou "
+        "audio.music); `profile` é um perfil de ruído do projeto (ver `noise_profile`) ou `auto`, o trecho mais quieto do "
+        "item; `start` e `end` marcam o trecho à mão (segundos da linha do tempo ou marker:<texto>). A resposta traz "
+        "`fills` com os valores sugeridos (ex.: threshold_db); a ação só lê, quem grava é `edit_project`."
+    )
+)
+def audio_effect_action(
+    name: str,
+    effect: str,
+    action: str,
+    target: str | None = None,
+    profile: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.effect_actions import run_effect_action
+    from .pipeline.projects import load_project
+
+    params = {"target": target, "profile": profile, "start": start, "end": end}
+    try:
+        return run_effect_action(
+            load_project(name), effect, action, {k: v for k, v in params.items() if v is not None}
+        )
+    except (EditError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(
+    description=(
+        "Plugins de efeito de terceiros (LV2 e LADSPA), como o Gerenciador de Plugins do Audacity. `action`: `list` (os da "
+        "última varredura, com os controles que cada um declara: nome na spec, rótulo, padrão, mínimo e máximo, e o estado), "
+        "`scan` (varre de novo as pastas padrão do sistema, só para leitura, e a pasta de plugins do DMaker), `show` (um "
+        "plugin, por `plugin`: o id ou a referência), `enable` e `disable` (por `plugin`). Para usar um plugin num item, "
+        "ponha o efeito `plugin` com `edit_project` (operação audio_effect): "
+        '{"type": "plugin", "format": "lv2", "plugin": "<URI>", "params": {"<controle>": 0.5}}; no LADSPA o `plugin` é '
+        '"arquivo#rótulo" e os controles são c0, c1... Um plugin ausente ou desabilitado é pulado com um aviso e o '
+        "`validate_project` o cita."
+    )
+)
+def audio_plugins(action: str = "list", plugin: str | None = None) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .pipeline.plugins import PluginUnavailable, plugin_service
+
+    service = plugin_service()
+    try:
+        if action == "scan":
+            service.scan()
+            return service.catalog()
+        if action == "list":
+            return service.catalog()
+        if action in {"show", "enable", "disable"}:
+            if not plugin:
+                raise ToolError(f"`{action}` pede o plugin (o id ou a referência; veja `list`)")
+            if action != "show":
+                service.set_enabled(plugin, action == "enable")
+            return service.catalog(plugin)
+    except PluginUnavailable as exc:
+        raise ToolError(str(exc)) from exc
+    raise ToolError(f"ação desconhecida: {action!r}. Use list, scan, show, enable ou disable")
 
 
 @server.tool(
@@ -262,7 +643,8 @@ def edit_project(name: str, op: dict) -> dict:
         "Vista da linha do tempo multitrilha do projeto (V2/V3... picture-in-picture, TX texto, "
         "GR imagem/barra de progresso, V1 trechos, A1 áudio dos clipes, A2... faixas externas, "
         "NAR narrações (duração real quando já sintetizadas, senão estimada), "
-        "MUS música, CC legendas), com o intervalo de cada item já calculado."
+        "MUS música, CC legendas, MK marcadores: uma trilha por grupo, MK ou MK:<grupo>), com o intervalo de "
+        "cada item já calculado."
     )
 )
 def timeline_view(name: str) -> dict:
@@ -273,6 +655,103 @@ def timeline_view(name: str) -> dict:
     project = load_project(name)
     durations = view_narration_durations(project)
     return project_timeline_view(project, durations).to_dict()
+
+
+# ---------- marcadores (trilha MK) ----------
+
+
+def _markers_tool_error(exc: Exception) -> Exception:
+    """Erro previsto dos marcadores (arquivo ausente, nome ambíguo, intervalo ruim): a mensagem chega ao cliente."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    return ToolError(str(exc))
+
+
+def _markers_summary(result: Any) -> dict:
+    return {
+        "project": result.project.name,
+        "added": result.added,
+        "markers_total": len(result.project.markers),
+        "warnings": result.warnings,
+    }
+
+
+@server.tool(
+    description=(
+        "Importa o `.txt` de marcadores do Audacity (uma linha por rótulo: início, fim e texto separados por "
+        "tabulação, em segundos; a linha de frequência que começa com barra invertida, dos rótulos espectrais, "
+        "também é lida) para o projeto, na trilha de marcadores `group` (vazio = a trilha padrão MK). `replace` "
+        "troca o que o grupo já tinha; sem ele os marcadores entram no fim. Os tempos são do vídeo final. "
+        "Linha ilegível é pulada com aviso."
+    )
+)
+def markers_import(name: str, file: str, group: str = "", replace: bool = False) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import import_labels
+
+    try:
+        return _markers_summary(import_labels(name, Path(file), group, replace))
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "Exporta os marcadores do projeto para o `.txt` do Audacity (início, fim e texto, com seis casas e "
+        "ponto decimal; o instante repete o tempo nas duas colunas). `group` escolhe uma trilha (vazio = a "
+        "padrão); sem ele saem todos. Sem `out`, grava em output/<projeto>-marcadores.txt. `newline`: auto "
+        "(a do sistema, como o Audacity), lf ou crlf. Importar o arquivo de volta dá os mesmos marcadores."
+    )
+)
+def markers_export(
+    name: str,
+    out: str | None = None,
+    group: str | None = None,
+    newline: Literal["auto", "lf", "crlf"] = "auto",
+) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import export_labels
+
+    try:
+        exported = export_labels(name, Path(out) if out else None, group, newline)
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+    return {"path": str(exported.path), "count": exported.count}
+
+
+@server.tool(
+    description=(
+        "Marcadores regulares (como o Regular Interval Labels do Audacity): a cada `interval` segundos OU em "
+        "`parts` partes iguais, de `start` até `end` (padrão: o vídeo inteiro), numerados com `prefix`, a "
+        "partir de `first_number` e com `digits` casas (prefixo 'Parte ' dá 'Parte 1', 'Parte 2'). `kind`: "
+        "region (cada marcador cobre o intervalo) ou instant (marca o começo). 60 s a cada 15 s dá 4 "
+        "marcadores. `replace` troca o que o grupo já tinha."
+    )
+)
+def markers_regular(
+    name: str,
+    interval: float | None = None,
+    parts: int | None = None,
+    start: float = 0.0,
+    end: float | None = None,
+    prefix: str = "",
+    first_number: int = 1,
+    digits: int = 1,
+    group: str = "",
+    color: str | None = None,
+    kind: Literal["region", "instant"] = "region",
+    replace: bool = False,
+) -> dict:
+    from .domain.markers import MarkerError
+    from .pipeline.markers import add_regular_markers
+
+    try:
+        result = add_regular_markers(
+            name, interval, parts, start, end, prefix, first_number, digits, group, color, kind, replace
+        )
+    except (MarkerError, FileNotFoundError) as exc:
+        raise _markers_tool_error(exc) from exc
+    return _markers_summary(result)
 
 
 @server.tool(
@@ -606,7 +1085,7 @@ def _render(
 ) -> dict:
     """Roda um render ligado ao job (progresso e etapas viram eventos)."""
     from .media.ffmpeg import SubprocessRunner
-    from .pipeline import RenderOptions, RenderPipeline
+    from .pipeline import RenderOptions, create_renderer
     from .pipeline.projects import load_project, parse_segments
 
     project = load_project(name_or_path)
@@ -619,7 +1098,7 @@ def _render(
         quiet=True,
         segments=parse_segments(segments),
     )
-    pipeline = RenderPipeline(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
+    pipeline = create_renderer(project, options, runner=SubprocessRunner(sink=job.sink()), log=job.log)
     result = pipeline.run()
     payload = preview_notice(_result_dict(result), preview and not segments)
     if not preview and not segments:
@@ -668,7 +1147,7 @@ def render_project(
 ) -> dict:
     """`segments` = "12-20" renderiza só esses trechos (sem sobreposições/legendas), para revisar vídeos longos."""
     if preset:
-        get_preset(preset)
+        resolve_output(preset)
     if show_ui:
         via_ui = _render_via_ui(
             name_or_path,
@@ -702,7 +1181,7 @@ def export_project(
     name_or_path: str, presets: list[str], wait_seconds: float = 900, show_ui: bool = True
 ) -> dict:
     for p in presets:
-        get_preset(p)
+        resolve_output(p)
     if show_ui:
         via_ui = _export_via_ui(name_or_path, presets, wait_seconds)
         if via_ui is not None:
@@ -714,6 +1193,393 @@ def export_project(
     job = jobs.start(f"export {name_or_path} -> {', '.join(presets)}", work)
     jobs.wait(job, wait_seconds)
     return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Formatos de arquivo de áudio (audio/wav, audio/mp3, audio/flac, audio/ogg, audio/opus, audio/m4a, "
+        "audio/aiff) com o padrão de cada um (taxa, canais, profundidade ou taxa de bits) e os alvos de loudness "
+        "(redes -14, podcast -16, broadcast -23 LUFS). Um projeto cujo output.preset é um destes tem como saída "
+        "só o arquivo de som, sem imagem; a timeline pode ficar vazia."
+    )
+)
+def audio_presets() -> dict:
+    from .domain.loudness import LOUDNESS_TARGETS
+
+    return {
+        "formats": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "extension": a.extension,
+                "lossless": a.lossless,
+                "sample_rate": a.sample_rate,
+                "channels": a.channels,
+                "bit_depths": list(a.bit_depths),
+                "bit_depth": a.bit_depth,
+                "bitrate_modes": list(a.bitrate_modes),
+                "bitrate_mode": a.bitrate_mode,
+                "bitrate_k": a.bitrate_k,
+                "quality": a.quality,
+                "allowed_sample_rates": list(a.sample_rates),
+                "notes": a.notes,
+            }
+            for a in list_audio_presets()
+        ],
+        "loudness_targets": LOUDNESS_TARGETS,
+    }
+
+
+def _audio_tool_error(exc: Exception) -> Exception:
+    """Erro previsto do áudio (marcador inexistente, formato que não aceita a opção, arquivo ausente): a mensagem
+    chega ao cliente em português."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    return ToolError(str(exc))
+
+
+@server.tool(
+    description=(
+        "Exporta o ÁUDIO do projeto para um arquivo, sem imagem: WAV, MP3, FLAC, OGG, Opus, M4A ou AIFF. "
+        "`preset` é o formato (audio/mp3...; omitido, vale o do projeto se for de áudio). `mode`: mix (o projeto "
+        "inteiro), regions (um arquivo por região de marcador, com o texto do marcador no nome; `group` filtra, "
+        "`pauses` exporta também os vazios entre as regiões, `numbered` põe o número na frente), stems (um "
+        "arquivo por trilha de som, NAR, VO, MUS, SFX e A1, que somados reproduzem o mix; `tracks` escolhe) ou "
+        "selection (só `start` a `end`, em segundos ou marker:<texto>). `loudness`: redes (-14), podcast (-16), "
+        "broadcast (-23) ou um número em LUFS; omitido, vale audio.target_lufs do projeto. `sample_rate`, "
+        "`channels`, `bit_depth` (WAV, FLAC, AIFF), `bitrate_k`, `bitrate_mode` (cbr, vbr, abr) e `quality` "
+        "ajustam o arquivo. `out` é o arquivo (mix e seleção), `out_dir` a pasta (regiões e trilhas); sem eles, "
+        "grava em output/. Grava por cima do que já existir. Espera até wait_seconds; se ainda estiver rodando "
+        "devolve job_id para job_status."
+    )
+)
+def audio_export(
+    name: str,
+    preset: str | None = None,
+    mode: Literal["mix", "regions", "stems", "selection"] = "mix",
+    out: str | None = None,
+    out_dir: str | None = None,
+    group: str | None = None,
+    pauses: bool = False,
+    numbered: bool = False,
+    start: float | str | None = None,
+    end: float | str | None = None,
+    tracks: list[str] | None = None,
+    loudness: str | float | None = None,
+    sample_rate: int | None = None,
+    channels: int | None = None,
+    bit_depth: int | None = None,
+    bitrate_k: int | None = None,
+    bitrate_mode: Literal["cbr", "vbr", "abr"] | None = None,
+    quality: float | None = None,
+    wait_seconds: float = 600,
+) -> dict:
+    from .domain.audio_presets import AudioFormatError, EncodingChoices
+    from .domain.markers import MarkerError
+    from .media.ffmpeg import SubprocessRunner
+    from .pipeline.audio_service import export_audio_project, export_request, result_dict
+
+    try:
+        request = export_request(
+            mode, group=group, pauses=pauses, numbered=numbered, start=start, end=end, tracks=tracks
+        )
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+    choices = EncodingChoices(sample_rate, channels, bit_depth, bitrate_mode, bitrate_k, quality)
+
+    def work(job: Job) -> dict:
+        try:
+            result = export_audio_project(
+                name,
+                request,
+                preset=preset,
+                out=out,
+                out_dir=out_dir,
+                loudness=loudness,
+                choices=None if choices.empty else choices,
+                runner=SubprocessRunner(sink=job.sink()),
+                log=job.log,
+            )
+        except (AudioFormatError, MarkerError, FileNotFoundError, KeyError, ValueError) as exc:
+            raise _audio_tool_error(exc) from exc
+        return result_dict(result)
+
+    job = jobs.start(f"áudio {name} ({mode})", work)
+    jobs.wait(job, wait_seconds)
+    return {**job.snapshot(), "result": job.result}
+
+
+@server.tool(
+    description=(
+        "Importa áudio bruto (PCM sem cabeçalho, o 'Import Raw Data' do Audacity) para um projeto: converte `src` "
+        "num WAV na pasta do projeto e o põe em audio.voiceover (voz gravada) em `start` segundos. O arquivo "
+        "original não muda. `encoding`: s8, u8, s16, u16, s24, s32, f32, f64, ulaw ou alaw; `byte_order`: "
+        "little ou big; `channels`; `sample_rate` em Hz; `offset_bytes` pula o começo; `percent` importa só essa "
+        "parte do arquivo. Projeto que não existe nasce como projeto só de áudio. `wav_name` escolhe o nome do WAV "
+        "(sem a extensão); um WAV que já existe só é trocado com overwrite=true."
+    )
+)
+def import_raw_audio(
+    name: str,
+    src: str,
+    encoding: Literal["s8", "u8", "s16", "u16", "s24", "s32", "f32", "f64", "ulaw", "alaw"] = "s16",
+    byte_order: Literal["little", "big"] = "little",
+    channels: int = 1,
+    sample_rate: int = 44100,
+    offset_bytes: int = 0,
+    percent: float = 100.0,
+    start: float = 0.0,
+    volume: float = 1.0,
+    wav_name: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    from .pipeline.audio_import import RawImportError
+    from .pipeline.audio_import import import_raw_audio as run_import
+
+    try:
+        imported = run_import(
+            name,
+            Path(src),
+            encoding=encoding,
+            byte_order=byte_order,
+            channels=channels,
+            sample_rate=sample_rate,
+            offset_bytes=offset_bytes,
+            percent=percent,
+            start=start,
+            volume=volume,
+            name=wav_name,
+            overwrite=overwrite,
+        )
+    except (RawImportError, FileNotFoundError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return {
+        "wav": str(imported.wav),
+        "voiceover_src": imported.source,
+        "duration_s": round(imported.duration, 3),
+        "project_created": imported.created_project,
+    }
+
+
+@server.tool(
+    description=(
+        "O catálogo dos analisadores de áudio (as funções Analyze do Audacity): Contraste (fala contra fundo, "
+        "critério de 20 dB), Achar Clipping, Medir RMS, Espectro de Frequência (espectro, autocorrelação, "
+        "cepstro; CSV e PNG), Marcar Sons, Achar Batidas e Exportar Amostras. Para cada um, o tipo, o nome em "
+        "português e no Audacity, o que faz, se marca, o que exporta e os parâmetros (tipo, unidade, padrão e "
+        "faixa); também de onde o som pode vir. `type` restringe a um analisador. Rode um com `audio_analyze`."
+    )
+)
+def audio_analyzers(type: str | None = None) -> dict:
+    from .analysis import analyzer_catalog
+
+    try:
+        return analyzer_catalog(type)
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "As gravações do microfone de um projeto (a interface grava pelo navegador e manda o som em pedaços de um segundo "
+        "para `projects/<nome>/recordings/<id>/`). `action` list lista todas (com `unfinished=true`, só as que a aba deixou "
+        "abertas, com a duração que chegou e os pedaços que faltam); recover finaliza uma aberta com o que chegou ao disco "
+        "e a põe como voz gravada na linha do tempo, num passo do histórico (`id` omitido vale se há uma só aberta); "
+        "punch aplica uma gravação aberta para regravar um trecho (`id`). O punch-in com o intervalo direto é a operação "
+        "audio_punch do `edit_project`."
+    )
+)
+def audio_recordings(
+    name: str, action: str = "list", id: str | None = None, unfinished: bool = False
+) -> dict:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from .domain.edits import EditError
+    from .pipeline.projects import summarize
+    from .pipeline.recording_attach import attach_recording, listing
+    from .pipeline.recordings import RecordingError
+
+    if action not in ("list", "recover", "punch"):
+        raise ToolError("`action` é list, recover ou punch")
+    try:
+        if action == "list":
+            return {"recordings": listing(name, unfinished)}
+        status, report = attach_recording(name, id, punch=action == "punch")
+    except (RecordingError, EditError, FileNotFoundError) as exc:
+        raise ToolError(str(exc)) from exc
+    result = {"recording": status.to_dict(), **_summary_dict(summarize(report.project))}
+    if report.warnings:
+        result["edit_warnings"] = report.warnings
+    return result
+
+
+@server.tool(
+    description=(
+        "O catálogo dos geradores de som (o menu Gerar do Audacity): Tom (senoidal, quadrada, dente de serra, quadrada "
+        "sem aliasing), Chirp (varredura linear ou log), Ruído (branco, rosa, marrom), Tons DTMF, Silêncio, Pluck, "
+        "Tambor de Risset, Faixa de ritmo e Importar amostras (um texto com um valor por linha). Para cada um, o tipo, o "
+        "nome em português e no Audacity, o que faz, a duração sugerida e os parâmetros (tipo, unidade, padrão e faixa). "
+        "`type` restringe a um gerador. Para um arquivo solto use `audio_generate`; para pôr no projeto, a operação "
+        "generated_add do `edit_project`."
+    )
+)
+def audio_generators(type: str | None = None) -> dict:
+    from .domain.generators import catalog_payload
+
+    try:
+        return catalog_payload(type)
+    except ValueError as exc:
+        raise _audio_tool_error(exc) from exc
+
+
+@server.tool(
+    description=(
+        "Gera um som solto e o grava num WAV (estéreo, ponto flutuante de 32 bits): `generator` é o tipo (veja "
+        "`audio_generators`), `params` os parâmetros dele (os que faltam ficam no padrão), `duration` os segundos (sem "
+        "ela vale a que o gerador pede) e `out` o arquivo .wav de destino. Um arquivo que já existe só é trocado com "
+        "overwrite=true. Devolve o caminho, a duração e o pico medido em dBFS. Por exemplo, um tom de teste: "
+        'generator "tone", params {"frequency_hz": 1000, "amplitude_db": -6}, duration 2.'
+    )
+)
+def audio_generate(
+    generator: str,
+    out: str,
+    params: dict | None = None,
+    duration: float | None = None,
+    overwrite: bool = False,
+) -> dict:
+    from .pipeline.generated_sounds import generate_sound_file
+
+    try:
+        made = generate_sound_file(generator, params, duration, Path(out), overwrite=overwrite)
+    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return made.to_dict()
+
+
+@server.tool(
+    description=(
+        "Analisa o áudio de um projeto sem mudar o som e devolve o resultado estruturado. `analyzer`: contrast, "
+        "clipping, rms, spectrum, sounds, beats ou samples (veja `audio_analyzers`). O som vem de `target`: um item "
+        "como ele soa, com os efeitos e o ganho (timeline.N, overlays.N, audio.voiceover.N, audio.narration.N, "
+        "audio.music, audio.tracks.N), `output` (a saída final já renderizada, o padrão) ou de `file`, um arquivo "
+        "solto. `start` e `end` recortam o item (segundos do áudio dele ou marker:<texto>); `params` são os "
+        'parâmetros do analisador (ex.: {"start_threshold": 3}). Marcar Sons e Achar Batidas gravam marcadores no '
+        "grupo `group` (sons e batidas por padrão; rodar de novo troca só aquele grupo, e os marcadores da pessoa "
+        "ficam como estão); `mark` liga ou desliga isso (o Achar Clipping marca com mark=true). `out` exporta o "
+        "resultado: .csv ou .txt (tabela), .png (gráfico do espectro) ou .json. Grava por cima do que já existir."
+    )
+)
+def audio_analyze(
+    name: str,
+    analyzer: str,
+    target: str | None = None,
+    file: str | None = None,
+    start: float | str | None = None,
+    end: float | str | None = None,
+    params: dict | None = None,
+    mark: bool | None = None,
+    group: str | None = None,
+    out: str | None = None,
+) -> dict:
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AnalysisRequest, AudioAnalysisService, analyze_project
+
+    request = AnalysisRequest(
+        analyzer, params or {}, target=target, file=file, start=start, end=end, mark=mark, group=group
+    )
+    try:
+        outcome = analyze_project(name, request, out=out, service=AudioAnalysisService(_analysis_runner()))
+    except (ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return outcome.to_dict()
+
+
+def _analysis_runner() -> Any:
+    from .media.ffmpeg import SubprocessRunner
+
+    return SubprocessRunner(quiet=True)
+
+
+@server.tool(
+    description=(
+        "Cortar no ritmo: para cada fronteira entre dois clipes, acha a batida da música mais perto (dentro de "
+        "`tolerance` segundos) e diz quanto o corte andaria. Por padrão só PROPÕE e devolve a lista (nada é "
+        "gravado); com apply=true, cada fronteira anda por duas aparas (a saída de um clipe e a entrada do "
+        "outro, o mesmo tanto, sem mudar a duração) e os marcadores acompanham. As batidas vêm do Achar Batidas "
+        "sobre `source` (a música, por padrão) com `params`, ou de um grupo de marcadores `group` que já existe. Com "
+        'source="grid" as batidas são os tempos do andamento do projeto (audio.tempo; `params` {"level": "bar"} usa só '
+        "os inícios de compasso): o corte cai exatamente na grade."
+    )
+)
+def cut_on_beat(
+    name: str,
+    source: str = "audio.music",
+    tolerance: float = 0.2,
+    apply: bool = False,
+    group: str | None = None,
+    params: dict | None = None,
+) -> dict:
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AudioAnalysisService
+    from .pipeline.beat_cut import cut_on_beat as run_cut_on_beat
+
+    try:
+        outcome = run_cut_on_beat(
+            name,
+            source=source,
+            tolerance=tolerance,
+            apply=apply,
+            group=group,
+            params=params,
+            service=AudioAnalysisService(_analysis_runner()),
+        )
+    except (ValueError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
+    return outcome.to_dict()
+
+
+@server.tool(
+    description=(
+        "O andamento (BPM) do projeto e da música. `action`: show devolve o andamento do projeto (audio.tempo: bpm, "
+        "fórmula de compasso, onde cai o tempo 1) e o da música (audio.music.bpm, beat_offset, stretch_to_tempo); detect "
+        "sugere o BPM e o primeiro tempo do ARQUIVO da música (com a confiança e a metade e o dobro como outras leituras) e, "
+        "com apply=true, grava os dois na música num passo do histórico; grid lista os tempos (level=beat) ou os inícios de "
+        "compasso (level=bar) entre `start` e `end` (padrão: o vídeo inteiro). Definir o andamento do projeto é a operação "
+        'tempo_set do `edit_project` ({"type": "tempo_set", "bpm": 120, "time_signature": "4/4", '
+        '"offset": 0}); a música no andamento é music_tempo_set ({"bpm": 100, "beat_offset": 0.12, '
+        '"stretch_to_tempo": true}), que estica a música sem mudar o tom. Com o andamento definido, `beat:<n>` e '
+        "`bar:<n>` (a partir de 1) valem onde `marker:<texto>` vale."
+    )
+)
+def audio_tempo(
+    name: str,
+    action: str = "show",
+    apply: bool = False,
+    start: float | None = None,
+    end: float | None = None,
+    level: str = "beat",
+) -> dict:
+    from .domain.edits import EditError
+    from .media.ffmpeg import FFmpegError
+    from .pipeline.audio_analysis import AudioAnalysisService
+    from .pipeline.projects import load_project
+    from .pipeline.tempo_detect import detect_music_tempo, grid_listing, tempo_summary
+    from .pipeline.timeline_service import project_timeline_view
+
+    if action not in ("show", "detect", "grid"):
+        raise _audio_tool_error(ValueError("`action` é show, detect ou grid"))
+    try:
+        project = load_project(name)
+        if action == "show":
+            return tempo_summary(project)
+        if action == "detect":
+            outcome = detect_music_tempo(name, apply=apply, service=AudioAnalysisService(_analysis_runner()))
+            return outcome.to_dict()
+        total = project_timeline_view(project).total
+        return grid_listing(project, 0.0 if start is None else start, total if end is None else end, level)
+    except (ValueError, EditError, FileNotFoundError, FFmpegError) as exc:
+        raise _audio_tool_error(exc) from exc
 
 
 @server.tool(
@@ -962,7 +1828,8 @@ def contact_sheet(video: str, cols: int = 3, rows: int = 3, width: int = 320) ->
     description=(
         "Relatório de QA em texto: checagens automáticas que não precisam de olho humano (zona segura, "
         "ritmo de leitura, sobreposições, contraste, legendas e, com output=true, a saída renderizada: "
-        "duração, resolução, quadros pretos, silêncio, loudness). Rode antes de contact_sheet/frames; "
+        "duração, resolução, quadros pretos, silêncio, loudness, som estourado (clipping, com o instante) e, "
+        "havendo música, o contraste entre a fala e a música). Rode antes de contact_sheet/frames; "
         "essas duas só quando o relatório apontar algo ou o usuário pedir para olhar."
     )
 )
@@ -980,15 +1847,9 @@ def qa_report(name_or_path: str, output: bool = True) -> dict:
 
 def _latest_final_output(project: Project) -> Path | None:
     """A última saída final (não preview) já renderizada para o preset da spec, se houver."""
-    if not config.OUTPUT_DIR.exists():
-        return None
-    preset_id = get_preset(project.output.preset).id.replace("/", "-")
-    files = sorted(
-        config.OUTPUT_DIR.glob(f"{project.name}__{preset_id}.mp4"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    return files[0] if files else None
+    from .pipeline.final_output import latest_final_output
+
+    return latest_final_output(project)
 
 
 @server.tool(

@@ -11,19 +11,92 @@ Convenções:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .. import config
 from .atomic_file import read_bytes_retrying, write_bytes_atomic
+from .audio_effects import AudioEffect
+from .audio_presets import (
+    AudioFormatError,
+    EncodingChoices,
+    get_audio_preset,
+    is_audio_preset,
+    resolve_encoding,
+)
+from .auto_duck import AutoDuck
+from .carrier_tracks import check_carrier_pair, find_cycle
 from .curves import Curve
+from .generators import normalized_params
+from .pitch_tempo import MAX_TIME_RATIO, MIN_TIME_RATIO
+from .tempo_grid import MAX_BPM, MIN_BPM, Tempo
 from .transitions import all_transition_names
 
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# ---------- cadeia de efeitos de áudio ----------
+
+# onde um efeito que muda a duração do item (Repetir) é aceito; a mensagem de recusa cita estes lugares
+GROWABLE_AUDIO = "voz gravada (audio.voiceover) e música (audio.music)"
+
+
+class EffectsOwner(Strict):
+    """Item da spec que tem uma lista de efeitos de áudio (`effects`, ou `master_effects` no barramento final).
+
+    Fica de fora do dump a lista vazia: um projeto sem efeitos gera exatamente os mesmos bytes e o mesmo hash de
+    cache de antes de o campo existir. E recusa, na hora de carregar a spec, o efeito que muda a duração onde o
+    item não pode crescer (os vídeos, as faixas externas e a narração têm a duração presa ao resto da edição)."""
+
+    effect_fields: ClassVar[tuple[str, ...]] = ("effects",)
+    effects_place: ClassVar[str] = "item"  # como a mensagem de recusa chama o lugar
+    effects_may_grow: ClassVar[bool] = False  # se um efeito que muda a duração é aceito aqui
+    # campos de mixagem (deslocamento, pan) que ficam fora do dump enquanto valem o padrão, pelo mesmo motivo da
+    # lista vazia: o hash de cache e o `spec.json` de um projeto antigo seguem idênticos
+    omitted_at_default: ClassVar[dict[str, Any]] = {}
+
+    @model_validator(mode="after")
+    def _effects_fit_here(self) -> EffectsOwner:
+        if self.effects_may_grow:
+            return self
+        for name in self.effect_fields:
+            for effect in getattr(self, name):
+                if effect.alters_duration():
+                    advice = f" {effect.duration_advice}" if effect.duration_advice else ""
+                    raise ValueError(
+                        f"{self.effects_place}: o efeito {effect.label} muda a duração do item e não vale "
+                        f"aqui. Ele vale em {GROWABLE_AUDIO}.{advice}"
+                    )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_effects(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for name in self.effect_fields:
+            if name in data and not data[name]:
+                del data[name]
+        for name, default in self.omitted_at_default.items():
+            if name in data and data[name] == default:
+                del data[name]
+        return data
+
+
+# Quanto o som de um clipe, de um PiP ou de uma faixa externa pode andar em relação à imagem (segundos): o
+# bastante para corrigir uma câmera dessincronizada, sem deixar uma troca de arquivo passar por deslocamento
+MAX_AUDIO_OFFSET = 60.0
 
 
 # Camada de uma sobreposição na pilha de profundidade: "front" fica na frente de tudo; "behind-person" fica entre o
@@ -157,6 +230,17 @@ class Transition(Strict):
         return v
 
 
+class AudioCrossfade(Strict):
+    """Crossfade do SOM no corte entre este clipe e o anterior, independente da imagem (que continua trocando no
+    quadro exato): o som de cada lado vem da sobra da fonte além do ponto de entrada e do de saída, e os dois se cruzam
+    por `duration` segundos, metade antes do corte e metade depois (o J-cut e o L-cut do vídeo). `curve` é o tipo do
+    crossfade: `constant_gain` soma as amplitudes (sons iguais e em fase), `constant_power_1` e `constant_power_2` somam as
+    potências (sons diferentes, a escolha de quase todo corte entre falas)."""
+
+    duration: float = Field(0.5, gt=0, le=5)
+    curve: Literal["constant_gain", "constant_power_1", "constant_power_2"] = "constant_power_1"
+
+
 class SegmentBase(Strict):
     label: str | None = None
     transition: Transition | None = None  # entrada deste trecho, a partir do anterior
@@ -169,7 +253,7 @@ class SegmentBase(Strict):
     look: str | None = None
 
 
-class ClipSegment(SegmentBase):
+class ClipSegment(SegmentBase, EffectsOwner):
     """Trecho de vídeo. Com `src`, start/end são tempos no arquivo. Com `source` (nome em
     `project.sources`), start/end são tempos no relógio da sessão (o da fonte principal): é assim
     que se corta entre câmeras sincronizadas sem calcular pontos de entrada na mão.
@@ -192,6 +276,18 @@ class ClipSegment(SegmentBase):
     # fade de áudio curto nas duas pontas do clipe, sem escurecer a imagem (ao contrário de fade_in/fade_out):
     # tira o estalo de um corte seco no meio da fala, como os de `autocut`. 0 = sem fade
     audio_fade: float = Field(0.0, ge=0, le=0.5)
+    # desloca o som em relação à imagem, em segundos da linha do tempo: positivo atrasa o som (a fala chega depois
+    # do lábio), negativo adianta. O som pode vir de fora de `start`/`end` na fonte; onde a fonte não tem som, sai silêncio
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
+    # equilíbrio esquerda/direita do som do trecho, de -1 (tudo à esquerda) a 1 (tudo à direita)
+    pan: float = Field(0.0, ge=-1, le=1)
+    # cadeia de efeitos no som da própria câmera do trecho (ver `domain/audio_effects`), em ordem
+    effects: list[AudioEffect] = []
+    # crossfade do som no corte com o clipe anterior (ver `AudioCrossfade`); vazio, fora do dump e do hash
+    audio_crossfade: AudioCrossfade | None = None
+
+    effects_place: ClassVar[str] = "clipe"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0, "audio_crossfade": None}
 
     @model_validator(mode="after")
     def _range(self) -> ClipSegment:
@@ -364,7 +460,7 @@ class ProgressBar(Strict):
     track_alpha: float = Field(0.25, ge=0, le=1)
 
 
-class VideoOverlay(Strict):
+class VideoOverlay(EffectsOwner):
     """Picture-in-picture: um segundo vídeo (webcam, câmera 2) sobre a linha do tempo, como no
     Shotcut (Size & Position + Crop Circle/Mask): retângulo, formato, borda, sombra e o áudio misturado."""
 
@@ -396,9 +492,15 @@ class VideoOverlay(Strict):
     opacity: float = Field(1.0, ge=0, le=1)
     margin: float = Field(40, ge=0)
     volume: float = Field(1.0, ge=0, le=4)  # áudio do PiP misturado (0 = mudo)
+    # desloca o som do PiP em relação à imagem dele (positivo atrasa o som), como em `ClipSegment.audio_offset`
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
+    effects: list[AudioEffect] = []  # cadeia de efeitos no áudio do PiP, em ordem
     animation: Literal["none", "fade", "slide"] = "fade"
     fade: float = Field(0.3, ge=0)
     sound: SoundSpec | None = None  # som na entrada do quadro (em `start`)
+
+    effects_place: ClassVar[str] = "sobreposição de vídeo (PiP)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0}
 
     @model_validator(mode="after")
     def _origin(self) -> VideoOverlay:
@@ -412,6 +514,18 @@ class VideoOverlay(Strict):
             raise ValueError("vídeo com `region` não leva `x` nem `y`: a região já define o lugar")
         if not all(0 <= v <= 1 for v in self.focus):
             raise ValueError("focus do vídeo precisa ter os dois valores entre 0 e 1")
+        return self
+
+    @model_validator(mode="after")
+    def _no_carrier_track(self) -> VideoOverlay:
+        """A sobreposição não é trilha da linha do tempo (o Auto Duck também não a cita): não há id para a portadora apontar
+        de volta nem lugar na mixagem de onde o Vocoder leria a trilha."""
+        for effect in self.effects:
+            if effect.carrier_track_id() is not None:
+                raise ValueError(
+                    f"{self.effects_place}: o efeito {effect.label} não aceita `carrier_track` aqui, porque a sobreposição "
+                    "não é uma trilha da linha do tempo; deixe a portadora gerada"
+                )
         return self
 
 
@@ -655,7 +769,7 @@ class MusicSpan(Strict):
         return self
 
 
-class Music(Strict):
+class Music(EffectsOwner):
     src: str
     volume: float = Field(0.18, ge=0, le=2)
     fade_in: float = Field(1.0, ge=0)
@@ -667,17 +781,53 @@ class Music(Strict):
     duck_threshold: float = Field(0.02, gt=0, le=1)
     duck_ratio: float = Field(6, ge=1, le=20)
     duck_release: float = Field(350, ge=10, le=5000)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[AudioEffect] = []  # cadeia de efeitos na música inteira (antes das janelas e do loop)
+    # andamento próprio da música (batidas por minuto) e onde cai o primeiro tempo dentro do ARQUIVO (segundos). Com o
+    # andamento do projeto (`audio.tempo`) e `stretch_to_tempo`, a música é esticada, sem mudar o tom, até casar com a
+    # grade. Os três ficam fora do dump enquanto valem o padrão: o hash de um projeto antigo não muda
+    bpm: float | None = Field(None, ge=MIN_BPM, le=MAX_BPM)
+    beat_offset: float = Field(0.0, ge=0, le=3600)
+    stretch_to_tempo: bool = False
+
+    effects_place: ClassVar[str] = "música"
+    effects_may_grow: ClassVar[bool] = True
+    omitted_at_default: ClassVar[dict[str, Any]] = {
+        "pan": 0.0,
+        "bpm": None,
+        "beat_offset": 0.0,
+        "stretch_to_tempo": False,
+    }
+
+    @model_validator(mode="after")
+    def _stretch_needs_bpm(self) -> Music:
+        if self.stretch_to_tempo and self.bpm is None:
+            raise ValueError(
+                "música: stretch_to_tempo precisa do andamento da música (audio.music.bpm); detecte-o com "
+                "`dmaker audio tempo detect` ou informe-o"
+            )
+        return self
 
 
-class AudioTrack(Strict):
+class AudioTrack(EffectsOwner):
     """Faixa externa sincronizada (gravador no altar, mesa do DJ) que segue os cortes dos clipes
     com `source`. É misturada ao áudio das câmeras em cada trecho."""
 
     source: str
     volume: float = Field(1.0, ge=0, le=4)
+    # desloca a faixa em relação à sessão, em segundos: positivo atrasa o som da faixa (corrige um gravador que
+    # começou adiantado em relação às câmeras), negativo adianta
+    audio_offset: float = Field(0.0, ge=-MAX_AUDIO_OFFSET, le=MAX_AUDIO_OFFSET)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[
+        AudioEffect
+    ] = []  # cadeia de efeitos no arquivo inteiro da faixa, antes de fatiar por trecho
+
+    effects_place: ClassVar[str] = "faixa externa (audio.tracks)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"audio_offset": 0.0, "pan": 0.0}
 
 
-class Narration(Strict):
+class Narration(EffectsOwner):
     """Fala sintetizada por texto, misturada como voz do vídeo (a música abaixa sob ela). O texto vem de
     `text` ou de `script` (arquivo .txt relativo ao projeto, como os outros caminhos), nunca dos dois.
     `voice` é o id de uma voz de `assets/voices`; sem ela, a voz automática do motor."""
@@ -691,6 +841,11 @@ class Narration(Strict):
     speed: float = Field(1.0, ge=0.5, le=2)
     language: str = "pt"
     seed: int | None = None  # fixa a síntese: o mesmo texto soa igual a cada render
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[AudioEffect] = []  # cadeia de efeitos na fala já sintetizada
+
+    effects_place: ClassVar[str] = "narração (audio.narration)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
 
     @model_validator(mode="after")
     def _one_source(self) -> Narration:
@@ -701,7 +856,26 @@ class Narration(Strict):
         return self
 
 
-class VoiceoverClip(Strict):
+class Take(Strict):
+    """Uma versão alternativa do trecho de uma voz gravada (o punch-in guarda a gravação antiga aqui): o mesmo recorte
+    `offset`..`end` de um arquivo, com a mesma duração do trecho que o item toca. Trocar o take ativo (`voiceover_take_set`)
+    põe estes campos no item e leva os dele para cá, então a lista só tem os que NÃO estão tocando."""
+
+    src: str = Field(min_length=1)
+    offset: float = Field(0.0, ge=0)
+    end: float = Field(gt=0)
+    label: str = ""
+
+    @model_validator(mode="after")
+    def _range(self) -> Take:
+        if self.end <= self.offset:
+            raise ValueError(
+                f"take {self.src}: end ({self.end}) precisa ser maior que offset ({self.offset})"
+            )
+        return self
+
+
+class VoiceoverClip(EffectsOwner):
     """Arquivo de áudio gravado (corte de podcast, entrevista, áudio de WhatsApp) posto na linha do tempo como
     voz do vídeo, sem precisar de um trecho de vídeo nem de uma fonte sincronizada. Entra no mesmo barramento
     de voz da narração: a música abaixa sob ele, os efeitos sonoros se nivelam por ele e a legenda `auto` o
@@ -714,6 +888,16 @@ class VoiceoverClip(Strict):
     offset: float = Field(0.0, ge=0)
     end: float | None = Field(None, ge=0)
     volume: float = Field(1.0, ge=0, le=4)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[AudioEffect] = []  # cadeia de efeitos no trecho do arquivo (de `offset` a `end`), em ordem
+    takes: list[
+        Take
+    ] = []  # os outros takes deste trecho (o punch-in guarda o antigo); fora do dump quando vazio
+    take_label: str = ""  # como o take que toca agora aparece na lista; fora do dump quando vazio
+
+    effects_place: ClassVar[str] = "voz gravada (audio.voiceover)"
+    effects_may_grow: ClassVar[bool] = True
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0, "takes": [], "take_label": ""}
 
     @model_validator(mode="after")
     def _range(self) -> VoiceoverClip:
@@ -722,7 +906,59 @@ class VoiceoverClip(Strict):
         return self
 
 
-class AudioSettings(Strict):
+# Teto da duração de um som gerado: dez minutos. O som nasce inteiro em memória (float, estéreo, 48 kHz: uns 23 MB por
+# minuto) antes de ir para o cache, e um gerador de teste ou de efeito não pede mais que isso.
+GENERATED_MAX_SECONDS = 600.0
+
+
+class GeneratedSound(EffectsOwner):
+    """Som sintetizado posto na linha do tempo (item de `audio.generated`): um tom, um ruído, um bipe, um metrônomo.
+
+    `generator` é o tipo registrado (`domain/generators`) e `params` os parâmetros dele, completados com os padrões na hora
+    de carregar (dois pedidos iguais dão a mesma spec). `start` e `duration` são do vídeo final. Entra no barramento dos
+    efeitos sonoros (`SFX`): soma depois do ducking e antes do loudnorm, sem abaixar a música. O nível é o do gerador
+    (`amplitude_db`) vezes o `volume`, sem nivelar contra a voz como os sons da biblioteca; a cadeia de efeitos vale nele."""
+
+    generator: str = Field(min_length=1)
+    params: dict[str, Any] = {}
+    start: float = Field(0.0, ge=0)
+    duration: float = Field(gt=0, le=GENERATED_MAX_SECONDS)
+    volume: float = Field(1.0, ge=0, le=4)
+    pan: float = Field(0.0, ge=-1, le=1)  # equilíbrio esquerda/direita, de -1 a 1
+    effects: list[AudioEffect] = []  # cadeia de efeitos no som já gerado
+
+    effects_place: ClassVar[str] = "som gerado (audio.generated)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {"pan": 0.0}
+
+    @model_validator(mode="after")
+    def _params_fit_generator(self) -> GeneratedSound:
+        try:
+            self.params = normalized_params(self.generator, self.params)
+        except ValueError as exc:
+            raise ValueError(f"audio.generated: {exc}") from exc
+        return self
+
+
+class NoiseProfile(Strict):
+    """Um trecho que só tem o chiado de fundo, guardado com um nome para a Redução de ruído (`noise_reduction`) usar.
+    `target` é o item de onde o trecho vem (`audio.voiceover.0`, `timeline.2`...), como em `edit_project`; `start` e
+    `end` são segundos do item, e não da linha do tempo, para o perfil seguir o item quando ele muda de lugar. O
+    espectro do trecho é medido na hora de processar e nunca fica na spec."""
+
+    target: str = Field(min_length=1)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> NoiseProfile:
+        if self.end <= self.start:
+            raise ValueError(
+                f"perfil de ruído: end ({self.end:g}) precisa ser maior que start ({self.start:g})"
+            )
+        return self
+
+
+class AudioSettings(EffectsOwner):
     music: Music | None = None
     tracks: list[AudioTrack] = []
     narration: list[Narration] = []  # falas sintetizadas por texto, somadas à voz antes da música
@@ -735,12 +971,106 @@ class AudioSettings(Strict):
     normalize: Literal["two-pass", "fast", "off"] = "two-pass"
     target_lufs: float = Field(-14, ge=-30, le=-5)
     mute_clips: bool = False
+    # cadeia de efeitos na mistura inteira: depois da música, da voz e dos efeitos sonoros e antes da
+    # normalização final, que continua valendo por cima
+    master_effects: list[AudioEffect] = []
+    # ganho (dB) e equilíbrio (-1 a 1) do barramento dos efeitos sonoros: o que o estado da trilha SFX
+    # (`Project.tracks`) vira na hora de renderizar, junto com o mudo (-120 dB). Ficam fora do dump no padrão
+    sfx_gain_db: float = Field(0.0, ge=-120, le=24)
+    sfx_pan: float = Field(0.0, ge=-1, le=1)
+    # perfis de ruído com nome (ver `NoiseProfile`): a Redução de ruído aponta um deles por `profile`. Vazio fica fora do
+    # dump, então um projeto sem perfil gera os mesmos bytes e o mesmo hash de antes de o campo existir
+    noise_profiles: dict[str, NoiseProfile] = {}
+    # regras do Auto Duck (ver `AutoDuck`): uma trilha abaixa enquanto OUTRA soa. A regra da música (`background: "MUS"`)
+    # substitui o `music.ducking` antigo. Vazio fica fora do dump, pelo mesmo motivo dos perfis de ruído
+    ducks: list[AutoDuck] = []
+    # sons sintetizados (tom, ruído, bipe, metrônomo...), no barramento dos efeitos sonoros (SFX). Vazio fica fora do
+    # dump, então um projeto sem som gerado mantém os mesmos bytes e o mesmo hash
+    generated: list[GeneratedSound] = []
+    # o andamento do projeto (ver `Tempo`): a régua em compassos, o encaixe e as referências beat:/bar:. Ausente fica fora do
+    # dump, então um projeto sem andamento gera os mesmos bytes e o mesmo hash de antes de o campo existir
+    tempo: Tempo | None = None
+
+    effect_fields: ClassVar[tuple[str, ...]] = ("master_effects",)
+    effects_place: ClassVar[str] = "áudio mestre (audio.master_effects)"
+    omitted_at_default: ClassVar[dict[str, Any]] = {
+        "sfx_gain_db": 0.0,
+        "sfx_pan": 0.0,
+        "noise_profiles": {},
+        "ducks": [],
+        "generated": [],
+        "tempo": None,
+    }
+
+    @model_validator(mode="after")
+    def _stretch_fits(self) -> AudioSettings:
+        """A razão entre o andamento do projeto e o da música tem que caber no que o Mudar Andamento aceita (de 0,1 a 10)."""
+        music, tempo = self.music, self.tempo
+        if music is not None and tempo is not None and music.stretch_to_tempo and music.bpm is not None:
+            ratio = tempo.bpm / music.bpm
+            if not MIN_TIME_RATIO <= ratio <= MAX_TIME_RATIO:
+                raise ValueError(
+                    f"música: esticar de {music.bpm:g} para {tempo.bpm:g} BPM pede uma razão de {ratio:.2f}, fora do "
+                    f"que o esticamento aceita ({MIN_TIME_RATIO:g} a {MAX_TIME_RATIO:g}); confira o andamento da música"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _master_runs_live(self) -> AudioSettings:
+        """O áudio mestre roda dentro do grafo ao vivo da mistura; um efeito de amostras (Redução de ruído, Reparar)
+        precisa do sinal na memória e vale nos itens."""
+        for effect in self.master_effects:
+            if effect.item_only():
+                raise ValueError(
+                    f"{self.effects_place}: o efeito {effect.label} {effect.item_only_reason()} e não vale "
+                    "na mistura inteira. Ponha-o no clipe, na voz gravada ou na faixa que tem o ruído"
+                )
+        return self
 
 
 # ---------- saída e projeto ----------
 
 
+class AudioFormat(Strict):
+    """Escolhas do arquivo de áudio por cima do padrão do preset (`audio/mp3`, `audio/wav`...): o que não vem aqui
+    fica como o preset define (`domain/audio_presets.py`). `bit_depth` vale nos formatos sem perda (32 é ponto
+    flutuante); `bitrate_mode`, `bitrate_k` e `quality` valem nos com perda (VBR usa a qualidade, CBR e ABR a
+    taxa de bits)."""
+
+    sample_rate: int | None = Field(None, ge=8000, le=192000)
+    channels: Literal[1, 2] | None = None
+    bit_depth: Literal[16, 24, 32] | None = None
+    bitrate_mode: Literal["cbr", "vbr", "abr"] | None = None
+    bitrate_k: int | None = Field(None, ge=8, le=512)  # kbps
+    quality: float | None = Field(None, ge=-1, le=10)
+
+    def choices(self) -> EncodingChoices:
+        return EncodingChoices(
+            self.sample_rate, self.channels, self.bit_depth, self.bitrate_mode, self.bitrate_k, self.quality
+        )
+
+
+class AudioMetadata(Strict):
+    """Etiquetas do arquivo de áudio, as da janela "Edit Metadata Tags" do Audacity. Cada formato as grava do seu
+    jeito (ID3v2.3 no MP3, comentários Vorbis no FLAC, OGG e Opus, atoms no M4A, INFO no WAV). O que a marca
+    define em `brand.json` (`metadata`) é o ponto de partida, e o que vem aqui vale por cima."""
+
+    artist: str | None = None
+    title: str | None = None
+    album: str | None = None
+    track: str | None = None  # "3" ou "3/12"
+    year: str | None = None
+    genre: str | None = None
+    comment: str | None = None
+
+    @field_validator("track", "year", mode="before")
+    @classmethod
+    def _number_as_text(cls, v: Any) -> Any:
+        return str(v) if isinstance(v, int) and not isinstance(v, bool) else v
+
+
 class Output(Strict):
+    # um preset de vídeo (`instagram/reels`) ou de áudio (`audio/mp3`): o de áudio tira a imagem do render
     preset: str = "instagram/reels"
     path: str | None = None
     fps: float | None = Field(None, gt=0, le=120)
@@ -748,6 +1078,19 @@ class Output(Strict):
     quality: Literal["max", "high", "medium", "draft"] = "high"  # max = x264 slow (mais lento, arquivo menor)
     thumbnail_at: float | None = Field(None, ge=0)
     guides: bool = False  # desenha as zonas seguras (para conferência)
+    audio_format: AudioFormat | None = (
+        None  # só com preset de áudio: taxa, canais, profundidade, taxa de bits
+    )
+    metadata: AudioMetadata | None = None  # etiquetas do arquivo de áudio (artista, título, álbum...)
+
+    @model_validator(mode="after")
+    def _audio_format_fits_preset(self) -> Output:
+        if self.audio_format is not None and is_audio_preset(self.preset):
+            try:
+                resolve_encoding(get_audio_preset(self.preset), self.audio_format.choices())
+            except AudioFormatError as exc:
+                raise ValueError(f"output.audio_format: {exc}") from exc
+        return self
 
 
 class SourceRef(Strict):
@@ -815,6 +1158,82 @@ class TrackState(Strict):
     muted: bool = False
     hidden: bool = False
     locked: bool = False
+    # controles de mixagem das trilhas de áudio (A1, A2..., MUS, NAR, VO, SFX), como no cabeçalho de trilha do
+    # Audacity: ganho em dB, equilíbrio de -1 (esquerda) a 1 (direita) e solo (com alguma trilha em solo, as outras
+    # trilhas de áudio ficam mudas). Valem para a prévia E para o render e ficam fora do dump no padrão
+    gain_db: float = Field(0.0, ge=-60, le=24)
+    pan: float = Field(0.0, ge=-1, le=1)
+    solo: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_mix_defaults(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for name, default in (("gain_db", 0.0), ("pan", 0.0), ("solo", False)):
+            if name in data and data[name] == default:
+                del data[name]
+        return data
+
+
+MARKER_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class Marker(Strict):
+    """Marcador da trilha MK: um instante (`at`) ou uma região (`start` e `end`) da linha do tempo FINAL, com texto,
+    cor e grupo. Cada grupo é uma trilha de marcadores (a "label track" do Audacity); o grupo vazio é a trilha padrão.
+    `low_hz` e `high_hz` guardam a faixa de frequência de um marcador espectral do Audacity, para a ida e volta do
+    arquivo dele não perder nada. Os marcadores seguem as edições que mexem no tempo (cortes, aparas)."""
+
+    at: float | None = Field(None, ge=0)
+    start: float | None = Field(None, ge=0)
+    end: float | None = Field(None, ge=0)
+    text: str = ""
+    color: str | None = None  # #RRGGBB; sem cor, a interface usa a do tema
+    group: str = ""
+    low_hz: float | None = Field(None, ge=0)
+    high_hz: float | None = Field(None, ge=0)
+
+    @field_validator("color")
+    @classmethod
+    def _hex_color(cls, v: str | None) -> str | None:
+        if v is not None and not MARKER_COLOR.match(v):
+            raise ValueError("color do marcador precisa ser #RRGGBB (ex.: #e0a020)")
+        return v
+
+    @field_validator("group")
+    @classmethod
+    def _group_name(cls, v: str) -> str:
+        v = v.strip()
+        if "/" in v:
+            raise ValueError(
+                "o nome do grupo não pode ter `/` (a barra separa grupo e texto em marker:grupo/texto)"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _instant_or_region(self) -> Marker:
+        if self.at is not None:
+            if self.start is not None or self.end is not None:
+                raise ValueError("marcador com `at` (instante) não tem `start` nem `end` (região)")
+            return self
+        if self.start is None or self.end is None:
+            raise ValueError("marcador precisa de `at` (instante) ou de `start` e `end` (região)")
+        if self.end <= self.start:
+            raise ValueError("`end` do marcador precisa ser maior que `start` (para um instante, use `at`)")
+        return self
+
+    @property
+    def is_region(self) -> bool:
+        return self.at is None
+
+    @property
+    def begin(self) -> float:
+        """Onde o marcador começa: o instante, ou o início da região."""
+        return self.at if self.at is not None else self.start  # type: ignore[return-value]
+
+    @property
+    def finish(self) -> float:
+        """Onde o marcador termina: o próprio instante, ou o fim da região."""
+        return self.at if self.at is not None else self.end  # type: ignore[return-value]
 
 
 class Project(Strict):
@@ -825,7 +1244,9 @@ class Project(Strict):
     theme: dict | None = None  # sobrescreve cores/fontes do tema
     sources: dict[str, SourceRef] = {}  # fontes sincronizadas (multicâmera, gravadores)
     master: str | None = None  # fonte principal = relógio da sessão; padrão: a primeira de `sources`
-    timeline: list[Segment] = Field(min_length=1)
+    # os trechos de vídeo; só um projeto com saída de áudio (`audio/mp3`...) pode ficar sem nenhum, e então o som dos
+    # itens de `audio` (narração, voz gravada, música) é o que dá a duração
+    timeline: list[Segment] = []
     look: str | None = None  # acabamento visual de todos os trechos, por nome (ver `domain/looks.py`)
     overlays: list[Overlay] = []
     captions: Captions | None = None
@@ -836,7 +1257,59 @@ class Project(Strict):
     # retângulos nomeados do quadro (ex.: "topo", "rosto" no modelo "explicativo"); as sobreposições se
     # encaixam neles por `region`, e infográficos e composições usam o mesmo nome (ver `domain.regions`)
     regions: dict[str, Region] = {}
+    # trilha de marcadores no tempo FINAL: não entra em hash de mezanino nem na receita da prévia (não muda a imagem
+    # nem o som), e `to_bytes` a omite quando vazia para o `spec.json` de um projeto antigo seguir idêntico
+    markers: list[Marker] = []
     base_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def _timeline_needed(self) -> Project:
+        if not self.timeline and not is_audio_preset(self.output.preset):
+            raise ValueError(
+                "timeline precisa de pelo menos um trecho; só um projeto com saída de áudio "
+                "(output.preset: audio/mp3, audio/wav...) pode ficar sem trechos de vídeo"
+            )
+        return self
+
+    def carrier_hosts(self) -> list[tuple[str, str, list]]:
+        """Os itens da spec que podem ter um Vocoder, como `(id da trilha que hospeda, lugar na spec, efeitos)`: o clipe é o `A1`,
+        a faixa externa `i` é a `A{i+2}`, e a música, a narração, a voz gravada e o som gerado são `MUS`, `NAR`, `VO` e `SFX`."""
+        audio = self.audio
+        hosts: list[tuple[str, str, list]] = [
+            ("A1", f"timeline[{index}]", list(segment.effects))
+            for index, segment in enumerate(self.timeline)
+            if isinstance(segment, ClipSegment)
+        ]
+        hosts += [(f"A{i + 2}", f"audio.tracks[{i}]", list(t.effects)) for i, t in enumerate(audio.tracks)]
+        if audio.music is not None:
+            hosts.append(("MUS", "audio.music", list(audio.music.effects)))
+        hosts += [("NAR", f"audio.narration[{i}]", list(n.effects)) for i, n in enumerate(audio.narration)]
+        hosts += [("VO", f"audio.voiceover[{i}]", list(v.effects)) for i, v in enumerate(audio.voiceover)]
+        hosts += [("SFX", f"audio.generated[{i}]", list(g.effects)) for i, g in enumerate(audio.generated)]
+        return hosts
+
+    @model_validator(mode="after")
+    def _carrier_track_refs(self) -> Project:
+        """O Vocoder que ouve outra trilha: recusa o par que não vale e o ciclo (cada trilha precisaria da outra pronta). A trilha
+        que não existe no projeto não é erro aqui: o efeito cai na portadora gerada e o `lint` avisa."""
+        edges: list[tuple[str, str]] = []
+        for host, place, effects in self.carrier_hosts():
+            for effect in effects:
+                carrier = effect.carrier_track_id()
+                if carrier is None:
+                    continue
+                reason = check_carrier_pair(host, carrier)
+                if reason:
+                    raise ValueError(f"{place}: efeito {effect.label}: {reason}")
+                if effect.enabled:
+                    edges.append((host, carrier))
+        cycle = find_cycle(edges)
+        if cycle:
+            raise ValueError(
+                f"Vocoder: as portadoras fecham um ciclo ({' -> '.join(cycle)}), e cada trilha precisaria da outra já pronta. "
+                "Deixe uma delas com a portadora gerada"
+            )
+        return self
 
     @model_validator(mode="after")
     def _region_refs(self) -> Project:
@@ -919,7 +1392,9 @@ class Project(Strict):
 
     def to_bytes(self) -> bytes:
         """Os bytes que `save` grava; a revisão do arquivo depois de salvo é a deste conteúdo."""
-        return self.model_dump_json(indent=2, exclude_none=True).encode("utf-8")
+        # sem marcador o campo não vai para o arquivo: o `spec.json` de um projeto antigo não muda ao ser salvo de novo
+        exclude = None if self.markers else {"markers"}
+        return self.model_dump_json(indent=2, exclude_none=True, exclude=exclude).encode("utf-8")
 
     def save(self, path: Path | str) -> Path:
         """Grava por troca atômica: a interface, o MCP e a CLI escrevem a mesma spec e nenhum lê metade dela."""

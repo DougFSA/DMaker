@@ -14,6 +14,7 @@ from pathlib import Path
 from ..domain.spec import ClipSegment
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
+from .clip_crossfade import ClipCrossfades
 from .common import Inputs
 from .mezzanine import TrackSlice, clip_audio_lines, uses_camera_audio
 
@@ -35,14 +36,17 @@ def clip_audio_piece(
     tracks: tuple[TrackSlice, ...] = (),
     audio_stream: int = 0,
     camera_audio: Path | None = None,
+    camera_lead: float = 0.0,
     label: str = "áudio do trecho",
+    crossfades: ClipCrossfades | None = None,
 ) -> FFmpegCommand:
     """O som de um trecho de clipe, `duration` segundos na linha do tempo final. O arquivo do clipe só é
     aberto quando a câmera soa e não vem de um áudio já isolado (`camera_audio`)."""
     inputs = Inputs()
     length = max(duration * seg.speed, 0.01)  # tempo de fonte que o trecho consome
     source_index = -1
-    if uses_camera_audio(seg, info) and camera_audio is None:
+    if uses_camera_audio(seg, info) and camera_audio is None and not seg.audio_offset:
+        # com som deslocado a leitura é outra (`clip_audio_lines` abre a própria entrada do arquivo)
         source_index = inputs.add(src, "-ss", f"{max(in_point, 0):.3f}", "-t", f"{length:.3f}")
     lines: list[str] = []
     clip_audio_lines(
@@ -56,6 +60,10 @@ def clip_audio_piece(
         tracks=tracks,
         audio_stream=audio_stream,
         camera_audio=camera_audio,
+        src=src,
+        in_point=in_point,
+        camera_lead=camera_lead,
+        crossfades=crossfades,
     )
     args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[aout]", *PIECE_CODEC, str(out)]
     return FFmpegCommand(args, label=label, total=duration)

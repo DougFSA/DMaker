@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..domain.audio_shift import AudioWindow, shifted_window
 from ..domain.presets import SafeZone
 from ..domain.spec import VideoOverlay, parse_aspect
 from .common import AUDIO_FMT_MIX, Inputs, even
@@ -29,6 +30,8 @@ class ResolvedVideoOverlay:
     pad: int
     audio_stream: int = 0
     has_audio: bool = True
+    # áudio do PiP já com os efeitos dele (o trecho que ele mostra, na faixa 0); None = o do próprio vídeo
+    audio_path: Path | None = None
 
     @property
     def duration(self) -> float:
@@ -177,7 +180,7 @@ def video_overlay_graph(
         cur_v = f"[pv{k}]"
 
         if pip.has_audio and ov.volume > 0:
-            lines.append(_pip_audio_chain(idx, pip, k))
+            lines.append(_pip_audio_chain(_pip_audio_source(inputs, pip, idx), pip, k))
             audio_labels.append(f"[pipaud{k}]")
     return cur_v, audio_labels
 
@@ -187,11 +190,36 @@ def _add_pip_input(inputs: Inputs, pip: ResolvedVideoOverlay) -> int:
     return inputs.add(pip.path, "-ss", f"{max(pip.in_point, 0):.3f}", "-t", f"{pip.duration:.3f}")
 
 
-def _pip_audio_chain(idx: int, pip: ResolvedVideoOverlay, k: int) -> str:
-    """Ramo de áudio do PiP: volume e atraso até o instante em que ele entra na linha do tempo."""
+def pip_audio_window(pip: ResolvedVideoOverlay) -> AudioWindow:
+    """De onde sai o som do PiP no arquivo: o ponto de entrada da imagem, ou, com `audio_offset`, o ponto deslocado
+    (e o silêncio que antecede o arquivo quando o som pedido começa antes dele)."""
+    if pip.overlay.audio_offset:
+        return shifted_window(pip.in_point, 1.0, pip.overlay.audio_offset)
+    return AudioWindow(max(pip.in_point, 0.0), 0.0)
+
+
+def _pip_audio_source(inputs: Inputs, pip: ResolvedVideoOverlay, video_index: int | None = None) -> str:
+    """O fluxo de áudio do PiP: o do vídeo, ou o arquivo já com efeitos (uma entrada própria, que já começa no
+    ponto de entrada). Sem `video_index` o vídeo não está no grafo (a medição só monta o áudio), e a entrada dele
+    é aberta só para o som. Com `audio_offset` o som sai de uma entrada própria, lida do ponto deslocado."""
+    if pip.audio_path is not None:
+        return f"[{inputs.add(pip.audio_path, '-t', f'{pip.duration:.3f}')}:a:0]"
+    if pip.overlay.audio_offset:
+        window = pip_audio_window(pip)
+        index = inputs.add(pip.path, "-ss", f"{window.read_from:.3f}", "-t", f"{pip.duration:.3f}")
+        return f"[{index}:a:{pip.audio_stream}]"
+    index = _add_pip_input(inputs, pip) if video_index is None else video_index
+    return f"[{index}:a:{pip.audio_stream}]"
+
+
+def _pip_audio_chain(source: str, pip: ResolvedVideoOverlay, k: int) -> str:
+    """Ramo de áudio do PiP: volume e atraso até o instante em que ele entra na linha do tempo. O silêncio que
+    antecede um som deslocado para antes do arquivo soma-se ao atraso (se o arquivo já foi processado, ele vem dentro
+    dele)."""
+    lead = 0.0 if pip.audio_path is not None else pip_audio_window(pip).lead
     chain = [
-        f"[{idx}:a:{pip.audio_stream}]asetpts=PTS-STARTPTS",
-        f"adelay={int(round(pip.start * 1000))}:all=1",
+        f"{source}asetpts=PTS-STARTPTS",
+        f"adelay={int(round((pip.start + lead) * 1000))}:all=1",
         f"volume={pip.overlay.volume:.3f}",
         AUDIO_FMT_MIX,
     ]
@@ -204,6 +232,6 @@ def pip_audio_graph(lines: list[str], inputs: Inputs, pips: list[ResolvedVideoOv
     labels: list[str] = []
     for k, pip in enumerate(pips):
         if pip.has_audio and pip.overlay.volume > 0:
-            lines.append(_pip_audio_chain(_add_pip_input(inputs, pip), pip, k))
+            lines.append(_pip_audio_chain(_pip_audio_source(inputs, pip), pip, k))
             labels.append(f"[pipaud{k}]")
     return labels

@@ -1,6 +1,8 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { TRACK_HEADER_WIDTH } from '@/lib/timeline'
 import { projectSpec, timelineView } from '@/test/editorFixtures'
+import { RULER_MODE_KEY } from '@/lib/tempoGrid'
 import { mountEditorPart, openEditor, type OpenedEditor } from '@/test/editorMount'
 import { useKeymapStore } from '@/stores/keymap'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
@@ -73,7 +75,7 @@ describe('os botões de edição', () => {
     await button('Remover')?.trigger('click')
     await flushPromises()
     expect(edits()).toHaveLength(0)
-    expect(useToastsStore().items.map((toast) => toast.title)).toContain('Selecione um trecho ou sobreposição para remover.')
+    expect(useToastsStore().items.map((toast) => toast.title)).toContain('Selecione um trecho, sobreposição ou marcador para remover.')
   })
 
   it('Remover tira o trecho selecionado e a seleção some junto', async () => {
@@ -138,7 +140,8 @@ describe('encaixe, ripple e zoom', () => {
     expect(timeline.pxPerSec).toBeCloseTo(78, 9)
     await button('Afastar')?.trigger('click')
     expect(timeline.pxPerSec).toBeCloseTo(60, 9)
-    timeline.setScroll(0, 632)
+    // a largura visível menos o cabeçalho da trilha (que o DMK-62 alargou para o solo e o ganho) e a folga final: 500 px para 6 s
+    timeline.setScroll(0, TRACK_HEADER_WIDTH + 40 + 500)
     await button('Ajustar')?.trigger('click')
     expect(timeline.pxPerSec).toBeCloseTo(500 / 6, 9)
   })
@@ -163,5 +166,25 @@ describe('painéis e atalhos', () => {
     await mountToolbar()
     await button('Atalhos de teclado')?.trigger('click')
     expect(useKeymapStore().dialogOpen).toBe(true)
+  })
+})
+
+describe('a régua em compassos', () => {
+  it('sem andamento o botão da régua está desligado e explica como ligar', async () => {
+    await mountToolbar()
+    const ruler = button('Régua: segundos')
+    expect(ruler?.attributes('disabled')).toBeDefined()
+    expect(ruler?.attributes('title')).toContain('Defina o andamento do projeto')
+  })
+
+  it('com andamento o botão alterna entre segundos e compassos e lembra a escolha', async () => {
+    const view = { ...timelineView(), tempo: { bpm: 120, time_signature: '4/4', beats_per_bar: 4, offset: 0, period: 0.5 } }
+    opened = await openEditor(projectSpec(), { 'POST /api/projects/demo/timeline': () => view })
+    wrapper = await mountEditorPart(TimelineToolbar, opened)
+    await button('Régua: segundos')?.trigger('click')
+    expect(button('Régua: compassos')?.attributes('aria-pressed')).toBe('true')
+    expect(window.localStorage.getItem(RULER_MODE_KEY)).toBe('bars')
+    await button('Régua: compassos')?.trigger('click')
+    expect(button('Régua: segundos')).toBeDefined()
   })
 })

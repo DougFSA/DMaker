@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* A linha do tempo multitrilha: régua, trilhas (V1, V2+, TX, GR, A1, A2+, NAR, MUS e CC) e o cursor. Mostra a vista
+/* A linha do tempo multitrilha: régua, trilhas (V1, V2+, TX, GR, A1, A2+, NAR, VO, MUS e CC) e o cursor. Mostra a vista
    do store do editor e devolve a intenção da pessoa: clicar seleciona, arrastar muda de ordem ou desloca, puxar a
    borda apara, clicar na régua leva o cursor. Toda mudança passa por `editor.applyOp`, e arrastar ou aparar grava o
    projeto ao soltar. O mouse é tratado por delegação (um só ouvinte para todos os itens) e só os itens da janela
@@ -28,6 +28,18 @@ import {
   TRACK_ROW_HEIGHT,
   type TrackToggle,
 } from '@/lib/timeline'
+import {
+  draggedFadeDuration,
+  FADE_CURVES,
+  fadeOperation,
+  fadeTarget,
+  itemFades,
+  itemSpeed,
+  snapFadeSeconds,
+  type FadeSide,
+} from '@/lib/audioFades'
+import { trackSetOp } from '@/lib/audioPanelOps'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { usePlayerStore } from '@/stores/player'
 import { useTimelineStore } from '@/stores/timeline'
@@ -43,6 +55,7 @@ const player = usePlayerStore()
 const timeline = useTimelineStore()
 const toasts = useToastsStore()
 const actions = useEditorActions()
+const audioPanel = useAudioPanelStore()
 
 /** Quanto o mouse precisa andar (pixels) antes de um clique virar arrasto. */
 const DRAG_THRESHOLD_PX = 3
@@ -137,13 +150,22 @@ function onTrackToggle(trackId: string, field: TrackToggle): void {
   void actions.toggleTrack(field, trackId)
 }
 
+/** Solo, ganho ou pan de uma trilha de áudio: cada mudança é um passo do desfazer. */
+function onTrackSet(trackId: string, changes: { solo?: boolean; gain_db?: number; pan?: number }): void {
+  if (tracks.value.find((track) => track.id === trackId)?.locked) {
+    lockedWarning(trackId)
+    return
+  }
+  void editor.applyOp(trackSetOp(trackId, changes))
+}
+
 let stopSeek: (() => void) | null = null
 
 /** Clicar e arrastar na régua ou numa faixa vazia leva o cursor até lá, encaixando nas bordas. */
 function beginSeek(event: MouseEvent): void {
   if (!view.value) return
   stopSeek?.()
-  const points = snapPoints(view.value, null, null)
+  const points = snapPoints(view.value, null, null, timeline.gridPoints)
   const seekTo = (clientX: number) => player.seek(snapTime(timeAt(clientX), points, timeline.snapTolerance))
   seekTo(event.clientX)
   const move = (moveEvent: MouseEvent) => seekTo(moveEvent.clientX)
@@ -209,11 +231,98 @@ function beginDrag(event: MouseEvent, track: TimelineTrack, itemId: string, side
     start: { mode, trackId: track.id, item, side, original: { start: item.start, end: item.end } },
     track,
     startX: event.clientX,
-    points: snapPoints(view.value, editor.playhead, item.id),
+    points: snapPoints(view.value, editor.playhead, item.id, timeline.gridPoints),
     moved: false,
   }
   document.addEventListener('mousemove', onDragMove)
   document.addEventListener('mouseup', onDragEnd)
+}
+
+/* ---------- alça de fade ---------- */
+
+interface FadeDrag {
+  itemId: string
+  target: string
+  side: FadeSide
+  /** A borda do item na tela quando o gesto começou, e a duração dele (segundos da tela) e a velocidade. */
+  edgeX: number
+  /** A borda do item na linha do tempo, em segundos: o começo para o fade de entrada, o fim para o de saída. */
+  edgeSeconds: number
+  lengthSeconds: number
+  speed: number
+  startX: number
+  moved: boolean
+}
+
+let activeFade: FadeDrag | null = null
+
+function onFadeMove(event: MouseEvent): void {
+  const drag = activeFade
+  if (!drag) return
+  if (!drag.moved && Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD_PX) return
+  if (!drag.moved) editor.beginGesture()
+  drag.moved = true
+  const pixels = drag.side === 'in' ? event.clientX - drag.edgeX : drag.edgeX - event.clientX
+  // a ponta do fade (onde ele termina) cai exatamente no tempo mais perto, quando o encaixe e o andamento estão ligados
+  const seconds = snapFadeSeconds(drag.side, drag.edgeSeconds, pixels / timeline.pxPerSec, timeline.gridPoints, timeline.snapTolerance)
+  timeline.fadePreview = {
+    itemId: drag.itemId,
+    side: drag.side,
+    duration: draggedFadeDuration(seconds, drag.lengthSeconds, drag.speed),
+  }
+}
+
+/** Soltar a alça grava o fade (duração 0 tira); a curva que ele já tinha fica. É um passo só do desfazer. */
+async function onFadeEnd(): Promise<void> {
+  document.removeEventListener('mousemove', onFadeMove)
+  document.removeEventListener('mouseup', onFadeEnd)
+  const drag = activeFade
+  const shown = timeline.fadePreview
+  activeFade = null
+  if (!drag?.moved || !shown) {
+    timeline.fadePreview = null
+    return
+  }
+  try {
+    const done = await editor.applyOp(fadeOperation(drag.target, drag.side, shown.duration))
+    if (done && editor.dirty) await editor.save({ quiet: true })
+  } finally {
+    timeline.fadePreview = null
+    editor.endGesture()
+  }
+}
+
+function beginFadeDrag(event: MouseEvent, track: TimelineTrack, itemElement: HTMLElement, side: FadeSide): void {
+  const item = track.items.find((candidate) => candidate.id === itemElement.dataset.itemId)
+  const target = item ? fadeTarget(track.id, item) : null
+  if (!item || !target) return
+  const rect = itemElement.getBoundingClientRect()
+  event.preventDefault()
+  activeFade = {
+    itemId: item.id,
+    target,
+    side,
+    edgeX: side === 'in' ? rect.left : rect.right,
+    edgeSeconds: side === 'in' ? item.start : item.end,
+    lengthSeconds: item.end - item.start,
+    speed: itemSpeed(item),
+    startX: event.clientX,
+    moved: false,
+  }
+  document.addEventListener('mousemove', onFadeMove)
+  document.addEventListener('mouseup', onFadeEnd)
+}
+
+/** Duplo clique na alça troca a curva do fade pela seguinte (linear, logarítmica, exponencial, seno, quadrática). */
+async function cycleFadeCurve(track: TimelineTrack, itemId: string, side: FadeSide): Promise<void> {
+  const item = track.items.find((candidate) => candidate.id === itemId)
+  const target = item ? fadeTarget(track.id, item) : null
+  const fade = item ? itemFades(item)[side] : undefined
+  if (!item || !target || !fade) return
+  const next = FADE_CURVES[(FADE_CURVES.indexOf(fade.curve) + 1) % FADE_CURVES.length]
+  // como o arrasto, o gesto direto grava na hora
+  const done = await editor.applyOp(fadeOperation(target, side, fade.duration, next))
+  if (done && editor.dirty) await editor.save({ quiet: true })
 }
 
 function lockedWarning(trackId: string): void {
@@ -231,6 +340,12 @@ function onMouseDown(event: MouseEvent): void {
     if (!track || !itemId) return
     if (track.locked) {
       lockedWarning(track.id)
+      return
+    }
+    const fadeSideRaw = target.closest<HTMLElement>('[data-fade]')?.dataset.fade
+    if (fadeSideRaw === 'in' || fadeSideRaw === 'out') {
+      // puxar a alça de fade muda o fade da borda sem mexer na seleção
+      beginFadeDrag(event, track, itemElement, fadeSideRaw)
       return
     }
     const handle = target.closest<HTMLElement>('[data-handle]')?.dataset.handle
@@ -259,6 +374,35 @@ function onMouseDown(event: MouseEvent): void {
   }
 }
 
+/** As trilhas de áudio, cujo duplo clique abre o item no painel Áudio. */
+const AUDIO_TRACK = /^(A\d+|MUS|NAR|VO)$/
+
+/** O duplo clique num marcador abre a caixa de texto dele; num item de áudio, abre o painel Áudio nele. */
+function onDoubleClick(event: MouseEvent): void {
+  if (!(event.target instanceof HTMLElement)) return
+  const item = event.target.closest<HTMLElement>('[data-item-id]')
+  const fadeSide = event.target.closest<HTMLElement>('[data-fade]')?.dataset.fade
+  if (item?.dataset.itemId && (fadeSide === 'in' || fadeSide === 'out')) {
+    const track = tracks.value.find((candidate) => candidate.id === item.dataset.trackId)
+    if (track && !track.locked) void cycleFadeCurve(track, item.dataset.itemId, fadeSide)
+    return
+  }
+  if (item?.dataset.trackId && AUDIO_TRACK.test(item.dataset.trackId) && item.dataset.itemId) {
+    const entry = editor.findItem(item.dataset.itemId)
+    if (entry) audioPanel.openFor(entry)
+    return
+  }
+  const element = event.target.closest<HTMLElement>('[data-marker]')
+  const id = element?.dataset.itemId
+  const trackId = element?.dataset.trackId
+  if (!id || !trackId) return
+  if (tracks.value.find((track) => track.id === trackId)?.locked) {
+    lockedWarning(trackId)
+    return
+  }
+  timeline.editMarker(id)
+}
+
 function onMouseOver(event: MouseEvent): void {
   const id = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>('[data-track-id]')?.dataset.trackId ?? null) : null
   if (id !== timeline.hoverTrackId) timeline.hoverTrackId = id
@@ -280,7 +424,7 @@ function onDrop(event: DragEvent): void {
   if (!handler || !payload || !view.value) return
   event.preventDefault()
   const trackId = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>('[data-track-id]')?.dataset.trackId ?? null) : null
-  const points = snapPoints(view.value, editor.playhead, null)
+  const points = snapPoints(view.value, editor.playhead, null, timeline.gridPoints)
   handler(payload, { trackId, time: snapTime(timeAt(event.clientX), points, timeline.snapTolerance) })
 }
 
@@ -329,7 +473,10 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
-  if (activeDrag?.moved) editor.endGesture()
+  document.removeEventListener('mousemove', onFadeMove)
+  document.removeEventListener('mouseup', onFadeEnd)
+  if (activeDrag?.moved || activeFade?.moved) editor.endGesture()
+  timeline.fadePreview = null
 })
 </script>
 
@@ -356,6 +503,7 @@ onBeforeUnmount(() => {
           class="timeline__content"
           :style="{ width: contentWidth }"
           @mousedown="onMouseDown"
+          @dblclick="onDoubleClick"
           @mouseover="onMouseOver"
           @dragover="onDragOver"
           @drop="onDrop"
@@ -366,6 +514,7 @@ onBeforeUnmount(() => {
             :px-per-sec="timeline.pxPerSec"
             :window-start="windowStart"
             :window-end="windowEnd"
+            :tempo="timeline.rulerMode === 'bars' ? timeline.tempo : null"
           />
           <TimelineTrackRow
             v-for="track in tracks"
@@ -376,7 +525,9 @@ onBeforeUnmount(() => {
             :window-start="windowStart"
             :window-end="windowEnd"
             :selected="selected"
+            :fade-preview="timeline.fadePreview"
             @toggle="onTrackToggle"
+            @track-set="onTrackSet"
           />
           <TimelinePlayhead />
           <div v-if="ghostStyle" class="timeline__ghost" :style="ghostStyle" data-ghost="1" />
@@ -385,7 +536,9 @@ onBeforeUnmount(() => {
       </div>
 
       <p class="timeline__hint">
-        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. A tecla ? mostra os atalhos.
+        Ctrl + roda do mouse faz zoom. Arraste um item para mudar de lugar e puxe a borda para aparar. Puxe o quadradinho
+        do canto de um item de áudio para fazer o fade (duplo clique nele troca a curva). M cria um marcador no cursor
+        (duplo clique edita o texto; vírgula e ponto pulam entre eles). A tecla ? mostra os atalhos.
       </p>
     </template>
   </AppCard>
@@ -394,7 +547,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .timeline {
   /* medidas e cores dos blocos: as mesmas nos dois temas, porque o texto dos blocos é sempre branco */
-  --tl-header-width: 92px;
+  --tl-header-width: 132px;
   --tl-row-height: 34px;
   --tl-ruler-height: 26px;
   --tl-clip: #1f5c63;
@@ -406,9 +559,12 @@ onBeforeUnmount(() => {
   --tl-track: #24555a;
   --tl-music: #245a4e;
   --tl-narration: #6b3f73;
+  --tl-voiceover: #8a3f5a;
+  --tl-generated: #3f5f8a;
   --tl-captions: #555a5e;
   --tl-progress: #3a3f44;
   --tl-other: #1f5c63;
+  --tl-marker: #d9a21b;
 }
 
 .timeline__scroll {

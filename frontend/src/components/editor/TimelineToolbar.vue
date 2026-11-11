@@ -1,13 +1,15 @@
 <script setup lang="ts">
-/* A barra de ferramentas da linha do tempo: cortar, remover, lift, duplicar, aparar, encaixe, zoom e os botões de
+/* A barra de ferramentas da linha do tempo: cortar, remover, lift, duplicar, aparar, marcador, encaixe, zoom e os botões de
    painéis (F filtros, M mídia) e de atalhos. Cada botão chama o mesmo comando do atalho de teclado dele, e o balão
    mostra a tecla (que muda se a pessoa trocou o atalho). */
 import { computed } from 'vue'
 import { useEditorActions } from '@/composables/useEditorActions'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { ShortcutId } from '@/lib/keymap'
+import { useAudioPanelStore } from '@/stores/audioPanel'
 import { useEditorStore } from '@/stores/editor'
 import { useKeymapStore } from '@/stores/keymap'
+import { useRecordingStore } from '@/stores/recording'
 import { useScreenLayoutStore } from '@/stores/screenLayout'
 import { useTimelineStore } from '@/stores/timeline'
 
@@ -16,8 +18,15 @@ const timeline = useTimelineStore()
 const keymap = useKeymapStore()
 const layout = useScreenLayoutStore()
 const actions = useEditorActions()
+const audioPanel = useAudioPanelStore()
+const recording = useRecordingStore()
 
 const ready = computed(() => !!editor.view)
+/** O último item selecionado: o que o painel Áudio abre. */
+const primary = computed(() => {
+  const last = editor.selection[editor.selection.length - 1]
+  return last ? editor.findItem(last) : null
+})
 
 /** O balão de um botão: o que ele faz e a tecla do atalho. */
 function hint(text: string, id: ShortcutId): string {
@@ -47,6 +56,27 @@ function hint(text: string, id: ShortcutId): string {
       <AppButton size="sm" :disabled="!ready" :title="hint('Aparar a saída até o cursor', 'trim_out')" @click="actions.trimTo('out')">
         Aparar saída
       </AppButton>
+      <AppButton size="sm" :disabled="!ready" :title="hint('Criar um marcador no cursor', 'add_marker')" @click="actions.addMarker()">
+        Marcador
+      </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!ready || !primary"
+        title="Abrir o item selecionado no painel Áudio (onda, seleção, efeitos). Também vale o duplo clique no item de áudio."
+        data-open-audio
+        @click="audioPanel.openFor(primary)"
+      >
+        Editar áudio
+      </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!ready"
+        title="Gravar uma narração do microfone sobre o vídeo, com a latência compensada"
+        data-record-narration
+        @click="recording.openDialog()"
+      >
+        Gravar narração
+      </AppButton>
     </div>
 
     <div class="bar__group" role="group" aria-label="Encaixe">
@@ -66,6 +96,20 @@ function hint(text: string, id: ShortcutId): string {
         @click="timeline.toggleRipple()"
       >
         {{ timeline.rippleAlways ? 'Ripple: V1 (sempre)' : 'Ripple: V1' }}
+      </AppButton>
+      <AppButton
+        size="sm"
+        :disabled="!timeline.tempo"
+        :aria-pressed="timeline.rulerMode === 'bars'"
+        :title="
+          timeline.tempo
+            ? 'Alterna a régua entre segundos e compassos (compasso.tempo). O Snap também atrai para os tempos.'
+            : 'Defina o andamento do projeto (Áudio, Andamento) para ter a régua em compassos e o encaixe nos tempos.'
+        "
+        data-ruler-mode
+        @click="timeline.toggleRuler()"
+      >
+        {{ timeline.rulerMode === 'bars' ? 'Régua: compassos' : 'Régua: segundos' }}
       </AppButton>
     </div>
 
