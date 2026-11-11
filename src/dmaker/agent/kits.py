@@ -278,6 +278,11 @@ KITS: tuple[Kit, ...] = (
 # Ferramentas do servidor que nenhum kit oferece, cada uma com o motivo. O teste de cobertura exige que uma
 # ferramenta nova entre num kit ou aqui: assim o agente nunca ganha (nem perde) uma função sem ninguém decidir.
 EXCLUDED_TOOLS: dict[str, str] = {
+    "list_personas": "as personas ainda não têm kit do agente local; o cadastro é feito por `dmaker persona`",
+    "get_persona": "as personas ainda não têm kit do agente local; o cadastro é feito por `dmaker persona`",
+    "create_persona": "as personas ainda não têm kit do agente local; o cadastro é feito por `dmaker persona`",
+    "edit_persona": "as personas ainda não têm kit do agente local; o cadastro é feito por `dmaker persona`",
+    "remove_persona": "apaga um cadastro; só por comando explícito (`dmaker persona remove`)",
     "dmaker_guide": "o guia inteiro não cabe no contexto de um modelo pequeno; vale o manual curto do kit",
     "spec_schema": "o esquema da spec é enorme; o agente edita por template e por edit_project",
     "save_project": "exige escrever a spec inteira à mão; o agente cria o projeto por new_from_template",

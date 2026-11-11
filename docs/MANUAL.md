@@ -4575,7 +4575,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 155 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 160 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -5186,6 +5186,30 @@ Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, a
 - **`dmaker models remove MODEL_ID`**: Apaga o modelo do disco, dizendo antes quais funções dependem dele.
   - `--yes`: Apaga sem perguntar.
 
+#### dmaker persona
+
+Personas: personagens reutilizáveis (ilustrados 2D) que falam no vídeo, em tela cheia ou num canto.
+
+- **`dmaker persona create NAME`**: Cria uma persona.
+  - `--kind` TEXTO: Tipo: 2d (ilustrada). (padrão 2d)
+  - `--voice` TEXTO: Id da voz (veja `dmaker voice list`).
+  - `--skin` TEXTO: Tom de pele, #RRGGBB.
+  - `--hair-color` TEXTO: Cor do cabelo, #RRGGBB.
+  - `--hair-style` TEXTO: Estilo do cabelo: short, long ou bun.
+  - `--eye-color` TEXTO: Cor dos olhos, #RRGGBB.
+  - `--outfit-color` TEXTO: Cor da roupa, #RRGGBB.
+- **`dmaker persona edit PERSONA_ID`**: Muda o nome, a voz ou a aparência de uma persona sua (só o que for dado muda).
+  - `--name` TEXTO: Novo nome.
+  - `--voice` TEXTO: Nova voz (id da biblioteca).
+  - `--skin` TEXTO: Tom de pele, #RRGGBB.
+  - `--hair-color` TEXTO: Cor do cabelo, #RRGGBB.
+  - `--hair-style` TEXTO: Estilo do cabelo: short, long ou bun.
+  - `--eye-color` TEXTO: Cor dos olhos, #RRGGBB.
+  - `--outfit-color` TEXTO: Cor da roupa, #RRGGBB.
+- **`dmaker persona list`**: Lista as personas: as prontas e as suas.
+- **`dmaker persona remove PERSONA_ID`**: Apaga uma persona sua. As prontas não podem ser apagadas.
+- **`dmaker persona show PERSONA_ID`**: Mostra uma persona: aparência, voz e o que ela sabe fazer (expressões e gestos).
+
 #### dmaker release
 
 Monta os instaladores do DMaker (Windows e Linux) e os publica na aba Releases do GitHub.
@@ -5326,7 +5350,7 @@ Fila de narrações longas (audiobook, vários roteiros): roda em segundo plano 
 
 <!-- dmaker:gerado mcp -->
 
-São 87 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
+São 92 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto completo de cada uma vem do próprio servidor (`dmaker mcp`).
 
 - **`dmaker_guide`**: Manual de operação do DMaker: fluxo, referência da spec e regras da marca.
   Sem parâmetros.
@@ -5476,6 +5500,16 @@ São 87 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
   Parâmetros: `path`\* (texto), `check_audio` (sim ou não, padrão não).
 - **`pronunciation`**: Dicionário de pronúncia da narração: como a voz fala cada termo (ex.: DMaker -> Di-mêiker). action = list | add | remove.
   Parâmetros: `action`\* ("list" ou "add" ou "remove"), `term` (texto), `spoken` (texto), `brand` (texto), `language` (texto, padrão pt).
+- **`list_personas`**: Personas: personagens reutilizáveis que falam no vídeo.
+  Sem parâmetros.
+- **`get_persona`**: Mostra uma persona: aparência, voz, expressões e gestos.
+  Parâmetros: `persona_id`\* (texto).
+- **`create_persona`**: Cria uma persona.
+  Parâmetros: `name`\* (texto), `kind` (texto, padrão 2d), `voice` (texto), `appearance` (objeto).
+- **`edit_persona`**: Muda uma persona sua: name, voice e/ou appearance (só os campos dados mudam).
+  Parâmetros: `persona_id`\* (texto), `name` (texto), `voice` (texto), `appearance` (objeto).
+- **`remove_persona`**: Apaga uma persona sua (as prontas não podem ser apagadas).
+  Parâmetros: `persona_id`\* (texto).
 - **`narrate_into_project`**: Receita: narra um roteiro e já o põe no projeto, em uma chamada (no lugar de edit_project para audio.narration, edit_project para as legendas e validate_project).
   Parâmetros: `name_or_path`\* (texto), `text`\* (texto), `voice` (texto), `start` (número, padrão 0.0), `language` (texto, padrão pt), `speed` (número, padrão 1.0), `seed` (inteiro), `captions` (sim ou não, padrão sim).
 - **`cut_pauses_and_caption`**: Receita: corta as pausas, os vícios e as repetições de uma gravação falada E deixa a legenda pronta, em uma chamada que espera o fim (no lugar de autocut, job_status e list_cuts).
@@ -5509,7 +5543,7 @@ São 87 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 
 <!-- dmaker:gerado spec -->
 
-São 94 blocos e 780 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
+São 99 blocos e 826 campos. Cada bloco aparece com os campos que ele aceita; um campo fora desta lista é recusado na validação.
 
 #### Project
 
@@ -5524,9 +5558,9 @@ A raiz do `spec.json`.
 | `theme` | objeto | nenhum | Tema montado na hora, no lugar de uma marca instalada. |
 | `sources` | mapa de `SourceRef` | vazio | Fontes de uma sessão multicâmera, por nome. |
 | `master` | texto | nenhum | Fonte que é o relógio principal da sessão (a primeira, se vazio). |
-| `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` | vazio | Os trechos do vídeo, em ordem (clipe, imagem ou cartão); só um projeto com saída de áudio pode ficar sem nenhum. |
+| `timeline` | lista de `ClipSegment` ou `ImageSegment` ou `CardSegment` ou `PersonaSegment` | vazio | Os trechos do vídeo, em ordem (clipe, imagem ou cartão); só um projeto com saída de áudio pode ficar sem nenhum. |
 | `look` | texto | nenhum | Acabamento visual pronto, por nome, para todos os trechos. |
-| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` ou `HtmlOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture), barra de progresso, audiograma e animação em HTML por cima da linha do tempo. |
+| `overlays` | lista de `TextOverlay` ou `ImageOverlay` ou `ProgressBar` ou `VideoOverlay` ou `AudiogramOverlay` ou `HtmlOverlay` ou `PersonaOverlay` | vazio | Textos, imagens, vídeos (picture-in-picture), barra de progresso, audiograma e animação em HTML por cima da linha do tempo. |
 | `captions` | `Captions` | nenhum | Legendas: automáticas, de um .srt ou da narração. |
 | `audio` | `AudioSettings` | os valores padrão do bloco | Música, faixas externas, narração, efeitos, volume e normalização. |
 | `multicam` | `MulticamBlock` | nenhum | Bloco de corte automático de cerimônia, expandido por `dmaker plan`. |
@@ -5911,7 +5945,7 @@ Usado em `Project.timeline`.
 
 #### ColorAdjust
 
-Usado em `CardSegment.color`, `ClipSegment.color`, `ImageSegment.color`.
+Usado em `CardSegment.color`, `ClipSegment.color`, `ImageSegment.color`, `PersonaSegment.color`.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6502,6 +6536,87 @@ Usado em `AudioSettings.master_effects`, `AudioTrack.effects`, `ClipSegment.effe
 | `stretch_factor` | número, de 1 a 1000 | 10.0 |  |
 | `time_resolution` | número, de 0.01 a 10 | 0.25 |  |
 
+#### PersonaBackground
+
+Usado em `PersonaSegment.background`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `color` | texto | nenhum | Ajuste de cor e efeitos de acabamento. |
+| `image` | texto | nenhum |  |
+| `clip` | texto | nenhum |  |
+| `clip_start` | número, mínimo 0 | 0.0 |  |
+
+#### PersonaMark
+
+Usado em `PersonaOverlay.marks`, `PersonaSegment.marks`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `at` | número, mínimo 0 | obrigatório |  |
+| `expression` | texto | nenhum |  |
+| `gesture` | texto | nenhum |  |
+
+#### PersonaOverlay
+
+Usado em `Project.overlays`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `type` | `"persona"` | `persona` | Tipo do item: escolhe qual dos blocos vale. |
+| `persona` | texto | obrigatório |  |
+| `speech` | `PersonaSpeech` | obrigatório |  |
+| `start` | número, mínimo 0 | 0.0 |  |
+| `end` | número, mínimo 0 | nenhum |  |
+| `position` | `"top-left"` ou `"top-right"` ou `"bottom-left"` ou `"bottom-right"` ou `"top"` ou `"bottom"` ou `"center"` | `bottom-right` |  |
+| `x` | número, de 0 a 1 | nenhum | Posição horizontal do centro, de 0 a 1 (use junto de `y`). |
+| `y` | número, de 0 a 1 | nenhum | Posição vertical do centro, de 0 a 1 (use junto de `x`). |
+| `width` | número, maior que 0, até 1 | 0.34 |  |
+| `aspect` | texto | `3:4` |  |
+| `margin` | número, mínimo 0 | 40 |  |
+| `background` | texto | nenhum |  |
+| `shape` | `"rect"` ou `"rounded"` ou `"circle"` | `rounded` |  |
+| `radius` | número, de 0 a 0.5 | 0.08 |  |
+| `fade` | número, mínimo 0 | 0.25 |  |
+| `expression` | texto | `neutral` |  |
+| `marks` | lista de `PersonaMark` | vazio |  |
+
+#### PersonaSegment
+
+Usado em `Project.timeline`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `label` | texto | nenhum | Rótulo que aparece na linha do tempo da interface. |
+| `transition` | `Transition` | nenhum | Como o item entra, vindo do anterior. |
+| `fade_in` | número, mínimo 0 | 0.0 | Entrada gradual, em segundos. |
+| `fade_out` | número, mínimo 0 | 0.0 | Saída gradual, em segundos. |
+| `reframe` | `Reframe` | os valores padrão do bloco | Como o vídeo ou a imagem é ajustado ao formato de saída. |
+| `color` | `ColorAdjust` | os valores padrão do bloco | Ajuste de cor e efeitos de acabamento. |
+| `look` | texto | nenhum | Look do trecho: vence o do projeto, e `nenhum` desliga o do projeto. |
+| `type` | `"persona"` | `persona` | Tipo do item: escolhe qual dos blocos vale. |
+| `persona` | texto | obrigatório |  |
+| `speech` | `PersonaSpeech` | obrigatório |  |
+| `duration` | número, maior que 0 | nenhum |  |
+| `tail` | número, de 0 a 5 | 0.5 |  |
+| `expression` | texto | `neutral` |  |
+| `marks` | lista de `PersonaMark` | vazio |  |
+| `background` | `PersonaBackground` | os valores padrão do bloco |  |
+
+#### PersonaSpeech
+
+Usado em `PersonaOverlay.speech`, `PersonaSegment.speech`.
+
+| Campo | Tipo | Padrão | O que é |
+| --- | --- | --- | --- |
+| `text` | texto | nenhum |  |
+| `audio` | texto | nenhum |  |
+| `language` | texto | `pt` |  |
+| `speed` | número, de 0.5 a 2 | 1.0 |  |
+| `instruct` | texto | nenhum |  |
+| `seed` | inteiro | nenhum |  |
+| `volume` | número, de 0 a 4 | 1.0 |  |
+
 #### PhaseRuleSpec
 
 Usado em `MulticamBlock.phases`.
@@ -6560,7 +6675,7 @@ Usado em `Project.overlays`.
 
 #### Reframe
 
-Usado em `CardSegment.reframe`, `ClipSegment.reframe`, `ImageSegment.reframe`.
+Usado em `CardSegment.reframe`, `ClipSegment.reframe`, `ImageSegment.reframe`, `PersonaSegment.reframe`.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
@@ -6837,7 +6952,7 @@ Usado em `Project.tracks`.
 
 #### Transition
 
-Usado em `CardSegment.transition`, `ClipSegment.transition`, `ImageSegment.transition`, `MulticamBlock.transition_in`.
+Usado em `CardSegment.transition`, `ClipSegment.transition`, `ImageSegment.transition`, `MulticamBlock.transition_in`, `PersonaSegment.transition`.
 
 | Campo | Tipo | Padrão | O que é |
 | --- | --- | --- | --- |
