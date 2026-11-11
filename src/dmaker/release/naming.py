@@ -6,6 +6,7 @@ from .platforms import PLATFORMS
 
 # O GitHub limita cada arquivo de uma release a 2 GiB (2 147 483 648 bytes); a fatia fica abaixo disso com folga.
 SLICE_BYTES = 2_000_000_000
+GITHUB_FILE_LIMIT = 2 * 1024**3
 
 
 def installer_basename(version: str, platform: str) -> str:
@@ -17,9 +18,10 @@ def installer_name(version: str, platform: str) -> str:
 
 
 def slice_names(version: str, platform: str, count: int) -> list[str]:
-    """As fatias de dados que o Inno gera ao lado do instalador: `<base>-1.bin`, `<base>-2.bin`..."""
+    """As partes de dados ao lado do instalador: `<base>-1.bin` (Inno Setup) ou `<base>-1.part` (Linux)."""
     base = installer_basename(version, platform)
-    return [f"{base}-{number}.bin" for number in range(1, count + 1)]
+    extension = PLATFORMS[platform].part_extension
+    return [f"{base}-{number}{extension}" for number in range(1, count + 1)]
 
 
 def installer_files(version: str, platform: str, slice_count: int) -> list[str]:
@@ -28,3 +30,8 @@ def installer_files(version: str, platform: str, slice_count: int) -> list[str]:
 
 def release_folder_name(version: str) -> str:
     return f"v{version}"
+
+
+def tag_for(version: str) -> str:
+    """A tag do git de uma versão do pacote: `2.0.0` é a tag `v2` (o nome da versão no Jira), como o `dmaker-producao` cria."""
+    return f"v{version.split('.')[0]}"

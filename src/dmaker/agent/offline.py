@@ -98,12 +98,19 @@ def _model_item(model_id: str, needed_by: str, probe: OfflineProbe) -> OfflineIt
     )
 
 
+def python_environment_label() -> str:
+    """Onde os pacotes Python moram: no instalado, o Python que veio com o programa; no clone, o `.venv`."""
+    if config.INSTALL:
+        return f"o Python do programa instalado ({config.INSTALL.root / 'python'})"
+    return "o ambiente Python do DMaker (.venv)"
+
+
 def _module_item(module: str, extra: str, needed_by: str, probe: OfflineProbe) -> OfflineItem:
     found = probe.module_available(module)
     return OfflineItem(
         f"Pacote Python {module}",
         "ok" if found else "missing",
-        "o ambiente Python do DMaker (.venv)",
+        python_environment_label(),
         needed_by,
         f'pip install -e ".[{extra}]"',
     )
