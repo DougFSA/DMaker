@@ -4526,7 +4526,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 153 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 154 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -5136,6 +5136,15 @@ Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, a
   - `--yes`: Apaga sem perguntar.
 - **`dmaker models remove MODEL_ID`**: Apaga o modelo do disco, dizendo antes quais funções dependem dele.
   - `--yes`: Apaga sem perguntar.
+
+#### dmaker release
+
+Monta o instalador do DMaker (Python portátil, binários e modelos).
+
+- **`dmaker release build`**: Gera o instalador e as fatias em releases/v<versão>, com o SHA-256 de cada arquivo e as notas da release.
+  - `--plataforma` TEXTO: Sistema do instalador (windows). (padrão windows)
+  - `--pasta` CAMINHO: Raiz principal do DMaker: de lá vêm os binários, os modelos e a ferramenta do instalador, e nela ficam releases/v<versão> e os downloads. Padrão: o clone atual.
+  - `--manter-trabalho`: Não apaga a pasta de trabalho no fim.
 
 #### dmaker sfx
 
