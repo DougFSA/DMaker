@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.error import URLError
 
 import numpy as np
 import pytest
@@ -421,6 +422,11 @@ def _render(
     project.base_dir = tmp_path
     matter = matter or FakeMatter()
     runner = runner or RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
+    # o teste nunca baixa modelo: sem isso, a prévia tentaria obter o leve na rede
+    builder = builder or PersonLayerBuilder(
+        fetch_model=lambda name: Path(name), model_on_disk=lambda name: True
+    )
+    messages: list[str] = []
     result = RenderPipeline(
         project,
         RenderOptions(**{"preview": True, "quiet": True, "out": tmp_path / "out.mp4", **options}),
@@ -429,10 +435,12 @@ def _render(
         transcriber_factory=lambda captions: FakeTranscriber(),
         matter=matter,
         person_layers=builder,
+        log=messages.append,
         cache_dir=tmp_path / "mez",
         jobs_dir=tmp_path / "jobs",
         output_dir=tmp_path / "output",
     ).run()
+    result.messages = messages
     return result, runner, matter
 
 
@@ -648,3 +656,54 @@ def test_the_window_covers_a_transition_between_two_clips_in_the_pipeline(tmp_pa
 def test_the_layer_version_and_the_warmup_are_pinned_constants():
     # mexer neles invalida o cache só da camada da pessoa (o `MATTE_VERSION` e o `MEZZ_VERSION` ficam)
     assert PERSON_LAYER_VERSION == "p1" and WARMUP_FRAMES == 12
+
+
+def _offline_fetch(calls: list[str]):
+    def fetch(name: str) -> Path:
+        calls.append(name)
+        raise URLError("sem rede")
+
+    return fetch
+
+
+def test_the_final_render_never_asks_for_the_light_model(tmp_path: Path):
+    calls: list[str] = []
+    builder = PersonLayerBuilder(fetch_model=_offline_fetch(calls), model_on_disk=lambda name: False)
+    _, _, matter = _render(tmp_path, _spec({"start": 1.0, "end": 2.0}), builder=builder, preview=False)
+    assert calls == [] and matter.person_requests[0].model == "resnet50"
+
+
+def test_the_preview_uses_the_light_model_when_it_can_be_fetched(tmp_path: Path):
+    calls: list[str] = []
+    builder = PersonLayerBuilder(fetch_model=lambda name: calls.append(name) or Path(name))
+    result, _, matter = _render(tmp_path, _spec({"start": 1.0, "end": 2.0}), builder=builder)
+    assert calls == ["mobilenetv3"] and matter.person_requests[0].model == "mobilenetv3"
+    assert any("modelo mobilenetv3" in m for m in result.messages)
+
+
+def test_the_preview_without_internet_falls_back_to_the_final_model_and_keeps_its_cache_key(tmp_path: Path):
+    calls: list[str] = []
+    builder = PersonLayerBuilder(fetch_model=_offline_fetch(calls), model_on_disk=lambda name: False)
+    spec = _spec({"start": 1.0, "end": 2.0})
+    result, _, matter = _render(tmp_path, spec, builder=builder)
+    assert matter.person_requests[0].model == "resnet50"
+    warnings = [m for m in result.messages if "sem internet" in m]
+    assert len(warnings) == 1 and "mobilenetv3" in warnings[0] and "resnet50" in warnings[0]
+    assert any("modelo resnet50" in m for m in result.messages)
+    # a chave só muda com o modelo e o conteúdo: a camada é a mesma de uma prévia que já pedia o resnet50, e uma
+    # segunda prévia sem internet a reaproveita (o render final tem outro tamanho, então outra camada, como já era)
+    layers = lambda: {p.name for p in (tmp_path / "mez").glob("*_person.mov")}  # noqa: E731
+    assert len(layers()) == 1
+    _render(tmp_path, spec, builder=PersonLayerBuilder(preview_model="resnet50"))
+    _render(tmp_path, spec, builder=builder)
+    assert len(layers()) == 1
+
+
+def test_the_preview_dry_run_never_fetches_the_light_model(tmp_path: Path):
+    calls: list[str] = []
+    missing = PersonLayerBuilder(fetch_model=_offline_fetch(calls), model_on_disk=lambda name: False)
+    _render(tmp_path / "a", _spec({"start": 1.0, "end": 2.0}), builder=missing, dry_run=True)
+    present = PersonLayerBuilder(fetch_model=_offline_fetch(calls), model_on_disk=lambda name: True)
+    result, _, _ = _render(tmp_path / "b", _spec({"start": 1.0, "end": 2.0}), builder=present, dry_run=True)
+    assert calls == []
+    assert any("modelo mobilenetv3" in m for m in result.messages)

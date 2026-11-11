@@ -256,6 +256,19 @@ def lv2_build(platform: str | None = None, machine: str | None = None) -> Ffmpeg
     return FFMPEG_LV2_BUILDS.get((kind, "x64" if arch in {"amd64", "x86_64"} else arch))
 
 
+def plugin_fix_advice(format_name: str, platform: str | None = None) -> str:
+    """O que fazer quando o ffmpeg de um formato de plugin (`lv2` ou `ladspa`) não está disponível, conforme o sistema."""
+    if format_name == "lv2":
+        return "rode dmaker setup --plugins"
+    if (platform or sys.platform).startswith("win"):
+        return "rode dmaker setup"  # o build completo do gyan.dev traz o filtro ladspa
+    # o `setup` só baixa o ffmpeg do Windows e o do pacote do Linux (BtbN) não tem o filtro `ladspa`
+    return (
+        "o ffmpeg em uso não tem o filtro ladspa; aponte DMAKER_FFMPEG_LADSPA_DIR para a pasta de um "
+        "ffmpeg que tenha (a do executável ou a que contém bin/; o do apt do Ubuntu tem)"
+    )
+
+
 def install_lv2_ffmpeg(
     force: bool = False,
     *,

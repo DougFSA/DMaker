@@ -277,3 +277,26 @@ def test_the_plugin_ffmpeg_is_found_by_the_environment_variable_then_bin_then_th
     ]  # o LADSPA não tem pasta própria
     monkeypatch.setenv("DMAKER_FFMPEG_LADSPA_DIR", str(tmp_path / "env"))
     assert [c.parent.parent.name for c in config.plugin_ffmpeg_candidates("ladspa")] == ["env", "principal"]
+
+
+def test_plugin_advice_is_setup_plugins_for_lv2_on_any_system():
+    from dmaker.setup_tools import plugin_fix_advice
+
+    assert (
+        plugin_fix_advice("lv2", "win32")
+        == plugin_fix_advice("lv2", "linux")
+        == "rode dmaker setup --plugins"
+    )
+
+
+def test_ladspa_advice_is_setup_on_windows_where_the_full_build_has_the_filter():
+    from dmaker.setup_tools import plugin_fix_advice
+
+    assert plugin_fix_advice("ladspa", "win32") == "rode dmaker setup"
+
+
+def test_ladspa_advice_off_windows_points_to_the_folder_variable_not_setup():
+    from dmaker.setup_tools import plugin_fix_advice
+
+    advice = plugin_fix_advice("ladspa", "linux")
+    assert "DMAKER_FFMPEG_LADSPA_DIR" in advice and "dmaker setup" not in advice and "—" not in advice

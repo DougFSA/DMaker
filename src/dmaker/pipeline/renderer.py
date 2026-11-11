@@ -353,7 +353,7 @@ class RenderPipeline:
             pending = sum(1 for item in people if item.commands)
             ctx.log(
                 f"pessoa atrás do texto: {len(people)} intervalo(s) ({pending} a recortar, "
-                f"{len(people) - pending} em cache), modelo {self.person_layers.model_for(ctx)}"
+                f"{len(people) - pending} em cache), modelo {people[0].model}"
             )
             self.person_layers.build(ctx, people)
         return people
