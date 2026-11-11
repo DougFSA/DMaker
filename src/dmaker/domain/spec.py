@@ -39,6 +39,7 @@ from .auto_duck import AutoDuck
 from .carrier_tracks import check_carrier_pair, find_cycle
 from .curves import Curve
 from .generators import normalized_params
+from .persona import DEFAULT_EXPRESSION, PersonaMark, PersonaSpeech
 from .pitch_tempo import MAX_TIME_RATIO, MIN_TIME_RATIO
 from .tempo_grid import MAX_BPM, MIN_BPM, Tempo
 from .transitions import all_transition_names
@@ -341,7 +342,39 @@ class CardSegment(SegmentBase):
         return self
 
 
-Segment = Annotated[ClipSegment | ImageSegment | CardSegment, Field(discriminator="type")]
+class PersonaBackground(Strict):
+    """Fundo atrás da persona num trecho de tela cheia: uma cor, uma imagem ou um clipe (nunca mais de um).
+    Sem nada, vale uma cor neutra."""
+
+    color: str | None = None  # "#RRGGBB" ou chave de cor da marca
+    image: str | None = None
+    clip: str | None = None
+    clip_start: float = Field(
+        0.0, ge=0
+    )  # ponto de entrada no clipe de fundo, que se repete se for mais curto
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> PersonaBackground:
+        if sum(value is not None for value in (self.color, self.image, self.clip)) > 1:
+            raise ValueError("o fundo da persona leva só um entre `color`, `image` e `clip`")
+        return self
+
+
+class PersonaSegment(SegmentBase):
+    """Trecho de tela cheia em que uma persona cadastrada fala (ver `domain/persona.py`). A duração é a da fala mais
+    `tail`, a não ser que `duration` a fixe; `marks` trocam a expressão e fazem gestos em segundos desde o início."""
+
+    type: Literal["persona"] = "persona"
+    persona: str = Field(min_length=1)
+    speech: PersonaSpeech
+    duration: float | None = Field(None, gt=0)
+    tail: float = Field(0.5, ge=0, le=5)  # respiro depois da fala, quando a duração não é fixa
+    expression: str = DEFAULT_EXPRESSION  # a expressão em que ela começa
+    marks: list[PersonaMark] = []
+    background: PersonaBackground = PersonaBackground()
+
+
+Segment = Annotated[ClipSegment | ImageSegment | CardSegment | PersonaSegment, Field(discriminator="type")]
 
 
 # ---------- regiões nomeadas ----------
@@ -685,8 +718,43 @@ class HtmlOverlay(Strict):
         return self
 
 
+class PersonaOverlay(Strict):
+    """Persona num canto do quadro, sobre outro trecho (como o picture-in-picture), falando por cima do vídeo: o som
+    dela entra na mixagem como uma narração. Sem `background` a persona fica solta (transparente); com uma cor,
+    ela ganha um fundo no formato de `shape`. `end` vazio acaba junto com a fala."""
+
+    type: Literal["persona"] = "persona"
+    persona: str = Field(min_length=1)
+    speech: PersonaSpeech
+    start: float = Field(0.0, ge=0)  # na linha do tempo
+    end: float | None = Field(None, ge=0)
+    position: Literal["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom", "center"] = (
+        "bottom-right"
+    )
+    x: float | None = Field(None, ge=0, le=1)  # centro, fração do quadro (sobrescreve position)
+    y: float | None = Field(None, ge=0, le=1)
+    width: float = Field(0.34, gt=0, le=1)  # fração da largura do vídeo
+    aspect: str = "3:4"  # proporção do quadro da persona; o círculo força 1:1
+    margin: float = Field(40, ge=0)  # px na base 1080
+    background: str | None = None  # cor "#RRGGBB" ou chave da marca; vazio = transparente
+    shape: Literal["rect", "rounded", "circle"] = "rounded"  # só vale com `background`
+    radius: float = Field(0.08, ge=0, le=0.5)  # cantos redondos, fração da largura
+    fade: float = Field(0.25, ge=0)  # entrada e saída suaves, em segundos
+    expression: str = DEFAULT_EXPRESSION
+    marks: list[PersonaMark] = []
+
+    @model_validator(mode="after")
+    def _place(self) -> PersonaOverlay:
+        parse_aspect(self.aspect)
+        if (self.x is None) != (self.y is None):
+            raise ValueError("persona sobreposta: informe `x` e `y` juntos (o centro do quadro)")
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("end precisa ser maior que start na persona sobreposta")
+        return self
+
+
 Overlay = Annotated[
-    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay | HtmlOverlay,
+    TextOverlay | ImageOverlay | ProgressBar | VideoOverlay | AudiogramOverlay | HtmlOverlay | PersonaOverlay,
     Field(discriminator="type"),
 ]
 

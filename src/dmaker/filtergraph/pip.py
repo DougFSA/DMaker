@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from ..domain.audio_shift import AudioWindow, shifted_window
 from ..domain.presets import SafeZone
@@ -38,6 +39,15 @@ class ResolvedVideoOverlay:
         return self.end - self.start
 
 
+class Placed(Protocol):
+    """O que o lugar de um quadro sobreposto lê da spec (o PiP e a persona sobreposta têm o mesmo jeito de posicionar)."""
+
+    x: float | None
+    y: float | None
+    position: str
+    margin: float
+
+
 def pip_size(ov: VideoOverlay, W: int, source_aspect: float | None) -> tuple[int, int]:
     """Largura e altura (px, pares) do quadro do PiP. A proporção é a do círculo (1:1), a pedida em `aspect` ou a
     da própria fonte (16:9 se ela não disser)."""
@@ -57,7 +67,7 @@ def pip_position(pip: ResolvedVideoOverlay, W: int, H: int, scale: float, safe: 
 
 
 def pip_origin(
-    ov: VideoOverlay, width: int, height: int, W: int, H: int, scale: float, safe: SafeZone
+    ov: Placed, width: int, height: int, W: int, H: int, scale: float, safe: SafeZone
 ) -> tuple[int, int]:
     """Canto superior esquerdo de um PiP de `width` x `height`: o centro em `x`/`y` quando a spec os dá, senão a
     posição nomeada dentro da zona segura. Separada de `pip_position` para a caixa da interface e o QA calcularem

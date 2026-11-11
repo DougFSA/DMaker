@@ -86,6 +86,9 @@ class RenderContext:
     # a linha do tempo vista pelo crossfade de som entre clipes vizinhos (`pipeline.audio_crossfade.CutNeighbors`): o
     # preparador de um trecho precisa das fontes e das durações dos vizinhos. O construtor do mezanino a preenche
     cut_neighbors: Any = None
+    # as personas do render (ver `pipeline/persona_render.py`): quem sintetiza a fala delas e desenha os clipes. O
+    # `RenderPipeline` o preenche; quem monta o contexto sem ele ganha um serviço padrão na primeira persona
+    personas: Any = None
 
     @property
     def width(self) -> int:

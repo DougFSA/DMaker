@@ -27,6 +27,8 @@ from ..domain.spec import (
 from ..domain.templates import Template, find_template, list_templates, render_template, template_summary
 from ..media.browser import browser_problem
 from ..media.probe import probe
+from ..persona.library import PersonaLibrary
+from ..persona.validation import persona_problems
 from .audio_lint import audio_output_warnings, noise_profile_warnings
 from .context import Prober
 from .html_layer import html_warnings
@@ -151,6 +153,7 @@ def summarize(
     warnings += tempo_warnings(project.audio)
     warnings += effect_refusal_warnings(project, prober)
     warnings += html_warnings(project, browser_problem)
+    warnings += persona_problems(project, PersonaLibrary().get)
     warnings += audio_output_warnings(project, presentation.total)
     warnings += noise_profile_warnings(project)
     warnings += plugin_warnings(project, plugins)

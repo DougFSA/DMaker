@@ -41,6 +41,7 @@ from .lint import lint
 from .narration import NarrationService
 from .output_kinds import register_output_kind
 from .person_layer import PersonLayerBuilder
+from .persona_render import PersonaStage
 from .segments import MezzanineBuilder
 from .sfx import SfxTrack, leveled_effects, resolve_files
 from .sources import expand_parts, resolve_session, resolve_sources
@@ -74,6 +75,7 @@ class RenderPipeline:
         mezzanines: MezzanineBuilder | None = None,
         person_layers: PersonLayerBuilder | None = None,
         html_layers: HtmlLayerBuilder | None = None,
+        personas: PersonaStage | None = None,
         cache_dir: Path | None = None,
         jobs_dir: Path | None = None,
         output_dir: Path | None = None,
@@ -94,6 +96,7 @@ class RenderPipeline:
         self.mezzanines = mezzanines or MezzanineBuilder()
         self.person_layers = person_layers or PersonLayerBuilder()
         self.html_layers = html_layers or HtmlLayerBuilder()
+        self.personas = personas or PersonaStage()
         self.narrator = narrator
         self.isolator = isolator
         self.voiceover = VoiceoverPreparer(voice_library)
@@ -135,6 +138,7 @@ class RenderPipeline:
             narrator=self.narrator,
             isolator=self.isolator,
             log=self.log,
+            personas=self.personas,
         )
 
     def _output_path(self, preset: Preset) -> Path:
@@ -167,6 +171,11 @@ class RenderPipeline:
         view = self._resolved(ctx, self._sliced(p, o, ctx), report=True)
         p, sources, track_origin = view.project, view.sources, view.track_origin
         ctx.session, ctx.project = view.session, p
+        persona_issues = self.personas.problems(p)
+        if persona_issues:
+            raise ValueError("Persona com problema:\n" + "\n".join(persona_issues))
+        self.personas.check_available(ctx)
+        sources = self.personas.attach_speech(ctx, p, sources)  # a fala dá a duração do trecho de persona
         heard = None
         if heard_project is not None:
             heard_view = self._resolved(ctx, self._sliced(heard_project, o, ctx), report=False)
@@ -206,7 +215,7 @@ class RenderPipeline:
         # o que não depende dos mezaninos fica pronto antes deles: o Auto Duck mede a chave de uma faixa externa de fundo
         # (que abaixa dentro do mezanino) na narração, nas vozes gravadas e na música já processadas
         # (o Vocoder que ouve outra trilha precisa dela já na hora de processar o item, então a passada prévia é instalada antes)
-        spoken = self.voiceover.prepare(ctx)
+        spoken = [*self.voiceover.prepare(ctx), *self.personas.voiceovers(ctx)]  # a fala da persona é uma voz
         music_file = self._music_path()
         voiceovers_of = Deferred(lambda: processed_voiceovers(ctx, spoken), "a narração")
         voice_files_of = Deferred(
@@ -300,7 +309,7 @@ class RenderPipeline:
             voice_files=voice_files,
             visual_gain_db=visual_gain,
             person_layers=[item.layer for item in people],
-            html_layers=[item.layer for item in html],
+            html_layers=[*(item.layer for item in html), *self.personas.overlay_layers(ctx, total)],
         )
         (ctx.job_dir / "graph.txt").write_text(";".join(assembly.graph), encoding="utf-8")
         (ctx.job_dir / "graph.pretty.txt").write_text(";\n".join(assembly.graph), encoding="utf-8")

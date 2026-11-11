@@ -566,3 +566,7 @@ class MezzanineBuilder:
                 ctx.runner.run(prerequisite)
             if item.command is not None:
                 ctx.runner.run(item.command)
+
+
+# O preparador do trecho de persona mora em outro módulo (que importa este) e se registra ao ser importado.
+from . import persona_segment  # noqa: E402,F401

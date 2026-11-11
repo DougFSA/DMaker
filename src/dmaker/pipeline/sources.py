@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.spec import CardSegment, ClipSegment, Project, VideoOverlay
+from ..domain.spec import CardSegment, ClipSegment, PersonaSegment, Project, VideoOverlay
 from ..media.probe import MediaInfo
 from .context import Prober
 from .missing import MissingMedia
@@ -107,7 +107,9 @@ def resolve_sources(
     session = session or {}
     sources: list[Source] = []
     for i, seg in enumerate(project.timeline):
-        if isinstance(seg, CardSegment):
+        if isinstance(
+            seg, CardSegment | PersonaSegment
+        ):  # sem arquivo de fonte (a fala da persona vem do render)
             sources.append(Source(None, None))
             continue
         if isinstance(seg, ClipSegment) and seg.source:
