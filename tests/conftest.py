@@ -55,12 +55,22 @@ def isolated_data(request, tmp_path_factory, monkeypatch):
         monkeypatch.setattr(config, name, path)
     monkeypatch.setattr(config, "DATA_DIR", data)
     monkeypatch.setenv("DMAKER_DATA_DIR", str(data))
+    if os.environ.get("DMAKER_VOICE_SMOKE") != "1":
+        _never_download_the_preview_model(monkeypatch)
     _reset_process_state(monkeypatch)
     yield data
     _reset_process_state(monkeypatch)
     leaked = GUARD.take_violations()
     GUARD.current_test = "<fora de um teste>"
     assert not leaked, "o teste escreveu fora da pasta temporária de dados:\n" + "\n".join(leaked)
+
+
+def _never_download_the_preview_model(monkeypatch) -> None:
+    """A prévia com texto atrás da pessoa baixa o modelo leve na primeira vez: nos testes ele finge que já está em disco,
+    porque teste não usa a rede (e sem rede a prévia cairia no resnet50, mudando o que os testes esperam)."""
+    from dmaker.pipeline import person_layer
+
+    monkeypatch.setattr(person_layer, "fetch_preview_model", lambda name: Path(name))
 
 
 def _reset_process_state(monkeypatch) -> None:
