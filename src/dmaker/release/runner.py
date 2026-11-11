@@ -19,6 +19,8 @@ class ReleaseError(RuntimeError):
 class RecordedCommand:
     command: tuple[str, ...]
     cwd: Path | None = None
+    env: Mapping[str, str] | None = None
+    quiet: bool = False
 
 
 class CommandRunner(Protocol):
@@ -29,8 +31,10 @@ class CommandRunner(Protocol):
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         check: bool = True,
+        quiet: bool = False,
     ) -> str:
-        """Roda o comando até o fim e devolve a saída; falhar é levantar `ReleaseError` (salvo com `check=False`)."""
+        """Roda o comando até o fim e devolve a saída; falhar é levantar `ReleaseError` (salvo com `check=False`).
+        `quiet` não repassa a saída ao log: é para o que só se lê (a lista de arquivos do git tem dezenas de milhares)."""
 
 
 class SubprocessCommandRunner:
@@ -46,6 +50,7 @@ class SubprocessCommandRunner:
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         check: bool = True,
+        quiet: bool = False,
     ) -> str:
         program = shutil.which(command[0]) or command[0]  # o `npm` do Windows é um .cmd
         merged = {**os.environ, **(env or {})}
@@ -66,7 +71,7 @@ class SubprocessCommandRunner:
         assert process.stdout is not None
         for line in process.stdout:
             lines.append(line)
-            if self.on_line:
+            if self.on_line and not quiet:
                 self.on_line(line.rstrip("\n"))
         if process.wait() != 0 and check:
             tail = "".join(lines[-25:]).strip()
@@ -88,9 +93,10 @@ class RecordingCommandRunner:
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         check: bool = True,
+        quiet: bool = False,
     ) -> str:
         recorded = tuple(str(part) for part in command)
-        self.commands.append(RecordedCommand(recorded, cwd))
+        self.commands.append(RecordedCommand(recorded, cwd, dict(env) if env else None, quiet))
         for prefix, output in self.outputs.items():
             if recorded[: len(prefix)] == prefix:
                 return output

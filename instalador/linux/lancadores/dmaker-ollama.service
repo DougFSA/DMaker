@@ -1,0 +1,9 @@
+[Unit]
+Description=Ollama instalado pelo DMaker
+
+[Service]
+ExecStart=@@PROGRAMA@@/ollama/bin/ollama serve
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

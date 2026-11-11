@@ -8,10 +8,12 @@ from typing import Literal
 
 from ..agent.offline import REQUIRED_MODELS
 from ..domain.models import REGISTRY, find_model
-from .platforms import BINARIES
+from .platforms import PLATFORMS, WINDOWS
 
 Target = Literal["program", "data"]
-Origin = Literal["repo", "pasta"]
+# `repo`: arquivo versionado do clone; `pasta`: da pasta principal (binários e modelos que já estão lá); `build`: o próprio
+# build o produz (o Chromium e o FFmpeg do Linux, baixados no contêiner), então não há o que copiar.
+Origin = Literal["repo", "pasta", "build"]
 
 # Pastas que são dado de quem usa o editor (ou saída dele): nunca entram no pacote, mesmo que estejam no git.
 FORBIDDEN_PARTS = frozenset(
@@ -51,14 +53,24 @@ def repo_entries(tracked_files: Iterable[str]) -> list[ManifestEntry]:
     return entries
 
 
-def binary_entries() -> list[ManifestEntry]:
-    return [ManifestEntry(f"bin/{name}", f"bin/{name}", "program", "pasta", why) for name, why in BINARIES]
+def binary_entries(platform: str = WINDOWS.id) -> list[ManifestEntry]:
+    spec = PLATFORMS[platform]
+    return [
+        ManifestEntry(f"bin/{name}", f"bin/{name}", "program", spec.binaries_origin, why)
+        for name, why in spec.binaries
+    ]
 
 
-def model_entries(model_ids: Iterable[str] | None = None) -> list[ManifestEntry]:
-    """Cada caminho de cada modelo padrão, sem repetir o que dois modelos dividem, para `<dados>/cache/models`."""
+def model_entries(
+    model_ids: Iterable[str] | None = None, excluded: Iterable[str] = ()
+) -> list[ManifestEntry]:
+    """Cada caminho de cada modelo padrão, sem repetir o que dois modelos dividem, para `<dados>/cache/models`.
+    Os `excluded` (`--sem-modelo`) ficam de fora: baixam no primeiro uso."""
     entries: dict[str, ManifestEntry] = {}
+    skipped = set(excluded)
     for model_id in model_ids if model_ids is not None else default_model_ids():
+        if model_id in skipped:
+            continue
         spec = find_model(model_id, REGISTRY)
         if spec is None:
             raise ValueError(f"Modelo fora do registro: {model_id}")
@@ -76,8 +88,20 @@ def model_entries(model_ids: Iterable[str] | None = None) -> list[ManifestEntry]
     return list(entries.values())
 
 
-def build_manifest(tracked_files: Iterable[str]) -> list[ManifestEntry]:
-    entries = [*repo_entries(tracked_files), *binary_entries(), *model_entries()]
+def check_model_ids(model_ids: Iterable[str]) -> None:
+    """Recusa um `--sem-modelo` que não é um modelo padrão do pacote: um erro de digitação não pode passar calado."""
+    known = set(default_model_ids())
+    for model_id in model_ids:
+        if model_id not in known:
+            raise ValueError(f"Modelo fora do pacote: {model_id}. Os do pacote: {', '.join(sorted(known))}")
+
+
+def build_manifest(
+    tracked_files: Iterable[str], platform: str = WINDOWS.id, excluded_models: Iterable[str] = ()
+) -> list[ManifestEntry]:
+    excluded = tuple(excluded_models)
+    check_model_ids(excluded)
+    entries = [*repo_entries(tracked_files), *binary_entries(platform), *model_entries(excluded=excluded)]
     for entry in entries:
         if not is_shippable(
             entry.dest.removeprefix(MODELS_DEST + "/") if entry.target == "data" else entry.dest

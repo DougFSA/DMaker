@@ -130,6 +130,54 @@ O DMaker não decide sozinho os cortes finos, o ritmo (quando cada trecho troca)
 
 ---
 
+## Instalar pelo instalador (Windows e Linux)
+
+Quem só quer usar o DMaker, sem o código, instala pelo pacote da aba **Releases** do repositório (<https://github.com/DougFSA/DMaker/releases>). O pacote traz tudo: o Python, o FFmpeg, o Chromium, o Ollama (só o programa, nenhum modelo de linguagem) e os modelos de legenda, voz, isolamento de voz e recorte de pessoa. Depois de instalado, o DMaker funciona sem internet. Quem quer mexer no código segue "Instalação passo a passo no Windows", mais abaixo.
+
+O GitHub limita cada arquivo a 2 GiB, então o pacote vem em partes: baixe **todos** os arquivos do seu sistema para a **mesma pasta** (o instalador mais as partes `-1`, `-2`...) e confira o SHA-256 de cada um contra o `SHA256SUMS.txt` ou a tabela das notas da release.
+
+### Instalar no Windows
+
+1. Baixe `DMaker-<versão>-windows-x64.exe` e todas as partes `DMaker-<versão>-windows-x64-N.bin` (cerca de 7 GB no total) para a mesma pasta.
+2. Confira cada arquivo: `certutil -hashfile <arquivo> SHA256` e compare com a tabela da release.
+3. Execute o `.exe`. Ele **não pede administrador**: instala só para o seu usuário. O assistente mostra as licenças e pergunta a **pasta do programa** (padrão `%LOCALAPPDATA%\Programs\DMaker`), a **pasta dos dados** (projetos, vozes, saídas, cache e modelos; padrão `%LOCALAPPDATA%\DMaker`) e duas opções: um atalho na área de trabalho e o comando `dmaker` no PATH.
+4. Abra **DMaker** no menu Iniciar (ele roda `dmaker ui`) ou use o `dmaker.cmd` da pasta do programa. `dmaker doctor --offline` confere o que o pacote levou.
+
+O instalador recusa, com uma mensagem, uma pasta do programa que já tem arquivos de outra coisa (ao desinstalar, o DMaker remove a própria pasta), uma pasta de dados dentro da do programa (ou o contrário) e um caminho tão longo que algum arquivo do pacote passaria dos 260 caracteres do Windows (o limite, uns 100 caracteres, aparece na mensagem; uma pasta curta na raiz do disco sempre serve). Na instalação silenciosa: `DMaker-<versão>-windows-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /DIR="<pasta do programa>" /DADOS="<pasta dos dados>"`; se uma pasta for recusada, o instalador sai com o código 7 e o motivo fica no log (`/LOG=arquivo.log`).
+
+**Atualizar** é rodar o instalador da versão nova por cima: o Python do programa é trocado inteiro, os modelos só são copiados se ainda não existem, e projetos, vozes, saídas e configurações ficam. **Desinstalar**: Configurações, Aplicativos, DMaker (ou o `unins000.exe` da pasta do programa). Ele pergunta se apaga também os dados (o padrão é não, e apaga só o que é do DMaker na pasta); desinstalar em silêncio nunca apaga os dados.
+
+### Instalar no Linux
+
+Ubuntu 22.04 e 24.04 (x64) foram testados.
+
+1. Baixe `DMaker-<versão>-linux-x64.run` e todas as partes `DMaker-<versão>-linux-x64-N.part` (cerca de 7 GB no total) para a mesma pasta, e confira: `sha256sum -c SHA256SUMS.txt --ignore-missing`.
+2. Rode `sh DMaker-<versão>-linux-x64.run`. Ele não pede `sudo` e não toca em `/usr`. Com terminal, pergunta as pastas mostrando o padrão; `--sim` aceita tudo sem perguntar; `--programa PASTA` e `--dados PASTA` escolhem as pastas.
+3. O programa vai em `~/.local/opt/dmaker`, os dados em `~/.local/share/dmaker`, os comandos `dmaker` e `dmaker-mcp` em `~/.local/bin` e o atalho do menu em `~/.local/share/applications/dmaker.desktop`. Se `~/.local/bin` não está no PATH, a última mensagem diz como pôr.
+4. O instalador confere o espaço livre nas duas pastas e as bibliotecas que o Chromium pede. Se faltar alguma, **avisa e mostra o `sudo apt install ...` exato**, e segue (só a composição em HTML e o PDF do manual dependem delas).
+5. O **Ollama** só entra se `ollama` ainda não está no PATH: o instalador o extrai no programa, cria o comando `~/.local/bin/ollama` e, onde há systemd de usuário, liga o serviço `dmaker-ollama`; sem systemd, diz para rodar `ollama serve`. Depois: `ollama pull gpt-oss:20b`.
+
+**Atualizar** é rodar o `.run` da versão nova: ele acha a instalação pelo marcador `instalacao.json`, troca o programa e mantém os dados (os modelos só são copiados se não existem). **Desinstalar**: `~/.local/opt/dmaker/desinstalar.sh`. Tira o programa, os comandos e o atalho; o Ollama e o serviço dele só saem se foi o instalador do DMaker que os pôs. Com terminal, pergunta se apaga os dados (o padrão é não); `--sim` nunca apaga; `--apagar-dados` apaga sem perguntar.
+
+O que o Linux não tem: o FFmpeg do pacote do Linux (o build estático do BtbN) **não tem o filtro `ladspa`**, então os plugins **LADSPA** não rodam nele (o `dmaker doctor` mostra "plugins LADSPA: indisponível" como aviso, não como erro, e o render só pula o efeito de plugin LADSPA). Os plugins **LV2** funcionam: o filtro `lv2` está lá, e `bin/ffmpeg-lv2` aponta para o mesmo FFmpeg. Por isso, no Linux, não rode `dmaker setup` para tentar trazer o LADSPA: ele só baixa o FFmpeg do Windows. O resto é igual ao Windows. Depois de instalado, o programa ocupa uns 6 GB e os modelos uns 4,5 GB.
+
+### Ligar o servidor MCP ao Claude Code (a partir do instalado)
+
+O instalado não tem `.venv` nem `.mcp.json`; aponte o Claude Code para o lançador do MCP:
+
+- Windows: `claude mcp add dmaker -- "<pasta do programa>\dmaker-mcp.cmd"`
+- Linux: `claude mcp add dmaker -- ~/.local/bin/dmaker-mcp`
+
+### Licença do OmniVoice
+
+Os pesos do OmniVoice (a voz padrão da narração) são **CC BY-NC 4.0**, por causa dos dados de treino: podem ser redistribuídos com atribuição, mas **não podem ser usados com fins comerciais**. O código dele é Apache-2.0. O pacote leva o modelo com esse aviso (no `LICENCAS.txt`, que o instalador mostra, e nas notas da release). Quem monta o pacote pode tirá-lo com `dmaker release build --sem-modelo omnivoice`: ele passa a baixar no primeiro uso (`dmaker models download omnivoice`).
+
+### Montar e publicar o pacote (quem lança a versão)
+
+`dmaker release build` gera os dois instaladores em `releases/v<versão>` (`--plataforma windows|linux|todas`; o Linux é montado num contêiner Docker `ubuntu:22.04`), com o `SHA256SUMS.txt` e as `NOTAS.md`. Depois do release e da tag, `dmaker release publish --versao <X>` sobe tudo para a aba Releases pelo `gh`: recusa sem a tag no `origin`, com a versão do pacote diferente da tag, com arquivo de 2 GiB ou mais ou com SHA-256 que não bate, e pode ser repetido depois de uma queda (só sobe o que falta).
+
+---
+
 ## Instalação passo a passo no Windows
 
 ### Pré-requisitos
@@ -4468,6 +4516,7 @@ Esta seção reúne o que mudou para quem usa desde a versão anterior (v1). Cad
 
 | Chamado | O que você ganhou | Onde está |
 | --- | --- | --- |
+| DMK-71 | Instaladores para Windows e Linux (pacote com Python, FFmpeg, Chromium, Ollama e os modelos, que instala e funciona sem internet), atualizar por cima sem perder os dados, desinstalar, o aviso de uso não comercial do OmniVoice (CC BY-NC) e `dmaker release build` e `dmaker release publish` para quem lança a versão | "Instalar pelo instalador (Windows e Linux)" |
 | DMK-24 | Infográficos animados prontos (`contador`, `barra`, `linha`, `imagem`, `etiqueta`, `grifo`, `emoji`), com a marca por variáveis, esquema de parâmetros validado no projeto, o atalho `infographic` na composição em HTML, `dmaker infographics`, `list_infographics`, `add_infographic` e a tela **Infográficos**; o modelo `explicativo` aceita um infográfico por assunto | "Pôr um infográfico animado no vídeo" |
 | DMK-26 | Animação em HTML sobre o vídeo (`type: "html"`): HTML, CSS e JavaScript, com three.js e Lottie, desenhados quadro a quadro com fundo transparente; `dmaker html frame`, `render_html_frame`, `add_html_overlay` e `dmaker setup --html` | "Pôr uma animação em HTML sobre o vídeo" |
 | DMK-28 | Texto atrás da pessoa (`layer: "behind-person"`): o título grande passa entre a parede e quem fala, recortando a pessoa só enquanto o texto aparece | "Pôr o texto atrás da pessoa" |
@@ -4526,7 +4575,7 @@ Esta seção é **gerada**: os quatro blocos abaixo são reescritos por `dmaker 
 
 <!-- dmaker:gerado cli -->
 
-São 154 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
+São 155 comandos. `dmaker COMANDO --help` mostra o mesmo texto na tela, com a versão instalada.
 
 #### Comandos avulsos
 
@@ -5139,12 +5188,16 @@ Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, a
 
 #### dmaker release
 
-Monta o instalador do DMaker (Python portátil, binários e modelos).
+Monta os instaladores do DMaker (Windows e Linux) e os publica na aba Releases do GitHub.
 
-- **`dmaker release build`**: Gera o instalador e as fatias em releases/v<versão>, com o SHA-256 de cada arquivo e as notas da release.
-  - `--plataforma` TEXTO: Sistema do instalador (windows). (padrão windows)
+- **`dmaker release build`**: Gera o instalador e as partes em releases/v<versão>, com o SHA-256 de cada arquivo e as notas da release.
+  - `--plataforma` TEXTO: Sistema do instalador: windows, linux ou todas. (padrão todas)
   - `--pasta` CAMINHO: Raiz principal do DMaker: de lá vêm os binários, os modelos e a ferramenta do instalador, e nela ficam releases/v<versão> e os downloads. Padrão: o clone atual.
+  - `--sem-modelo` TEXTO: Não leva este modelo no pacote (ele baixa no primeiro uso). Repita para vários. Ex.: --sem-modelo omnivoice. (pode repetir)
   - `--manter-trabalho`: Não apaga a pasta de trabalho no fim.
+- **`dmaker release publish`**: Sobe os instaladores de releases/v<versão> para a release do GitHub (a tag precisa existir). Pode ser repetido.
+  - `--versao` TEXTO: O nome da versão, o mesmo da tag (2 para a tag v2, pacote 2.0.0). (obrigatória)
+  - `--pasta` CAMINHO: Raiz principal do DMaker, onde está releases/v<versão>. Padrão: o clone atual.
 
 #### dmaker sfx
 

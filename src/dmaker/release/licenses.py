@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .manifest import default_model_ids
@@ -11,28 +12,15 @@ from .manifest import default_model_ids
 class LicenseItem:
     name: str
     license: str
-    redistributable: bool  # pode ir no pacote sem pedir nada à pessoa
+    redistributable: bool  # pode ir no pacote (False: precisa de uma decisão de quem publica)
     source: str  # de onde veio (e, quando a licença pede, onde está o código-fonte)
     note: str = ""
+    non_commercial: bool = False  # vai no pacote, mas a licença proíbe o uso comercial: o aviso acompanha
 
 
 # Um item por componente que o `build` embute além do código do DMaker (MIT). Os modelos seguem o registro
 # (`domain/models.py`); a licença de cada um foi conferida na página do modelo ou no pacote que o baixa.
-LICENSE_ITEMS: tuple[LicenseItem, ...] = (
-    LicenseItem(
-        "FFmpeg 9.0.2 (gyan.dev, build full)",
-        "GPL v3",
-        True,
-        "https://www.gyan.dev/ffmpeg/builds/ ; código-fonte do build: https://github.com/FFmpeg/FFmpeg/commit/946fcce07b",
-        "O texto da GPL v3 vai em bin/ffmpeg/LICENSE. O FFmpeg roda como programa separado, chamado pelo DMaker.",
-    ),
-    LicenseItem(
-        "FFmpeg n9.0.2 (BtbN, plugins LV2)",
-        "GPL v3",
-        True,
-        "https://github.com/BtbN/FFmpeg-Builds ; código-fonte: https://github.com/FFmpeg/FFmpeg (commit b204e94e90)",
-        "O texto da GPL v3 vai em bin/ffmpeg-lv2/LICENSE.txt.",
-    ),
+COMMON_ITEMS: tuple[LicenseItem, ...] = (
     LicenseItem(
         "Python 3.13 (python-build-standalone)",
         "PSF License",
@@ -41,24 +29,17 @@ LICENSE_ITEMS: tuple[LicenseItem, ...] = (
         "As bibliotecas que o build do Python embute trazem as licenças delas em python/LICENSE.txt.",
     ),
     LicenseItem(
-        "Chromium (Playwright)",
-        "BSD-3-Clause e licenças de terceiros do Chromium",
-        True,
-        "https://www.chromium.org/ ; https://playwright.dev/",
-        "As licenças de terceiros ficam em bin/playwright/chromium-*/chrome-win*/ (arquivo LICENSE).",
-    ),
-    LicenseItem(
         "Ollama 0.40.16 (só o programa, nenhum modelo)",
         "MIT",
         True,
         "https://github.com/ollama/ollama",
-        "Instalado pelo instalador do próprio Ollama, só se a máquina ainda não tiver o programa.",
+        "Instalado junto só se a máquina ainda não tiver o programa.",
     ),
     LicenseItem(
         "PyTorch, torchaudio e demais pacotes Python",
         "BSD-3-Clause, MIT, Apache-2.0 e similares, cada um com a sua",
         True,
-        "Cada pacote traz a licença na pasta *.dist-info em python/Lib/site-packages",
+        "Cada pacote traz a licença na pasta *.dist-info em site-packages",
     ),
     LicenseItem("Poppins (fonte)", "SIL Open Font License 1.1", True, "assets/fonts/OFL-Poppins.txt"),
     LicenseItem(
@@ -69,6 +50,49 @@ LICENSE_ITEMS: tuple[LicenseItem, ...] = (
     ),
 )
 
+# O que muda de um sistema para outro: o FFmpeg e o Chromium.
+PLATFORM_ITEMS: dict[str, tuple[LicenseItem, ...]] = {
+    "windows": (
+        LicenseItem(
+            "FFmpeg 9.0.2 (gyan.dev, build full)",
+            "GPL v3",
+            True,
+            "https://www.gyan.dev/ffmpeg/builds/ ; código-fonte do build: https://github.com/FFmpeg/FFmpeg/commit/946fcce07b",
+            "O texto da GPL v3 vai em bin/ffmpeg/LICENSE. O FFmpeg roda como programa separado, chamado pelo DMaker.",
+        ),
+        LicenseItem(
+            "FFmpeg n9.0.2 (BtbN, plugins LV2)",
+            "GPL v3",
+            True,
+            "https://github.com/BtbN/FFmpeg-Builds ; código-fonte: https://github.com/FFmpeg/FFmpeg (commit b204e94e90)",
+            "O texto da GPL v3 vai em bin/ffmpeg-lv2/LICENSE.txt.",
+        ),
+        LicenseItem(
+            "Chromium (Playwright)",
+            "BSD-3-Clause e licenças de terceiros do Chromium",
+            True,
+            "https://www.chromium.org/ ; https://playwright.dev/",
+            "As licenças de terceiros ficam em bin/playwright/chromium-*/chrome-win*/ (arquivo LICENSE).",
+        ),
+    ),
+    "linux": (
+        LicenseItem(
+            "FFmpeg n9.0 (BtbN, build estático com LADSPA e LV2)",
+            "GPL v3",
+            True,
+            "https://github.com/BtbN/FFmpeg-Builds ; código-fonte: https://github.com/FFmpeg/FFmpeg",
+            "O texto da GPL v3 vai em bin/ffmpeg/LICENSE.txt. O FFmpeg roda como programa separado, chamado pelo DMaker.",
+        ),
+        LicenseItem(
+            "Chromium (Playwright)",
+            "BSD-3-Clause e licenças de terceiros do Chromium",
+            True,
+            "https://www.chromium.org/ ; https://playwright.dev/",
+            "As licenças de terceiros ficam em bin/playwright/chromium-*/chrome-linux*/ (arquivo LICENSE).",
+        ),
+    ),
+}
+
 MODEL_LICENSES: dict[str, LicenseItem] = {
     "whisper-small": LicenseItem(
         "Whisper small (faster-whisper, Systran)",
@@ -78,11 +102,13 @@ MODEL_LICENSES: dict[str, LicenseItem] = {
     ),
     "omnivoice": LicenseItem(
         "OmniVoice (k2-fsa)",
-        "CC-BY-NC (os pesos); Apache-2.0 (o código)",
-        False,
+        "CC BY-NC 4.0 (os pesos); Apache-2.0 (o código)",
+        True,
         "https://huggingface.co/k2-fsa/OmniVoice",
-        "Os pesos só podem ser usados sem fins comerciais, por causa dos dados de treino (Emilia). A página do "
-        "modelo diz isso na seção License. O registro do DMaker dizia Apache-2.0, que vale só para o código.",
+        "Os pesos são CC BY-NC 4.0 por causa dos dados de treino (Emilia): podem ser redistribuídos com atribuição "
+        "(OmniVoice, k2-fsa) e SEM fins comerciais. A página do modelo diz isso na seção License; o registro do "
+        "DMaker dizia Apache-2.0, que vale só para o código.",
+        non_commercial=True,
     ),
     "kokoro-fp32": LicenseItem(
         "Kokoro 82M v1.0 (kokoro-onnx)",
@@ -120,9 +146,11 @@ MODEL_LICENSES: dict[str, LicenseItem] = {
 }
 
 
-def license_items() -> list[LicenseItem]:
-    """A lista completa: os componentes fixos e um item por modelo padrão (na ordem do registro)."""
-    return [*LICENSE_ITEMS, *(MODEL_LICENSES[model_id] for model_id in default_model_ids())]
+def license_items(platform: str = "windows", excluded_models: Iterable[str] = ()) -> list[LicenseItem]:
+    """A lista completa: o que é do sistema, os componentes comuns e um item por modelo padrão que vai no pacote."""
+    skipped = set(excluded_models)
+    models = (MODEL_LICENSES[model_id] for model_id in default_model_ids() if model_id not in skipped)
+    return [*PLATFORM_ITEMS[platform], *COMMON_ITEMS, *models]
 
 
 def blocked_models() -> list[str]:
@@ -130,8 +158,19 @@ def blocked_models() -> list[str]:
     return [model_id for model_id in default_model_ids() if not MODEL_LICENSES[model_id].redistributable]
 
 
-def license_notice(version: str) -> str:
+def non_commercial_models(excluded_models: Iterable[str] = ()) -> list[LicenseItem]:
+    """Os modelos que vão no pacote com licença de uso não comercial (o aviso vai no LICENCAS.txt e nas notas)."""
+    skipped = set(excluded_models)
+    return [
+        MODEL_LICENSES[model_id]
+        for model_id in default_model_ids()
+        if model_id not in skipped and MODEL_LICENSES[model_id].non_commercial
+    ]
+
+
+def license_notice(version: str, platform: str = "windows", excluded_models: Iterable[str] = ()) -> str:
     """O texto de `licencas/LICENCAS.txt`, que o instalador mostra antes de instalar."""
+    skipped = tuple(excluded_models)
     lines = [
         f"DMaker {version}: licenças do que vai neste pacote",
         "=" * 60,
@@ -139,13 +178,28 @@ def license_notice(version: str) -> str:
         "O código do DMaker é MIT. Este pacote leva, além dele, os componentes abaixo, cada um com a sua licença.",
         "",
     ]
-    for item in license_items():
+    restricted = non_commercial_models(skipped)
+    if restricted:
+        lines += ["AVISO DE USO NÃO COMERCIAL"]
+        lines += [
+            f"  {item.name}: {item.license}. Os pesos vão no pacote com atribuição, mas não podem ser usados com fins comerciais."
+            for item in restricted
+        ]
+        lines.append("")
+    for item in license_items(platform, skipped):
         lines += [f"* {item.name}", f"  Licença: {item.license}", f"  Origem: {item.source}"]
         if item.note:
             lines.append(f"  Nota: {item.note}")
-        if not item.redistributable:
+        if item.non_commercial:
+            lines.append("  ATENÇÃO: uso somente não comercial, com atribuição.")
+        elif not item.redistributable:
             lines.append("  ATENÇÃO: uso restrito, leia a licença antes de usar este componente.")
         lines.append("")
+    if skipped:
+        lines += [
+            "Modelos que NÃO vão neste pacote e baixam no primeiro uso: " + ", ".join(skipped) + ".",
+            "",
+        ]
     lines += [
         "Não vão no pacote: os modelos de linguagem do Ollama (você baixa o que quiser), as suas vozes e projetos,",
         "e plugins de terceiros.",
