@@ -707,3 +707,17 @@ def test_the_preview_dry_run_never_fetches_the_light_model(tmp_path: Path):
     result, _, _ = _render(tmp_path / "b", _spec({"start": 1.0, "end": 2.0}), builder=present, dry_run=True)
     assert calls == []
     assert any("modelo mobilenetv3" in m for m in result.messages)
+
+
+def test_the_default_fetch_is_read_when_used_so_the_tests_never_reach_the_network(
+    tmp_path: Path, monkeypatch
+):
+    # o conftest troca `fetch_preview_model` em todos os testes; se o builder guardasse a função no padrão do
+    # parâmetro, a troca não chegaria a ele e a prévia tentaria baixar o modelo leve de verdade
+    from dmaker.pipeline import person_layer
+
+    calls: list[str] = []
+    monkeypatch.setattr(person_layer, "fetch_preview_model", _offline_fetch(calls))
+    builder = PersonLayerBuilder(model_on_disk=lambda name: False)
+    _, _, matter = _render(tmp_path, _spec({"start": 1.0, "end": 2.0}), builder=builder)
+    assert calls == ["mobilenetv3"] and matter.person_requests[0].model == "resnet50"

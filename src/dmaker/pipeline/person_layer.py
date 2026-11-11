@@ -42,6 +42,11 @@ class PreparedPersonLayer:
     model: str = DEFAULT_MODEL  # o modelo que de fato recortou (a prévia pode cair no do render final)
 
 
+def fetch_preview_model(name: str) -> Path:
+    """Obtém o modelo leve da prévia, baixando na primeira vez; mora no módulo para os testes o trocarem por um sem rede."""
+    return ensure_model(name)
+
+
 def _needs_render(out: Path, ctx: RenderContext) -> bool:
     return ctx.options.dry_run or ctx.options.force or not out.exists()
 
@@ -52,19 +57,20 @@ class PersonLayerBuilder:
     No `--preview` o modelo é o leve (`preview_model`, 2,5x mais rápido): o rascunho serve para conferir a posição
     do texto, e o modelo entra na chave do cache, então rascunho e render final não se misturam. Se o leve não está
     em disco e não dá para baixá-lo (sem internet), a prévia usa o do render final: um rascunho mais lento vale mais
-    que um erro, e a camada sai com a mesma chave do render final, que a reaproveita."""
+    que um erro, e a camada fica em cache para as próximas prévias."""
 
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
         preview_model: str = PREVIEW_MODEL,
         *,
-        fetch_model: Callable[[str], Path] = ensure_model,
+        fetch_model: Callable[[str], Path] | None = None,
         model_on_disk: Callable[[str], bool] = lambda name: model_path(name).exists(),
     ):
         self.model = model
         self.preview_model = preview_model
-        self.fetch_model = fetch_model  # injetada: o pipeline não fala com a rede direto
+        # injetada: o pipeline não fala com a rede direto (None usa `fetch_preview_model`)
+        self.fetch_model = fetch_model
         self.model_on_disk = model_on_disk
 
     def model_for(self, ctx: RenderContext) -> str:
@@ -78,8 +84,10 @@ class PersonLayerBuilder:
             return wanted
         if ctx.options.dry_run:
             return wanted if self.model_on_disk(wanted) else self.model  # o dry-run nunca baixa nada
+        # lida na hora do uso, e não como padrão do parâmetro, para o conftest poder trocá-la em todos os testes
+        fetch = self.fetch_model or fetch_preview_model
         try:
-            self.fetch_model(wanted)
+            fetch(wanted)
         except OSError:  # URLError, TimeoutError e gaierror descendem dela: é a falta de rede
             ctx.log(
                 f"sem internet para baixar o modelo leve do recorte ({wanted}): "
