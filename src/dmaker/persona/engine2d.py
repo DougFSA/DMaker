@@ -1,0 +1,157 @@
+"""O motor da persona ilustrada 2D: um personagem em SVG desenhado quadro a quadro no Chromium da composição HTML.
+
+A página (`assets/html/persona/2d/index.html`) recebe a persona, a boca e as marcas como dados e desenha cada
+instante a partir de `dmakerSeek(t)`. O motor só monta esses dados (função pura) e entrega os quadros ao ffmpeg
+pelo mesmo caminho das composições em HTML: não há um segundo jeito de capturar quadros.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable, Iterator, Mapping
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+
+from .. import config
+from ..filtergraph.html_layer import html_layer_command
+from ..media.ffmpeg import FFmpegError, FFmpegRunner
+from ..media.html_render import HtmlComposition, HtmlRenderer, PlaywrightHtmlRenderer
+from ..media.html_site import composition_files
+from .engine import PersonaEngine, PersonaEngineError, PersonaRender, register_engine
+from .marks import expression_track, gesture_track
+from .mouth import mouth_timeline
+
+ENGINE_VERSION = "p1"  # muda quando o desenho da página ou o jeito de montar os dados muda
+EXPRESSIONS = ("neutral", "happy", "sad", "surprised")
+GESTURES = ("nod", "shake", "tilt", "wave")
+HAIR_STYLES = ("short", "long", "bun")
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class Appearance2D(BaseModel):
+    """A aparência da persona ilustrada: cores em `#RRGGBB` e um entre os estilos de cabelo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skin: str = "#E8B796"
+    hair_color: str = "#3B2A20"
+    hair_style: Literal["short", "long", "bun"] = "short"
+    eye_color: str = "#4A7BA7"
+    outfit_color: str = "#2F6FDE"
+
+    @field_validator("skin", "hair_color", "eye_color", "outfit_color")
+    @classmethod
+    def _hex_color(cls, value: str) -> str:
+        if not _HEX.match(value):
+            raise ValueError(f"{value!r} não é uma cor; use o formato #RRGGBB (ex.: #E8B796)")
+        return value.upper()
+
+
+class _FrameStream:
+    """Os quadros a entregar ao ffmpeg. Se a página parar no meio, o fluxo termina e o erro fica guardado para
+    quem sabe o que se renderizava (o ffmpeg fecha o arquivo com o que veio, em vez de esperar o resto)."""
+
+    def __init__(self, source: Iterator[bytes]) -> None:
+        self.source = source
+        self.error: Exception | None = None
+
+    def __iter__(self) -> Iterator[bytes]:
+        try:
+            yield from self.source
+        except Exception as exc:  # noqa: BLE001 - reerguido por `render`, que sabe o nome da persona
+            self.error = exc
+
+
+def page_data(request: PersonaRender, appearance: Mapping[str, Any]) -> dict[str, Any]:
+    """Os dados que a página lê em `dmaker.data` (função pura: o mesmo pedido dá sempre os mesmos dados)."""
+    return {
+        "appearance": dict(appearance),
+        "mouth": [[round(a, 4), round(b, 4), shape] for a, b, shape in mouth_timeline(request.visemes)],
+        "expressions": [
+            [round(at, 4), name] for at, name in expression_track(request.expression, request.marks)
+        ],
+        "gestures": [[round(at, 4), name] for at, name in gesture_track(request.marks)],
+    }
+
+
+class Engine2D:
+    kind = "2d"
+    version = ENGINE_VERSION
+    produces_alpha = True
+    expressions = EXPRESSIONS
+    gestures = GESTURES
+
+    def __init__(self, renderer: HtmlRenderer | None = None, page_dir: Path | None = None) -> None:
+        self._renderer = renderer
+        self._page_dir = page_dir
+
+    @property
+    def page_dir(self) -> Path:
+        return self._page_dir or config.PERSONA_PAGES_DIR / "2d"
+
+    def _html(self) -> HtmlRenderer:
+        if self._renderer is None:
+            self._renderer = PlaywrightHtmlRenderer()
+        return self._renderer
+
+    def normalize_appearance(self, appearance: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            return Appearance2D.model_validate(dict(appearance)).model_dump()
+        except ValidationError as exc:
+            problems = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+            raise PersonaEngineError(f"Aparência 2D inválida: {problems}") from exc
+
+    def cache_parts(self, request: PersonaRender) -> tuple[Any, ...]:
+        """O conteúdo da página entra na chave: mexer no desenho invalida os clipes sem precisar mudar a versão."""
+        import hashlib
+
+        digest = hashlib.sha1()
+        root = self.page_dir
+        for path in composition_files(root):
+            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+            digest.update(path.read_bytes())
+        return (digest.hexdigest(),)
+
+    def unavailable_reason(self) -> str | None:
+        return self._html().unavailable_reason()
+
+    def render(
+        self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
+    ) -> None:
+        appearance = self.normalize_appearance(request.persona.appearance)
+        composition = HtmlComposition(
+            source=self.page_dir,
+            size=request.size,
+            scale=1.0,
+            fps=request.fps,
+            duration=request.duration,
+            data=page_data(request, appearance),
+        )
+        count = request.frame_count
+        times = [index / request.fps for index in range(count)]
+        stream = _FrameStream(self._html().frames(composition, times, on_warning))
+        partial = out.with_name(f"{out.stem}.part{out.suffix}")
+        command = html_layer_command(
+            stream, request.size, request.fps, count, partial, label=f"persona {request.persona.id}"
+        )
+        try:
+            try:
+                runner.run(command)
+            except FFmpegError:
+                if stream.error is not None:
+                    raise PersonaEngineError(
+                        f"A página da persona parou no meio do desenho: {stream.error}"
+                    ) from stream.error
+                raise
+            if stream.error is not None:
+                raise PersonaEngineError(
+                    f"A página da persona parou no meio do desenho: {stream.error}"
+                ) from stream.error
+            partial.replace(out)
+        finally:
+            partial.unlink(missing_ok=True)
+
+
+_ENGINE: PersonaEngine = register_engine(Engine2D())

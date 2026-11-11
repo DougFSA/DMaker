@@ -48,6 +48,14 @@ COMMON_ITEMS: tuple[LicenseItem, ...] = (
         True,
         "assets/html/LICENSE-*.txt",
     ),
+    LicenseItem(
+        "Regras de boca em português do TalkingHead (lipsync-pt_br.mjs, portadas para Python)",
+        "MIT",
+        True,
+        "https://github.com/met4citizen/TalkingHead ; src/dmaker/persona/visemes.py",
+        "O aviso da licença MIT acompanha o código portado (persona/visemes.py). A persona 2D é desenhada pelo DMaker, "
+        "sem arquivo de terceiros.",
+    ),
 )
 
 # O que muda de um sistema para outro: o FFmpeg e o Chromium.

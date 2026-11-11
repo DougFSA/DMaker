@@ -98,6 +98,10 @@ HTML_ASSETS_DIR = ASSETS_DIR / "html"  # three.js e lottie-web (MIT), servidos �
 BRANDS_DIR = ASSETS_DIR / "brands"
 SFX_DIR = ASSETS_DIR / "sfx"  # biblioteca de efeitos sonoros (WAV sintetizados pelo DMaker, versionados)
 VOICES_DIR = DATA_DIR / "assets" / "voices"
+# Personas: as do usuário (dado da máquina, fora do git, como as vozes) e as prontas, versionadas e somente leitura.
+PERSONAS_DIR = DATA_DIR / "assets" / "personas"
+PERSONA_PRESETS_DIR = ASSETS_DIR / "persona-presets"
+PERSONA_PAGES_DIR = HTML_ASSETS_DIR / "persona"  # a página de cada motor de persona desenhada no Chromium
 LEXICON_DIR = DATA_DIR / "assets"  # pronunciation.json global e brands/<marca>/pronunciation.json
 CACHE_DIR = DATA_DIR / "cache"
 MEZ_DIR = CACHE_DIR / "mez"
