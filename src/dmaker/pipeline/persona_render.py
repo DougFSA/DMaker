@@ -13,12 +13,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..domain.persona import Persona, PersonaMark, PersonaSpeech, estimate_speech_seconds
-from ..domain.spec import PersonaOverlay, PersonaSegment, Project, parse_aspect
+from ..domain.spec import PersonaOverlay, PersonaSegment, Project
 from ..domain.timeline import frame_range, persona_segment_duration
-from ..filtergraph.common import even
 from ..filtergraph.html_layer import ResolvedHtmlLayer
 from ..filtergraph.persona import persona_frame_command
-from ..filtergraph.pip import pip_origin
+from ..filtergraph.persona_rect import persona_overlay_rect, persona_size
 from ..media.browser import BrowserUnavailable
 from ..media.probe import MediaInfo
 from ..persona.engine import PersonaRender, clip_cache_key, engine_for
@@ -27,7 +26,9 @@ from ..persona.marks import mark_problems
 from ..persona.validation import persona_problems
 from ..persona.visemes import build_visemes
 from ..persona.words import evenly_timed_words
+from ..text.caption_band import project_caption_band
 from ..text.captions import Cue, Word
+from ..text.overlays import Canvas
 from ..visuals.pip import pip_mask
 from ..voice.library import VoiceLibrary
 from .cache_key import cache_key
@@ -216,6 +217,17 @@ class PersonaStage:
             partial.replace(out)
         return out
 
+    @staticmethod
+    def _corner(ctx: RenderContext, overlay: PersonaOverlay) -> tuple[int, int]:
+        """O canto de cima e da esquerda da persona sobreposta, pela mesma conta da caixa da interface e do QA
+        (`persona_overlay_rect`): com legenda queimada, a persona de baixo sobe para acima dela."""
+        canvas = Canvas(ctx.width, ctx.height, ctx.preset.safe, ctx.theme, total=0.0)
+        band = project_caption_band(ctx.project, canvas, no_captions=ctx.options.no_captions)
+        left, top, _, _ = persona_overlay_rect(
+            overlay, ctx.width, ctx.height, ctx.scale, ctx.preset.safe, band
+        )
+        return left, top
+
     def overlay_still(
         self, ctx: RenderContext, overlay: PersonaOverlay, frame: int
     ) -> ResolvedHtmlLayer | None:
@@ -226,15 +238,13 @@ class PersonaStage:
         first, stop = frame_range(overlay.start, end, ctx.fps)
         if not first <= frame < stop:
             return None
-        width = even(ctx.width * overlay.width)
-        aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
-        size = (width, even(width / aspect))
+        size = persona_size(overlay, ctx.width)
         duration = (stop - first) / ctx.fps
         at = max(frame / ctx.fps - overlay.start, 0.0)
         png = self.still_for(
             ctx, persona, line, overlay.expression, overlay.marks, duration, size, at, "corner"
         )
-        left, top = pip_origin(overlay, size[0], size[1], ctx.width, ctx.height, ctx.scale, ctx.preset.safe)
+        left, top = self._corner(ctx, overlay)
         return ResolvedHtmlLayer(png, frame / ctx.fps, (frame + 1) / ctx.fps, str(left), str(top), still=True)
 
     # ---------- o projeto ----------
@@ -345,16 +355,14 @@ class PersonaStage:
         if stop <= first:
             return None  # cai depois do fim do vídeo
         duration = (stop - first) / ctx.fps
-        width = even(ctx.width * overlay.width)
-        aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
-        size = (width, even(width / aspect))
+        size = persona_size(overlay, ctx.width)
         clip, alpha = self.clip_for(
             ctx, persona, line, overlay.expression, overlay.marks, duration, size, "corner"
         )
         path = clip
         if overlay.background and alpha:
             path = self._framed(ctx, overlay, clip, size, duration)
-        left, top = pip_origin(overlay, size[0], size[1], ctx.width, ctx.height, ctx.scale, ctx.preset.safe)
+        left, top = self._corner(ctx, overlay)
         return ResolvedHtmlLayer(
             path, first / ctx.fps, stop / ctx.fps, str(left), str(top), fade=overlay.fade
         )
