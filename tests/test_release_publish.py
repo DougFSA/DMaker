@@ -29,11 +29,17 @@ class FakeGh:
     """Responde ao `git ls-remote` e ao `gh` como o GitHub responderia, e guarda cada comando."""
 
     def __init__(
-        self, *, tag_exists: bool = True, release_exists: bool = False, assets: list[dict] | None = None
+        self,
+        *,
+        tag_exists: bool = True,
+        release_exists: bool = False,
+        assets: list[dict] | None = None,
+        draft: bool = False,
     ):
         self.tag_exists = tag_exists
         self.release_exists = release_exists
         self.assets = assets or []
+        self.draft = draft
         self.commands: list[RecordedCommand] = []
 
     def run(self, command, *, cwd=None, env=None, check=True, quiet=False):
@@ -43,8 +49,8 @@ class FakeGh:
             return "abc123\trefs/tags/v2\n" if self.tag_exists else ""
         if recorded[:3] == ("gh", "release", "list"):
             return json.dumps([{"tagName": "v2"}] if self.release_exists else [{"tagName": "v1"}])
-        if recorded[:3] == ("gh", "release", "view") and "assets" in recorded:
-            return json.dumps({"assets": self.assets})
+        if recorded[:3] == ("gh", "release", "view") and "assets,isDraft" in recorded:
+            return json.dumps({"assets": self.assets, "isDraft": self.draft})
         if recorded[:3] == ("gh", "release", "view") and "url" in recorded:
             return json.dumps({"url": "https://github.com/DougFSA/DMaker/releases/tag/v2"})
         return ""
@@ -188,3 +194,45 @@ def test_a_second_run_with_everything_there_sends_nothing(tmp_path, release_fold
     result = publisher(tmp_path, runner).publish()
     assert not [c for c in runner.gh_calls() if c[2] in {"upload", "create", "delete-asset"}]
     assert result.uploaded == [] and len(result.already_there) == len(FILES) + 1
+
+
+def _uploaded(release_folder, names) -> list[dict]:
+    return [
+        {"name": name, "size": (release_folder / name).stat().st_size, "state": "uploaded"} for name in names
+    ]
+
+
+def test_resume_publishes_the_draft_an_interrupted_upload_left(tmp_path, release_folder):
+    """O `gh release create` só publica depois do último arquivo: a queda no meio deixa um rascunho (DMK-76)."""
+    some = _uploaded(release_folder, ["DMaker-2.0.0-windows-x64.exe", "DMaker-2.0.0-linux-x64.run"])
+    runner = FakeGh(release_exists=True, assets=some, draft=True)
+    result = publisher(tmp_path, runner).publish()
+    calls = runner.gh_calls()
+    edits = [c for c in calls if c[2] == "edit"]
+    assert len(edits) == 1 and "--draft=false" in edits[0]
+    last_upload = max(i for i, c in enumerate(calls) if c[2] == "upload")
+    assert calls.index(edits[0]) > last_upload  # só publica com todos os arquivos lá
+    assert result.published_draft and not result.created
+
+
+def test_resume_publishes_a_complete_draft_without_sending_anything(tmp_path, release_folder):
+    """A queda pode vir depois do último arquivo e antes da publicação: sobra só publicar."""
+    runner = FakeGh(release_exists=True, assets=_uploaded(release_folder, [*FILES, SUMS_NAME]), draft=True)
+    result = publisher(tmp_path, runner).publish()
+    calls = runner.gh_calls()
+    assert not [c for c in calls if c[2] in {"upload", "create", "delete-asset"}]
+    assert [c for c in calls if c[2] == "edit" and "--draft=false" in c]
+    assert result.published_draft and result.uploaded == []
+
+
+def test_resume_of_a_published_release_leaves_the_draft_flag_alone(tmp_path, release_folder):
+    runner = FakeGh(release_exists=True, assets=_uploaded(release_folder, [*FILES, SUMS_NAME]))
+    result = publisher(tmp_path, runner).publish()
+    edits = [c for c in runner.gh_calls() if c[2] == "edit"]
+    assert len(edits) == 1 and "--draft=false" not in edits[0]
+    assert not result.published_draft
+
+
+def test_a_new_release_is_not_reported_as_a_published_draft(tmp_path, release_folder):
+    result = publisher(tmp_path, FakeGh()).publish()
+    assert result.created and not result.published_draft
