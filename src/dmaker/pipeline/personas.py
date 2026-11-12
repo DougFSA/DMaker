@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..domain.persona import Persona
+from ..domain.spec import Project
 from ..persona.engine import capabilities, engine_kinds
 from ..persona.library import PersonaLibrary
 from ..voice.library import VoiceLibrary
@@ -70,6 +71,35 @@ def edit_persona(
 ) -> dict[str, Any]:
     _check_voice(changes.get("voice"), voices or VoiceLibrary())
     return persona_dict((library or PersonaLibrary()).update(persona_id, changes))
+
+
+def use_persona(
+    project: Project,
+    persona_id: str,
+    text: str,
+    placement: str = "segment",
+    start: float = 0.0,
+    library: PersonaLibrary | None = None,
+) -> Project:
+    """O projeto com a persona falando `text`: um trecho de tela cheia no fim da linha do tempo (`segment`) ou uma
+    sobreposição no canto (`overlay`) a partir de `start`. Devolve uma cópia; quem chama salva."""
+    from ..domain.spec import PersonaOverlay, PersonaSegment
+
+    (library or PersonaLibrary()).get(persona_id)  # persona que não existe: a mensagem lista as que existem
+    if not text.strip():
+        raise ValueError("Escreva o que a persona vai falar.")
+    speech = {"text": text.strip()}
+    updated = project.model_copy(deep=True)
+    updated.base_dir = project.base_dir
+    if placement == "segment":
+        updated.timeline.append(PersonaSegment.model_validate({"persona": persona_id, "speech": speech}))
+    elif placement == "overlay":
+        updated.overlays.append(
+            PersonaOverlay.model_validate({"persona": persona_id, "speech": speech, "start": start})
+        )
+    else:
+        raise ValueError("O lugar da persona é `segment` (tela cheia) ou `overlay` (no canto).")
+    return updated
 
 
 def remove_persona(persona_id: str, library: PersonaLibrary | None = None) -> None:

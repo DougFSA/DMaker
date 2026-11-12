@@ -10,7 +10,7 @@ from ..domain.generators import parse_generator
 from ..domain.infographics import infographic_warnings
 from ..domain.looks import UnknownLookError, is_no_look, resolve_look
 from ..domain.presets import Preset
-from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, Project, TextOverlay
+from ..domain.spec import AudiogramOverlay, ClipSegment, HtmlOverlay, PersonaOverlay, Project, TextOverlay
 from ..domain.timeline import TIME_EPSILON, timeline_spans, transitions_of
 from ..domain.tracks import known_track_ids
 from ..media.probe import MediaInfo
@@ -281,6 +281,14 @@ def _narration_warnings(project: Project, total: float, known_voices: Collection
                 f"({total:.1f}s); o final da fala seria cortado."
             )
     captions = project.captions
-    if captions and captions.enabled and captions.source == "narration" and not project.audio.narration:
+    if (
+        captions
+        and captions.enabled
+        and captions.source == "narration"
+        and not project.audio.narration
+        and not any(
+            isinstance(overlay, PersonaOverlay) for overlay in project.overlays
+        )  # a persona no canto também fala
+    ):
         warnings.append('captions.source "narration" sem audio.narration: não há fala para legendar.')
     return warnings

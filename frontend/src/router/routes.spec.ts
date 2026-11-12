@@ -18,6 +18,7 @@ describe('rotas das áreas do DMK-38', () => {
     ['/dublagem', 'dubbing', 'Dublagem'],
     ['/fila', 'queue', 'Fila'],
     ['/modelos', 'models', 'Modelos'],
+    ['/personas', 'personas', 'Personas'],
     ['/editor/meu-video', 'editor', 'Editor'],
     ['/editor', 'editor', 'Editor'],
   ]

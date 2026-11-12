@@ -58,6 +58,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         meta: { title: 'Infográficos' },
       },
       {
+        path: '/personas',
+        name: 'personas',
+        component: () => import('@/views/PersonasView.vue'),
+        meta: { title: 'Personas' },
+      },
+      {
         path: '/agente',
         name: 'agent',
         component: () => import('@/views/AgentView.vue'),

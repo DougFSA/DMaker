@@ -2236,7 +2236,7 @@ def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) ->
 # ---------- personas ----------
 
 persona_app = typer.Typer(
-    help="Personas: personagens reutilizáveis (ilustrados 2D) que falam no vídeo, em tela cheia ou num canto.",
+    help="Personas: personagens reutilizáveis (ilustrados 2D e personagens 3D) que falam no vídeo, em tela cheia ou num canto.",
     no_args_is_help=True,
 )
 app.add_typer(persona_app, name="persona")
@@ -2249,7 +2249,7 @@ def _appearance_from_options(**fields: str | None) -> dict[str, str]:
 @persona_app.command("create")
 def persona_create(
     name: Annotated[str, typer.Argument(help="Nome da persona.")],
-    kind: Annotated[str, typer.Option(help="Tipo: 2d (ilustrada).")] = "2d",
+    kind: Annotated[str, typer.Option(help="Tipo: 2d (ilustrada) ou 3d (personagem 3D).")] = "2d",
     voice: Annotated[str | None, typer.Option(help="Id da voz (veja `dmaker voice list`).")] = None,
     skin: Annotated[str | None, typer.Option(help="Tom de pele, #RRGGBB.")] = None,
     hair_color: Annotated[str | None, typer.Option(help="Cor do cabelo, #RRGGBB.")] = None,

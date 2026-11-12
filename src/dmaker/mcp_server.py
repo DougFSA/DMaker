@@ -2451,7 +2451,7 @@ def _lexicon_store():
 
 @server.tool(
     description=(
-        "Personas: personagens reutilizáveis que falam no vídeo. Cada uma tem id, nome, tipo (2d: ilustrada), voz "
+        "Personas: personagens reutilizáveis que falam no vídeo. Cada uma tem id, nome, tipo (2d: ilustrada; 3d: personagem 3D), voz "
         "(id de list_voices), aparência e as expressões e gestos que sabe fazer. As prontas (builtin) são somente "
         "leitura. Use o id em `timeline` (trecho `type: persona`, tela cheia) ou em `overlays` (`type: persona`, num "
         "canto sobre outro trecho)."
@@ -2472,8 +2472,10 @@ def get_persona(persona_id: str) -> dict:
 
 @server.tool(
     description=(
-        "Cria uma persona. `kind`: 2d. `voice`: id de list_voices (sem ela, a voz automática). `appearance` (2d): "
-        "skin, hair_color, eye_color, outfit_color em #RRGGBB e hair_style (short, long ou bun); o que faltar usa o padrão."
+        "Cria uma persona. `kind`: 2d ou 3d. `voice`: id de list_voices (sem ela, a voz automática). `appearance` (2d): "
+        "skin, hair_color, eye_color, outfit_color em #RRGGBB e hair_style (short, long ou bun); (3d): outfit_color em "
+        "#RRGGBB (a roupa do personagem pronto, lisa) e model (mpfb, o personagem pronto, que precisa de "
+        "`dmaker models download persona3d-mpfb`); o que faltar usa o padrão."
     )
 )
 def create_persona(

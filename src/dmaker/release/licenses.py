@@ -76,8 +76,15 @@ COMMON_ITEMS: tuple[LicenseItem, ...] = (
         True,
         "https://github.com/met4citizen/TalkingHead/blob/main/avatars/mpfb.glb",
         "Não vai no pacote nem no git: o `dmaker models download persona3d-mpfb` baixa para cache/models, do commit "
-        "fixado e conferido por SHA-256. Os outros avatares do TalkingHead são de uso não comercial e as "
-        "animações Mixamo não podem ser redistribuídas: o DMaker não usa nenhum deles.",
+        "fixado e conferido por SHA-256. O README do TalkingHead diz que os assets MakeHuman por trás do MPFB são "
+        '"CC0/CC-BY"; conferidos um a um nas páginas dos pacotes da comunidade MakeHuman, os que o mpfb.glb usa '
+        "(corpo, olhos, sobrancelhas e cílios Mindfront, dentes, língua, cabelo ponytail01 e a roupa "
+        "female_casualsuit01) estão todos como CC0, e o README declara o avatar como CC0. Não achamos nenhum item "
+        "CC-BY, então não há aviso de atribuição obrigatório; a página da textura da pele "
+        "(young_lightskinned_female) não lista o item pelo nome, mas é do mesmo pacote de sistema CC0. A textura da "
+        "roupa, que traz um logotipo do MakeHuman, nunca aparece: o DMaker a troca por uma cor lisa. Os outros "
+        "avatares do TalkingHead são de uso não comercial e as animações Mixamo não podem ser redistribuídas: o "
+        "DMaker não usa nenhum deles.",
     ),
 )
 

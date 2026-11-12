@@ -229,3 +229,28 @@ def test_the_doctor_line_says_the_3d_model_is_optional_and_how_to_download_it(tm
     builtin_model_path().parent.mkdir(parents=True)
     builtin_model_path().write_bytes(b"glb")
     assert "baixado" in doctor_line() and "não baixado" not in doctor_line()
+
+
+def test_the_page_receives_the_outfit_color_and_the_wave_gesture_keeps_its_name():
+    from dmaker.persona.engine3d import page_data
+
+    request = PersonaRender(
+        persona=persona(),
+        visemes=(),
+        expression="neutral",
+        marks=(PersonaMark(at=1.0, gesture="wave"), PersonaMark(at=2.0, gesture="tilt")),
+        duration=3.0,
+        fps=30.0,
+        size=(1080, 1920),
+    )
+
+    data = page_data(request, "#2E5E4E")
+
+    assert data["outfit"] == "#2E5E4E" and data["gestures"] == [[1.0, "wave"], [2.0, "tilt"]]
+
+
+def test_the_page_hides_the_tongue_and_paints_the_suit_without_the_logo_texture():
+    page = (Path(__file__).parents[1] / "assets/html/persona/3d/index.html").read_text(encoding="utf-8")
+
+    assert "casualsuit" in page and "material.map = null" in page and "node.visible = false" in page
+    assert 'wave: "handup"' in page and "headRotateZ" in page

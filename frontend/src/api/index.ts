@@ -6,6 +6,7 @@ import { editorApi } from './editor'
 import { http } from './http'
 import { jobsApi } from './jobs'
 import { modelsApi } from './models'
+import { personasApi } from './personas'
 import { queueApi } from './queue'
 import { speechApi } from './speech'
 import { voiceApi } from './voice'
@@ -140,6 +141,7 @@ export const api = {
   dub: dubApi,
   queue: queueApi,
   models: modelsApi,
+  personas: personasApi,
   editor: editorApi,
 }
 
@@ -158,6 +160,7 @@ export type * from './types/audioPanel'
 export type * from './types/dub'
 export type * from './types/editor'
 export type * from './types/models'
+export type * from './types/personas'
 export type * from './types/queue'
 export type * from './types/recordings'
 export type * from './types/speech'
