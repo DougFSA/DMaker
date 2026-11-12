@@ -47,6 +47,35 @@ const DEFAULTS: Record<PersonaKind, Record<string, string>> = {
 
 export const KIND_LABELS: Record<PersonaKind, string> = { '2d': 'Ilustrada 2D', '3d': 'Personagem 3D', realistic: 'Realista' }
 
+/** Os nomes em português das expressões e dos gestos dos dois motores; a chave é o identificador da spec. */
+export const CAPABILITY_LABELS: Record<string, string> = {
+  neutral: 'neutra',
+  happy: 'alegre',
+  sad: 'triste',
+  surprised: 'surpresa',
+  nod: 'sim com a cabeça',
+  shake: 'não com a cabeça',
+  tilt: 'cabeça inclinada',
+  wave: 'aceno com a mão',
+  handup: 'mão levantada',
+  index: 'dedo indicador',
+  ok: 'sinal de ok',
+  thumbup: 'joinha',
+  thumbdown: 'polegar para baixo',
+  side: 'mão para o lado',
+  shrug: 'dar de ombros',
+}
+
+/** "alegre (`happy`)": o nome em português com o identificador da spec ao lado (o próprio id se não houver nome). */
+export function capabilityLabel(id: string): string {
+  const label = CAPABILITY_LABELS[id]
+  return label ? `${label} (${id})` : id
+}
+
+export function capabilityList(ids: readonly string[]): string {
+  return ids.map(capabilityLabel).join(', ')
+}
+
 export function appearanceFields(kind: PersonaKind): AppearanceField[] {
   return FIELDS[kind]
 }

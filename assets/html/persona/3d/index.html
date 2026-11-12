@@ -172,9 +172,9 @@ function frameCamera() {
   headBone.getWorldPosition(headPos);
   const view = D.view === "corner"
     ? { span: 0.6, centerBelowHead: 0.07, width: 0.5, shiftX: 0 }
-    // folga de uns 7% da altura sobre o topo da cabeça (a cabeça sobe uns 0,23 m do osso `Head`), e o meio corpo
-    // abaixo dela, onde a mão do gesto aparece; o gesto da mão esquerda sobe à direita do quadro
-    : { span: 1.35, centerBelowHead: 0.35, width: 0.6, shiftX: 0.15 };
+    // meio corpo de verdade: do alto da cabeça (uns 0,23 m acima do osso `Head`, com folga de uns 7% do quadro) até
+    // o quadril, com a cabeça em uns 20% da altura; a mão do gesto sobe ao lado do rosto, à direita do quadro
+    : { span: 1.1, centerBelowHead: 0.265, width: 0.6, shiftX: 0.15 };
   const fov = camera.fov * Math.PI / 180;
   const needVertical = view.span / 2 / Math.tan(fov / 2);
   const needHorizontal = view.width / 2 / (Math.tan(fov / 2) * camera.aspect);

@@ -120,6 +120,14 @@ describe('PersonasView (/personas)', () => {
     expect(http.to('POST /api/personas/ana/use')[0]!.body).toEqual({ project: 'demo', text: 'Oi gente', placement: 'overlay' })
   })
 
+  it('mostra as expressões e os gestos do motor com nome em português e o identificador', async () => {
+    await open()
+    const caps = wrapper!.find('.personas__caps').text()
+    expect(caps).toContain('alegre (happy)')
+    expect(caps).toContain('aceno com a mão (wave)')
+    expect(caps).toContain('sim com a cabeça (nod)')
+  })
+
   it('mostra o erro do carregamento e tenta de novo', async () => {
     http.set('GET /api/personas', reply(500, { detail: 'servidor parado' }))
     await open()

@@ -25,7 +25,7 @@ from .glb import avatar_problems
 from .html_clip import page_digest, render_html_clip
 from .marks import expression_track, gesture_track
 
-ENGINE_VERSION = "p3d2"  # muda quando o desenho da página ou o jeito de montar os dados muda
+ENGINE_VERSION = "p3d3"  # muda quando o desenho da página ou o jeito de montar os dados muda
 EXPRESSIONS = ("neutral", "happy", "sad", "surprised")
 # Os gestos de mão do TalkingHead que não dependem de arquivo Mixamo, mais o aceno e a negação com a cabeça.
 # `wave` e `tilt` também existem no motor 2D: assim a spec de uma persona 2D vale ao trocá-la por uma 3D.
