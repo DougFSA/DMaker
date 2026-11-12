@@ -29,14 +29,15 @@ from ..domain.spec import (
     Project,
     TextOverlay,
     VideoOverlay,
-    parse_aspect,
 )
 from ..filtergraph.audiogram import audiogram_expressions
-from ..filtergraph.common import even
 from ..filtergraph.expressions import evaluate
 from ..filtergraph.overlays import image_overlay_origin, image_overlay_size
+from ..filtergraph.persona_rect import persona_overlay_rect
 from ..filtergraph.pip import pip_origin, pip_size
+from ..media import fonts
 from ..media.ffmpeg import FFmpegError
+from ..text.caption_band import project_caption_band
 from ..text.overlays import Canvas, MeasureFn, TextLayout, layout_text_overlay
 from .context import Prober
 from .textlayer import resolve_overlay_image
@@ -405,12 +406,17 @@ def _audiogram_box(context: BoxContext, index: int, overlay: AudiogramOverlay) -
 # ---------- persona ----------
 
 
+def _caption_band(context: BoxContext) -> tuple[float, float] | None:
+    """A faixa da legenda queimada (None sem legenda), a mesma que o render usa para subir a persona."""
+    canvas = Canvas(context.width, context.height, context.safe, context.theme, total=0.0)
+    return project_caption_band(context.project, canvas, measure=context.measure or fonts.measure_rendered)
+
+
 def _persona_box(context: BoxContext, index: int, overlay: PersonaOverlay) -> OverlayBox:
     """O quadro da persona no canto, do tamanho e no lugar em que a montagem o põe (as mesmas contas do render)."""
-    width = even(context.width * overlay.width)
-    aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
-    height = even(width / aspect)
-    left, top = pip_origin(overlay, width, height, context.width, context.height, context.scale, context.safe)
+    left, top, width, height = persona_overlay_rect(
+        overlay, context.width, context.height, context.scale, context.safe, _caption_band(context)
+    )
     rect = (float(left), float(top), float(width), float(height))
     return _locked(index, overlay, "persona", "A persona ainda não se move no quadro.", rect=rect)
 

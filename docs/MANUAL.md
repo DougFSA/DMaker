@@ -1907,7 +1907,7 @@ No canto, em `overlays` (`position`, `width`, `background` e `shape` como no pic
 {"type": "persona", "persona": "rafael", "start": 1.0, "speech": {"text": "Olha só."}, "background": "#D9E4F2"}
 ```
 
-`marks` conta segundos desde o início da fala. A fala é `text` ou `audio`.
+Com legenda no vídeo, a persona num canto de baixo fica acima da legenda. `marks` conta segundos desde o início da fala. A fala é `text` ou `audio`.
 
 #### Como conferir
 
