@@ -56,6 +56,29 @@ COMMON_ITEMS: tuple[LicenseItem, ...] = (
         "O aviso da licença MIT acompanha o código portado (persona/visemes.py). A persona 2D é desenhada pelo DMaker, "
         "sem arquivo de terceiros.",
     ),
+    LicenseItem(
+        "TalkingHead (talkinghead.mjs, dynamicbones.mjs, retargeter.mjs): anima a persona 3D",
+        "MIT",
+        True,
+        "https://github.com/met4citizen/TalkingHead (commit 1563de1) ; assets/html/persona/3d/vendor/talkinghead/",
+        "A licença MIT acompanha os arquivos (LICENSE-talkinghead.txt).",
+    ),
+    LicenseItem(
+        "Addons do three.js r185 usados pelo TalkingHead (GLTFLoader, OrbitControls e outros)",
+        "MIT",
+        True,
+        "https://github.com/mrdoob/three.js (tag r185, examples/jsm) ; assets/html/persona/3d/vendor/three-addons/",
+        "A licença MIT acompanha os arquivos (LICENSE-three-addons.txt).",
+    ),
+    LicenseItem(
+        "Personagem 3D mpfb.glb (feito com Blender e MPFB)",
+        "CC0 1.0 (domínio público)",
+        True,
+        "https://github.com/met4citizen/TalkingHead/blob/main/avatars/mpfb.glb",
+        "Não vai no pacote nem no git: o `dmaker models download persona3d-mpfb` baixa para cache/models, do commit "
+        "fixado e conferido por SHA-256. Os outros avatares do TalkingHead são de uso não comercial e as "
+        "animações Mixamo não podem ser redistribuídas: o DMaker não usa nenhum deles.",
+    ),
 )
 
 # O que muda de um sistema para outro: o FFmpeg e o Chromium.

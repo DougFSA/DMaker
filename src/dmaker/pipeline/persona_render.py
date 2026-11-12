@@ -132,6 +132,7 @@ class PersonaStage:
         marks: Sequence[PersonaMark],
         duration: float,
         size: tuple[int, int],
+        framing: str = "full",
     ) -> tuple[Path, bool]:
         """O clipe da persona em cache (desenhado agora se ainda não existe) e se ele tem alfa."""
         engine = engine_for(persona.kind)
@@ -143,6 +144,7 @@ class PersonaStage:
             duration=duration,
             fps=ctx.fps,
             size=size,
+            framing=framing,
         )
         out = ctx.cache_dir / f"{clip_cache_key(engine, request)}_persona.mov"
         if not ctx.options.dry_run and (ctx.options.force or not out.exists()):
@@ -250,7 +252,9 @@ class PersonaStage:
         width = even(ctx.width * overlay.width)
         aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
         size = (width, even(width / aspect))
-        clip, alpha = self.clip_for(ctx, persona, line, overlay.expression, overlay.marks, duration, size)
+        clip, alpha = self.clip_for(
+            ctx, persona, line, overlay.expression, overlay.marks, duration, size, "corner"
+        )
         path = clip
         if overlay.background and alpha:
             path = self._framed(ctx, overlay, clip, size, duration)

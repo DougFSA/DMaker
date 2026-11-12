@@ -71,9 +71,12 @@ def person_layer_command(
     frame_count: int,
     out: Path,
     label: str = "camada da pessoa",
+    scale_to: tuple[int, int] | None = None,
 ) -> FFmpegCommand:
-    """Escreve os quadros RGBA do recortador (pelo stdin) como vídeo com alfa."""
+    """Escreve os quadros RGBA do recortador (pelo stdin) como vídeo com alfa. `scale_to` amplia os quadros (lanczos)
+    para esse tamanho, quando quem os desenhou o fez menor por custo."""
     inputs = Inputs()
     inputs.add("pipe:0", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{width}x{height}", "-r", f"{fps:g}")
-    args = [*inputs.args, "-an", *PERSON_VIDEO, "-r", f"{fps:g}", "-fps_mode", "cfr", str(out)]
+    scaling = ["-vf", f"scale={scale_to[0]}:{scale_to[1]}:flags=lanczos"] if scale_to else []
+    args = [*inputs.args, "-an", *scaling, *PERSON_VIDEO, "-r", f"{fps:g}", "-fps_mode", "cfr", str(out)]
     return FFmpegCommand(args, label=label, total=frame_count / fps, frames=frames)

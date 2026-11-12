@@ -52,7 +52,7 @@ class RecordingEngine:
 def test_the_2d_engine_is_registered_by_default_and_an_unknown_kind_says_which_exist():
     assert engine_for("2d").kind == "2d" and "2d" in registry.engine_kinds()
     with pytest.raises(PersonaEngineError, match="ainda não tem motor.*2d"):
-        engine_for("3d")
+        engine_for("realistic")
 
 
 def test_a_new_engine_registers_without_touching_the_pipeline(monkeypatch):

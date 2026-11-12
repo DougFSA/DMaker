@@ -42,10 +42,13 @@ def html_layer_command(
     frame_count: int,
     out: Path,
     label: str = "composição html",
+    scale_to: tuple[int, int] | None = None,
 ) -> FFmpegCommand:
     """Escreve os quadros RGBA da composição (pelo stdin) como vídeo com alfa, do mesmo jeito que a camada da
     pessoa: PNG dentro do .mov, sem perdas e sem conversão para YUV na escrita."""
-    return person_layer_command(frames, size[0], size[1], fps, frame_count, out, label=label)
+    return person_layer_command(
+        frames, size[0], size[1], fps, frame_count, out, label=label, scale_to=scale_to
+    )
 
 
 def attach_html_layer(

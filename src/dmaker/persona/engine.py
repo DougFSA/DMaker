@@ -35,6 +35,9 @@ class PersonaRender:
     duration: float
     fps: float
     size: tuple[int, int]
+    framing: str = (
+        "full"  # "full": tela cheia (meio corpo); "corner": sobreposição no canto (cabeça e ombros)
+    )
 
     @property
     def frame_count(self) -> int:
@@ -104,6 +107,7 @@ def clip_cache_key(engine: PersonaEngine, request: PersonaRender) -> str:
         round(request.duration, 6),
         request.fps,
         list(request.size),
+        request.framing,
         list(engine.cache_parts(request)),
     ]
     raw = json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False)

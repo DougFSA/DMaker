@@ -8,18 +8,17 @@ pelo mesmo caminho das composições em HTML: não há um segundo jeito de captu
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from .. import config
-from ..filtergraph.html_layer import html_layer_command
-from ..media.ffmpeg import FFmpegError, FFmpegRunner
+from ..media.ffmpeg import FFmpegRunner
 from ..media.html_render import HtmlComposition, HtmlRenderer, PlaywrightHtmlRenderer
-from ..media.html_site import composition_files
 from .engine import PersonaEngine, PersonaEngineError, PersonaRender, register_engine
+from .html_clip import page_digest, render_html_clip
 from .marks import expression_track, gesture_track
 from .mouth import mouth_timeline
 
@@ -47,21 +46,6 @@ class Appearance2D(BaseModel):
         if not _HEX.match(value):
             raise ValueError(f"{value!r} não é uma cor; use o formato #RRGGBB (ex.: #E8B796)")
         return value.upper()
-
-
-class _FrameStream:
-    """Os quadros a entregar ao ffmpeg. Se a página parar no meio, o fluxo termina e o erro fica guardado para
-    quem sabe o que se renderizava (o ffmpeg fecha o arquivo com o que veio, em vez de esperar o resto)."""
-
-    def __init__(self, source: Iterator[bytes]) -> None:
-        self.source = source
-        self.error: Exception | None = None
-
-    def __iter__(self) -> Iterator[bytes]:
-        try:
-            yield from self.source
-        except Exception as exc:  # noqa: BLE001 - reerguido por `render`, que sabe o nome da persona
-            self.error = exc
 
 
 def page_data(request: PersonaRender, appearance: Mapping[str, Any]) -> dict[str, Any]:
@@ -105,14 +89,7 @@ class Engine2D:
 
     def cache_parts(self, request: PersonaRender) -> tuple[Any, ...]:
         """O conteúdo da página entra na chave: mexer no desenho invalida os clipes sem precisar mudar a versão."""
-        import hashlib
-
-        digest = hashlib.sha1()
-        root = self.page_dir
-        for path in composition_files(root):
-            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
-            digest.update(path.read_bytes())
-        return (digest.hexdigest(),)
+        return (page_digest(self.page_dir),)
 
     def unavailable_reason(self) -> str | None:
         return self._html().unavailable_reason()
@@ -129,29 +106,7 @@ class Engine2D:
             duration=request.duration,
             data=page_data(request, appearance),
         )
-        count = request.frame_count
-        times = [index / request.fps for index in range(count)]
-        stream = _FrameStream(self._html().frames(composition, times, on_warning))
-        partial = out.with_name(f"{out.stem}.part{out.suffix}")
-        command = html_layer_command(
-            stream, request.size, request.fps, count, partial, label=f"persona {request.persona.id}"
-        )
-        try:
-            try:
-                runner.run(command)
-            except FFmpegError:
-                if stream.error is not None:
-                    raise PersonaEngineError(
-                        f"A página da persona parou no meio do desenho: {stream.error}"
-                    ) from stream.error
-                raise
-            if stream.error is not None:
-                raise PersonaEngineError(
-                    f"A página da persona parou no meio do desenho: {stream.error}"
-                ) from stream.error
-            partial.replace(out)
-        finally:
-            partial.unlink(missing_ok=True)
+        render_html_clip(self._html(), composition, request, out, runner, on_warning)
 
 
 _ENGINE: PersonaEngine = register_engine(Engine2D())

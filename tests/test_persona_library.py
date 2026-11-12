@@ -20,8 +20,8 @@ def library(tmp_path) -> PersonaLibrary:
 
 def test_the_ready_made_personas_ship_with_the_repository_and_the_users_live_elsewhere():
     ready = PersonaLibrary().list()
-    assert {"lia", "caio"} <= {p.id for p in ready}
-    assert all(p.builtin and p.kind == "2d" for p in ready)
+    assert {"lia", "caio", "bia"} <= {p.id for p in ready}
+    assert all(p.builtin and p.kind in {"2d", "3d"} for p in ready)
     assert config.PERSONA_PRESETS_DIR != config.PERSONAS_DIR
     assert config.PERSONAS_DIR.is_relative_to(
         config.DATA_DIR
@@ -46,7 +46,7 @@ def test_an_invalid_appearance_or_kind_is_refused_with_a_clear_message(library):
     with pytest.raises(PersonaEngineError, match="hair_style"):
         library.create("Ruim", appearance={"hair_style": "careca"})
     with pytest.raises(PersonaEngineError, match="ainda não tem motor"):
-        library.create("Tridimensional", kind="3d")
+        library.create("Realista", kind="realistic")
     with pytest.raises(PersonaEngineError, match="não existe no tipo 2d"):
         library.create("Dancarina", gestures=["dance"])
     assert library.list() == []  # nada pela metade no cadastro
@@ -114,7 +114,7 @@ def test_the_service_checks_the_voice_in_the_voice_library_and_reports_what_the_
     assert made["voice"] == "dora" and set(made["gestures"]) == {"nod", "shake", "tilt", "wave"}
     assert "surprised" in made["expressions"] and made["builtin"] is False
     with pytest.raises(ValueError, match="não está disponível"):
-        personas.create_persona("Beto 3D", kind="3d", library=library, voices=voices)
+        personas.create_persona("Beto Real", kind="realistic", library=library, voices=voices)
     personas.edit_persona("beto", {"name": "Beto Novo"}, library, voices)
     assert personas.get_persona("beto", library)["name"] == "Beto Novo"
     personas.remove_persona("beto", library)

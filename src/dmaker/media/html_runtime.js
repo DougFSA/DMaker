@@ -331,7 +331,8 @@
 
   const host = {
     /** Espera a página ficar pronta e deixa tudo parado no instante 0. */
-    ready: () => guard(whenReady(), "a composição não ficou pronta em 30 s (fontes, imagens ou animação Lottie ainda carregando)", 30000).then(() => host.seek(0)),
+    // A página que carrega um modelo grande (a persona 3D) declara um prazo maior em `window.dmakerReadyTimeoutMs`.
+    ready: () => guard(whenReady(), "a composição não ficou pronta (fontes, imagens, animação Lottie ou modelo ainda carregando)", window.dmakerReadyTimeoutMs || 30000).then(() => host.seek(0)),
     /** Leva a composição ao instante `seconds` (sempre para frente) e espera ela desenhar. */
     seek: async (seconds) => {
       const nowMs = seconds * 1000;
