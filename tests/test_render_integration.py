@@ -1316,7 +1316,8 @@ def test_a_3d_persona_is_drawn_with_the_real_browser_and_the_same_clip_twice_is_
         digests.append(hashlib.sha1(raw).hexdigest())
         frame_bytes = 270 * 480 * 4
         assert len(raw) == frame_bytes * 6
-        assert raw[3:frame_bytes:4].min() == 0  # há fundo transparente
+        alpha = np.frombuffer(raw, dtype=np.uint8)[3:frame_bytes:4]
+        assert alpha.min() == 0  # há fundo transparente
         assert (
             raw[:frame_bytes] != raw[-frame_bytes:]
         )  # a persona se mexeu entre o primeiro e o último quadro
