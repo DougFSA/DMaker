@@ -552,7 +552,17 @@ def check_sources(project: Project, layout: ProjectLayout) -> list[Finding]:
         isinstance(seg, ClipSegment) and src.info and src.info.has_audio and not seg.mute and seg.volume > 0
         for seg, src in zip(project.timeline, layout.sources, strict=True)
     )
-    if has_clips and not has_live_audio and not project.audio.music and not project.audio.tracks:
+    # a fala de uma persona sobreposta entra na mixagem como narração: o vídeo tem áudio mesmo com os clipes mudos
+    has_persona_voice = any(
+        isinstance(item, PersonaOverlay) and item.speech.volume > 0 for item in project.overlays
+    )
+    if (
+        has_clips
+        and not has_live_audio
+        and not has_persona_voice
+        and not project.audio.music
+        and not project.audio.tracks
+    ):
         findings.append(
             Finding("aviso", "audio", "o vídeo fica sem áudio (clipes mudos, sem música e sem faixa externa)")
         )

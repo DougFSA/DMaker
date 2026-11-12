@@ -45,8 +45,8 @@ def test_an_invalid_appearance_or_kind_is_refused_with_a_clear_message(library):
         library.create("Ruim", appearance={"skin": "marrom"})
     with pytest.raises(PersonaEngineError, match="hair_style"):
         library.create("Ruim", appearance={"hair_style": "careca"})
-    with pytest.raises(PersonaEngineError, match="ainda não tem motor"):
-        library.create("Realista", kind="realistic")
+    with pytest.raises(PersonaEngineError, match="Aparência realista inválida.*photo"):
+        library.create("Realista", kind="realistic")  # a persona realista sem foto não tem o que mostrar
     with pytest.raises(PersonaEngineError, match="não existe no tipo 2d"):
         library.create("Dancarina", gestures=["dance"])
     assert library.list() == []  # nada pela metade no cadastro
@@ -114,7 +114,7 @@ def test_the_service_checks_the_voice_in_the_voice_library_and_reports_what_the_
     assert made["voice"] == "dora" and set(made["gestures"]) == {"nod", "shake", "tilt", "wave"}
     assert "surprised" in made["expressions"] and made["builtin"] is False
     with pytest.raises(ValueError, match="não está disponível"):
-        personas.create_persona("Beto Real", kind="realistic", library=library, voices=voices)
+        personas.create_persona("Beto Real", kind="holograma", library=library, voices=voices)
     personas.edit_persona("beto", {"name": "Beto Novo"}, library, voices)
     assert personas.get_persona("beto", library)["name"] == "Beto Novo"
     personas.remove_persona("beto", library)

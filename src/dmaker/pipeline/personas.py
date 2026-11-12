@@ -7,6 +7,7 @@ adaptadores devolvem. As contas e as regras ficam na biblioteca e nos motores.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from ..domain.persona import Persona
@@ -53,14 +54,38 @@ def create_persona(
     gestures: list[str] | None = None,
     library: PersonaLibrary | None = None,
     voices: VoiceLibrary | None = None,
+    photo: str | Path | None = None,
 ) -> dict[str, Any]:
+    """Cria uma persona. `photo` é o arquivo da foto da persona realista (jpg ou png, lado menor de pelo menos 512
+    px): é copiado para a pasta da persona, e só esse tipo usa foto."""
     if kind not in engine_kinds():
         raise ValueError(
             f"O tipo de persona {kind!r} não está disponível; tipos disponíveis: {', '.join(engine_kinds())}."
         )
     _check_voice(voice, voices or VoiceLibrary())
-    created = (library or PersonaLibrary()).create(name, kind, voice, appearance, expressions, gestures)
+    appearance, files = _with_photo(kind, dict(appearance or {}), photo)
+    created = (library or PersonaLibrary()).create(
+        name, kind, voice, appearance, expressions, gestures, files=files
+    )
     return persona_dict(created)
+
+
+def _with_photo(
+    kind: str, appearance: dict[str, Any], photo: str | Path | None
+) -> tuple[dict[str, Any], dict[str, Path]]:
+    """A aparência com o nome da foto dentro da pasta da persona e o arquivo a copiar para lá."""
+    from ..persona.portrait import check_photo_file
+
+    if kind != "realistic":
+        if photo is not None:
+            raise ValueError(f"Só a persona realista usa foto; o tipo {kind!r} não tem `photo`.")
+        return appearance, {}
+    if photo is None:
+        raise ValueError("A persona realista precisa de uma foto: informe `photo` (um arquivo .jpg ou .png).")
+    source = Path(photo)
+    check_photo_file(source)  # levanta PhotoError (ValueError) com a mensagem do que corrigir
+    stored = "foto" + (".png" if source.suffix.lower() == ".png" else ".jpg")
+    return {**appearance, "photo": stored}, {stored: source}
 
 
 def edit_persona(

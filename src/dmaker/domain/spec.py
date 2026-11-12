@@ -720,8 +720,9 @@ class HtmlOverlay(Strict):
 
 class PersonaOverlay(Strict):
     """Persona num canto do quadro, sobre outro trecho (como o picture-in-picture), falando por cima do vídeo: o som
-    dela entra na mixagem como uma narração. Sem `background` a persona fica solta (transparente); com uma cor,
-    ela ganha um fundo no formato de `shape`. `end` vazio acaba junto com a fala."""
+    dela entra na mixagem como uma narração. Sem `background` a persona de clipe com alfa (2D, 3D) fica solta
+    (transparente); com uma cor, ela ganha um fundo no formato de `shape`. A persona realista, cujo clipe é opaco,
+    sempre aparece recortada em `shape`, com ou sem `background`. `end` vazio acaba junto com a fala."""
 
     type: Literal["persona"] = "persona"
     persona: str = Field(min_length=1)
@@ -737,7 +738,9 @@ class PersonaOverlay(Strict):
     aspect: str = "3:4"  # proporção do quadro da persona; o círculo força 1:1
     margin: float = Field(40, ge=0)  # px na base 1080
     background: str | None = None  # cor "#RRGGBB" ou chave da marca; vazio = transparente
-    shape: Literal["rect", "rounded", "circle"] = "rounded"  # só vale com `background`
+    shape: Literal["rect", "rounded", "circle"] = (
+        "rounded"  # vale com `background` ou na persona realista (opaca)
+    )
     radius: float = Field(0.08, ge=0, le=0.5)  # cantos redondos, fração da largura
     fade: float = Field(0.25, ge=0)  # entrada e saída suaves, em segundos
     expression: str = DEFAULT_EXPRESSION

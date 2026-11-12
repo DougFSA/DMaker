@@ -251,8 +251,10 @@ def doctor(
         else "  playwright e Chromium: [yellow]faltam[/yellow] (composição em HTML: dmaker setup --html)"
     )
     from .persona.engine3d import doctor_line
+    from .persona.engine_realistic import doctor_line as realistic_doctor_line
 
     console.print(f"  {escape(doctor_line())}")
+    console.print(f"  {escape(realistic_doctor_line())}")
     try:
         import mcp  # noqa: F401
 
@@ -739,7 +741,8 @@ def render(
         return
 
     try:
-        result = create_renderer(project, options).run()
+        # o log das etapas (a estimativa da persona realista, o andamento) também aparece no render local, como no da interface
+        result = create_renderer(project, options, log=None if quiet else _console_log).run()
     except (FFmpegError, *RENDER_ERRORS) as exc:
         _fail(str(exc))
     if dry_run:
@@ -793,7 +796,9 @@ def export(
             _print_ui_result(snapshot.get("result") or {})
             continue
         try:
-            result = create_renderer(project, RenderOptions(preview=preview, preset=p)).run()
+            result = create_renderer(
+                project, RenderOptions(preview=preview, preset=p), log=_console_log
+            ).run()
         except (FFmpegError, *RENDER_ERRORS) as exc:
             _fail(str(exc))
         _print_result(result)
@@ -2236,7 +2241,7 @@ def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) ->
 # ---------- personas ----------
 
 persona_app = typer.Typer(
-    help="Personas: personagens reutilizáveis (ilustrados 2D e personagens 3D) que falam no vídeo, em tela cheia ou num canto.",
+    help="Personas: personagens reutilizáveis (ilustrados 2D, personagens 3D e fotos que falam) que falam no vídeo, em tela cheia ou num canto.",
     no_args_is_help=True,
 )
 app.add_typer(persona_app, name="persona")
@@ -2249,8 +2254,14 @@ def _appearance_from_options(**fields: str | None) -> dict[str, str]:
 @persona_app.command("create")
 def persona_create(
     name: Annotated[str, typer.Argument(help="Nome da persona.")],
-    kind: Annotated[str, typer.Option(help="Tipo: 2d (ilustrada) ou 3d (personagem 3D).")] = "2d",
+    kind: Annotated[
+        str, typer.Option(help="Tipo: 2d (ilustrada), 3d (personagem 3D) ou realistic (uma foto que fala).")
+    ] = "2d",
     voice: Annotated[str | None, typer.Option(help="Id da voz (veja `dmaker voice list`).")] = None,
+    photo: Annotated[
+        Path | None,
+        typer.Option(help="A foto da persona realista (.jpg ou .png, lado menor de pelo menos 512 px)."),
+    ] = None,
     skin: Annotated[str | None, typer.Option(help="Tom de pele, #RRGGBB.")] = None,
     hair_color: Annotated[str | None, typer.Option(help="Cor do cabelo, #RRGGBB.")] = None,
     hair_style: Annotated[str | None, typer.Option(help="Estilo do cabelo: short, long ou bun.")] = None,
@@ -2268,7 +2279,7 @@ def persona_create(
         outfit_color=outfit_color,
     )
     try:
-        created = create_persona(name, kind, voice, appearance)
+        created = create_persona(name, kind, voice, appearance, photo=photo)
     except VOICE_ERRORS as exc:
         _fail(str(exc))
     console.print(f"[green]Persona criada:[/green] {created['id']}  ({created['kind']})")

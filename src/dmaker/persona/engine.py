@@ -38,6 +38,10 @@ class PersonaRender:
     framing: str = (
         "full"  # "full": tela cheia (meio corpo); "corner": sobreposição no canto (cabeça e ombros)
     )
+    # O áudio da fala e a semente dela: o motor realista anima a foto escutando o áudio (os motores 2D e 3D só usam
+    # os visemas). Sem áudio (a simulação) ou sem semente, o motor usa o que tem.
+    audio: Path | None = None
+    seed: int | None = None
 
     @property
     def frame_count(self) -> int:
@@ -68,7 +72,12 @@ class PersonaEngine(Protocol):
     def render(
         self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
     ) -> None:
-        """Escreve o clipe em `out` (vídeo com alfa, ou opaco se `produces_alpha` for falso)."""
+        """Escreve o clipe em `out` (vídeo com alfa, ou opaco se `produces_alpha` for falso).
+
+        O motor que leva minutos por clipe (o realista) ainda pode: declarar `reports_progress = True` e aceitar um
+        quinto argumento, `on_log` (o andamento, em texto, para o log do render; a porcentagem já vai pelo `runner`),
+        e ter `forecast(request) -> str`, a estimativa de tempo que o log mostra antes de começar. Os dois são
+        opcionais: um motor que não os tem continua valendo, e o 2D e o 3D não os têm."""
         ...
 
     def still(self, request: PersonaRender, at: float, on_warning: Callable[[str], None]) -> bytes:

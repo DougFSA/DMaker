@@ -11,9 +11,9 @@ BOTTOM_POSITIONS = ("bottom-left", "bottom-right", "bottom")
 
 
 def persona_size(overlay: PersonaOverlay, W: int) -> tuple[int, int]:
-    """Largura e altura (px, pares) do quadro da persona; o círculo com fundo força 1:1."""
+    """Largura e altura (px, pares) do quadro da persona; o círculo força 1:1 (com fundo, ou com a foto da realista)."""
     width = even(W * overlay.width)
-    aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
+    aspect = 1.0 if overlay.shape == "circle" else parse_aspect(overlay.aspect)
     return width, even(width / aspect)
 
 

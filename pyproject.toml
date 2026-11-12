@@ -41,6 +41,11 @@ agente = ["pypdf==6.20.1"]
 # o Chromium baixa à parte, para dentro do clone (bin/playwright): dmaker setup --html
 docs = ["playwright>=1.45"]
 html = ["playwright>=1.45"]
+# persona realista (uma foto e a fala viram um vídeo da pessoa falando, DMK-74): o ditto-talkinghead vendorizado em
+# vendor/ditto roda o warp e o decoder no OpenVINO (GPU integrada Intel). O torch vem à parte (versão CPU, como acima)
+# e `numpy<2.6` é o teto que o openvino exige. O openvino-telemetry NÃO entra: nada deve sair para a rede
+# (instale o openvino com --no-deps se o pip insistir nele). Os modelos baixam à parte: dmaker models download persona-realista
+persona-realista = ["openvino>=2026.4", "opencv-python-headless>=5.0", "numpy<2.6", "onnxruntime>=1.18", "scipy>=1.11", "librosa>=0.10"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
@@ -54,17 +59,20 @@ version = { attr = "dmaker.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-dmaker = ["py.typed", "media/*.js", "ui/static/*", "ui/dist/*", "ui/dist/assets/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md"]
+dmaker = ["py.typed", "media/*.js", "ui/static/*", "ui/dist/*", "ui/dist/assets/*", "resources/*.md", "voice/third_party/*/LICENSE", "voice/third_party/*/ORIGEM.md", "vendor/ditto/LICENSE", "vendor/ditto/NOTICE", "vendor/ditto/default_kwargs.npz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not ditto'"
+# ditto: roda o ditto de verdade (minutos, precisa dos modelos e de uma foto); fora do padrão: pytest -m ditto tests/test_ditto_real.py
+markers = ["ditto: roda o ditto de verdade (minutos); fora do pytest padrão"]
 
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-# código de terceiros copiado como está (veja o ORIGEM.md de cada pasta): reformatar esconderia o que mudou
-extend-exclude = ["src/dmaker/voice/third_party"]
+# código de terceiros copiado como está (veja o ORIGEM.md e o NOTICE de cada pasta): reformatar esconderia o que mudou
+# em relação ao original, e o lint reprovaria o estilo deles (nomes de uma letra, imports fora de ordem)
+extend-exclude = ["src/dmaker/voice/third_party", "src/dmaker/vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

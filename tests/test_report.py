@@ -798,3 +798,17 @@ def test_the_media_check_is_part_of_the_static_checks_and_of_the_report(tmp_path
     report = build_report(project, prober=make_prober({"logo.png": SMALL_IMAGE_INFO}))
     assert any("imagem ou vídeo sobreposto" in check for check in report.checks)
     assert any(f.where == "overlays[0]" and "imagem" in f.message for f in report.findings)
+
+
+def test_check_sources_counts_the_voice_of_an_overlay_persona_as_audio(tmp_path):
+    _touch(tmp_path, "take.mp4")
+    spec = {
+        "name": "p",
+        "output": {"preset": "instagram/reels"},
+        "timeline": [{"type": "clip", "src": "take.mp4", "start": 0, "end": 4, "mute": True}],
+        "overlays": [{"type": "persona", "persona": "ana", "speech": {"text": "Oi, tudo bem?"}}],
+        "audio": {"normalize": "off"},
+    }
+    project = _project(tmp_path, spec)
+    findings = check_sources(project, _layout(project, make_prober({})))
+    assert not any("sem áudio" in f.message for f in findings)

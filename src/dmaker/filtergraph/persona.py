@@ -6,6 +6,7 @@ alfa, ou opaco) vem pronto do motor; aqui ele é composto sobre o fundo e junto 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -109,33 +110,90 @@ def persona_mezzanine(
 def persona_frame_command(
     clip: Path,
     mask: Path,
-    background_hex: str,
+    background_hex: str | None,
     duration: float,
     size: tuple[int, int],
     fps: float,
     out: Path,
     label: str = "quadro da persona",
 ) -> FFmpegCommand:
-    """A persona sobreposta com fundo: o clipe sobre uma cor lisa, recortado pela máscara (retângulo, cantos
-    redondos ou círculo) e escrito como vídeo com alfa, para entrar na montagem como as composições em HTML."""
+    """A persona sobreposta recortada pela máscara (retângulo, cantos redondos ou círculo) e escrita como vídeo com
+    alfa, para entrar na montagem como as composições em HTML. Com `background_hex` o clipe (com alfa) vai sobre
+    uma cor lisa; sem ela o clipe já é opaco (a persona realista, com a foto de fundo) e só ganha o recorte."""
     width, height = size
     inputs = Inputs()
-    background = inputs.add(
-        f"color=c=0x{background_hex.lstrip('#')}:s={width}x{height}:r={fps:g}",
-        "-f",
-        "lavfi",
-        "-t",
-        f"{duration:.3f}",
-    )
-    persona = inputs.add(clip)
+    if background_hex is None:
+        persona = inputs.add(clip)
+        lines = [f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_flat]"]
+    else:
+        background = inputs.add(
+            f"color=c=0x{background_hex.lstrip('#')}:s={width}x{height}:r={fps:g}",
+            "-f",
+            "lavfi",
+            "-t",
+            f"{duration:.3f}",
+        )
+        persona = inputs.add(clip)
+        lines = [
+            f"[{background}:v]format=rgba[fr_bg]",
+            f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_persona]",
+            "[fr_bg][fr_persona]overlay=x=0:y=0:eof_action=pass:format=auto[fr_flat]",
+        ]
     shape = inputs.add_looped_image(mask, fps, duration)
-    lines = [
-        f"[{background}:v]format=rgba[fr_bg]",
-        f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_persona]",
-        "[fr_bg][fr_persona]overlay=x=0:y=0:eof_action=pass:format=auto[fr_flat]",
-        f"[{shape}:v]format=gray[fr_mask]",
-        "[fr_flat][fr_mask]alphamerge[fr_out]",
-    ]
+    lines += [f"[{shape}:v]format=gray[fr_mask]", "[fr_flat][fr_mask]alphamerge[fr_out]"]
     args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fr_out]", "-an", *PERSON_VIDEO]
     args += ["-r", f"{fps:g}", "-fps_mode", "cfr", "-t", f"{duration:.3f}", str(out)]
     return FFmpegCommand(args, label=label, total=duration)
+
+
+def realistic_clip_command(
+    frames: Iterable[bytes],
+    size: tuple[int, int],
+    source_fps: float,
+    fps: float,
+    duration: float,
+    out: Path,
+    label: str = "persona realista",
+) -> FFmpegCommand:
+    """Grava os quadros RGB do ditto (pelo stdin, a `source_fps`) como o clipe opaco da persona, no ritmo do projeto.
+
+    O clipe é opaco e longo (um quadro de 1080x1920 sem compressão pesa 6 MB), então vai em x264 com CRF 12, quase sem
+    perdas e sem o peso do PNG do clipe com alfa; o mezanino o reencoda depois. A conversão de RGB para YUV declara
+    BT.709, o padrão do vídeo HD, para a cor da foto não mudar. `fps` leva os 25 quadros do ditto ao ritmo do
+    projeto (repete quadros, não inventa movimento) e `tpad` repete o último, para a duração nunca ficar um quadro
+    abaixo do pedido."""
+    inputs = Inputs()
+    inputs.add(
+        "pipe:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{size[0]}x{size[1]}", "-r", f"{source_fps:g}"
+    )
+    video_filter = (
+        f"fps={fps:g},tpad=stop_mode=clone:stop=1,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+    )
+    args = [
+        *inputs.args,
+        "-an",
+        "-vf",
+        video_filter,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "12",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-color_range",
+        "tv",
+        "-r",
+        f"{fps:g}",
+        "-fps_mode",
+        "cfr",
+        "-t",
+        f"{duration:.3f}",
+        str(out),
+    ]
+    return FFmpegCommand(args, label=label, total=duration, frames=frames)

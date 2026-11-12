@@ -89,7 +89,10 @@ class PersonaLibrary:
         appearance: Mapping[str, Any] | None = None,
         expressions: list[str] | None = None,
         gestures: list[str] | None = None,
+        files: Mapping[str, Path] | None = None,
     ) -> Persona:
+        """Cria a persona. `files` leva arquivos para a pasta dela (nome na pasta -> arquivo de origem): a foto da
+        persona realista, por exemplo."""
         persona_id = slugify(name)
         if any(p.id == persona_id for p in self.list()):
             raise ValueError(f"Já existe a persona {persona_id!r}. Apague-a antes ou escolha outro nome.")
@@ -104,7 +107,11 @@ class PersonaLibrary:
                 gestures=gestures or [],
             )
         )
-        return self._write(persona)
+        written = self._write(persona)
+        assert written.folder is not None
+        for name, source in (files or {}).items():
+            shutil.copyfile(source, written.folder / name)
+        return written
 
     def update(self, persona_id: str, changes: Mapping[str, Any]) -> Persona:
         """Edita campos de uma persona do usuário: `name`, `voice`, `appearance` (mescla com a atual), `expressions`

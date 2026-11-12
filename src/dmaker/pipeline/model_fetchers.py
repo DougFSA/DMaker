@@ -83,6 +83,27 @@ def fetch_matting(models_dir: Path, variant: str) -> None:
     ensure_model(variant, models_dir)
 
 
+def fetch_persona_realista(
+    models_dir: Path,
+    variant: str,
+    downloader: Callable[[str, Path], None] | None = None,
+    build_ir: Callable[..., None] | None = None,
+) -> None:
+    """Os pesos do ditto (Hugging Face, revisão fixa, SHA-256 de cada arquivo) e, depois, o IR do OpenVINO do warp,
+    gerado aqui a partir do `warp_network.pth`. `downloader` e `build_ir` são injetáveis para os testes e para instalar
+    de uma pasta local (`ditto_models.mirror_downloader`)."""
+    from ..media.ditto_models import FILES, MODEL_FOLDER, paths_in
+    from ..media.downloads import download_file, ensure_file
+
+    for item in FILES:
+        ensure_file(models_dir / MODEL_FOLDER / item.folder, item.remote, downloader or download_file)
+    paths = paths_in(models_dir)
+    if not paths.has_warp_ir():
+        if build_ir is None:
+            from ..media.ditto_fast import build_warp_ir as build_ir
+        build_ir(paths)
+
+
 def fetch_persona3d(models_dir: Path, variant: str) -> None:
     """O avatar `mpfb.glb` do TalkingHead, do commit fixado do repositório, conferido por tamanho e SHA-256."""
     from ..media.downloads import ensure_file
