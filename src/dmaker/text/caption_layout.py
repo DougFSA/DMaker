@@ -71,7 +71,7 @@ def _timed_words(cue: Cue) -> list[Word]:
     return spoken
 
 
-def _max_text_width(style: CaptionStyle, canvas: Canvas) -> float:
+def max_text_width(style: CaptionStyle, canvas: Canvas) -> float:
     """A largura que a linha pode ter: a do quadro menos as margens da legenda (e, no `rounded`, a folga da caixa)."""
     scale = canvas.scale
     margin_l = int(canvas.safe.left + 40 * scale)
@@ -91,7 +91,7 @@ def layout_cue(cue: Cue, style: CaptionStyle, canvas: Canvas) -> list[CaptionWor
     if not spoken:
         return []
     tokens = [word.text.strip().upper() if style.uppercase else word.text.strip() for word in spoken]
-    rows = wrap_tokens(tokens, ref, size, _max_text_width(style, canvas), 0, fonts.measure_rendered)
+    rows = wrap_tokens(tokens, ref, size, max_text_width(style, canvas), 0, fonts.measure_rendered)
     windows = {
         active: (start, end) for start, end, active in highlight_windows(cue, spoken) if active is not None
     }

@@ -18,15 +18,25 @@ from pathlib import Path
 from typing import Literal
 
 from ..domain.brand import Theme
+from ..domain.persona import estimate_speech_seconds
 from ..domain.presets import Preset
-from ..domain.spec import CardSegment, ClipSegment, ImageOverlay, ImageSegment, Project, TextOverlay
+from ..domain.spec import (
+    CardSegment,
+    ClipSegment,
+    ImageOverlay,
+    ImageSegment,
+    PersonaOverlay,
+    Project,
+    TextOverlay,
+)
 from ..domain.timeline import tone_for
 from ..filtergraph.reframe import resolve_reframe_mode
 from ..media import fonts
 from ..media.ffmpeg import FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
+from ..text.caption_band import project_caption_band
 from ..text.captions import from_json, suspicious_cues
-from ..text.overlays import ROLE_DEFAULTS, effective_style, wrap_lines
+from ..text.overlays import ROLE_DEFAULTS, Canvas, effective_style, wrap_lines
 from .context import Prober
 from .layout import ProjectLayout, project_layout, to_presentation
 from .lint import lint
@@ -248,6 +258,50 @@ def check_media_safe_zone(project: Project, layout: ProjectLayout) -> list[Findi
                 f"overlays[{box.index}]",
                 f"{what} pode invadir a região coberta pela interface do app",
                 ov.start,
+            )
+        )
+    return findings
+
+
+def _persona_visible_span(ov: PersonaOverlay, total: float) -> tuple[float, float]:
+    """Quando a persona sobreposta aparece: até o `end`, ou até o fim da fala (estimada pelo texto), limitado ao vídeo."""
+    if ov.end is not None:
+        end = ov.end
+    elif ov.speech.text:
+        end = ov.start + estimate_speech_seconds(ov.speech.text, ov.speech.speed)
+    else:
+        end = total  # a duração de um áudio dado só se sabe ao renderizar
+    return ov.start, min(end, total)
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.1f}".replace(".", ",")
+
+
+def check_persona_over_caption(project: Project, layout: ProjectLayout) -> list[Finding]:
+    """persona sobreposta que cobre a faixa da legenda: posta por x/y, ou num canto de baixo que não coube acima dela"""
+    canvas = Canvas(layout.preset.width, layout.preset.height, layout.preset.safe, layout.theme, total=0.0)
+    band = project_caption_band(project, canvas)
+    if band is None:
+        return []
+    findings: list[Finding] = []
+    persona_number = 0
+    for box in _boxes(project, layout, {"persona"}):
+        persona_number += 1
+        ov = project.overlays[box.index]
+        if box.rect is None or not _is_on_screen(ov, layout):
+            continue
+        _, top, _, height = box.rect
+        if top + height <= band[0] + 1 or top >= band[1] - 1:  # 1 px de folga, como a zona segura
+            continue
+        start, end = _persona_visible_span(ov, layout.total)
+        findings.append(
+            Finding(
+                "aviso",
+                f"overlays[{box.index}]",
+                f"A persona sobreposta {persona_number} cobre a legenda de {_seconds(start)} s a {_seconds(end)} s: "
+                "mude position ou x/y.",
+                start,
             )
         )
     return findings
@@ -523,6 +577,7 @@ STATIC_CHECKS = [
     check_text_safe_zone,
     check_html_safe_zone,
     check_media_safe_zone,
+    check_persona_over_caption,
     check_text_pacing,
     check_overlap,
     check_contrast,
