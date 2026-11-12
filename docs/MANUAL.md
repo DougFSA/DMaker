@@ -24,7 +24,7 @@ Três palavras aparecem o tempo todo, e já valem aqui: a **spec** é o arquivo 
 
 <!-- dmaker:gerado indice -->
 
-São 60 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
+São 61 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem todas as ferramentas da tarefa; quando não tem, ela fica para o Claude, para a interface ou para a CLI.
 
 **Tarefas de vídeo**
 
@@ -49,6 +49,7 @@ São 60 tarefas. A última coluna diz se o agente local (`dmaker agent`) já tem
 | [Fazer vários vídeos de uma planilha](#fazer-vários-vídeos-de-uma-planilha) | Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada. | sim |
 | [Exportar o vídeo para outras plataformas](#exportar-o-vídeo-para-outras-plataformas) | Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma. | sim |
 | [Conferir o vídeo antes de publicar](#conferir-o-vídeo-antes-de-publicar) | Roda as checagens automáticas em texto (duração, zona segura, ritmo de leitura, contraste, legendas e o arquivo renderizado) sem gastar tempo olhando imagem. | ainda não: `contact_sheet` |
+| [Fazer uma persona falar no vídeo](#fazer-uma-persona-falar-no-vídeo) | Põe uma personagem ilustrada (2D) ou um personagem 3D falando no vídeo, em tela cheia ou num canto, com a boca seguindo a fala, piscadas, gestos e troca de expressão nas marcas que você escolher. | ainda não: `create_persona`, `list_personas` |
 
 **Tarefas de voz e áudio**
 
@@ -1848,11 +1849,11 @@ A zona segura vale para o texto, para a imagem e o vídeo sobreposto postos por 
 
 ### Fazer uma persona falar no vídeo
 <!-- tarefa: persona -->
-Põe uma personagem ilustrada (2D) ou um personagem 3D falando no vídeo, em tela cheia ou num canto, com a boca seguindo a fala, piscadas, movimento de cabeça, gestos e troca de expressão nas marcas que você escolher.
+Põe uma personagem ilustrada (2D) ou um personagem 3D falando no vídeo, em tela cheia ou num canto, com a boca seguindo a fala, piscadas, gestos e troca de expressão nas marcas que você escolher.
 
 #### Quando usar
 
-Você quer um apresentador que não precisa ser gravado: ele fala o texto que você escrever, com a voz que escolher, e pode ser reaproveitado em qualquer projeto. Uma **persona** é um cadastro (nome, tipo, voz e aparência); o cadastro mora em `assets/personas` na pasta de dados, e as personas prontas (`bia`, `caio` e `lia`) vêm com o DMaker e não mudam.
+Você quer um apresentador sem gravar ninguém: ele fala o texto que você escrever, com a voz que escolher, e vale em qualquer projeto. Uma **persona** é um cadastro (nome, tipo, voz e aparência); as prontas (`bia`, `caio`, `lia`) não mudam.
 
 **Pedidos que levam a esta tarefa:**
 - "Cria uma persona ilustrada chamada Marina com cabelo em coque"
@@ -1861,79 +1862,63 @@ Você quer um apresentador que não precisa ser gravado: ele fala o texto que vo
 
 #### Antes de começar
 
-- Dois tipos: **2d** (personagem desenhado pelo DMaker, cores e cabelo à escolha; não baixa nada) e **3d** (personagem em glTF animado pelo TalkingHead; precisa do modelo, que se baixa uma vez com `dmaker models download persona3d-mpfb`, 36,8 MB, licença CC0).
-- A voz vem da biblioteca de vozes (`dmaker voice list`); sem ela vale a voz automática.
-- O que cada tipo aceita. Expressões, nos dois: `neutral`, `happy`, `sad`, `surprised`. Gestos do **2d**: `nod`, `shake`, `tilt`, `wave`. Gestos do **3d**: `nod`, `shake`, `tilt`, `wave` (a mão levantada, igual a `handup`), `handup`, `index`, `ok`, `thumbup`, `thumbdown`, `side` e `shrug`. Os quatro nomes do 2d valem nos dois tipos, então trocar a persona de 2d para 3d não quebra a spec.
-- Aparência **2d**: `skin`, `hair_color`, `eye_color` e `outfit_color` em `#RRGGBB` e `hair_style` (`short`, `long` ou `bun`). Aparência **3d**: `outfit_color` em `#RRGGBB` (a roupa do personagem pronto é lisa nessa cor; o padrão é um azul acinzentado sóbrio) e `model` (`mpfb`, o personagem pronto, ou o nome de um `.glb` na pasta da persona).
-- O 3d só renderiza com o Chromium do `dmaker setup --html` (veja "Se der errado").
-- O 3d é desenhado por software, sem placa de vídeo, e leva bem mais tempo que o 2d: os tempos medidos nesta máquina estão em "Como conferir".
+- Tipos: **2d** (desenhado pelo DMaker, não baixa nada) e **3d** (glTF animado pelo TalkingHead; antes, `dmaker models download persona3d-mpfb`, 36,8 MB, CC0). Os dois desenham no Chromium (`dmaker setup --html`).
+- Voz: da biblioteca (`dmaker voice list`); sem ela, a automática.
+- Expressões nos dois: `neutral`, `happy`, `sad`, `surprised`. Gestos nos dois: `nod`, `shake`, `tilt`, `wave`; o 3d tem ainda `handup`, `index`, `ok`, `thumbup`, `thumbdown`, `side`, `shrug`. Assim a spec de uma persona 2d vale ao trocá-la por 3d.
+- Aparência 2d: `skin`, `hair_color`, `eye_color`, `outfit_color` (`#RRGGBB`) e `hair_style` (`short`, `long`, `bun`). Aparência 3d: `outfit_color` (a roupa é lisa nessa cor) e `model` (`mpfb` ou um `.glb` na pasta da persona).
+- Render só com CPU: 30 s de fala em 1080x1920 levaram 19 min 32 s no 2d, 31 min 41 s no 3d e 5 min 36 s no 3d em um canto, na primeira vez e com a voz inclusa; o clipe fica em cache.
 
 #### Pela IA
 
-Diga: "Cria a persona Marina (2d, voz dora, cabelo em coque) e faz um vídeo vertical de 30 segundos com ela falando em tela cheia este texto: ... Muda para alegre aos 3 segundos e acena aos 5." A IA cria a persona, monta o projeto com um trecho `persona` e renderiza. Para o canto, ela usa uma sobreposição `persona` sobre os outros trechos. As ferramentas de persona não fazem parte do kit do agente local (Ollama): o modelo pequeno ainda não as conhece, então criar persona e montar a spec é trabalho para o Claude, pela CLI ou pela interface.
+Diga: "Cria a persona Marina (2d, voz dora) e faz um vídeo vertical dela falando este texto em tela cheia; alegre aos 3 segundos e acena aos 5." As ferramentas de persona não estão no kit do agente local (Ollama): use o Claude, a CLI ou a interface.
 
 #### Chamadas das ferramentas
 
 ```json
 [
-  {"tool": "create_persona", "arguments": {"name": "Marina", "kind": "2d", "voice": "dora", "appearance": {"hair_style": "bun", "outfit_color": "#B03A5C"}}, "para": "cadastrar a persona"},
-  {"tool": "list_personas", "arguments": {}, "para": "ver as prontas e as suas, e o que cada tipo aceita"},
-  {"tool": "save_project", "arguments": {"name": "apresentacao", "spec": {"name": "apresentacao", "output": {"preset": "instagram/reels"}, "timeline": [{"type": "persona", "persona": "marina", "speech": {"text": "Olá! Eu sou a Marina."}, "marks": [{"at": 1.0, "expression": "happy"}, {"at": 2.0, "gesture": "wave"}]}]}}, "para": "persona em tela cheia"},
-  {"tool": "render_project", "arguments": {"name": "apresentacao", "preview": true}, "para": "conferir antes do render final"}
+  {"tool": "create_persona", "arguments": {"name": "Marina", "kind": "2d", "voice": "dora", "appearance": {"hair_style": "bun"}}, "para": "cadastrar a persona"},
+  {"tool": "list_personas", "arguments": {}, "para": "ver as personas e o que cada tipo aceita"},
+  {"tool": "render_project", "arguments": {"name_or_path": "apresentacao", "preview": true}, "para": "conferir um projeto com trecho persona"}
 ]
 ```
 
 #### Pela interface
 
-Interface nova, **Personas**: a lista mostra as **Prontas** (só leitura) e **Minhas personas**. O formulário do lado cria ou edita: **Nome**, **Tipo** (2D ou 3D), **Voz** e a **Aparência** do tipo (seletores de cor, o estilo do cabelo no 2D, a cor da roupa no 3D). Ao escolher o tipo 3D sem o modelo baixado, a tela mostra a mensagem do motor em português, com o comando que baixa, e o link para a tela **Modelos**. **Apagar** pede confirmação.
-
-Ao escolher uma persona na lista, dois cartões abrem: **Prévia**, que renderiza uma frase curta dela falando (com a barra de andamento; a mesma frase repetida vem do cache) e toca o vídeo ali mesmo, e **Usar em um projeto**, que põe a persona falando no fim do projeto escolhido, em tela cheia (um trecho novo) ou no canto (sobreposição). As marcas de expressão e gesto e o fundo se ajustam depois na spec. No editor, o trecho `persona` e a sobreposição `persona` aparecem na linha do tempo com o nome da persona, e a duração é a da fala quando ela já foi sintetizada (antes disso, uma estimativa pelo tamanho do texto).
+Interface nova, **Personas**: lista as **Prontas** (só leitura) e **Minhas personas**; o formulário cria e edita (**Nome**, **Tipo**, **Voz**, **Aparência**) e **Apagar** pede confirmação. No tipo 3D sem o modelo, a tela mostra o comando que baixa e o link para **Modelos**. Escolha uma persona para ver a **Prévia** (uma frase dela falando) ou **Usar em um projeto** (tela cheia ou canto).
 
 #### Pela CLI
 
 ```powershell
-dmaker persona create "Marina" --kind 2d --voice dora --hair-style bun --outfit-color "#B03A5C"
-dmaker persona create "Rafael" --kind 3d --voice alex --outfit-color "#2E5E4E"
+dmaker persona create "Marina" --kind 2d --voice dora --hair-style bun
+dmaker persona create "Rafael" --kind 3d --outfit-color "#2E5E4E"
 dmaker persona list
-dmaker persona show rafael
-dmaker persona edit marina --outfit-color "#222222"
-dmaker persona remove marina
-dmaker models download persona3d-mpfb   # só para personas 3d
 ```
 
-Em tela cheia, o trecho `persona` da spec:
+Em tela cheia, no `timeline`:
 
 ```json
-{"type": "persona", "persona": "marina", "speech": {"text": "Olá, eu sou a Marina."}, "tail": 0.5,
- "marks": [{"at": 3.0, "expression": "happy"}, {"at": 5.5, "gesture": "wave"}],
- "background": {"color": "#D9E4F2"}}
+{"type": "persona", "persona": "marina", "speech": {"text": "Olá, eu sou a Marina."},
+ "marks": [{"at": 3.0, "expression": "happy"}, {"at": 5.5, "gesture": "wave"}], "background": {"color": "#D9E4F2"}}
 ```
 
-No canto, a sobreposição `persona` (tamanho em `width`, lugar em `position` ou `x` e `y`, `background` e `shape` para o fundo recortado). A fala entra na mixagem como uma narração e na legenda do projeto, no instante do início da sobreposição mais o de cada palavra:
+No canto, em `overlays` (`position`, `width`, `background` e `shape` como no picture-in-picture; a fala entra na mixagem e na legenda):
 
 ```json
-{"type": "persona", "persona": "rafael", "start": 1.0, "speech": {"text": "Olha só."},
- "position": "bottom-right", "width": 0.34, "background": "#D9E4F2", "shape": "rounded"}
+{"type": "persona", "persona": "rafael", "start": 1.0, "speech": {"text": "Olha só."}, "background": "#D9E4F2"}
 ```
 
-A fala pode ser `text` (sintetizado com a voz da persona) ou `audio` (um arquivo seu). `marks` usa segundos desde o início da fala; a expressão vale até a próxima marca de expressão e o gesto é um movimento curto. Sem `duration`, o trecho dura a fala mais `tail`.
+`marks` conta segundos desde o início da fala. A fala é `text` ou `audio`.
 
 #### Como conferir
 
-`dmaker validate` confere a persona, as marcas e o tipo (uma marca com um gesto que o tipo não conhece diz quais ele aceita). `dmaker render NOME --preview --no-ui` mostra o resultado em baixa resolução; `dmaker qa` confere a duração contra a fala sintetizada de verdade. Depois da primeira síntese a duração real fica em `persona_speech.json`, na pasta do projeto, e é ela que a linha do tempo, o quadro de um instante, a prévia de áudio e o QA passam a usar. O quadro de um instante desenha a persona só naquele instante, sem sintetizar; a sobreposição aparece nele sem o fundo recortado.
-
-Tempos de render medidos nesta máquina (só CPU, sem placa de vídeo), em 1080x1920 e 30 quadros por segundo, a primeira vez, com a síntese da voz inclusa e sem nada no cache: persona **2d** em tela cheia, fala de 30,8 s, **19 min 32 s**; persona **3d** em tela cheia, a mesma fala, **31 min 41 s** (o 3d é desenhado por software); persona **3d** no canto sobre um vídeo de 14 s, fala de uns 6 s, **5 min 36 s**. Outro trabalho pesado rodando na mesma máquina estica esses números. Renderizar de novo o mesmo texto e as mesmas marcas leva só a montagem, porque o clipe da persona fica em cache.
-
-O clipe do 3d é desenhado a 540x960 e ampliado só na montagem, e fica em cache por conteúdo: repetir o mesmo texto e as mesmas marcas não desenha nada de novo.
+`dmaker validate` confere a persona e as marcas; `dmaker render NOME --preview --no-ui` mostra o resultado e `dmaker qa` confere a duração contra a fala real, que fica em `persona_speech.json` na pasta do projeto e alimenta também a linha do tempo.
 
 #### Se der errado
 
-- **"O personagem da persona 3D ainda não foi baixado"**: rode `dmaker models download persona3d-mpfb` (ou use a tela **Modelos**). O `dmaker doctor` mostra o modelo como opcional, baixado ou não baixado.
-- **O motor não está pronto (Chromium)**: `dmaker setup --html`.
-- **Marca com gesto ou expressão que o tipo não conhece**: use um dos nomes da seção "Antes de começar".
-- **Persona não encontrada**: `dmaker persona list` mostra os ids.
-- **Duração diferente da prevista na linha do tempo**: antes da primeira síntese a duração é estimada pelo texto; depois do primeiro render ela é a real.
-- **Licença do personagem 3D**: o `mpfb.glb` e os assets MakeHuman por trás dele estão como CC0 (sem exigência de atribuição); o README do TalkingHead fala em "CC0/CC-BY" para o ecossistema MakeHuman em geral, mas nenhum item do `mpfb.glb` consta como CC-BY. A textura da roupa tem um logotipo do MakeHuman, e por isso o DMaker a troca por uma cor lisa. Detalhes no `LICENCAS.txt` do instalador.
+- **"O personagem da persona 3D ainda não foi baixado"**: `dmaker models download persona3d-mpfb`.
+- **Chromium ausente**: `dmaker setup --html`.
+- **Gesto ou expressão desconhecido**: a mensagem lista os que o tipo aceita.
+- **Licença do 3D**: o `mpfb.glb` é CC0; a textura da roupa, com logotipo de terceiro, é trocada por uma cor lisa.
 
 ---
 
@@ -5279,10 +5264,10 @@ Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, a
 
 #### dmaker persona
 
-Personas: personagens reutilizáveis (ilustrados 2D) que falam no vídeo, em tela cheia ou num canto.
+Personas: personagens reutilizáveis (ilustrados 2D e personagens 3D) que falam no vídeo, em tela cheia ou num canto.
 
 - **`dmaker persona create NAME`**: Cria uma persona.
-  - `--kind` TEXTO: Tipo: 2d (ilustrada). (padrão 2d)
+  - `--kind` TEXTO: Tipo: 2d (ilustrada) ou 3d (personagem 3D). (padrão 2d)
   - `--voice` TEXTO: Id da voz (veja `dmaker voice list`).
   - `--skin` TEXTO: Tom de pele, #RRGGBB.
   - `--hair-color` TEXTO: Cor do cabelo, #RRGGBB.

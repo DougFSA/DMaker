@@ -90,6 +90,7 @@ describe('SidebarNav', () => {
       'Lote',
       'Editor',
       'Voz',
+      'Personas',
       'Dublagem',
       'Fila',
       'Modelos',
