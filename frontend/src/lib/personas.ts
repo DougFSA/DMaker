@@ -45,7 +45,13 @@ const DEFAULTS: Record<PersonaKind, Record<string, string>> = {
   realistic: {},
 }
 
-export const KIND_LABELS: Record<PersonaKind, string> = { '2d': 'Ilustrada 2D', '3d': 'Personagem 3D', realistic: 'Realista' }
+export const KIND_LABELS: Record<PersonaKind, string> = {
+  '2d': 'Ilustrada 2D',
+  '3d': 'Personagem 3D',
+  realistic: 'Realista (uma foto que fala)',
+}
+
+export const PHOTO_RIGHTS_NOTICE = 'Use só foto sua ou de quem autorizou o uso da imagem.'
 
 /** Os nomes em português das expressões e dos gestos dos dois motores; a chave é o identificador da spec. */
 export const CAPABILITY_LABELS: Record<string, string> = {
@@ -74,6 +80,27 @@ export function capabilityLabel(id: string): string {
 
 export function capabilityList(ids: readonly string[]): string {
   return ids.map(capabilityLabel).join(', ')
+}
+
+/** O que a tela diz de expressões e gestos de um tipo: a realista só tem a expressão da foto. */
+export function capabilitySummary(kind: PersonaKind, expressions: readonly string[], gestures: readonly string[]): string {
+  if (kind === 'realistic') return 'Só a expressão da foto; sem gestos.'
+  return `Expressões: ${capabilityList(expressions)}. Gestos: ${capabilityList(gestures)}.`
+}
+
+/** "uns 11 min", "uns 45 s", "uns 1 h 55 min": a estimativa de tempo dita como gente. */
+export function approximateDuration(seconds: number): string {
+  if (seconds < 90) return `uns ${Math.max(Math.round(seconds), 1)} s`
+  if (seconds < 5400) return `uns ${Math.round(seconds / 60)} min`
+  const minutes = Math.round(seconds / 60)
+  return `uns ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`
+}
+
+/** A frase ao lado do botão da prévia; vazia quando o motor é rápido e não há estimativa. */
+export function previewEstimateText(estimate: { seconds: number | null; device_label?: string } | undefined): string {
+  if (!estimate || estimate.seconds === null) return ''
+  const where = estimate.device_label ? ` (${estimate.device_label})` : ''
+  return `A prévia leva ${approximateDuration(estimate.seconds)} neste computador${where}, com ele livre.`
 }
 
 export function appearanceFields(kind: PersonaKind): AppearanceField[] {

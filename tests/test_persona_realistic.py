@@ -272,8 +272,9 @@ def test_the_forecast_uses_the_measured_estimate_for_the_device(tmp_path, librar
     request = render_request(persona, speech, duration=6.0)
     gpu = RealisticEngine(head=FakeHead(gpu=True), models_dir=models_dir).forecast(request)
     cpu = RealisticEngine(head=FakeHead(gpu=False), models_dir=models_dir).forecast(request)
-    assert gpu == "estimativa de 19 min 45 s na GPU integrada"  # 135 + 175 x 6
-    assert cpu.startswith("estimativa de 1 h 52 min") and "sem GPU integrada" in cpu  # 170 + 1100 x 6
+    assert gpu.startswith("estimativa de 13 min 45 s na GPU integrada")  # 150 + 4,5 x 150 quadros
+    assert "computador livre" in gpu and "programas pesados" in gpu
+    assert cpu.startswith("estimativa de 1 h 55 min") and "sem GPU integrada" in cpu  # 180 + 45 x 150
 
 
 # ---------- o clipe e o quadro parado ----------
@@ -415,6 +416,10 @@ def test_the_render_logs_the_estimate_and_the_progress_and_the_second_render_com
     estimate = [line for line in first if "estimativa de" in line]
     assert estimate and "na GPU integrada" in estimate[0] and estimate[0].startswith("persona Ana:")
     assert "persona realista: desenhando de mentira" in first  # o andamento do motor chega ao log do render
+    early = [i for i, line in enumerate(first) if line.startswith("persona realista: até ")]
+    assert early and "1 clipe" in first[early[0]] and "se nada estiver em cache" in first[early[0]]
+    drawing = [i for i, line in enumerate(first) if "desenhando" in line and line.startswith("persona Ana")]
+    assert early[0] < drawing[0]  # a previsão sai no começo, antes de a vez do clipe chegar
 
     second: list[str] = []
     render(second)

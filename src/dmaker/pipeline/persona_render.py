@@ -21,6 +21,7 @@ from ..filtergraph.persona_rect import persona_overlay_rect, persona_size
 from ..media.browser import BrowserUnavailable
 from ..media.probe import MediaInfo
 from ..persona.engine import PersonaRender, clip_cache_key, engine_for
+from ..persona.forecast import REALISTIC_KIND, forecast_message, realistic_clip_seconds
 from ..persona.library import PersonaLibrary
 from ..persona.marks import mark_problems
 from ..persona.validation import persona_problems
@@ -268,6 +269,26 @@ class PersonaStage:
                     f"O projeto tem persona {kind} e o motor dela não está pronto. {reason}"
                 )
 
+    def realistic_forecast(self, ctx: RenderContext) -> str | None:
+        """A previsão do tempo das personas realistas do projeto, para o início do render (None sem nenhuma)."""
+        return self.realistic_forecast_of(ctx.project, ctx.options.dry_run, ctx.project.resolve, ctx.prober)
+
+    def realistic_forecast_of(self, project: Project, dry_run: bool, resolve=None, prober=None) -> str | None:
+        """O mesmo, a partir só do projeto: serve ao MCP, que avisa ao agendar o render, antes de haver contexto."""
+        if dry_run:
+            return None
+
+        def audio_seconds(name: str) -> float | None:
+            if resolve is None or prober is None:
+                return None
+            path = resolve(name)
+            return prober(path).duration if path.exists() else None
+
+        durations = realistic_clip_seconds(project, lambda pid: self.library.get(pid).kind, audio_seconds)
+        if not durations:
+            return None
+        return forecast_message(durations, engine_for(REALISTIC_KIND).head.has_gpu())
+
     def attach_speech(self, ctx: RenderContext, project: Project, sources: list[Source]) -> list[Source]:
         """As fontes com a fala das personas de tela cheia no lugar: o trecho ganha a duração real do áudio, e as
         marcas são conferidas contra ela."""
@@ -360,18 +381,26 @@ class PersonaStage:
             ctx, persona, line, overlay.expression, overlay.marks, duration, size, "corner"
         )
         path = clip
-        if overlay.background and alpha:
-            path = self._framed(ctx, overlay, clip, size, duration)
+        # clipe com alfa: só ganha forma se tem fundo; clipe opaco (realista): sempre, ele não tem de onde ter canto
+        if alpha and overlay.background or not alpha:
+            path = self._framed(ctx, overlay, clip, size, duration, opaque=not alpha)
         left, top = self._corner(ctx, overlay)
         return ResolvedHtmlLayer(
             path, first / ctx.fps, stop / ctx.fps, str(left), str(top), fade=overlay.fade
         )
 
     def _framed(
-        self, ctx: RenderContext, overlay: PersonaOverlay, clip: Path, size: tuple[int, int], duration: float
+        self,
+        ctx: RenderContext,
+        overlay: PersonaOverlay,
+        clip: Path,
+        size: tuple[int, int],
+        duration: float,
+        opaque: bool = False,
     ) -> Path:
-        """A persona sobre o fundo de cor, recortada no formato pedido (cache por conteúdo, como o mezanino)."""
-        color = ctx.theme.color(overlay.background, "#D9E4F2")
+        """A persona recortada no formato pedido, sobre o fundo de cor quando o clipe tem alfa (cache por conteúdo,
+        como o mezanino). O clipe opaco não precisa de fundo: reusa a máscara do PiP só para o recorte."""
+        color = None if opaque else ctx.theme.color(overlay.background, "#D9E4F2")
         radius = round(overlay.radius * size[0])
         key = cache_key(
             PERSONA_CLIP_VERSION, clip.name, color, overlay.shape, radius, size, ctx.fps, round(duration, 6)

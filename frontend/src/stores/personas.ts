@@ -7,6 +7,7 @@ import {
   type PersonaChanges,
   type PersonaDraft,
   type PersonaEngineInfo,
+  type PersonaEstimate,
   type PersonaPreviewResult,
   type PersonaUse,
 } from '@/api'
@@ -29,6 +30,7 @@ export const usePersonasStore = defineStore('personas', () => {
   const saving = ref(false)
   const previews = reactive<Record<string, JobRun<PersonaPreviewResult>>>({})
   const previewResults = ref<Record<string, PersonaPreviewResult>>({})
+  const estimates = ref<Record<string, PersonaEstimate>>({})
 
   const builtin = computed(() => personas.value.filter((persona) => persona.builtin))
   const mine = computed(() => personas.value.filter((persona) => !persona.builtin))
@@ -64,6 +66,33 @@ export const usePersonasStore = defineStore('personas', () => {
       return null
     } finally {
       saving.value = false
+    }
+  }
+
+  /** Cria a persona realista com a foto enviada; a mensagem do servidor (foto pequena, formato) vai no aviso. */
+  async function createRealistic(name: string, voice: string | null, photo: File): Promise<Persona | null> {
+    saving.value = true
+    try {
+      const created = await api.personas.createRealistic(name, voice, photo)
+      toasts.push({ tone: 'success', title: 'Persona criada', description: created.name })
+      await load()
+      return created
+    } catch (error) {
+      toasts.push({ tone: 'error', title: 'Não consegui criar a persona', description: errorMessage(error) })
+      return null
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Pede o tempo da prévia antes de começar; falhar aqui não atrapalha a prévia, só some a frase. */
+  async function loadEstimate(persona: Persona, phrase: string): Promise<void> {
+    try {
+      estimates.value = { ...estimates.value, [persona.id]: await api.personas.previewEstimate(persona.id, phrase) }
+    } catch {
+      const rest = { ...estimates.value }
+      delete rest[persona.id]
+      estimates.value = rest
     }
   }
 
@@ -131,11 +160,14 @@ export const usePersonasStore = defineStore('personas', () => {
     saving,
     previews,
     previewResults,
+    estimates,
     builtin,
     mine,
     engineOf,
     load,
     create,
+    createRealistic,
+    loadEstimate,
     update,
     remove,
     use,

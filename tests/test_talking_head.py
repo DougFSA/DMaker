@@ -17,16 +17,31 @@ from dmaker.media.talking_head import (
     WorkerEvent,
     estimate_seconds,
     format_duration,
+    frame_count,
+    low_memory_warning,
     parse_event,
     progress_message,
 )
 
 
-def test_the_estimate_is_the_measured_fixed_cost_plus_a_cost_per_second_of_video():
-    assert estimate_seconds(6.0, has_gpu=True) == 135 + 175 * 6
-    assert estimate_seconds(6.0, has_gpu=False) == 170 + 1100 * 6
-    assert estimate_seconds(0.0, has_gpu=True) == 135  # o preparo fixo se paga mesmo para um clipe curtíssimo
-    assert estimate_seconds(30.0, has_gpu=True) < 180 * 30  # o limite de 180 s de render por segundo de vídeo
+def test_the_estimate_is_the_measured_fixed_cost_plus_a_cost_per_frame():
+    assert estimate_seconds(132, has_gpu=True) == 150 + 4.5 * 132  # os 132 quadros medidos levaram 657 s
+    assert estimate_seconds(132, has_gpu=True) > 657  # a margem faz a estimativa errar para mais
+    assert estimate_seconds(132, has_gpu=False) == 180 + 45 * 132
+    assert estimate_seconds(0, has_gpu=True) == 150  # o preparo fixo se paga mesmo para um clipe curtíssimo
+
+
+def test_frames_follow_the_ditto_rate_not_the_project_rate():
+    assert frame_count(6.0) == 150 and frame_count(0.0) == 0 and frame_count(5.28) == 132
+
+
+def test_low_memory_warns_below_five_gb_and_stays_quiet_otherwise():
+    message = low_memory_warning(3.2)
+    assert message == (
+        "Pouca memória livre (3.2 GB): feche outros programas, o render da persona realista usa uns 4.5 GB."
+    )
+    assert low_memory_warning(5.0) is None and low_memory_warning(12.0) is None
+    assert low_memory_warning(None) is None  # sem psutil não dá para medir, e o aviso não bloqueia nada
 
 
 @pytest.mark.parametrize(
@@ -102,6 +117,7 @@ print("PRONTO 3 1.0", flush=True)
 
 @pytest.fixture
 def head(tmp_path, monkeypatch) -> DittoTalkingHead:
+    monkeypatch.setattr(talking_head, "free_memory_gb", lambda: 16.0)  # a memória real não decide o teste
     script = tmp_path / "worker_falso.py"
     script.write_text(FAKE_WORKER, encoding="utf-8")
     monkeypatch.setattr(
@@ -170,3 +186,10 @@ def test_only_one_drawing_runs_at_a_time_and_the_second_waits_with_a_notice(tmp_
     monkeypatch.setattr(talking_head.time, "sleep", release_after_first_wait)
     frames = list(head.frames(ask(tmp_path, "ok"), log.append, lambda _: None))
     assert len(frames) == 3 and waits and "aguardando a vez" in log[0]
+
+
+def test_a_low_memory_machine_gets_the_warning_before_the_first_frame(tmp_path, head, monkeypatch):
+    monkeypatch.setattr(talking_head, "free_memory_gb", lambda: 3.2)
+    warnings: list[str] = []
+    list(head.frames(ask(tmp_path, "ok"), lambda _: None, warnings.append))
+    assert warnings[0].startswith("Pouca memória livre (3.2 GB)")

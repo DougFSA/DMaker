@@ -1073,6 +1073,18 @@ def _export_via_ui(name_or_path: str, presets: list[str], wait_seconds: float) -
     return {**snapshot, "where": "ui", "url": _ui_job_url(dispatcher.client, name_or_path, job_id)}
 
 
+def _persona_forecast(name_or_path: str) -> str | None:
+    """A previsão do tempo das personas realistas do projeto (None sem nenhuma): vai na resposta do render_project,
+    porque o job de uma persona realista leva muito mais que a espera da chamada. Nunca derruba o render."""
+    from .pipeline.persona_render import PersonaStage
+    from .pipeline.projects import load_project
+
+    try:
+        return PersonaStage().realistic_forecast_of(load_project(name_or_path), dry_run=False)
+    except Exception:  # noqa: BLE001 - é só um aviso; quem decide o erro de verdade é o render
+        return None
+
+
 def _render(
     job: Job,
     name_or_path: str,
@@ -1131,7 +1143,8 @@ def _qa_text_for_output(project: Project, preset: str | None, output: Path) -> s
         "Renderiza o projeto. preview=true gera uma versão rápida em baixa resolução para conferir. "
         "show_ui=true (padrão) abre a interface gráfica para o usuário acompanhar o andamento; use "
         "show_ui=false só se ele pedir para não abrir. Espera até wait_seconds; se ainda estiver "
-        "rodando devolve job_id para consultar com job_status."
+        "rodando devolve job_id para consultar com job_status. Com persona realista no projeto, a resposta traz "
+        "`forecast`: o tempo estimado (teto, se nada estiver em cache)."
     )
 )
 def render_project(
@@ -1148,6 +1161,8 @@ def render_project(
     """`segments` = "12-20" renderiza só esses trechos (sem sobreposições/legendas), para revisar vídeos longos."""
     if preset:
         resolve_output(preset)
+    forecast = _persona_forecast(name_or_path)
+    extra = {"forecast": forecast} if forecast else {}
     if show_ui:
         via_ui = _render_via_ui(
             name_or_path,
@@ -1162,13 +1177,13 @@ def render_project(
             wait_seconds,
         )
         if via_ui is not None:
-            return via_ui
+            return {**via_ui, **extra}
     job = jobs.start(
         f"render {name_or_path} ({'preview' if preview else preset or 'final'})",
         lambda job: _render(job, name_or_path, preview, preset, force, guides, no_captions, segments),
     )
     jobs.wait(job, wait_seconds)
-    return {**job.snapshot(), "result": job.result}
+    return {**job.snapshot(), "result": job.result, **extra}
 
 
 @server.tool(

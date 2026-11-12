@@ -175,6 +175,11 @@ class RenderPipeline:
         if persona_issues:
             raise ValueError("Persona com problema:\n" + "\n".join(persona_issues))
         self.personas.check_available(ctx)
+        forecast = self.personas.realistic_forecast(
+            ctx
+        )  # antes da narração e do Whisper, para o aviso sair já
+        if forecast:
+            ctx.log(forecast)
         sources = self.personas.attach_speech(ctx, p, sources)  # a fala dá a duração do trecho de persona
         heard = None
         if heard_project is not None:

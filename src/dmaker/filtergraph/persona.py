@@ -110,33 +110,37 @@ def persona_mezzanine(
 def persona_frame_command(
     clip: Path,
     mask: Path,
-    background_hex: str,
+    background_hex: str | None,
     duration: float,
     size: tuple[int, int],
     fps: float,
     out: Path,
     label: str = "quadro da persona",
 ) -> FFmpegCommand:
-    """A persona sobreposta com fundo: o clipe sobre uma cor lisa, recortado pela máscara (retângulo, cantos
-    redondos ou círculo) e escrito como vídeo com alfa, para entrar na montagem como as composições em HTML."""
+    """A persona sobreposta recortada pela máscara (retângulo, cantos redondos ou círculo) e escrita como vídeo com
+    alfa, para entrar na montagem como as composições em HTML. Com `background_hex` o clipe (com alfa) vai sobre
+    uma cor lisa; sem ela o clipe já é opaco (a persona realista, com a foto de fundo) e só ganha o recorte."""
     width, height = size
     inputs = Inputs()
-    background = inputs.add(
-        f"color=c=0x{background_hex.lstrip('#')}:s={width}x{height}:r={fps:g}",
-        "-f",
-        "lavfi",
-        "-t",
-        f"{duration:.3f}",
-    )
-    persona = inputs.add(clip)
+    if background_hex is None:
+        persona = inputs.add(clip)
+        lines = [f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_flat]"]
+    else:
+        background = inputs.add(
+            f"color=c=0x{background_hex.lstrip('#')}:s={width}x{height}:r={fps:g}",
+            "-f",
+            "lavfi",
+            "-t",
+            f"{duration:.3f}",
+        )
+        persona = inputs.add(clip)
+        lines = [
+            f"[{background}:v]format=rgba[fr_bg]",
+            f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_persona]",
+            "[fr_bg][fr_persona]overlay=x=0:y=0:eof_action=pass:format=auto[fr_flat]",
+        ]
     shape = inputs.add_looped_image(mask, fps, duration)
-    lines = [
-        f"[{background}:v]format=rgba[fr_bg]",
-        f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_persona]",
-        "[fr_bg][fr_persona]overlay=x=0:y=0:eof_action=pass:format=auto[fr_flat]",
-        f"[{shape}:v]format=gray[fr_mask]",
-        "[fr_flat][fr_mask]alphamerge[fr_out]",
-    ]
+    lines += [f"[{shape}:v]format=gray[fr_mask]", "[fr_flat][fr_mask]alphamerge[fr_out]"]
     args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fr_out]", "-an", *PERSON_VIDEO]
     args += ["-r", f"{fps:g}", "-fps_mode", "cfr", "-t", f"{duration:.3f}", str(out)]
     return FFmpegCommand(args, label=label, total=duration)

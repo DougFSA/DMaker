@@ -21,14 +21,6 @@ from typing import Protocol
 from .. import config
 from .ditto_worker import WorkerArguments
 
-# A estimativa do tempo de render, medida nesta máquina (Iris Xe, 4 threads de torch): um preparo fixo por clipe
-# (carregar os modelos, achar o rosto, aquecer o acelerador) mais um custo por segundo de vídeo. Sem GPU integrada
-# tudo roda na CPU, mais de seis vezes mais lento.
-GPU_FIXED_SECONDS = 135.0
-GPU_SECONDS_PER_VIDEO_SECOND = 175.0
-CPU_FIXED_SECONDS = 170.0
-CPU_SECONDS_PER_VIDEO_SECOND = 1100.0
-
 TALKING_HEAD_FPS = 25  # o ditto desenha a 25 quadros por segundo
 DEFAULT_STEPS = 15  # passos da difusão: 15 dão a mesma imagem de 50 para o olho e custam menos de um terço
 DEFAULT_SEED = 7
@@ -36,12 +28,57 @@ LOG_EVERY_FRAMES = 10  # a cada tantos quadros uma linha no log do render (cada 
 LOCK_POLL_SECONDS = 2.0
 KEEP_OUTPUT_LINES = 12  # as últimas linhas do processo, para a mensagem de erro
 
+# A estimativa do tempo de render é por quadro desenhado, porque o ritmo do preset muda o custo. Vem das medições do
+# DMK-74 num i5-1235U com Iris Xe, com o computador livre: 6 s de fala (132 quadros) levaram 657 s, com um preparo de
+# 125 s e 3,6 s por quadro em regime. O preparo fixo é arredondado para 150 s e o custo por quadro leva 25% de
+# margem (3,6 x 1,25 = 4,5 s), para a estimativa errar para mais e não para menos. A CPU tem uma só medição
+# (45 s por quadro, 180 s de preparo).
+GPU_FIXED_SECONDS = 150.0
+GPU_SECONDS_PER_FRAME = 4.5
+CPU_FIXED_SECONDS = 180.0
+CPU_SECONDS_PER_FRAME = 45.0
+# O pico de memória medido no DMK-74 foi de 4,5 GB; abaixo disto de memória livre o render pode travar o computador.
+PEAK_MEMORY_GB = 4.5
+LOW_MEMORY_GB = 5.0
 
-def estimate_seconds(duration: float, has_gpu: bool) -> float:
-    """Quanto tempo o render de um clipe de `duration` segundos leva (função pura, só uma estimativa)."""
+
+def frame_count(duration: float) -> int:
+    """Quantos quadros o ditto desenha para `duration` segundos de fala."""
+    return max(round(duration * TALKING_HEAD_FPS), 0)
+
+
+def estimate_seconds(frames: int, has_gpu: bool) -> float:
+    """Quanto tempo o render de um clipe de `frames` quadros leva (função pura, só uma estimativa)."""
     if has_gpu:
-        return GPU_FIXED_SECONDS + GPU_SECONDS_PER_VIDEO_SECOND * duration
-    return CPU_FIXED_SECONDS + CPU_SECONDS_PER_VIDEO_SECOND * duration
+        return GPU_FIXED_SECONDS + GPU_SECONDS_PER_FRAME * frames
+    return CPU_FIXED_SECONDS + CPU_SECONDS_PER_FRAME * frames
+
+
+def free_memory_gb() -> float | None:
+    """A memória livre em GB (psutil); None quando o psutil não está instalado."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return psutil.virtual_memory().available / 1024**3
+
+
+def total_memory_gb() -> float | None:
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return psutil.virtual_memory().total / 1024**3
+
+
+def low_memory_warning(free_gb: float | None) -> str | None:
+    """O aviso de pouca memória livre (não bloqueia), ou None se há de sobra ou não dá para medir."""
+    if free_gb is None or free_gb >= LOW_MEMORY_GB:
+        return None
+    return (
+        f"Pouca memória livre ({free_gb:.1f} GB): feche outros programas, "
+        f"o render da persona realista usa uns {PEAK_MEMORY_GB:g} GB."
+    )
 
 
 def format_duration(seconds: float) -> str:
@@ -157,6 +194,9 @@ class DittoTalkingHead:
         from ..pipeline.filelock import FileLock
 
         lock = FileLock(config.CACHE_DIR / "ditto.lock")
+        low_memory = low_memory_warning(free_memory_gb())
+        if low_memory:
+            warn(low_memory)
         announced = False
         while not lock.try_acquire():
             if not announced:

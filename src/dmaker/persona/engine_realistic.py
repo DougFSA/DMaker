@@ -35,6 +35,8 @@ from ..media.talking_head import (
     TalkingHeadRequest,
     estimate_seconds,
     format_duration,
+    frame_count,
+    total_memory_gb,
 )
 from .engine import PersonaEngine, PersonaEngineError, PersonaRender, register_engine
 from .html_clip import FrameStream
@@ -114,7 +116,9 @@ def doctor_line(head: TalkingHead | None = None, models_dir: Path | None = None)
         return f"persona realista (opcional): modelos não baixados (dmaker models download {MODEL_ID})"
     gpu = (head or DittoTalkingHead()).has_gpu()
     where = "com GPU integrada (OpenVINO)" if gpu else "sem GPU integrada: só CPU, bem mais lento"
-    return f"persona realista (opcional): pronta, {where}"
+    memory = total_memory_gb()
+    ram = f", {memory:.0f} GB de RAM" if memory is not None else ""
+    return f"persona realista (opcional): pronta, {where}{ram}"
 
 
 class RealisticEngine:
@@ -202,7 +206,22 @@ class RealisticEngine:
         """O que o log do render diz antes de começar o clipe: quanto deve levar (estimativa medida), e onde."""
         gpu = self.head.has_gpu()
         where = "na GPU integrada" if gpu else "na CPU (sem GPU integrada, bem mais lento)"
-        return f"estimativa de {format_duration(estimate_seconds(request.duration, gpu))} {where}"
+        seconds = estimate_seconds(frame_count(request.duration), gpu)
+        return (
+            f"estimativa de {format_duration(seconds)} {where}, com o computador livre "
+            "(outros programas pesados aumentam o tempo)"
+        )
+
+    def estimate(self, duration: float) -> dict[str, Any]:
+        """A estimativa de um clipe de `duration` segundos para a tela (segundos, quadros e o dispositivo)."""
+        gpu = self.head.has_gpu()
+        frames = frame_count(duration)
+        return {
+            "seconds": round(estimate_seconds(frames, gpu)),
+            "frames": frames,
+            "device": "gpu" if gpu else "cpu",
+            "device_label": "GPU integrada" if gpu else "CPU (sem GPU integrada)",
+        }
 
     # ---------- o desenho ----------
 

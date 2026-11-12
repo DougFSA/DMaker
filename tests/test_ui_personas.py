@@ -135,3 +135,101 @@ def test_use_puts_the_persona_in_a_project_as_a_full_screen_segment_or_a_corner_
     assert saved.overlays[0].start == 2.0 and saved.overlays[0].speech.text == "Olá"
     assert client.post("/api/personas/zzz/use", json={"project": "demo", "text": "x"}).status_code == 404
     assert client.post("/api/personas/ana/use", json={**body, "placement": "x"}).status_code == 400
+
+
+# ---------- a persona realista: foto enviada, miniatura e estimativa da prévia ----------
+
+
+class FakeHead:
+    def __init__(self, gpu: bool) -> None:
+        self.gpu = gpu
+
+    def has_gpu(self) -> bool:
+        return self.gpu
+
+
+@pytest.fixture
+def realistic_engine(monkeypatch):
+    """O motor realista com uma cabeça falante de mentira (a rota de estimativa pergunta a ela se há GPU)."""
+    from dmaker.persona import engine as registry
+    from dmaker.persona.engine_realistic import RealisticEngine
+
+    engine = RealisticEngine(head=FakeHead(gpu=True))
+    monkeypatch.setattr(registry, "_ENGINES", {**registry._ENGINES, "realistic": engine})
+    return engine
+
+
+def photo_bytes(size=(600, 800)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (180, 140, 120)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def test_uploading_a_photo_creates_the_realistic_persona_and_serves_its_thumbnail(client, realistic_engine):
+    response = client.post(
+        "/api/personas/realistic",
+        data={"name": "Rosto"},
+        files={"photo": ("minha foto.jpg", photo_bytes(), "image/jpeg")},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["kind"] == "realistic" and body["appearance"]["photo"] == "foto.jpg"
+    assert body["photo_url"] == "/api/personas/rosto/photo"
+    assert body["expressions"] == ["neutral"] and body["gestures"] == []  # só a expressão da foto, sem gestos
+    listed = client.get("/api/personas").json()["personas"][0]
+    assert listed["photo_url"] == "/api/personas/rosto/photo"
+    thumbnail = client.get(body["photo_url"])
+    assert thumbnail.headers["content-type"] == "image/jpeg"
+    from io import BytesIO
+
+    from PIL import Image
+
+    assert Image.open(BytesIO(thumbnail.content)).size == (320, 427)  # miniatura de 600x800, sem distorcer
+
+
+def test_a_photo_that_is_too_small_is_refused_with_the_server_message(client, realistic_engine):
+    response = client.post(
+        "/api/personas/realistic",
+        data={"name": "Pequena"},
+        files={"photo": ("p.jpg", photo_bytes((300, 300)), "image/jpeg")},
+    )
+
+    assert response.status_code == 400
+    assert "512" in response.json()["detail"]
+    assert client.get("/api/personas").json()["personas"] == []  # nada ficou criado
+
+
+def test_a_persona_without_photo_has_no_thumbnail(client):
+    client.post("/api/personas", json={"name": "Ana", "kind": "2d"})
+
+    assert "photo_url" not in client.get("/api/personas/ana").json()
+    assert client.get("/api/personas/ana/photo").status_code == 404
+
+
+def test_the_preview_estimate_comes_before_the_job_with_the_device(client, realistic_engine):
+    client.post(
+        "/api/personas/realistic",
+        data={"name": "Rosto"},
+        files={"photo": ("f.jpg", photo_bytes(), "image/jpeg")},
+    )
+
+    gpu = client.get(
+        "/api/personas/rosto/preview/estimate", params={"phrase": "Oi, tudo bem com você?"}
+    ).json()
+    assert gpu["device"] == "gpu" and gpu["frames"] > 0
+    assert gpu["seconds"] == round(150 + 4.5 * gpu["frames"])
+
+    realistic_engine._head = FakeHead(gpu=False)
+    cpu = client.get("/api/personas/rosto/preview/estimate").json()
+    assert cpu["device"] == "cpu" and cpu["seconds"] == round(180 + 45 * cpu["frames"])
+
+
+def test_the_preview_estimate_is_null_for_the_fast_engines(client):
+    client.post("/api/personas", json={"name": "Ana", "kind": "2d"})
+
+    assert client.get("/api/personas/ana/preview/estimate").json() == {"seconds": None}

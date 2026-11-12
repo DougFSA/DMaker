@@ -181,6 +181,25 @@ def test_an_opaque_engine_gets_no_background_composed_over_it(tmp_path, library,
     assert not any("0x112233" in " ".join(c) for c in runner.commands)
 
 
+def test_an_opaque_clip_in_the_corner_is_always_cut_to_the_shape_even_without_a_background(
+    tmp_path, library, engine
+):
+    engine.produces_alpha = False  # o clipe da realista é opaco: sem recorte ele seria um retângulo quadrado
+    runner = runner_for_pipeline()
+    spec = {
+        "timeline": [{"type": "clip", "src": "base.mp4", "start": 0, "end": 6}],
+        "overlays": [
+            {"type": "persona", "persona": "ana", "start": 1.0, "shape": "circle", "speech": {"text": TEXT}}
+        ],
+    }
+    result = pipeline(tmp_path, library, spec, runner).run()
+    assert engine.requests[0].size[0] == engine.requests[0].size[1]  # o círculo força 1:1
+    framing = [" ".join(c) for c in runner.commands if "alphamerge" in " ".join(c)]
+    assert len(framing) == 1
+    assert "color=c=0x" not in framing[0]  # sem fundo de cor: o clipe opaco só ganha o recorte
+    assert result.duration == pytest.approx(6.0)
+
+
 def test_a_missing_persona_or_a_gesture_the_type_cannot_do_stops_the_render_with_a_clear_message(
     tmp_path, library, engine
 ):
