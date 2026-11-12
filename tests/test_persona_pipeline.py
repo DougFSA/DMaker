@@ -337,3 +337,24 @@ def test_the_speech_of_a_corner_persona_is_captioned_at_the_overlay_start(tmp_pa
     ass = next((tmp_path / "jobs").rglob("overlay.ass")).read_text(encoding="utf-8-sig")
     # as palavras do transcritor falso (olá, eu, sou) a partir de 2,0 s, mais o início de cada uma
     assert "OLÁ" in ass.upper() and "0:00:02.1" in ass
+
+
+def test_the_caption_is_burned_after_the_corner_persona_so_it_stays_on_top_of_her_card(
+    tmp_path, library, engine
+):
+    """O ASS (legenda e textos) é queimado depois de a persona do canto entrar, como o picture-in-picture."""
+    runner = runner_for_pipeline()
+    spec = {
+        "timeline": [{"type": "clip", "src": "base.mp4", "start": 0, "end": 8}],
+        "overlays": [
+            {"type": "persona", "persona": "ana", "start": 2.0, "speech": {"text": TEXT}},
+        ],
+        "captions": {"source": "narration"},
+    }
+    result = pipeline(tmp_path, library, spec, runner).run()
+
+    lines = (result.job_dir / "graph.txt").read_text(encoding="utf-8").split(";")
+    persona_at = next(i for i, line in enumerate(lines) if line.endswith("[v_html0]") and "overlay=" in line)
+    text_at = next(i for i, line in enumerate(lines) if "ass=filename" in line)
+    assert persona_at < text_at
+    assert lines[text_at].startswith("[v_html0]")  # a legenda é desenhada sobre o quadro que já tem a persona

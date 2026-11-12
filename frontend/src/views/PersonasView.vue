@@ -15,7 +15,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import MediaPlayer from '@/components/ui/MediaPlayer.vue'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
 import { useVoiceChoices } from '@/composables/useVoiceChoices'
-import { appearanceFields, appearanceWithDefaults, defaultAppearance, KIND_LABELS } from '@/lib/personas'
+import { appearanceFields, appearanceWithDefaults, capabilityList, defaultAppearance, KIND_LABELS } from '@/lib/personas'
 import { usePersonasStore } from '@/stores/personas'
 
 const store = usePersonasStore()
@@ -216,7 +216,7 @@ onMounted(async () => {
           </fieldset>
 
           <p v-if="engine" class="personas__caps">
-            Expressões: {{ engine.expressions.join(', ') }}. Gestos: {{ engine.gestures.join(', ') }}.
+            Expressões: {{ capabilityList(engine.expressions) }}. Gestos: {{ capabilityList(engine.gestures) }}.
           </p>
           <div class="form__actions">
             <AppButton type="submit" variant="primary" :loading="store.saving" :disabled="!name.trim()">
