@@ -15,7 +15,7 @@ from ..domain.spec import ClipSegment
 from ..media.ffmpeg import FFmpegCommand
 from ..media.probe import MediaInfo
 from .clip_crossfade import ClipCrossfades
-from .common import Inputs
+from .common import AUDIO_FMT_MEZZ, Inputs
 from .mezzanine import TrackSlice, clip_audio_lines, uses_camera_audio
 
 # AAC a 96 kbps estéreo: transparente para conferir corte e mixagem, ~700 KB por minuto. O AAC toca em
@@ -74,6 +74,21 @@ def silence_piece(duration: float, out: Path, label: str = "silêncio do trecho"
     inputs = Inputs()
     inputs.add_silence(duration)
     args = [*inputs.args, "-map", "0:a", *PIECE_CODEC, str(out)]
+    return FFmpegCommand(args, label=label, total=duration)
+
+
+def persona_speech_piece(
+    speech: Path, duration: float, out: Path, label: str = "fala da persona"
+) -> FFmpegCommand:
+    """O som de um trecho de persona: a fala dela, completada com silêncio (ou cortada) até a duração do trecho,
+    como o mezanino do render faz."""
+    inputs = Inputs()
+    index = inputs.add(speech)
+    chain = (
+        f"[{index}:a]asetpts=PTS-STARTPTS,{AUDIO_FMT_MEZZ},"
+        f"apad=whole_dur={duration:.3f},atrim=0:{duration:.3f}[aout]"
+    )
+    args = [*inputs.args, "-filter_complex", chain, "-map", "[aout]", *PIECE_CODEC, str(out)]
     return FFmpegCommand(args, label=label, total=duration)
 
 

@@ -23,6 +23,7 @@
 - [Fazer vários vídeos de uma planilha](lote.md): Gera um vídeo por linha de uma planilha (CSV, XLSX ou JSON), todos sobre o mesmo modelo de projeto, com validação antes, pausa e retomada.
 - [Exportar o vídeo para outras plataformas](exportar.md): Gera o mesmo projeto em vários formatos de uma vez (Reels, Shorts, Facebook, feed), cada um com o tamanho, a zona segura e o limite da plataforma.
 - [Conferir o vídeo antes de publicar](conferir-video.md): Roda as checagens automáticas em texto (duração, zona segura, ritmo de leitura, contraste, legendas e o arquivo renderizado) sem gastar tempo olhando imagem.
+- [Fazer uma persona falar no vídeo](persona.md): Põe uma personagem ilustrada (2D) ou um personagem 3D falando no vídeo, em tela cheia ou num canto, com a boca seguindo a fala, piscadas, gestos e troca de expressão nas marcas que você escolher.
 
 ## Tarefas de voz e áudio
 

@@ -48,6 +48,44 @@ COMMON_ITEMS: tuple[LicenseItem, ...] = (
         True,
         "assets/html/LICENSE-*.txt",
     ),
+    LicenseItem(
+        "Regras de boca em português do TalkingHead (lipsync-pt_br.mjs, portadas para Python)",
+        "MIT",
+        True,
+        "https://github.com/met4citizen/TalkingHead ; src/dmaker/persona/visemes.py",
+        "O aviso da licença MIT acompanha o código portado (persona/visemes.py). A persona 2D é desenhada pelo DMaker, "
+        "sem arquivo de terceiros.",
+    ),
+    LicenseItem(
+        "TalkingHead (talkinghead.mjs, dynamicbones.mjs, retargeter.mjs): anima a persona 3D",
+        "MIT",
+        True,
+        "https://github.com/met4citizen/TalkingHead (commit 1563de1) ; assets/html/persona/3d/vendor/talkinghead/",
+        "A licença MIT acompanha os arquivos (LICENSE-talkinghead.txt).",
+    ),
+    LicenseItem(
+        "Addons do three.js r185 usados pelo TalkingHead (GLTFLoader, OrbitControls e outros)",
+        "MIT",
+        True,
+        "https://github.com/mrdoob/three.js (tag r185, examples/jsm) ; assets/html/persona/3d/vendor/three-addons/",
+        "A licença MIT acompanha os arquivos (LICENSE-three-addons.txt).",
+    ),
+    LicenseItem(
+        "Personagem 3D mpfb.glb (feito com Blender e MPFB)",
+        "CC0 1.0 (domínio público)",
+        True,
+        "https://github.com/met4citizen/TalkingHead/blob/main/avatars/mpfb.glb",
+        "Não vai no pacote nem no git: o `dmaker models download persona3d-mpfb` baixa para cache/models, do commit "
+        "fixado e conferido por SHA-256. O README do TalkingHead diz que os assets MakeHuman por trás do MPFB são "
+        '"CC0/CC-BY"; conferidos um a um nas páginas dos pacotes da comunidade MakeHuman, os que o mpfb.glb usa '
+        "(corpo, olhos, sobrancelhas e cílios Mindfront, dentes, língua, cabelo ponytail01 e a roupa "
+        "female_casualsuit01) estão todos como CC0, e o README declara o avatar como CC0. Não achamos nenhum item "
+        "CC-BY, então não há aviso de atribuição obrigatório; a página da textura da pele "
+        "(young_lightskinned_female) não lista o item pelo nome, mas é do mesmo pacote de sistema CC0. A textura da "
+        "roupa, que traz um logotipo do MakeHuman, nunca aparece: o DMaker a troca por uma cor lisa. Os outros "
+        "avatares do TalkingHead são de uso não comercial e as animações Mixamo não podem ser redistribuídas: o "
+        "DMaker não usa nenhum deles.",
+    ),
 )
 
 # O que muda de um sistema para outro: o FFmpeg e o Chromium.

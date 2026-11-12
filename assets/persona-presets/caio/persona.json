@@ -1,0 +1,16 @@
+{
+ "id": "caio",
+ "name": "Caio",
+ "kind": "2d",
+ "voice": "alex",
+ "appearance": {
+  "skin": "#B9825F",
+  "hair_color": "#1F1714",
+  "hair_style": "short",
+  "eye_color": "#4B3426",
+  "outfit_color": "#1F9E7A"
+ },
+ "expressions": [],
+ "gestures": [],
+ "created": "2026-11-11"
+}

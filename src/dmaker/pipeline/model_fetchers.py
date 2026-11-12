@@ -81,3 +81,11 @@ def fetch_matting(models_dir: Path, variant: str) -> None:
     from ..media.matting import ensure_model
 
     ensure_model(variant, models_dir)
+
+
+def fetch_persona3d(models_dir: Path, variant: str) -> None:
+    """O avatar `mpfb.glb` do TalkingHead, do commit fixado do repositório, conferido por tamanho e SHA-256."""
+    from ..media.downloads import ensure_file
+    from ..persona.avatar_files import MPFB_AVATAR
+
+    ensure_file(models_dir / "persona3d", MPFB_AVATAR)

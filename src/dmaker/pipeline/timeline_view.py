@@ -23,6 +23,8 @@ from ..domain.spec import (
     HtmlOverlay,
     ImageOverlay,
     Overlay,
+    PersonaOverlay,
+    PersonaSegment,
     ProgressBar,
     Project,
     Segment,
@@ -34,6 +36,7 @@ from ..domain.tracks import silenced_audio_tracks
 from ..filtergraph.audio import resolve_span
 from .layout import ProjectLayout, to_presentation
 from .missing import MissingMedia
+from .persona_speech_store import PersonaView
 from .sources import physical_source_names
 from .track_slices import TrackWindow, track_slice, track_window
 from .voiceover import estimate_narration_duration, narration_label
@@ -218,7 +221,36 @@ def _item_id(track_id: str, index: int) -> str:
     return f"{track_id}-{index}"
 
 
-def _segment_label(segment: Segment) -> str:
+def _persona_overlay_items(overlays: list[Overlay], total: float, personas: PersonaView) -> list[TrackItem]:
+    """A persona sobreposta numa faixa de vídeo, com o nome dela e a duração da fala quando falta o `end`."""
+    items = []
+    for i, ov in enumerate(overlays):
+        if not isinstance(ov, PersonaOverlay):
+            continue
+        end = ov.end if ov.end is not None else ov.start + personas.overlay_seconds.get(i, 0.0)
+        items.append(
+            TrackItem(
+                id="",  # a faixa só é conhecida depois do stack_lanes
+                kind="persona",
+                index=i,
+                label=personas.names.get(ov.persona, ov.persona),
+                start=ov.start,
+                end=min(end, total) if total else end,
+                in_point=0.0,
+                out_point=None,
+                src=None,
+                source=None,
+                transition=None,
+                muted=False,
+                extra={"persona": ov.persona, "expression": ov.expression},
+            )
+        )
+    return items
+
+
+def _segment_label(segment: Segment, personas: PersonaView | None = None) -> str:
+    if isinstance(segment, PersonaSegment):
+        return (personas.names.get(segment.persona) if personas else None) or segment.persona
     label = (
         getattr(segment, "label", None) or getattr(segment, "src", None) or getattr(segment, "source", None)
     )
@@ -372,7 +404,9 @@ def _clip_pieces(project: Project, physical: ProjectLayout, index: int) -> list[
     return pieces
 
 
-def _v1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) -> list[TrackItem]:
+def _v1_items(
+    project: Project, layout: ProjectLayout, physical: ProjectLayout, personas: PersonaView
+) -> list[TrackItem]:
     items = []
     for i, (segment, (start, end)) in enumerate(zip(project.timeline, layout.spans, strict=True)):
         is_clip = isinstance(segment, ClipSegment)
@@ -382,7 +416,7 @@ def _v1_items(project: Project, layout: ProjectLayout, physical: ProjectLayout) 
                 id=_item_id("V1", i),
                 kind=segment.type,
                 index=i,
-                label=_segment_label(segment),
+                label=_segment_label(segment, personas),
                 start=start,
                 end=end,
                 in_point=segment.start if is_clip else 0.0,
@@ -791,6 +825,7 @@ def build_timeline_view(
     narration_durations: Sequence[float | None] = (),
     missing: MissingMedia | None = None,
     voiceover_durations: Sequence[float | None] = (),
+    personas: PersonaView | None = None,
 ) -> TimelineView:
     """Monta a vista multitrilha: uma faixa por PiP que se sobrepõe, texto, gráficos, a linha do
     tempo principal, o áudio de cada clipe, cada faixa de áudio externa, a música e as legendas.
@@ -803,12 +838,20 @@ def build_timeline_view(
     bloqueio salvo em `project.tracks` (`domain.tracks.apply_track_state` aplica o mesmo estado no
     render, para a prévia e o vídeo final nunca discordarem). `missing` (ver `pipeline/missing.py`) marca
     os itens de arquivos que sumiram do disco e traz um aviso por arquivo."""
+    personas = personas or PersonaView()
     physical = layout  # com as `parts` já partidas: de onde vêm o arquivo e o ponto de cada som
     layout = to_presentation(project, layout)
     total = layout.total
     tracks: list[Track] = []
 
-    for lane_index, lane in enumerate(stack_lanes(_video_overlay_items(project, project.overlays, total))):
+    for lane_index, lane in enumerate(
+        stack_lanes(
+            [
+                *_video_overlay_items(project, project.overlays, total),
+                *_persona_overlay_items(project.overlays, total, personas),
+            ]
+        )
+    ):
         track_id = f"V{2 + lane_index}"
         muted, hidden, locked = _track_state(project, track_id)
         lane_sorted = sorted(lane, key=lambda it: it.start)
@@ -856,7 +899,7 @@ def build_timeline_view(
             id="V1",
             kind="video",
             label="V1",
-            items=_v1_items(project, layout, physical),
+            items=_v1_items(project, layout, physical, personas),
             muted=v1_muted,
             hidden=v1_hidden,
             locked=v1_locked,

@@ -641,3 +641,79 @@ def test_a_graph_too_long_for_the_command_line_goes_to_a_file(tmp_path):
 def test_cache_directory_lives_under_the_data_dir():
     assert config.PREVIEW_AUDIO_DIR.is_relative_to(config.CACHE_DIR)
     assert re.fullmatch(r"preview-audio", config.PREVIEW_AUDIO_DIR.name)
+
+
+# ---------- a fala das personas ----------
+
+PERSONA_TEXT = "Oi, eu sou a Ana."
+
+
+def persona_builder(tmp_path: Path, synthesizer: FakeSynthesizer):
+    from dmaker.persona.library import PersonaLibrary
+
+    library = PersonaLibrary(root=tmp_path / "personas", presets_root=tmp_path / "nenhuma")
+    library.create("Ana")
+    builder, runner, narrator = narrated_builder(tmp_path, synthesizer)
+    builder.persona_hearing.library = library
+    return builder, runner, narrator
+
+
+def prime_persona_speech(narrator, runner, tmp_path, project) -> None:
+    narrator(runner).render(
+        PERSONA_TEXT, tmp_path / "ana.wav", None, language="pt", speed=1.0, instruct=None, seed=None,
+        brand=project.brand,
+    )  # fmt: skip
+
+
+def test_a_synthesized_full_screen_persona_speech_is_the_sound_of_its_segment(tmp_path):
+    synthesizer = FakeSynthesizer()
+    builder, runner, narrator = persona_builder(tmp_path, synthesizer)
+    project = make_project(
+        tmp_path,
+        timeline=[{"type": "persona", "persona": "ana", "speech": {"text": PERSONA_TEXT}}],
+        audio={"normalize": "off"},
+    )
+    prime_persona_speech(narrator, runner, tmp_path, project)
+    asked = len(synthesizer.requests)
+
+    audio = builder.build(project)
+
+    (piece,) = [c for c in pieces(runner) if "apad=whole_dur" in " ".join(c)]
+    assert "persona_timeline_0.wav" in " ".join(piece)
+    assert audio.warnings == ()
+    assert len(synthesizer.requests) == asked  # a prévia nunca sintetiza
+
+
+def test_a_persona_not_yet_spoken_stays_out_with_a_warning_and_the_mix_changes_when_it_arrives(tmp_path):
+    synthesizer = FakeSynthesizer()
+    builder, runner, narrator = persona_builder(tmp_path, synthesizer)
+    project = make_project(
+        tmp_path,
+        timeline=[{"type": "persona", "persona": "ana", "speech": {"text": PERSONA_TEXT}}],
+        audio={"normalize": "off"},
+    )
+    before = builder.key(project)
+
+    audio = builder.build(project)
+
+    assert synthesizer.requests == []
+    assert any("ainda não foi sintetizada" in warning for warning in audio.warnings)
+    prime_persona_speech(narrator, runner, tmp_path, project)
+    assert builder.key(project) != before
+
+
+def test_the_speech_of_a_corner_persona_enters_the_mix_at_the_overlay_start(tmp_path):
+    synthesizer = FakeSynthesizer()
+    builder, runner, narrator = persona_builder(tmp_path, synthesizer)
+    project = make_project(
+        tmp_path,
+        timeline=[{"type": "clip", "src": "cam1.mp4", "start": 0, "end": 10, "mute": True}],
+        overlays=[{"type": "persona", "persona": "ana", "start": 3.0, "speech": {"text": PERSONA_TEXT}}],
+        audio={"normalize": "off"},
+    )
+    prime_persona_speech(narrator, runner, tmp_path, project)
+
+    builder.build(project)
+
+    (mix,) = mixes(runner)
+    assert "persona_overlays_0.wav" in " ".join(mix) and "adelay=3000:all=1" in graph_of(mix)

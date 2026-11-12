@@ -30,6 +30,9 @@ class ResolvedHtmlLayer:
     scale_to: tuple[int, int] | None = None
     behind: bool = False
     still: bool = False  # o arquivo é uma imagem de um quadro só (o quadro de um instante), não um vídeo
+    fade: float = (
+        0.0  # entrada e saída suaves em segundos (a persona sobreposta); 0 liga e desliga de uma vez
+    )
 
 
 def html_layer_command(
@@ -39,10 +42,13 @@ def html_layer_command(
     frame_count: int,
     out: Path,
     label: str = "composição html",
+    scale_to: tuple[int, int] | None = None,
 ) -> FFmpegCommand:
     """Escreve os quadros RGBA da composição (pelo stdin) como vídeo com alfa, do mesmo jeito que a camada da
     pessoa: PNG dentro do .mov, sem perdas e sem conversão para YUV na escrita."""
-    return person_layer_command(frames, size[0], size[1], fps, frame_count, out, label=label)
+    return person_layer_command(
+        frames, size[0], size[1], fps, frame_count, out, label=label, scale_to=scale_to
+    )
 
 
 def attach_html_layer(
@@ -72,6 +78,13 @@ def attach_html_layer(
     else:
         index = inputs.add(layer.path)
         chain += ["tpad=stop_mode=clone:stop=1", f"setpts=PTS-STARTPTS{layer.start - quarter:+.6f}/TB"]
+        if layer.fade > 0:
+            # o fade só mexe no alfa: a entrada e a saída da camada, sem escurecer o que ela cobre
+            fade = min(layer.fade, (layer.stop - layer.start) / 2)
+            chain += [
+                f"fade=t=in:st={layer.start:.6f}:d={fade:.6f}:alpha=1",
+                f"fade=t=out:st={layer.stop - fade:.6f}:d={fade:.6f}:alpha=1",
+            ]
     lines.append(f"[{index}:v]{','.join(chain)}[{tag}_src]")
     window = f"gte(t,{layer.start - half:.6f})*lt(t,{layer.stop - half:.6f})"
     lines.append(

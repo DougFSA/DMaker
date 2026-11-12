@@ -6,6 +6,7 @@ export type IconName =
   | 'folder'
   | 'film'
   | 'mic'
+  | 'user'
   | 'languages'
   | 'queue'
   | 'layers'
@@ -44,6 +45,7 @@ const paths: Record<IconName, string> = {
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   film: 'M4 4h16v16H4zM8 4v16M16 4v16M4 9h4M4 15h4M16 9h4M16 15h4',
   mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
+  user: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0',
   languages: 'M4 5h8M8 3v2M5 9c1.5 3 4 5 7 6M11 5c-.5 4-3 8-7 10M13 21l4-10 4 10M14.5 18h5',
   queue: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   layers: 'M12 3 3 8l9 5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5',

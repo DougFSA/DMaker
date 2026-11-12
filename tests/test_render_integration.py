@@ -1171,3 +1171,154 @@ def test_explainer_topic_sounds_play_at_the_start_of_the_topic_plus_em(speech_cl
     mono = _decode_audio(_render(project, tmp_path / "sons.mp4"), tmp_path).mean(axis=1)
     for name, at in (("whoosh", 0.0), ("ding", 2.5), ("pop", 4.0), ("click", 8.0), ("impact", 13.25)):
         assert abs(_sfx_onset_seconds(mono, name, at) - at) < 0.020, name
+
+
+def test_a_persona_speaks_in_full_screen_with_the_real_browser_and_the_clip_is_reused(tmp_path: Path):
+    """A persona 2D de verdade (Chromium + ffmpeg), em poucos quadros: a boca muda com a fala e o segundo render
+    reaproveita o clipe do cache."""
+    import subprocess
+
+    from dmaker.media.browser import browser_problem
+    from dmaker.persona.library import PersonaLibrary
+    from dmaker.pipeline.persona_render import PersonaStage
+    from dmaker.text.captions import Word
+    from dmaker.voice.library import VoiceLibrary
+
+    if browser_problem():
+        pytest.skip("Chromium não instalado (dmaker setup)")
+    wav = tmp_path / "fala.wav"
+    samples = (0.3 * np.sin(2 * np.pi * 220 * np.arange(24000) / 24000) * 32767).astype("<i2")
+    with wave.open(str(wav), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(24000)
+        handle.writeframes(samples.tobytes())
+    project = Project.model_validate(
+        {
+            "name": "persona_integracao",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [
+                {
+                    "type": "persona",
+                    "persona": "lia",
+                    "speech": {"audio": str(wav)},
+                    "tail": 0.2,
+                    "marks": [{"at": 0.3, "expression": "happy"}],
+                }
+            ],
+        }
+    )
+    project.base_dir = tmp_path
+
+    def render() -> Path:
+        stage = PersonaStage(
+            PersonaLibrary(),
+            VoiceLibrary(tmp_path / "vozes"),
+            word_timer=lambda ctx: lambda path, language: [Word(0.1, 0.5, "casa"), Word(0.6, 0.9, "olá")],
+        )
+        return (
+            RenderPipeline(
+                project,
+                RenderOptions(preview=True, quiet=True, out=tmp_path / "persona.mp4"),
+                cache_dir=tmp_path / "mez",
+                jobs_dir=tmp_path / "jobs",
+                output_dir=tmp_path / "output",
+                personas=stage,
+            )
+            .run()
+            .output
+        )
+
+    out = render()
+    clips = list((tmp_path / "mez").glob("*_persona.mov"))
+    assert len(clips) == 1 and probe(out).duration == pytest.approx(1.2, abs=0.1)
+    first_mtime = clips[0].stat().st_mtime_ns
+    frames = []
+    for second in (0.0, 0.35, 0.95):
+        raw = subprocess.run(
+            [
+                str(ffmpeg.ffmpeg_path()),
+                "-v",
+                "error",
+                "-ss",
+                str(second),
+                "-i",
+                str(out),
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "gray",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+        frames.append(raw)
+    assert frames[0] != frames[1] != frames[2]  # a boca (e a expressão) mudam entre os quadros
+    render()
+    assert clips[0].stat().st_mtime_ns == first_mtime  # o clipe saiu do cache
+
+
+def test_a_3d_persona_is_drawn_with_the_real_browser_and_the_same_clip_twice_is_identical(
+    tmp_path: Path, monkeypatch
+):
+    """A persona 3D de verdade (Chromium com WebGL por software + TalkingHead + ffmpeg), em poucos quadros: a boca e
+    o gesto mudam o quadro, o fundo é transparente e desenhar duas vezes dá exatamente os mesmos bytes."""
+    import hashlib
+    import subprocess
+
+    from dmaker import config
+    from dmaker.domain.persona import Persona, PersonaMark
+    from dmaker.media.browser import browser_problem
+    from dmaker.persona.engine import PersonaRender, engine_for
+    from dmaker.persona.visemes import VisemeSpan
+
+    real_model = config.ROOT / "cache" / "models" / "persona3d" / "mpfb.glb"
+    if browser_problem():
+        pytest.skip("Chromium não instalado (dmaker setup)")
+    if not real_model.is_file():
+        pytest.skip("personagem 3D não baixado (dmaker models download persona3d-mpfb)")
+    monkeypatch.setattr(
+        config, "MODELS_DIR", real_model.parents[1]
+    )  # só leitura: o modelo baixado de verdade
+    request = PersonaRender(
+        persona=Persona(id="bia", name="Bia", kind="3d", appearance={"model": "mpfb"}),
+        visemes=(VisemeSpan(0.0, 0.2, "sil"), VisemeSpan(0.2, 0.4, "aa"), VisemeSpan(0.4, 0.6, "PP")),
+        expression="neutral",
+        marks=(PersonaMark(at=0.2, gesture="handup"), PersonaMark(at=0.3, expression="surprised")),
+        duration=0.6,
+        fps=10.0,
+        size=(270, 480),
+    )
+    engine = engine_for("3d")
+    digests = []
+    for name in ("um.mov", "dois.mov"):
+        out = tmp_path / name
+        engine.render(request, out, ffmpeg.SubprocessRunner(quiet=True), lambda message: None)
+        raw = subprocess.run(
+            [
+                str(ffmpeg.ffmpeg_path()),
+                "-v",
+                "error",
+                "-i",
+                str(out),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+        digests.append(hashlib.sha1(raw).hexdigest())
+        frame_bytes = 270 * 480 * 4
+        assert len(raw) == frame_bytes * 6
+        alpha = np.frombuffer(raw, dtype=np.uint8)[3:frame_bytes:4]
+        assert alpha.min() == 0  # há fundo transparente
+        assert (
+            raw[:frame_bytes] != raw[-frame_bytes:]
+        )  # a persona se mexeu entre o primeiro e o último quadro
+    assert digests[0] == digests[1]

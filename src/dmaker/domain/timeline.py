@@ -7,7 +7,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from ..media.probe import MediaInfo
-from .spec import ClipSegment, HtmlOverlay, Segment, TextOverlay, Transition
+from .persona import estimate_speech_seconds
+from .spec import ClipSegment, HtmlOverlay, PersonaSegment, Segment, TextOverlay, Transition
 
 # folga das contas em segundos e quadros: 0.1 * 30 dá 3.0000000000000004, e sem ela o `ceil` pularia um quadro
 TIME_EPSILON = 1e-6
@@ -26,7 +27,19 @@ def segment_duration(segment: Segment, info: MediaInfo | None, offset: float = 0
         if coverage_end is not None:
             end = min(end, coverage_end)
         return max(end - segment.start, 0.0) / segment.speed
+    if isinstance(segment, PersonaSegment):
+        return persona_segment_duration(segment, info)
     return segment.duration
+
+
+def persona_segment_duration(segment: PersonaSegment, info: MediaInfo | None) -> float:
+    """A duração fixada, ou a da fala (o áudio medido, quando há) mais o respiro final. Sem a fala ainda
+    sintetizada, é a estimativa pelo tamanho do texto: serve à vista da linha do tempo, não ao render."""
+    if segment.duration is not None:
+        return segment.duration
+    if info is not None and info.duration:
+        return info.duration + segment.tail
+    return estimate_speech_seconds(segment.speech.text or "", segment.speech.speed) + segment.tail
 
 
 def transitions_of(segments: list[Segment]) -> list[Transition | None]:

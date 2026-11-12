@@ -1,0 +1,12 @@
+{
+ "id": "bia",
+ "name": "Bia",
+ "kind": "3d",
+ "voice": "dora",
+ "appearance": {
+  "model": "mpfb"
+ },
+ "expressions": [],
+ "gestures": [],
+ "created": "2026-11-11"
+}

@@ -250,6 +250,9 @@ def doctor(
         if problem is None
         else "  playwright e Chromium: [yellow]faltam[/yellow] (composição em HTML: dmaker setup --html)"
     )
+    from .persona.engine3d import doctor_line
+
+    console.print(f"  {escape(doctor_line())}")
     try:
         import mcp  # noqa: F401
 
@@ -2228,6 +2231,134 @@ def voice_remove(voice_id: Annotated[str, typer.Argument(help="Id da voz.")]) ->
     except VOICE_ERRORS as exc:
         _voice_fail(exc)
     console.print(f"[green]Voz removida:[/green] {voice_id}")
+
+
+# ---------- personas ----------
+
+persona_app = typer.Typer(
+    help="Personas: personagens reutilizáveis (ilustrados 2D e personagens 3D) que falam no vídeo, em tela cheia ou num canto.",
+    no_args_is_help=True,
+)
+app.add_typer(persona_app, name="persona")
+
+
+def _appearance_from_options(**fields: str | None) -> dict[str, str]:
+    return {name: value for name, value in fields.items() if value is not None}
+
+
+@persona_app.command("create")
+def persona_create(
+    name: Annotated[str, typer.Argument(help="Nome da persona.")],
+    kind: Annotated[str, typer.Option(help="Tipo: 2d (ilustrada) ou 3d (personagem 3D).")] = "2d",
+    voice: Annotated[str | None, typer.Option(help="Id da voz (veja `dmaker voice list`).")] = None,
+    skin: Annotated[str | None, typer.Option(help="Tom de pele, #RRGGBB.")] = None,
+    hair_color: Annotated[str | None, typer.Option(help="Cor do cabelo, #RRGGBB.")] = None,
+    hair_style: Annotated[str | None, typer.Option(help="Estilo do cabelo: short, long ou bun.")] = None,
+    eye_color: Annotated[str | None, typer.Option(help="Cor dos olhos, #RRGGBB.")] = None,
+    outfit_color: Annotated[str | None, typer.Option(help="Cor da roupa, #RRGGBB.")] = None,
+) -> None:
+    """Cria uma persona."""
+    from .pipeline.personas import create_persona
+
+    appearance = _appearance_from_options(
+        skin=skin,
+        hair_color=hair_color,
+        hair_style=hair_style,
+        eye_color=eye_color,
+        outfit_color=outfit_color,
+    )
+    try:
+        created = create_persona(name, kind, voice, appearance)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]Persona criada:[/green] {created['id']}  ({created['kind']})")
+
+
+@persona_app.command("list")
+def persona_list() -> None:
+    """Lista as personas: as prontas e as suas."""
+    from .pipeline.personas import list_personas
+
+    table = Table("id", "nome", "tipo", "voz", "origem")
+    for persona in list_personas():
+        table.add_row(
+            persona["id"],
+            persona["name"],
+            persona["kind"],
+            persona["voice"] or "automática",
+            "pronta" if persona["builtin"] else "sua",
+        )
+    console.print(table)
+
+
+@persona_app.command("show")
+def persona_show(persona_id: Annotated[str, typer.Argument(help="Id da persona.")]) -> None:
+    """Mostra uma persona: aparência, voz e o que ela sabe fazer (expressões e gestos)."""
+    from .pipeline.personas import get_persona
+
+    try:
+        persona = get_persona(persona_id)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc))
+    console.print(
+        f"{persona['name']} ({persona['id']}), tipo {persona['kind']}", markup=False, highlight=False
+    )
+    console.print(f"  voz: {persona['voice'] or 'automática'}", markup=False, highlight=False)
+    for key, value in persona["appearance"].items():
+        console.print(f"  {key}: {value}", markup=False, highlight=False)
+    console.print(f"  expressões: {', '.join(persona['expressions'])}", markup=False, highlight=False)
+    console.print(f"  gestos: {', '.join(persona['gestures'])}", markup=False, highlight=False)
+    if persona["builtin"]:
+        console.print("  persona pronta: somente leitura", markup=False, highlight=False)
+
+
+@persona_app.command("edit")
+def persona_edit(
+    persona_id: Annotated[str, typer.Argument(help="Id da persona (uma das suas).")],
+    name: Annotated[str | None, typer.Option(help="Novo nome.")] = None,
+    voice: Annotated[str | None, typer.Option(help="Nova voz (id da biblioteca).")] = None,
+    skin: Annotated[str | None, typer.Option(help="Tom de pele, #RRGGBB.")] = None,
+    hair_color: Annotated[str | None, typer.Option(help="Cor do cabelo, #RRGGBB.")] = None,
+    hair_style: Annotated[str | None, typer.Option(help="Estilo do cabelo: short, long ou bun.")] = None,
+    eye_color: Annotated[str | None, typer.Option(help="Cor dos olhos, #RRGGBB.")] = None,
+    outfit_color: Annotated[str | None, typer.Option(help="Cor da roupa, #RRGGBB.")] = None,
+) -> None:
+    """Muda o nome, a voz ou a aparência de uma persona sua (só o que for dado muda)."""
+    from .pipeline.personas import edit_persona
+
+    changes: dict = {}
+    if name is not None:
+        changes["name"] = name
+    if voice is not None:
+        changes["voice"] = voice
+    appearance = _appearance_from_options(
+        skin=skin,
+        hair_color=hair_color,
+        hair_style=hair_style,
+        eye_color=eye_color,
+        outfit_color=outfit_color,
+    )
+    if appearance:
+        changes["appearance"] = appearance
+    if not changes:
+        _fail("Nada a mudar: informe --name, --voice ou um campo da aparência.")
+    try:
+        edit_persona(persona_id, changes)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]Persona atualizada:[/green] {persona_id}")
+
+
+@persona_app.command("remove")
+def persona_remove(persona_id: Annotated[str, typer.Argument(help="Id da persona (uma das suas).")]) -> None:
+    """Apaga uma persona sua. As prontas não podem ser apagadas."""
+    from .pipeline.personas import remove_persona
+
+    try:
+        remove_persona(persona_id)
+    except VOICE_ERRORS as exc:
+        _fail(str(exc))
+    console.print(f"[green]Persona removida:[/green] {persona_id}")
 
 
 queue_app = typer.Typer(

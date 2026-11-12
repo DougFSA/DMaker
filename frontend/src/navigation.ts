@@ -13,6 +13,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'batch', label: 'Lote', to: '/lote', icon: 'copy' },
   { key: 'editor', label: 'Editor', to: '/editor', icon: 'film' },
   { key: 'voice', label: 'Voz', to: '/voz', icon: 'mic' },
+  { key: 'personas', label: 'Personas', to: '/personas', icon: 'user' },
   { key: 'dubbing', label: 'Dublagem', to: '/dublagem', icon: 'languages' },
   { key: 'queue', label: 'Fila', to: '/fila', icon: 'queue' },
   { key: 'models', label: 'Modelos', to: '/modelos', icon: 'layers' },

@@ -36,9 +36,17 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 ## [Não lançado]
 
+### Added
+
+- **DMK-73**: personas, personagens cadastrados que falam no vídeo. **Cadastro** (`dmaker persona create|list|show|edit|remove`, ferramentas MCP `list_personas`, `get_persona`, `create_persona`, `edit_persona` e `remove_persona`, tela **Personas** da interface nova): nome, tipo, voz da biblioteca e aparência; as prontas (`bia`, `caio` e `lia`) são somente leitura e as do usuário ficam na pasta de dados, para reaproveitar em qualquer projeto. **Dois motores registrados por tipo**: **2d**, personagem ilustrado em SVG (cores, cabelo) e **3d**, personagem glTF animado pelo TalkingHead (MIT) no Chromium da composição HTML, com a roupa trocada por uma cor lisa (`outfit_color`) porque a textura do modelo traz um logotipo de terceiro. **Tela cheia e canto**: o trecho `persona` da `timeline` e a sobreposição `persona` em `overlays`, com a fala sintetizada na voz dela (ou um `audio`), boca em português por visemas a partir das palavras do Whisper, piscadas, movimento de cabeça e `marks` de expressão (`neutral`, `happy`, `sad`, `surprised`) e de gesto (`nod`, `shake`, `tilt`, `wave` nos dois tipos; o 3d tem também `handup`, `index`, `ok`, `thumbup`, `thumbdown`, `side` e `shrug`). A fala do canto entra na mixagem como narração e na legenda do projeto. **Editor**: a duração real da fala fica em `persona_speech.json` na pasta do projeto e alimenta a linha do tempo (o trecho e a sobreposição aparecem com o nome da persona), o `dmaker qa` (sem o falso aviso de duração), o quadro de um instante (que desenha a persona só no instante pedido) e o áudio da prévia (que só usa a fala já sintetizada). **Interface**: a tela Personas lista, cria, edita e apaga (com confirmação), mostra a mensagem do motor em português quando o 3D está sem o modelo, faz uma prévia curta da persona falando uma frase (job com progresso, em cache) e põe a persona num projeto em tela cheia ou no canto. **Manual**: a tarefa "Fazer uma persona falar no vídeo", a referência gerada e o guia MCP. O clipe 3d é guardado no tamanho em que é desenhado (540x960) e ampliado só na montagem, 1/4 do tamanho em disco. Tempos de render medidos (só CPU, 1080x1920, fala de 30 s, nada em cache): persona 2d em tela cheia 19 min 32 s, 3d em tela cheia 31 min 41 s e 3d no canto sobre um vídeo de 14 s 5 min 36 s. As ferramentas de persona ficam fora do kit do agente local. Licença do personagem 3d: CC0 (veja `LICENCAS.txt`).
+
 ### Fixed
 
 - **DMK-76**: o `dmaker release publish`, rodado de novo depois de um envio interrompido, subia os arquivos que faltavam mas deixava a release como rascunho no GitHub, invisível na aba Releases (o `gh release create` cria o rascunho, sobe os arquivos e só então publica). Agora a retomada publica o rascunho depois de conferir que todos os arquivos estão lá, e o comando avisa quando fez isso; uma release já pública não é tocada.
+
+### Pré-requisitos na máquina
+
+- **DMK-73**: para a persona **3d**, `dmaker models download persona3d-mpfb` (36,8 MB, CC0); a persona 2d não baixa nada. As duas desenham no Chromium do `dmaker setup --html`. O `dmaker doctor` mostra o modelo como opcional.
 
 ## v3 — 2026-11-11
 

@@ -2446,6 +2446,74 @@ def _lexicon_store():
     return LexiconStore()
 
 
+# ---------- personas ----------
+
+
+@server.tool(
+    description=(
+        "Personas: personagens reutilizáveis que falam no vídeo. Cada uma tem id, nome, tipo (2d: ilustrada; 3d: personagem 3D), voz "
+        "(id de list_voices), aparência e as expressões e gestos que sabe fazer. As prontas (builtin) são somente "
+        "leitura. Use o id em `timeline` (trecho `type: persona`, tela cheia) ou em `overlays` (`type: persona`, num "
+        "canto sobre outro trecho)."
+    )
+)
+def list_personas() -> list[dict]:
+    from .pipeline.personas import list_personas as _list
+
+    return _list()
+
+
+@server.tool(description="Mostra uma persona: aparência, voz, expressões e gestos.")
+def get_persona(persona_id: str) -> dict:
+    from .pipeline.personas import get_persona as _get
+
+    return _get(persona_id)
+
+
+@server.tool(
+    description=(
+        "Cria uma persona. `kind`: 2d ou 3d. `voice`: id de list_voices (sem ela, a voz automática). `appearance` (2d): "
+        "skin, hair_color, eye_color, outfit_color em #RRGGBB e hair_style (short, long ou bun); (3d): outfit_color em "
+        "#RRGGBB (a roupa do personagem pronto, lisa) e model (mpfb, o personagem pronto, que precisa de "
+        "`dmaker models download persona3d-mpfb`); o que faltar usa o padrão."
+    )
+)
+def create_persona(
+    name: str, kind: str = "2d", voice: str | None = None, appearance: dict | None = None
+) -> dict:
+    from .pipeline.personas import create_persona as _create
+
+    return _create(name, kind, voice, appearance)
+
+
+@server.tool(
+    description="Muda uma persona sua: name, voice e/ou appearance (só os campos dados mudam). As prontas não mudam."
+)
+def edit_persona(
+    persona_id: str, name: str | None = None, voice: str | None = None, appearance: dict | None = None
+) -> dict:
+    from .pipeline.personas import edit_persona as _edit
+
+    changes: dict = {}
+    if name is not None:
+        changes["name"] = name
+    if voice is not None:
+        changes["voice"] = voice
+    if appearance:
+        changes["appearance"] = appearance
+    if not changes:
+        raise ValueError("Nada a mudar: informe name, voice ou appearance.")
+    return _edit(persona_id, changes)
+
+
+@server.tool(description="Apaga uma persona sua (as prontas não podem ser apagadas).")
+def remove_persona(persona_id: str) -> dict:
+    from .pipeline.personas import remove_persona as _remove
+
+    _remove(persona_id)
+    return {"removed": persona_id}
+
+
 def _voice_library():
     from .voice.library import VoiceLibrary
 

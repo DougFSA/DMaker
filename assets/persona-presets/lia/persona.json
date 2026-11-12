@@ -1,0 +1,16 @@
+{
+ "id": "lia",
+ "name": "Lia",
+ "kind": "2d",
+ "voice": "dora",
+ "appearance": {
+  "skin": "#E8B796",
+  "hair_color": "#5A3425",
+  "hair_style": "long",
+  "eye_color": "#4A7BA7",
+  "outfit_color": "#2F6FDE"
+ },
+ "expressions": [],
+ "gestures": [],
+ "created": "2026-11-11"
+}

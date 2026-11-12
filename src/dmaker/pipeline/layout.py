@@ -22,6 +22,7 @@ from ..media.probe import probe
 from .audio_duration import audio_extent
 from .context import Prober
 from .missing import MissingMedia
+from .persona_speech_store import with_spoken_durations
 from .sample_reader import SampleReader
 from .sources import Source, expand_parts, resolve_session, resolve_sources
 from .sync import OffsetFinder, SyncResolver, ffmpeg_offset_finder
@@ -70,7 +71,9 @@ def project_layout(
     resolution = SyncResolver(finder, prober=prober, missing=missing).resolve(project, store)
     session = resolve_session(project, prober, resolution.offsets, resolution.parts, missing)
     physical, origin = expand_parts(project, session, resolution.parts)
-    sources = resolve_sources(physical, prober, session, missing)
+    sources = with_spoken_durations(
+        physical, resolve_sources(physical, prober, session, missing), prober=prober
+    )
     durations = [
         segment_duration(seg, s.info, s.offset) for seg, s in zip(physical.timeline, sources, strict=True)
     ]

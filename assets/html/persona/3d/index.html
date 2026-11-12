@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Persona 3D do DMaker: um personagem em glTF animado pelo TalkingHead (MIT, em vendor/talkinghead) no modo
+  `avatarOnly`, desenhado pelo three.js do DMaker com fundo transparente.
+
+  O desenho de cada instante sai só de `dmakerSeek(t)`. O TalkingHead tem estado interno (ossos dinâmicos, piscar,
+  movimento ocioso), então a página o avança em passos fixos de 1/fps, com `Math.random` de semente fixa: o mesmo
+  projeto gera sempre os mesmos quadros. O relógio do DMaker só anda para a frente, e o desenho é função do número
+  de passos dados, nunca do histórico de pedidos.
+
+  A boca NÃO é calculada aqui: vem pronta de `dmaker.data.visemes`, a mesma linha do tempo de visemas Oculus (em
+  Python, a partir das palavras do Whisper) que o motor 2D usa. A página só liga cada visema ao blendshape
+  `viseme_<nome>` do avatar, com uma suavização curta entre eles.
+
+  Os dados chegam em `dmaker.data`:
+    model       URL do arquivo glTF do avatar (servido pelo DMaker)
+    view        "full" (meio corpo, o gesto de mão aparece) ou "corner" (cabeça e ombros)
+    fps         quadros por segundo do clipe
+    visemes     [[início, fim, visema]] (os 15 visemas Oculus, `sil` incluído)
+    outfit      cor da roupa em #RRGGBB (a textura do modelo traz um logotipo de terceiro e não pode aparecer)
+    expressions [[instante, nome]] em ordem; a primeira é a inicial
+    gestures    [[instante, nome]] em ordem
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/_dmaker/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<div id="host" style="position:absolute;inset:0"></div>
+<script type="module">
+import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { TalkingHead } from "/vendor/talkinghead/talkinghead.mjs";
+
+const D = dmaker.data;
+const FPS = D.fps;
+const STEP_MS = 1000 / FPS;
+const SEED = 0x3d3d;
+
+// ---------- sorteio com semente (o TalkingHead usa Math.random em tudo que parece espontâneo) ----------
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- cena ----------
+const W = window.innerWidth, H = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+renderer.setSize(W, H);
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.getElementById("host").appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(22, W / H, 0.05, 50);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+const key = new THREE.DirectionalLight(0xfff1e0, 2.2);
+key.position.set(1.2, 2.2, 2.4);
+const fill = new THREE.DirectionalLight(0xdde8ff, 0.7);
+fill.position.set(-1.6, 1.2, 1.6);
+const rim = new THREE.DirectionalLight(0xffffff, 0.9);
+rim.position.set(0, 2.2, -2);
+scene.add(new THREE.AmbientLight(0xffffff, 0.35), key, fill, rim);
+
+// ---------- o personagem ----------
+// Pico de cada visema (1 fecha os lábios por inteiro; as vogais não precisam de tudo para a boca parecer natural).
+const VISEME_PEAK = { PP: 1.0, FF: 0.9, TH: 0.5, DD: 0.5, kk: 0.7, CH: 0.85, SS: 0.7, nn: 0.5, RR: 0.75, aa: 0.95, E: 0.85, I: 0.8, O: 0.95, U: 0.95 };
+const ATTACK_S = 0.05, RELEASE_S = 0.07; // suavização entre visemas (a boca não pula de uma forma para a outra)
+const GESTURE_HOLD_S = 2.2;
+const NOD_S = 0.9, SHAKE_S = 1.0;
+// Cada expressão soma blendshapes de rosto ao humor do TalkingHead (que sozinho é discreto demais para ler num
+// vídeo vertical), com rampa entre uma expressão e outra. `jawOpen` entra por `realtime` por não ser fixado.
+const FACE_RAMP_S = 0.18;
+const EXPRESSION_FACE = {
+  happy: { mouthSmileLeft: 0.6, mouthSmileRight: 0.6, cheekSquintLeft: 0.35, cheekSquintRight: 0.35 },
+  sad: { mouthFrownLeft: 0.55, mouthFrownRight: 0.55, browInnerUp: 0.7, browDownLeft: 0.25, browDownRight: 0.25 },
+  surprised: { browInnerUp: 1.0, browOuterUpLeft: 0.8, browOuterUpRight: 0.8, eyeWideLeft: 1.0, eyeWideRight: 1.0, jawOpen: 0.1 },
+};
+const TH_MOODS = { neutral: "neutral", happy: "happy", sad: "sad", surprised: "neutral" };
+const TH_GESTURES = new Set(["handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug"]);
+// Nomes que o motor 2D também aceita: uma spec feita para ele continua valendo ao trocar a persona para 3D.
+const GESTURE_ALIAS = { wave: "handup" }; // acenar é a mão levantada
+const TILT_S = 1.2;
+
+let head = null;
+let state = null;
+
+function makeState() {
+  return {
+    step: -1, // último passo dado; o quadro do instante t é o do passo round(t * fps)
+    visemeValue: {}, // peso atual (suavizado) de cada blendshape de visema
+    expressionName: "neutral",
+    face: {}, // quanto de cada expressão está ligado agora (0 a 1)
+    gestureEnd: -1,
+    headMotion: null, // {kind, start}
+    expressionIndex: 0,
+    gestureIndex: 0,
+    mouthIndex: 0,
+  };
+}
+
+async function loadHead() {
+  Math.random = mulberry32(SEED);
+  if (head) {
+    scene.remove(head.armature);
+    head.stop();
+  }
+  head = new TalkingHead(document.getElementById("host"), {
+    avatarOnly: true,
+    avatarOnlyScene: scene,
+    avatarOnlyCamera: camera,
+    lipsyncModules: [], // a boca não vem do texto: vem dos visemas calculados em Python
+    modelFPS: FPS,
+    avatarMood: "neutral",
+    avatarIdleEyeContact: 0.2,
+    avatarIdleHeadMove: 0.5,
+    avatarIgnoreCamera: false,
+    cameraView: "full",
+  });
+  head.stateName = "speaking";
+  await head.showAvatar({ url: D.model, body: "F", avatarMood: "neutral", lipsyncLang: "pt_br" });
+  state = makeState();
+  tidyAvatar();
+  frameCamera();
+}
+
+// ---------- o modelo ----------
+// A roupa do mpfb traz um logotipo de terceiro estampado e a língua dele passa dos dentes em vários visemas: a roupa
+// vira uma cor lisa (a da aparência) e a língua some, que a boca fechada por trás dos dentes não faz falta num vídeo.
+function tidyAvatar() {
+  head.armature.traverse((node) => {
+    if (!node.isMesh) return;
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    for (const material of materials) {
+      const name = (material.name || "") + " " + (node.name || "");
+      if (/casualsuit/i.test(name)) {
+        material.map = null;
+        material.color.set(D.outfit || "#3A4A5E");
+        material.needsUpdate = true;
+      }
+    }
+    if (/tongue/i.test((node.name || "") + " " + (materials[0].name || ""))) node.visible = false;
+  });
+  const tongue = head.mtAvatar.tongueOut;
+  if (tongue) { tongue.fixed = 0; tongue.needsUpdate = true; }
+}
+
+// ---------- câmera ----------
+// Meio corpo no clipe vertical (o gesto de mão aparece); cabeça e ombros no clipe do canto.
+function frameCamera() {
+  const headBone = head.armature.getObjectByName("Head");
+  scene.updateMatrixWorld(true);
+  const headPos = new THREE.Vector3();
+  headBone.getWorldPosition(headPos);
+  const view = D.view === "corner"
+    ? { span: 0.6, centerBelowHead: 0.07, width: 0.5, shiftX: 0 }
+    // folga de uns 7% da altura sobre o topo da cabeça (a cabeça sobe uns 0,23 m do osso `Head`), e o meio corpo
+    // abaixo dela, onde a mão do gesto aparece; o gesto da mão esquerda sobe à direita do quadro
+    : { span: 1.35, centerBelowHead: 0.35, width: 0.6, shiftX: 0.15 };
+  const fov = camera.fov * Math.PI / 180;
+  const needVertical = view.span / 2 / Math.tan(fov / 2);
+  const needHorizontal = view.width / 2 / (Math.tan(fov / 2) * camera.aspect);
+  const distance = Math.max(needVertical, needHorizontal);
+  const targetY = headPos.y - view.centerBelowHead;
+  camera.position.set(headPos.x + view.shiftX, targetY, headPos.z + distance);
+  camera.lookAt(headPos.x + view.shiftX, targetY, headPos.z);
+  camera.updateProjectionMatrix();
+}
+
+// ---------- um passo de 1/fps ----------
+const lerp = (a, b, k) => a + (b - a) * k;
+const smooth = (k) => { const c = Math.min(Math.max(k, 0), 1); return c * c * (3 - 2 * c); };
+
+function visemeAt(t) {
+  const spans = D.visemes;
+  while (state.mouthIndex < spans.length && spans[state.mouthIndex][1] <= t) state.mouthIndex += 1;
+  const span = spans[state.mouthIndex];
+  return span && span[0] <= t ? span[2] : "sil";
+}
+
+function applyMarks(index, t) {
+  const eps = 0.5 / FPS;
+  const exps = D.expressions;
+  while (state.expressionIndex < exps.length && exps[state.expressionIndex][0] <= t + eps) {
+    const name = exps[state.expressionIndex][1];
+    state.expressionIndex += 1;
+    state.expressionName = name;
+    head.setMood(TH_MOODS[name] || "neutral");
+  }
+  const gests = D.gestures;
+  while (state.gestureIndex < gests.length && gests[state.gestureIndex][0] <= t + eps) {
+    const name = gests[state.gestureIndex][1];
+    state.gestureIndex += 1;
+    const handGesture = GESTURE_ALIAS[name] || name;
+    if (TH_GESTURES.has(handGesture)) {
+      if (state.gestureEnd >= 0) head.stopGesture(600);
+      head.playGesture(handGesture, 0, false, 600); // dur 0: quem solta o gesto é esta página, não um setTimeout
+      state.gestureEnd = t + GESTURE_HOLD_S;
+    } else if (name === "nod" || name === "shake" || name === "tilt") {
+      state.headMotion = { kind: name, start: t };
+    }
+  }
+  if (state.gestureEnd >= 0 && t >= state.gestureEnd) {
+    head.stopGesture(800);
+    state.gestureEnd = -1;
+  }
+}
+
+function driveMouthAndFace(t) {
+  const dt = STEP_MS / 1000;
+  const active = visemeAt(t);
+  for (const name of Object.keys(VISEME_PEAK)) {
+    const key = "viseme_" + name;
+    const target = name === active ? VISEME_PEAK[name] : 0;
+    const now = state.visemeValue[key] || 0;
+    const tau = target > now ? ATTACK_S : RELEASE_S;
+    const next = now + (target - now) * (1 - Math.exp(-dt / tau));
+    state.visemeValue[key] = next < 0.002 ? 0 : next;
+    const mt = head.mtAvatar[key];
+    if (mt) { mt.realtime = state.visemeValue[key]; mt.needsUpdate = true; }
+  }
+  // expressões de rosto: sobem para 1 na ativa e descem para 0 nas outras, com rampa
+  const rate = dt / FACE_RAMP_S;
+  const totals = {};
+  for (const [expression, shapes] of Object.entries(EXPRESSION_FACE)) {
+    const goal = state.expressionName === expression ? 1 : 0;
+    const now = state.face[expression] || 0;
+    state.face[expression] = goal > now ? Math.min(goal, now + rate) : Math.max(goal, now - rate);
+    const amount = smooth(state.face[expression]);
+    for (const [name, peak] of Object.entries(shapes)) totals[name] = Math.max(totals[name] || 0, amount * peak);
+  }
+  for (const [name, value] of Object.entries(totals)) {
+    const mt = head.mtAvatar[name];
+    if (!mt) continue;
+    if (name === "jawOpen") mt.realtime = value;
+    else mt.fixed = value > 0 ? value : null;
+    mt.needsUpdate = true;
+  }
+}
+
+function driveHeadMotion(t) {
+  const motion = state.headMotion;
+  const roll = (name, value) => {
+    const mt = head.mtAvatar[name];
+    mt.fixed = value === 0 ? null : value;
+    mt.needsUpdate = true;
+  };
+  if (!motion) return;
+  const len = motion.kind === "nod" ? NOD_S : motion.kind === "tilt" ? TILT_S : SHAKE_S;
+  const p = (t - motion.start) / len;
+  if (p >= 1) {
+    roll("headRotateX", 0);
+    roll("headRotateY", 0);
+    roll("headRotateZ", 0);
+    state.headMotion = null;
+    return;
+  }
+  const envelope = Math.sin(Math.PI * p);
+  const wave = Math.sin(2 * Math.PI * 2 * p);
+  if (motion.kind === "nod") roll("headRotateX", 0.22 * wave * envelope);
+  else if (motion.kind === "tilt") roll("headRotateZ", 0.25 * envelope); // inclina e volta, sem balançar
+  else roll("headRotateY", 0.3 * wave * envelope);
+}
+
+function stepOnce() {
+  state.step += 1;
+  const t = state.step / FPS;
+  applyMarks(state.step, t);
+  driveMouthAndFace(t);
+  driveHeadMotion(t);
+  head.animate(STEP_MS);
+}
+
+async function seekTo(t) {
+  const target = Math.max(Math.round(t * FPS), 0);
+  if (target < state.step) await loadHead(); // pedido para trás: recomeça do zero e refaz o caminho
+  while (state.step < target) stepOnce();
+  if (state.step < 0) stepOnce();
+  renderer.render(scene, camera);
+}
+
+// carregar e compilar o personagem por software leva dezenas de segundos numa máquina carregada
+window.dmakerReadyTimeoutMs = 240000;
+window.dmakerReady = (async () => {
+  await loadHead();
+  stepOnce();
+})();
+window.dmakerSeek = seekTo;
+</script>
+</body>
+</html>

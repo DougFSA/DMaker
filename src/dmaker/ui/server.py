@@ -47,6 +47,7 @@ from .dub_routes import build_dub_router
 from .infographic_routes import build_infographics_router
 from .look_routes import build_looks_router
 from .models_routes import build_models_router
+from .persona_routes import build_persona_router
 from .queue_routes import build_queue_router
 from .queue_routes import runtime as voice_queue_runtime
 from .recording_routes import build_recording_router
@@ -77,6 +78,7 @@ layout_store = layout_files.LayoutStore(lambda: config.LAYOUTS_FILE)
 preview_audio_tasks = PreviewAudioTasks()
 instant_frame_tasks = InstantFrameTasks()
 app.include_router(build_voice_router(jobs))
+app.include_router(build_persona_router(jobs))
 app.include_router(build_queue_router())
 app.include_router(build_speech_router(jobs))
 app.include_router(build_dub_router(jobs))

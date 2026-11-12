@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Persona ilustrada 2D do DMaker: um busto desenhado em SVG (arte própria do DMaker, sem arquivo de terceiros).
+  O desenho de cada instante sai só de `dmakerSeek(t)`: piscar, olhar, cabeça, boca e expressão são funções do
+  tempo (nada de setTimeout, requestAnimationFrame nem sorteio), então o mesmo projeto gera sempre os mesmos quadros.
+  Os dados chegam em `dmaker.data`:
+    appearance  cores e estilo (skin, hair_color, hair_style, eye_color, outfit_color)
+    mouth       [[início, fim, forma]] com a forma da boca em cada intervalo (agrupamento dos 15 visemas)
+    expressions [[instante, nome]] em ordem; a primeira é a inicial
+    gestures    [[instante, nome]] em ordem
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<svg id="svg" xmlns="http://www.w3.org/2000/svg" viewBox="110 0 780 1200" preserveAspectRatio="xMidYMax meet"></svg>
+<script>
+(() => {
+  const D = dmaker.data;
+  const A = D.appearance;
+  const svg = document.getElementById("svg");
+
+  // ---------- cores derivadas da aparência ----------
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const hex = (c) => "#" + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+  const mix = (a, b, t) => { const x = rgb(a), y = rgb(b); return hex(x.map((v, i) => v + (y[i] - v) * t)); };
+  const light = (c, t) => mix(c, "#ffffff", t);
+  const dark = (c, t) => mix(c, "#000000", t);
+
+  const skin = A.skin;
+  const C = {
+    skin,
+    skinLight: light(skin, 0.18),
+    skinShade: mix(skin, "#7a3a2c", 0.30),
+    blush: mix(skin, "#e8505b", 0.55),
+    lip: mix(skin, "#a8323f", 0.62),
+    lipDark: mix(skin, "#6e1f2c", 0.7),
+    hair: A.hair_color,
+    hairLight: light(A.hair_color, 0.28),
+    hairDark: dark(A.hair_color, 0.32),
+    iris: A.eye_color,
+    irisLight: light(A.eye_color, 0.35),
+    irisDark: dark(A.eye_color, 0.35),
+    outfit: A.outfit_color,
+    outfitLight: light(A.outfit_color, 0.22),
+    outfitDark: dark(A.outfit_color, 0.28),
+  };
+
+  // ---------- partes do desenho ----------
+  const HEAD = "M 293 478 C 293 306 396 272 500 272 C 604 272 707 306 707 478 C 707 640 642 764 500 780 C 358 764 293 640 293 478 Z";
+
+  // cabelo da frente (a franja e a calota) e de trás, por estilo; todos em coordenadas do busto (1000 x 1200)
+  const HAIR = {
+    short: {
+      back: "",
+      front:
+        `<path d="M 280 480 C 252 292 372 170 506 172 C 650 174 752 290 722 480 C 708 410 676 350 612 322 C 548 360 440 352 372 396 C 330 424 296 446 280 480 Z" fill="url(#gHair)"/>
+         <path d="M 372 396 C 440 352 548 360 612 322" fill="none" stroke="${C.hairLight}" stroke-width="6" stroke-linecap="round" opacity=".55"/>
+         <path d="M 330 250 C 380 205 460 190 540 196" fill="none" stroke="${C.hairLight}" stroke-width="10" stroke-linecap="round" opacity=".35"/>`,
+    },
+    long: {
+      back:
+        `<path d="M 262 440 C 170 620 190 900 232 1090 L 770 1090 C 812 900 832 620 738 440 C 700 250 300 250 262 440 Z" fill="${C.hairDark}"/>`,
+      front:
+        `<path d="M 282 520 C 246 290 372 168 500 168 C 636 168 754 290 718 520 C 706 440 676 372 618 338 C 580 380 540 396 500 398 C 456 394 408 372 382 338 C 324 372 294 440 282 520 Z" fill="url(#gHair)"/>
+         <path d="M 500 190 C 470 260 440 330 382 338" fill="none" stroke="${C.hairLight}" stroke-width="7" stroke-linecap="round" opacity=".45"/>
+         <path d="M 500 190 C 540 250 580 320 618 338" fill="none" stroke="${C.hairLight}" stroke-width="7" stroke-linecap="round" opacity=".3"/>`,
+    },
+    bun: {
+      back: `<circle cx="500" cy="190" r="92" fill="${C.hairDark}"/>`,
+      front:
+        `<circle cx="500" cy="190" r="86" fill="url(#gHair)"/>
+         <path d="M 430 160 C 460 130 520 130 560 168" fill="none" stroke="${C.hairLight}" stroke-width="8" stroke-linecap="round" opacity=".45"/>
+         <path d="M 284 500 C 262 320 372 226 500 224 C 630 226 740 320 716 500 C 704 420 668 366 600 340 C 540 372 460 372 400 340 C 332 366 296 420 284 500 Z" fill="url(#gHair)"/>
+         <rect x="448" y="236" width="104" height="22" rx="11" fill="${C.outfit}" transform="rotate(-2 500 247)"/>`,
+    },
+  };
+  const style = HAIR[A.hair_style] || HAIR.short;
+
+  const EYE_Y = 522, EYE_DX = 84, EYE_RX = 58, EYE_RY = 47;
+  const MOUTH_Y = 690;
+
+  svg.innerHTML = `
+  <defs>
+    <radialGradient id="gSkin" cx="50%" cy="38%" r="72%">
+      <stop offset="0" stop-color="${C.skinLight}"/><stop offset=".6" stop-color="${C.skin}"/><stop offset="1" stop-color="${C.skinShade}"/>
+    </radialGradient>
+    <linearGradient id="gHair" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${C.hairLight}"/><stop offset=".45" stop-color="${C.hair}"/><stop offset="1" stop-color="${C.hairDark}"/>
+    </linearGradient>
+    <linearGradient id="gOutfit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${C.outfitLight}"/><stop offset="1" stop-color="${C.outfitDark}"/>
+    </linearGradient>
+    <radialGradient id="gSclera" cx="50%" cy="45%" r="60%">
+      <stop offset=".6" stop-color="#ffffff"/><stop offset="1" stop-color="#e3dcd8"/>
+    </radialGradient>
+    <radialGradient id="gIris" cx="50%" cy="38%" r="65%">
+      <stop offset="0" stop-color="${C.irisLight}"/><stop offset=".7" stop-color="${C.iris}"/><stop offset="1" stop-color="${C.irisDark}"/>
+    </radialGradient>
+    <clipPath id="clipNeck"><rect x="436" y="740" width="128" height="260" rx="44"/></clipPath>
+    <clipPath id="clipEyeL"><path id="eyeOpenL" d=""/></clipPath>
+    <clipPath id="clipEyeR"><path id="eyeOpenR" d=""/></clipPath>
+    <clipPath id="clipMouth"><path id="mouthCavityClip" d=""/></clipPath>
+  </defs>
+
+  <g id="rig">
+    <g id="backHair">${style.back}</g>
+
+    <g id="body">
+      <rect x="436" y="740" width="128" height="260" rx="44" fill="${C.skin}"/>
+      <g clip-path="url(#clipNeck)"><ellipse cx="500" cy="796" rx="112" ry="62" fill="${C.skinShade}" opacity=".5"/></g>
+      <g transform="translate(0 -70)">
+        <path d="M 70 1330 C 84 1016 200 954 360 922 C 398 994 448 1026 500 1028 C 552 1026 602 994 640 922 C 800 954 916 1016 930 1330 Z" fill="url(#gOutfit)"/>
+        <path d="M 360 922 C 398 994 448 1026 500 1028 C 552 1026 602 994 640 922" fill="none" stroke="${C.outfitLight}" stroke-width="12" stroke-linecap="round" opacity=".9"/>
+        <path d="M 232 1020 C 240 1090 246 1150 250 1330" fill="none" stroke="${C.outfitDark}" stroke-width="5" opacity=".28" stroke-linecap="round"/>
+        <path d="M 768 1020 C 760 1090 754 1150 750 1330" fill="none" stroke="${C.outfitDark}" stroke-width="5" opacity=".28" stroke-linecap="round"/>
+      </g>
+    </g>
+
+    <g id="armGroup" transform="translate(780 1500)">
+      <rect x="-52" y="190" width="104" height="900" rx="40" fill="url(#gOutfit)"/>
+      <path d="M -52 214 H 52" stroke="${C.outfitLight}" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+      <rect x="-36" y="40" width="72" height="190" rx="30" fill="${C.skin}"/>
+      <g id="hand">
+        <g transform="translate(0 -6)">
+          <rect x="-58" y="-124" width="24" height="86" rx="12" fill="${C.skin}" transform="rotate(-14 -46 -40)"/>
+          <rect x="-30" y="-140" width="24" height="98" rx="12" fill="${C.skin}" transform="rotate(-5 -18 -40)"/>
+          <rect x="-2" y="-142" width="24" height="100" rx="12" fill="${C.skin}" transform="rotate(4 10 -40)"/>
+          <rect x="26" y="-130" width="24" height="90" rx="12" fill="${C.skin}" transform="rotate(14 38 -40)"/>
+          <rect x="-84" y="-52" width="24" height="76" rx="12" fill="${C.skin}" transform="rotate(-52 -72 20)"/>
+          <ellipse cx="-4" cy="2" rx="58" ry="52" fill="${C.skin}"/>
+          <path d="M -34 -34 C -10 -22 18 -22 40 -34" fill="none" stroke="${C.skinShade}" stroke-width="3" opacity=".45" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+
+    <g id="head">
+      <ellipse cx="290" cy="540" rx="30" ry="50" fill="${C.skin}"/>
+      <ellipse cx="710" cy="540" rx="30" ry="50" fill="${C.skin}"/>
+      <ellipse cx="294" cy="544" rx="13" ry="26" fill="${C.skinShade}" opacity=".5"/>
+      <ellipse cx="706" cy="544" rx="13" ry="26" fill="${C.skinShade}" opacity=".5"/>
+      <path d="${HEAD}" fill="url(#gSkin)"/>
+      <ellipse id="blushL" cx="382" cy="630" rx="52" ry="30" fill="${C.blush}" opacity=".3"/>
+      <ellipse id="blushR" cx="618" cy="630" rx="52" ry="30" fill="${C.blush}" opacity=".3"/>
+      <path d="M 500 556 C 498 596 486 616 474 624 C 490 638 512 638 526 624" fill="none" stroke="${C.skinShade}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".5"/>
+
+      ${[["L", 500 - EYE_DX], ["R", 500 + EYE_DX]]
+        .map(([side, cx]) => `
+      <g id="eye${side}">
+        <g clip-path="url(#clipEye${side})">
+          <rect x="${cx - EYE_RX - 8}" y="${EYE_Y - EYE_RY - 14}" width="${EYE_RX * 2 + 16}" height="${EYE_RY * 2 + 30}" fill="url(#gSclera)"/>
+          <g id="gaze${side}">
+            <circle cx="${cx}" cy="${EYE_Y + 2}" r="35" fill="url(#gIris)"/>
+            <circle cx="${cx}" cy="${EYE_Y + 2}" r="16" fill="#16100e"/>
+            <circle cx="${cx + 11}" cy="${EYE_Y - 10}" r="8" fill="#ffffff" opacity=".95"/>
+            <circle cx="${cx - 10}" cy="${EYE_Y + 12}" r="3.6" fill="#ffffff" opacity=".7"/>
+          </g>
+          <path id="lidShadow${side}" d="" fill="${C.skinShade}" opacity=".35"/>
+        </g>
+        <path id="lash${side}" d="" fill="none" stroke="#1c1411" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="lowerLash${side}" d="" fill="none" stroke="${C.skinShade}" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+      </g>
+      <path id="brow${side}" d="" fill="none" stroke="${C.hair}" stroke-width="17" stroke-linecap="round"/>`)
+        .join("")}
+
+      <g id="mouth">
+        <path id="mouthCavity" d="" fill="#4a1520"/>
+        <g clip-path="url(#clipMouth)">
+          <rect id="teeth" x="0" y="0" width="0" height="0" rx="6" fill="#fbf7f2"/>
+          <ellipse id="tongue" cx="500" cy="0" rx="0" ry="0" fill="#d8656f"/>
+        </g>
+        <path id="mouthLine" d="" fill="none" stroke="${C.lip}" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+
+      <g id="frontHair">${style.front}</g>
+    </g>
+  </g>`;
+
+  const $ = (id) => document.getElementById(id);
+  const el = Object.fromEntries(
+    ["rig", "backHair", "head", "frontHair", "armGroup", "hand", "blushL", "blushR", "eyeOpenL", "eyeOpenR",
+     "gazeL", "gazeR", "lashL", "lashR", "lowerLashL", "lowerLashR", "lidShadowL", "lidShadowR", "browL", "browR",
+     "mouthCavity", "mouthCavityClip", "mouthLine", "teeth", "tongue"].map((id) => [id, $(id)]));
+
+  // ---------- utilitários de tempo (tudo função de t) ----------
+  const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const smooth = (k) => { k = clamp(k); return k * k * (3 - 2 * k); };
+  const TAU = Math.PI * 2;
+  // pseudo-aleatório determinístico por índice: o mesmo n dá sempre o mesmo valor (nada de Math.random)
+  const noise = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+
+  // piscadas: a primeira perto de 1 s e as seguintes a cada 2,2 a 4,6 s
+  const BLINK_SECONDS = 0.17;
+  const blinkTimes = [];
+  for (let k = 0, at = 1.1; at < (dmaker.duration || 60) + 20; k++) { blinkTimes.push(at); at += 2.2 + 2.4 * noise(k + 3); }
+  function blinkAmount(t) {
+    for (const at of blinkTimes) {
+      if (t >= at && t <= at + BLINK_SECONDS) return Math.sin(((t - at) / BLINK_SECONDS) * Math.PI);
+      if (at > t) break;
+    }
+    return 0;
+  }
+
+  // ---------- expressões ----------
+  // brow: quanto sobe a sobrancelha (px, negativo sobe); tilt: o lado de dentro sobe (+) ou desce (-); eye: abertura
+  // do olho; cheek: o olho fecha por baixo (sorriso); lift: cantos da boca; openAdd: boca aberta em repouso
+  const EXPRESSIONS = {
+    neutral:   { brow: 0,   tilt: 0,  eye: 1.0,  cheek: 0,    lift: 7,   openAdd: 0,  blush: 0.0, tiltHead: 0 },
+    happy:     { brow: -10, tilt: 0,  eye: 0.86, cheek: 0.42, lift: 26,  openAdd: 4,  blush: 0.6, tiltHead: 2 },
+    sad:       { brow: -4,  tilt: 20, eye: 0.82, cheek: 0,    lift: -18, openAdd: 0,  blush: 0.0, tiltHead: -3 },
+    surprised: { brow: -30, tilt: 0,  eye: 1.3,  cheek: 0,    lift: 0,   openAdd: 44, blush: 0.0, tiltHead: 0 },
+  };
+  const EXPR_BLEND = 0.28;
+  const expr = (name) => EXPRESSIONS[name] || EXPRESSIONS.neutral;
+  function expressionAt(t) {
+    const track = D.expressions;
+    let i = 0;
+    while (i + 1 < track.length && track[i + 1][0] <= t) i++;
+    const current = expr(track[i][1]);
+    if (i === 0) return current;
+    const k = smooth((t - track[i][0]) / EXPR_BLEND);
+    const before = expr(track[i - 1][1]);
+    const out = {};
+    for (const key of Object.keys(current)) out[key] = lerp(before[key], current[key], k);
+    return out;
+  }
+
+  // ---------- boca ----------
+  // w: meia largura; up/down: quanto o lábio de cima sobe e o de baixo desce do centro; lift: cantos; o resto é o que
+  // aparece lá dentro (dentes, língua) e a grossura do traço dos lábios
+  const MOUTH = {
+    rest:   { w: 60, up: 0,  down: 0,  lift: 0, teeth: 0,   tongue: 0,   lip: 11 },
+    closed: { w: 54, up: 0,  down: 0,  lift: -6, teeth: 0,  tongue: 0,   lip: 15 },
+    fv:     { w: 58, up: 5,  down: 13, lift: 0, teeth: 1,   tongue: 0,   lip: 10 },
+    mid:    { w: 58, up: 7,  down: 22, lift: 2, teeth: 0.55, tongue: 0.4, lip: 10 },
+    teeth:  { w: 70, up: 9,  down: 15, lift: 6, teeth: 1,   tongue: 0,   lip: 9 },
+    open:   { w: 64, up: 15, down: 60, lift: 0, teeth: 0.65, tongue: 0.6, lip: 10 },
+    smile:  { w: 82, up: 9,  down: 28, lift: 12, teeth: 1,  tongue: 0,   lip: 9 },
+    round:  { w: 34, up: 26, down: 40, lift: -2, teeth: 0,  tongue: 0.25, lip: 12 },
+    pucker: { w: 27, up: 16, down: 22, lift: -2, teeth: 0,  tongue: 0,   lip: 13 },
+  };
+  const MOUTH_BLEND = 0.075;
+  function mouthAt(t) {
+    const track = D.mouth;
+    let lo = 0, hi = track.length - 1, i = 0;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (track[m][0] <= t) { i = m; lo = m + 1; } else hi = m - 1; }
+    const now = MOUTH[track[i] ? track[i][2] : "rest"] || MOUTH.rest;
+    if (i === 0) return now;
+    const before = MOUTH[track[i - 1][2]] || MOUTH.rest;
+    const k = smooth((t - track[i][0]) / Math.min(MOUTH_BLEND, Math.max(track[i][1] - track[i][0], 0.02) * 0.9));
+    const out = {};
+    for (const key of Object.keys(now)) out[key] = lerp(before[key], now[key], k);
+    return out;
+  }
+
+  // ---------- gestos ----------
+  const GESTURE_SECONDS = { nod: 1.1, shake: 1.1, tilt: 1.5, wave: 1.9 };
+  function gestureState(t) {
+    const g = { dx: 0, dy: 0, rot: 0, wave: 0, waveSwing: 0 };
+    for (const [at, name] of D.gestures) {
+      const len = GESTURE_SECONDS[name];
+      if (len === undefined || t < at || t > at + len) continue;
+      const p = (t - at) / len;
+      const env = Math.sin(Math.PI * p);
+      if (name === "nod") g.dy += Math.sin(TAU * 2 * p) * 26 * env;
+      else if (name === "shake") { g.dx += Math.sin(TAU * 2 * p) * 30 * env; g.rot += Math.sin(TAU * 2 * p) * 3 * env; }
+      else if (name === "tilt") g.rot += 9 * smooth(Math.min(p * 3, 1, (1 - p) * 3));
+      else if (name === "wave") {
+        g.wave = Math.max(g.wave, smooth(Math.min(p * 5, 1, (1 - p) * 5)));
+        g.waveSwing = Math.sin(TAU * 3 * p) * 16;
+      }
+    }
+    return g;
+  }
+
+  // ---------- olhos ----------
+  const eyePath = (cx, open, cheek) => {
+    const left = cx - EYE_RX, right = cx + EYE_RX, corner = EYE_Y + 7;
+    const top = EYE_Y - EYE_RY * 0.95 * open + 9 * (1 - Math.min(open, 1));
+    const bottom = EYE_Y + EYE_RY * 0.9 * (1 - cheek) - 4 * (1 - Math.min(open, 1));
+    const upCtl = 2 * top - corner, lowCtl = 2 * bottom - corner;
+    return {
+      opening: `M ${left} ${corner} Q ${cx} ${upCtl} ${right} ${corner} Q ${cx} ${lowCtl} ${left} ${corner} Z`,
+      lash: `M ${left - 4} ${corner + 2} Q ${cx} ${upCtl - 2} ${right + 4} ${corner + 2}`,
+      lower: `M ${left + 8} ${corner + 1} Q ${cx} ${lowCtl + 3} ${right - 8} ${corner + 1}`,
+      top,
+    };
+  };
+
+  function setHead(t, g, e) {
+    const dx = Math.sin((TAU * t) / 5.1) * 5 + g.dx;
+    const dy = Math.sin((TAU * t) / 3.7 + 1) * 4 + g.dy;
+    const rot = Math.sin((TAU * t) / 4.3) * 1.4 + Math.sin((TAU * t) / 2.3 + 2) * 0.7 + g.rot + e.tiltHead;
+    return { dx, dy, rot };
+  }
+
+  function dmakerSeekImpl(t) {
+    const e = expressionAt(t);
+    const g = gestureState(t);
+    const m = mouthAt(t);
+
+    // cabeça (o fundo do cabelo, o rosto e a franja se movem juntos) e o corpo, que respira
+    const speech = clamp((m.down + m.up) / 70);
+    const h = setHead(t, g, e);
+    const move = `translate(${h.dx.toFixed(2)} ${(h.dy + speech * 3).toFixed(2)}) rotate(${h.rot.toFixed(3)} 500 930)`;
+    el.head.setAttribute("transform", move);
+    el.backHair.setAttribute("transform", move);
+    el.rig.setAttribute("transform", `translate(0 ${(Math.sin((TAU * t) / 3.4) * 3).toFixed(2)})`);
+
+    // mão que acena
+    const lift = (1 - g.wave) * 760;
+    el.armGroup.setAttribute("transform", `translate(780 ${(700 + lift).toFixed(1)})`);
+    el.hand.setAttribute("transform", `rotate(${g.waveSwing.toFixed(2)} 0 70)`);
+
+    // olhos: piscar, olhar que passeia devagar e olho que sorri
+    const blink = blinkAmount(t);
+    const open = e.eye * (1 - blink * 0.97);
+    const glance = Math.floor(t / 1.7);
+    const mix1 = smooth((t - glance * 1.7) / 0.14);
+    const gx = lerp((noise(glance) - 0.5) * 8, (noise(glance + 1) - 0.5) * 8, mix1);
+    const gy = lerp((noise(glance + 9) - 0.5) * 4, (noise(glance + 10) - 0.5) * 4, mix1);
+    for (const [side, cx] of [["L", 500 - EYE_DX], ["R", 500 + EYE_DX]]) {
+      const p = eyePath(cx, open, e.cheek);
+      el["eyeOpen" + side].setAttribute("d", p.opening);
+      el["lash" + side].setAttribute("d", p.lash);
+      el["lowerLash" + side].setAttribute("d", p.lower);
+      el["lidShadow" + side].setAttribute("d", `M ${cx - EYE_RX - 6} ${EYE_Y - EYE_RY - 20} H ${cx + EYE_RX + 6} V ${p.top + 14} Q ${cx} ${p.top + 2} ${cx - EYE_RX - 6} ${p.top + 14} Z`);
+      el["gaze" + side].setAttribute("transform", `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`);
+      // sobrancelha: o lado de dentro acompanha a inclinação da expressão; o de fora, o contrário
+      const sign = side === "L" ? -1 : 1;
+      const x0 = 500 + sign * 150, x1 = 500 + sign * 42;
+      const y = 452 + e.brow;
+      const inner = y - e.tilt, outer = y + e.tilt * 0.45;
+      el["brow" + side].setAttribute("d", `M ${x0} ${outer.toFixed(1)} Q ${(x0 + x1) / 2} ${(Math.min(inner, outer) - 15).toFixed(1)} ${x1} ${inner.toFixed(1)}`);
+      el["blush" + side].setAttribute("opacity", (0.28 + e.blush * 0.35).toFixed(3));
+    }
+
+    // boca
+    const down = m.down + e.openAdd * (1 - clamp(m.down / 50));
+    const w = m.w + (e.openAdd > 20 && m.down < 8 ? -18 : 0) + (e.lift > 15 ? 4 : 0);
+    const cornerY = MOUTH_Y - (m.lift + e.lift);
+    const topY = MOUTH_Y - m.up, bottomY = MOUTH_Y + down;
+    const L = 500 - w, R = 500 + w;
+    const upCtl = 2 * topY - cornerY, lowCtl = 2 * bottomY - cornerY;
+    const upper = `M ${L} ${cornerY} Q 500 ${upCtl} ${R} ${cornerY}`;
+    const lower = `Q 500 ${lowCtl} ${L} ${cornerY}`;
+    const cavity = `${upper} ${lower} Z`;
+    const isOpen = m.up + down > 3;
+    el.mouthCavity.setAttribute("d", isOpen ? cavity : "");
+    el.mouthCavityClip.setAttribute("d", isOpen ? cavity : "M 0 0");
+    el.mouthLine.setAttribute("stroke-width", m.lip.toFixed(1));
+    el.mouthLine.setAttribute("d", isOpen ? `${upper} ${lower} Z` : `${upper}`);
+    const teethH = clamp(m.teeth) * Math.max(8, (m.up + down) * 0.46);
+    el.teeth.setAttribute("x", L); el.teeth.setAttribute("width", 2 * w);
+    el.teeth.setAttribute("y", (topY - 2).toFixed(1)); el.teeth.setAttribute("height", teethH.toFixed(1));
+    const tongueH = clamp(m.tongue) * down * 0.55;
+    el.tongue.setAttribute("cy", (bottomY - tongueH * 0.2).toFixed(1));
+    el.tongue.setAttribute("rx", (w * 0.55 * (m.tongue > 0 ? 1 : 0)).toFixed(1));
+    el.tongue.setAttribute("ry", tongueH.toFixed(1));
+  }
+
+  window.dmakerSeek = dmakerSeekImpl;
+  dmakerSeekImpl(0);
+})();
+</script>
+</body>
+</html>
