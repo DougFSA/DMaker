@@ -263,7 +263,8 @@ o pacote é o que ele vai instalar. O mesmo "pode subir" do Douglas vale para is
 3. **Publique**: `dmaker release publish --versao X --pasta <raiz principal>`. Ele
    recusa sem a tag no `origin`, com a versão do pacote diferente da tag, com arquivo de
    2 GiB ou mais e com SHA-256 que não bate. Se cair no meio do upload, rode de novo:
-   só sobe o que falta.
+   só sobe o que falta e, no fim, publica a release que a queda deixou como rascunho.
+   Confira com `gh release view vX --json isDraft` que ela não ficou como rascunho.
 4. **Informe**: onde ficaram os arquivos, o tamanho e o SHA-256 de cada um, o tempo de
    cada build e o **link da release** (`gh release view vX --json url`).
 5. Tire o worktree (`git worktree remove`, depois de `rmdir` em qualquer junção).

@@ -1,8 +1,9 @@
 """`dmaker release publish`: sobe os instaladores de uma versão para a aba Releases do GitHub, pelo `gh`.
 
 Só publica depois do release (a tag `vX` já existe no `origin`) e pode ser repetido: uma queda no meio de 16 GB de
-upload não obriga a recomeçar, porque o que já subiu inteiro fica e só o que falta é enviado. Todo comando externo passa
-pelo `CommandRunner` injetado, então o teste prova a ordem sem tocar o GitHub."""
+upload não obriga a recomeçar, porque o que já subiu inteiro fica e só o que falta é enviado, e a release que a queda
+deixou como rascunho é publicada no fim. Todo comando externo passa pelo `CommandRunner` injetado, então o teste prova a
+ordem sem tocar o GitHub."""
 
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ class PublishResult:
     uploaded: list[str] = field(default_factory=list)
     already_there: list[str] = field(default_factory=list)
     created: bool = False
+    published_draft: bool = False  # a retomada achou um rascunho e o publicou
 
 
 class ReleasePublisher:
@@ -121,9 +123,11 @@ class ReleasePublisher:
         )
         return any(item.get("tagName") == self.tag for item in listing)
 
-    def release_assets(self) -> list[dict]:
-        data = json.loads(self.gh("release", "view", self.tag, "--json", "assets", quiet=True) or "{}")
-        return list(data.get("assets", []))
+    def release_state(self) -> dict:
+        """Os arquivos que a release já tem e se ela ainda é um rascunho, numa chamada só ao GitHub."""
+        return json.loads(
+            self.gh("release", "view", self.tag, "--json", "assets,isDraft", quiet=True) or "{}"
+        )
 
     def release_url(self) -> str:
         data = json.loads(self.gh("release", "view", self.tag, "--json", "url", quiet=True) or "{}")
@@ -152,7 +156,8 @@ class ReleasePublisher:
             result.created = True
             result.uploaded = [path.name for path in files]
         else:
-            assets = self.release_assets()
+            state = self.release_state()
+            assets = list(state.get("assets", []))
             # Um arquivo que a queda deixou pela metade (estado diferente de `uploaded`) não conta: sai e sobe de novo.
             there = {a["name"]: int(a["size"]) for a in assets if a.get("state") == "uploaded"}
             for asset in assets:
@@ -166,6 +171,13 @@ class ReleasePublisher:
                 self.log(f"  enviando {path.name}")
                 self.gh("release", "upload", self.tag, str(path), "--clobber")
                 result.uploaded.append(path.name)
-            self.gh("release", "edit", self.tag, "--title", title, "--notes-file", notes)
+            edit = ["release", "edit", self.tag, "--title", title, "--notes-file", notes]
+            if state.get("isDraft"):
+                # O `gh release create` cria um rascunho, sobe os arquivos e só então publica: a queda no meio deixa o
+                # rascunho, que ninguém vê na aba Releases. Com tudo enviado, a retomada termina o que ele não terminou.
+                self.log(f"publicando a release {self.tag}, que a queda deixou como rascunho")
+                edit.append("--draft=false")
+                result.published_draft = True
+            self.gh(*edit)
         result.url = self.release_url()
         return result
