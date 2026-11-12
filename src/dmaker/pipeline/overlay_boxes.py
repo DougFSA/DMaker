@@ -24,12 +24,15 @@ from ..domain.spec import (
     AudiogramOverlay,
     HtmlOverlay,
     ImageOverlay,
+    PersonaOverlay,
     ProgressBar,
     Project,
     TextOverlay,
     VideoOverlay,
+    parse_aspect,
 )
 from ..filtergraph.audiogram import audiogram_expressions
+from ..filtergraph.common import even
 from ..filtergraph.expressions import evaluate
 from ..filtergraph.overlays import image_overlay_origin, image_overlay_size
 from ..filtergraph.pip import pip_origin, pip_size
@@ -399,6 +402,19 @@ def _audiogram_box(context: BoxContext, index: int, overlay: AudiogramOverlay) -
     return _locked(index, overlay, "audiogram", "O audiograma ainda não se move no quadro.", rect=rect)
 
 
+# ---------- persona ----------
+
+
+def _persona_box(context: BoxContext, index: int, overlay: PersonaOverlay) -> OverlayBox:
+    """O quadro da persona no canto, do tamanho e no lugar em que a montagem o põe (as mesmas contas do render)."""
+    width = even(context.width * overlay.width)
+    aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
+    height = even(width / aspect)
+    left, top = pip_origin(overlay, width, height, context.width, context.height, context.scale, context.safe)
+    rect = (float(left), float(top), float(width), float(height))
+    return _locked(index, overlay, "persona", "A persona ainda não se move no quadro.", rect=rect)
+
+
 # Como cada tipo de sobreposição vira caixa. Um tipo novo entra aqui, com o seu calculador.
 CALCULATORS: dict[type, tuple[str, Calculator]] = {
     TextOverlay: ("text", _text_box),
@@ -407,6 +423,7 @@ CALCULATORS: dict[type, tuple[str, Calculator]] = {
     HtmlOverlay: ("html", _html_box),
     ProgressBar: ("progress-bar", _progress_bar_box),
     AudiogramOverlay: ("audiogram", _audiogram_box),
+    PersonaOverlay: ("persona", _persona_box),
 }
 
 # O que um calculador levanta quando a sobreposição não tem lugar calculável: a caixa fica sem área e diz o motivo.

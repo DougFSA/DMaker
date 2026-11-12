@@ -567,3 +567,21 @@ def test_pip_size_is_even_and_keeps_the_aspect_without_the_float_trap():
     width, height = pip_size(overlay, W, None)
     assert width % 2 == 0 and height % 2 == 0
     assert height >= width / (226 / 480) - 2  # 480 / (480/226) não vira 224 por truncamento
+
+
+def test_a_persona_overlay_has_the_box_the_render_gives_it_but_is_locked(tmp_path):
+    box = one_box(
+        tmp_path,
+        {
+            "type": "persona",
+            "persona": "bia",
+            "speech": {"text": "oi"},
+            "position": "bottom-right",
+            "width": 0.5,
+            "aspect": "3:4",
+        },
+    )
+    assert box.kind == "persona" and not box.movable and box.locked_reason
+    left, top, width, height = box.rect
+    assert (width, height) == (540, 720)  # metade da largura do quadro, em 3:4: as contas do render
+    assert left + width == W - SAFE.right - 40 and top + height == H - SAFE.bottom - 40
