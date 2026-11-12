@@ -2472,18 +2472,24 @@ def get_persona(persona_id: str) -> dict:
 
 @server.tool(
     description=(
-        "Cria uma persona. `kind`: 2d ou 3d. `voice`: id de list_voices (sem ela, a voz automática). `appearance` (2d): "
+        "Cria uma persona. `kind`: 2d, 3d ou realistic. `voice`: id de list_voices (sem ela, a voz automática). `appearance` (2d): "
         "skin, hair_color, eye_color, outfit_color em #RRGGBB e hair_style (short, long ou bun); (3d): outfit_color em "
         "#RRGGBB (a roupa do personagem pronto, lisa) e model (mpfb, o personagem pronto, que precisa de "
-        "`dmaker models download persona3d-mpfb`); o que faltar usa o padrão."
+        "`dmaker models download persona3d-mpfb`); (realistic): `photo` é o caminho de uma foto .jpg ou .png (lado menor de "
+        "pelo menos 512 px) copiada para a persona, e o render precisa dos pacotes e dos modelos de "
+        "`dmaker models download persona-realista` (e leva minutos por clipe); o que faltar usa o padrão."
     )
 )
 def create_persona(
-    name: str, kind: str = "2d", voice: str | None = None, appearance: dict | None = None
+    name: str,
+    kind: str = "2d",
+    voice: str | None = None,
+    appearance: dict | None = None,
+    photo: str | None = None,
 ) -> dict:
     from .pipeline.personas import create_persona as _create
 
-    return _create(name, kind, voice, appearance)
+    return _create(name, kind, voice, appearance, photo=photo)
 
 
 @server.tool(

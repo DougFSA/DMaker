@@ -1,0 +1,45 @@
+ditto-talkinghead (vendorizado no DMaker)
+=========================================
+
+Origem:   https://github.com/antgroup/ditto-talkinghead
+Commit:   c3e47ee ("release training code")
+Licença:  Apache-2.0 (o texto está no arquivo LICENSE desta pasta, copiado do repositório de origem)
+
+Esta pasta traz só os arquivos do ditto que o caminho de geração do DMaker usa (foto e áudio viram quadros, no
+modo offline), com os imports já relativos ao pacote. O resto do repositório (treino, TensorRT, modo em tempo
+real, InsightFace, WavLM, vídeo como fonte) não vem. O código do DMaker que usa estes módulos está em
+`src/dmaker/media/ditto_*.py`: o `StreamSDK` do ditto foi reescrito lá (ditto_sdk.py) em vez de remendado.
+
+Os pesos (Apache-2.0, revisão e4a2f60328ee7c32af585ac4b3cce299e4c8e254 de digital-avatar/ditto-talkinghead no
+Hugging Face) não estão no git: o `dmaker models download persona-realista` baixa para `cache/models`, conferindo
+o SHA-256 de cada arquivo (lista em `src/dmaker/media/ditto_models.py`).
+
+O InsightFace, que o ditto usa para achar o rosto na foto, NÃO é usado: o modelo é de uso não comercial. No lugar
+dele a caixa inicial do rosto vem do blaze_face e do face_mesh do MediaPipe (modelos Apache-2.0).
+
+O que mudamos em relação ao original
+------------------------------------
+
+1. atomic_components/source2info.py: sem InsightFace (detector e landmark106). A caixa inicial do rosto é montada
+   em `_initial_landmarks_from_mesh` a partir da malha de 478 pontos do face_mesh, num vetor no layout de 106
+   pontos que o resto do cálculo espera. O construtor deixou de receber as configurações dos dois modelos
+   removidos, e atomic_components/avatar_registrar.py acompanha essa mudança.
+2. utils/blend/__init__.py: o blend de imagens era em Cython (compilado na hora com pyximport, que pede um
+   compilador C); agora é a mesma conta em numpy.
+3. atomic_components/loader.py: só carrega imagem (a foto da persona), com a leitura pelos bytes para aceitar
+   caminho com acento no Windows. A leitura de vídeo, que usa filetype e imageio, foi removida.
+4. aux_models/modules/__init__.py e models/modules/__init__.py: importam só o que o DMaker usa (hubert e
+   landmark203 em ONNX; a rede de warp em torch), em vez de todos os módulos do original.
+5. Arquivos que NÃO foram copiados: cfg.py (o pickle de configuração `v0.4_hubert_cfg_trt.pkl` não é carregado
+   em runtime: seus parâmetros viraram constantes em src/dmaker/media/ditto_sdk.py e seus arrays estão em
+   default_kwargs.npz), writer.py, warp_f3d.py, decode_f3d.py, models/warp_network.py, models/decoder.py,
+   utils/tensorrt_utils.py, aux_models/insightface_*.py e aux_models/modules/{retinaface,landmark106,landmark478}.py.
+
+default_kwargs.npz
+------------------
+
+Os arrays do `default_kwargs` do arquivo ditto_cfg/v0.4_hubert_cfg_trt.pkl do repositório de pesos (sha256 do pkl
+de origem: be6729ca19e25269c4447d8ff4062e18de053b0f6dd38fdb6ef8166de6e8f3e3, também gravado no próprio .npz em
+`origem_sha256`): a emoção neutra (emo), os limites de movimento (v_min_max_for_clip), os deltas de piscada
+(delta_eye_arr) e o estado inicial da condição (sc, eye_open, eye_ball e x_s_*). Foi extraído uma vez, e o
+render só lê o .npz (sem pickle).

@@ -9,7 +9,7 @@ transcritor, motor) entra por injeção.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..domain.persona import Persona, PersonaMark, PersonaSpeech, estimate_speech_seconds
@@ -47,6 +47,7 @@ class SpokenLine:
     path: Path | None
     duration: float
     words: tuple[tuple[float, float, str], ...]
+    seed: int | None = None  # a semente da fala: o motor realista fixa o desenho com ela
 
 
 def default_word_timer(ctx: RenderContext) -> WordTimer:
@@ -88,6 +89,7 @@ class PersonaStage:
                 self._lines[key] = self._estimated(ctx, persona, speech)
             else:
                 self._lines[key] = self._speak(ctx, persona, speech, key)
+            self._lines[key] = replace(self._lines[key], seed=speech.seed)
         return self._lines[key]
 
     @staticmethod
@@ -163,11 +165,21 @@ class PersonaStage:
             fps=ctx.fps,
             size=size,
             framing=framing,
+            audio=line.path,
+            seed=line.seed,
         )
         out = ctx.cache_dir / f"{clip_cache_key(engine, request)}_persona.mov"
         if not ctx.options.dry_run and (ctx.options.force or not out.exists()):
             ctx.log(f"persona {persona.name}: desenhando {request.frame_count} quadros ({size[0]}x{size[1]})")
-            engine.render(request, out, ctx.runner, ctx.warn)
+            forecast = getattr(
+                engine, "forecast", None
+            )  # o motor que demora (realista) diz quanto, antes de começar
+            if forecast is not None:
+                ctx.log(f"persona {persona.name}: {forecast(request)}")
+            if getattr(engine, "reports_progress", False):
+                engine.render(request, out, ctx.runner, ctx.warn, ctx.log)
+            else:
+                engine.render(request, out, ctx.runner, ctx.warn)
         return out, engine.produces_alpha
 
     def still_for(
@@ -193,6 +205,8 @@ class PersonaStage:
             fps=ctx.fps,
             size=size,
             framing=framing,
+            audio=line.path,
+            seed=line.seed,
         )
         out = ctx.cache_dir / f"{clip_cache_key(engine, request)}_{round(at * ctx.fps)}_personastill.png"
         if not ctx.options.dry_run and (ctx.options.force or not out.exists()):

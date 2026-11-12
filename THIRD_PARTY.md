@@ -38,6 +38,16 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTI
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## ditto-talkinghead (Ant Group)
+
+- **Onde:** `src/dmaker/vendor/ditto/` (o código que anima a persona realista: uma foto e a fala viram o vídeo da pessoa
+  falando) e `src/dmaker/media/ditto_*.py` (o caminho rápido e o worker, código do DMaker).
+- **Projeto:** https://github.com/antgroup/ditto-talkinghead, commit **c3e47ee**.
+- **Licença:** Apache-2.0, texto em `src/dmaker/vendor/ditto/LICENSE`. A origem e o que foi mudado estão no `NOTICE` da pasta.
+- **Pesos:** Apache-2.0, baixados para `cache/models` (`dmaker models download persona-realista`) na revisão
+  e4a2f60328ee7c32af585ac4b3cce299e4c8e254 de digital-avatar/ditto-talkinghead, conferidos por SHA-256. O InsightFace
+  que o ditto original usa não é usado (uso não comercial).
+
 ## OpenVoice V2 (MyShell.ai)
 
 - **Onde:** `src/dmaker/voice/third_party/openvoice/` (conversor de timbre).

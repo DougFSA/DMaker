@@ -86,6 +86,40 @@ COMMON_ITEMS: tuple[LicenseItem, ...] = (
         "avatares do TalkingHead são de uso não comercial e as animações Mixamo não podem ser redistribuídas: o "
         "DMaker não usa nenhum deles.",
     ),
+    LicenseItem(
+        "ditto-talkinghead (código vendorizado): anima a persona realista",
+        "Apache-2.0",
+        True,
+        "https://github.com/antgroup/ditto-talkinghead (commit c3e47ee) ; src/dmaker/vendor/ditto/",
+        "O texto da licença (LICENSE) e a lista do que mudamos (NOTICE) acompanham o código. O InsightFace, que o "
+        "ditto original usa, fica de fora (uso não comercial): a caixa do rosto vem do MediaPipe.",
+    ),
+    LicenseItem(
+        "Pesos do ditto-talkinghead (persona realista)",
+        "Apache-2.0",
+        True,
+        "https://huggingface.co/digital-avatar/ditto-talkinghead (revisão e4a2f60328ee7c32af585ac4b3cce299e4c8e254)",
+        "Não vão no pacote nem no git: o `dmaker models download persona-realista` baixa para cache/models, da "
+        "revisão fixada e conferidos por SHA-256. Os modelos MediaPipe blaze_face e face_mesh constam como "
+        "Apache-2.0, segundo os model cards. O landmark203 consta como MIT, vindo do LivePortrait, conforme o model "
+        "card. O hubert.onnx consta como distribuído nos pesos do ditto sob Apache-2.0, com a origem da base não "
+        "declarada. O InsightFace não é usado.",
+    ),
+    LicenseItem(
+        "OpenVINO (o pacote openvino, sem o openvino-telemetry)",
+        "Apache-2.0",
+        True,
+        "https://github.com/openvinotoolkit/openvino ; extra persona-realista do pip",
+        "Roda o warp e o decoder da persona realista na GPU integrada Intel. O openvino-telemetry não é instalado: "
+        "nada vai para a rede.",
+    ),
+    LicenseItem(
+        "opencv-python-headless",
+        "Apache-2.0 (o OpenCV); o pacote embute o FFmpeg sob LGPL-2.1",
+        True,
+        "https://github.com/opencv/opencv-python ; extra persona-realista do pip",
+        "Lê, enquadra e grava as imagens da persona realista. A licença do pacote fica na pasta *.dist-info.",
+    ),
 )
 
 # O que muda de um sistema para outro: o FFmpeg e o Chromium.

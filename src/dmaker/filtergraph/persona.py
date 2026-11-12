@@ -6,6 +6,7 @@ alfa, ou opaco) vem pronto do motor; aqui ele é composto sobre o fundo e junto 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -139,3 +140,56 @@ def persona_frame_command(
     args = [*inputs.args, "-filter_complex", ";".join(lines), "-map", "[fr_out]", "-an", *PERSON_VIDEO]
     args += ["-r", f"{fps:g}", "-fps_mode", "cfr", "-t", f"{duration:.3f}", str(out)]
     return FFmpegCommand(args, label=label, total=duration)
+
+
+def realistic_clip_command(
+    frames: Iterable[bytes],
+    size: tuple[int, int],
+    source_fps: float,
+    fps: float,
+    duration: float,
+    out: Path,
+    label: str = "persona realista",
+) -> FFmpegCommand:
+    """Grava os quadros RGB do ditto (pelo stdin, a `source_fps`) como o clipe opaco da persona, no ritmo do projeto.
+
+    O clipe é opaco e longo (um quadro de 1080x1920 sem compressão pesa 6 MB), então vai em x264 com CRF 12, quase sem
+    perdas e sem o peso do PNG do clipe com alfa; o mezanino o reencoda depois. A conversão de RGB para YUV declara
+    BT.709, o padrão do vídeo HD, para a cor da foto não mudar. `fps` leva os 25 quadros do ditto ao ritmo do
+    projeto (repete quadros, não inventa movimento) e `tpad` repete o último, para a duração nunca ficar um quadro
+    abaixo do pedido."""
+    inputs = Inputs()
+    inputs.add(
+        "pipe:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{size[0]}x{size[1]}", "-r", f"{source_fps:g}"
+    )
+    video_filter = (
+        f"fps={fps:g},tpad=stop_mode=clone:stop=1,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+    )
+    args = [
+        *inputs.args,
+        "-an",
+        "-vf",
+        video_filter,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "12",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-color_range",
+        "tv",
+        "-r",
+        f"{fps:g}",
+        "-fps_mode",
+        "cfr",
+        "-t",
+        f"{duration:.3f}",
+        str(out),
+    ]
+    return FFmpegCommand(args, label=label, total=duration, frames=frames)

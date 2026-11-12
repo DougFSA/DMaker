@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
+from ..media.ditto_models import EXPECTED_SIZE as PERSONA_REALISTA_SIZE
+from ..media.ditto_models import FILES as PERSONA_REALISTA_FILES
+from ..media.ditto_models import MODEL_FOLDER as PERSONA_REALISTA_FOLDER
+from ..media.ditto_models import MODEL_ID as PERSONA_REALISTA_ID
+from ..media.ditto_models import OPENVINO_FOLDER as PERSONA_REALISTA_IR
+
 ModelState = Literal["installed", "partial", "absent"]
 
 # Abaixo disso o modelo não está inteiro. 90% e não 100% porque o tamanho esperado é a medida de uma
@@ -206,6 +212,23 @@ REGISTRY: tuple[ModelSpec, ...] = (
         expected_size=36_815_920,
         required_by=("Persona 3D (tela cheia e sobreposta)",),
         fetch="dmaker.pipeline.model_fetchers:fetch_persona3d",
+    ),
+    ModelSpec(
+        id=PERSONA_REALISTA_ID,
+        name="Persona realista (ditto-talkinghead)",
+        purpose=(
+            "Anima uma foto com a fala (boca, cabeça e piscadas) para a persona realista: os pesos do ditto, "
+            "mais o IR do OpenVINO do warp, que o download gera depois de baixar."
+        ),
+        engine="ditto",
+        license="Apache-2.0",
+        paths=(
+            *(item.relative for item in PERSONA_REALISTA_FILES),
+            f"{PERSONA_REALISTA_FOLDER}/{PERSONA_REALISTA_IR}",
+        ),
+        expected_size=PERSONA_REALISTA_SIZE,
+        required_by=("Persona realista",),
+        fetch="dmaker.pipeline.model_fetchers:fetch_persona_realista",
     ),
     _whisper("tiny", 78_000_000, "O menor e mais rápido, com mais erros."),
     _whisper("base", 148_000_000, "Pequeno e rápido, com alguns erros."),

@@ -5264,11 +5264,12 @@ Modelos de IA em cache/models: ver o que está baixado e quanto ocupa, baixar, a
 
 #### dmaker persona
 
-Personas: personagens reutilizáveis (ilustrados 2D e personagens 3D) que falam no vídeo, em tela cheia ou num canto.
+Personas: personagens reutilizáveis (ilustrados 2D, personagens 3D e fotos que falam) que falam no vídeo, em tela cheia ou num canto.
 
 - **`dmaker persona create NAME`**: Cria uma persona.
-  - `--kind` TEXTO: Tipo: 2d (ilustrada) ou 3d (personagem 3D). (padrão 2d)
+  - `--kind` TEXTO: Tipo: 2d (ilustrada), 3d (personagem 3D) ou realistic (uma foto que fala). (padrão 2d)
   - `--voice` TEXTO: Id da voz (veja `dmaker voice list`).
+  - `--photo` CAMINHO: A foto da persona realista (.jpg ou .png, lado menor de pelo menos 512 px).
   - `--skin` TEXTO: Tom de pele, #RRGGBB.
   - `--hair-color` TEXTO: Cor do cabelo, #RRGGBB.
   - `--hair-style` TEXTO: Estilo do cabelo: short, long ou bun.
@@ -5581,7 +5582,7 @@ São 92 ferramentas. Um asterisco (\*) marca o parâmetro obrigatório. O texto 
 - **`get_persona`**: Mostra uma persona: aparência, voz, expressões e gestos.
   Parâmetros: `persona_id`\* (texto).
 - **`create_persona`**: Cria uma persona.
-  Parâmetros: `name`\* (texto), `kind` (texto, padrão 2d), `voice` (texto), `appearance` (objeto).
+  Parâmetros: `name`\* (texto), `kind` (texto, padrão 2d), `voice` (texto), `appearance` (objeto), `photo` (texto).
 - **`edit_persona`**: Muda uma persona sua: name, voice e/ou appearance (só os campos dados mudam).
   Parâmetros: `persona_id`\* (texto), `name` (texto), `voice` (texto), `appearance` (objeto).
 - **`remove_persona`**: Apaga uma persona sua (as prontas não podem ser apagadas).
