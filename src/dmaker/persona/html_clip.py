@@ -55,7 +55,10 @@ def render_html_clip(
     times = [index / request.fps for index in range(count)]
     stream = FrameStream(renderer.frames(composition, times, on_warning))
     partial = out.with_name(f"{out.stem}.part{out.suffix}")
-    drawn = composition.output_size  # a página pode ter sido desenhada menor que o clipe (mais rápido)
+    # O clipe fica no tamanho em que a página foi desenhada (pode ser menor que `request.size`, que é mais rápido):
+    # ampliá-lo aqui gravaria no cache um .mov de PNG até 4 vezes maior, sem ganhar um pixel de detalhe. Quem
+    # compõe o clipe (o mezanino e o quadro da sobreposição) o amplia na hora.
+    drawn = composition.output_size
     command = html_layer_command(
         stream,
         drawn,
@@ -63,7 +66,6 @@ def render_html_clip(
         count,
         partial,
         label=f"persona {request.persona.id}",
-        scale_to=request.size if drawn != request.size else None,
     )
     try:
         try:

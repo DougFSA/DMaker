@@ -266,3 +266,74 @@ def test_the_segment_duration_is_fixed_measured_or_estimated():
     fixed = segment.model_copy(update={"duration": 4.0})
     assert persona_segment_duration(fixed, None) == 4.0
     assert isinstance(Persona(id="a", name="A"), Persona)
+
+
+def test_the_real_speech_duration_is_kept_for_the_timeline_and_the_qa(tmp_path, library, engine):
+    from dmaker.pipeline.persona_speech_store import STORE_FILE, with_spoken_durations
+    from dmaker.pipeline.sources import Source
+
+    runner = runner_for_pipeline()
+    render = pipeline(tmp_path, library, full_screen(), runner)
+    project = render.project
+    estimated = persona_segment_duration(project.timeline[0], None)
+
+    # antes de sintetizar só há a estimativa
+    before = with_spoken_durations(project, [Source(None, None)], library)
+    assert before[0].info is None
+
+    result = render.run()
+
+    assert (tmp_path / STORE_FILE).is_file()
+    after = with_spoken_durations(project, [Source(None, None)], library)
+    assert after[0].info is not None
+    real = persona_segment_duration(project.timeline[0], after[0].info)
+    assert real == pytest.approx(result.duration, abs=0.05)
+    assert abs(real - estimated) > 0.3  # a estimativa do texto erra; a duração guardada, não
+
+
+def test_the_timeline_view_shows_personas_by_name_with_the_real_speech_duration(tmp_path):
+    from dmaker.pipeline.persona_speech_store import save_duration, speech_key
+    from dmaker.pipeline.timeline_service import project_timeline_view
+
+    project = Project.model_validate(
+        {
+            "name": "vista",
+            "output": {"preset": "instagram/reels"},
+            "timeline": [{"type": "persona", "persona": "bia", "speech": {"text": TEXT}}],
+            "overlays": [{"type": "persona", "persona": "bia", "start": 1.0, "speech": {"text": TEXT}}],
+        }
+    )
+    project.base_dir = tmp_path
+    bia = PersonaLibrary().get("bia")
+
+    def items(view):
+        return {track.id: track.items for track in view.tracks}
+
+    estimated = project_timeline_view(project, prober=fake_prober)
+    save_duration(tmp_path, speech_key(bia, project.timeline[0].speech), 6.0)
+    real = project_timeline_view(project, prober=fake_prober)
+
+    main, corner = items(real)["V1"][0], items(real)["V2"][0]
+    assert main.label == bia.name and corner.label == bia.name and corner.kind == "persona"
+    assert main.end - main.start == pytest.approx(6.0 + project.timeline[0].tail)
+    assert corner.start == 1.0 and corner.end == pytest.approx(min(7.0, real.total))
+    first = items(estimated)["V1"][0]
+    assert first.end - first.start == pytest.approx(len(TEXT) / 14.0 + project.timeline[0].tail)
+
+
+def test_the_speech_of_a_corner_persona_is_captioned_at_the_overlay_start(tmp_path, library, engine):
+    runner = runner_for_pipeline()
+    spec = {
+        "timeline": [{"type": "clip", "src": "base.mp4", "start": 0, "end": 8}],
+        "overlays": [
+            {"type": "persona", "persona": "ana", "start": 2.0, "speech": {"text": TEXT}},
+        ],
+        "captions": {"source": "narration"},
+    }
+    render = pipeline(tmp_path, library, spec, runner)
+
+    render.run()
+
+    ass = next((tmp_path / "jobs").rglob("overlay.ass")).read_text(encoding="utf-8-sig")
+    # as palavras do transcritor falso (olá, eu, sou) a partir de 2,0 s, mais o início de cada uma
+    assert "OLÁ" in ass.upper() and "0:00:02.1" in ass

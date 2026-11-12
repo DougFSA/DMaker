@@ -409,3 +409,61 @@ def test_clean_also_clears_the_frames_the_editor_asked_for():
     result = CliRunner().invoke(app, ["clean"])
     assert result.exit_code == 0, result.output
     assert config.FRAMES_DIR.is_dir() and not list(config.FRAMES_DIR.iterdir())
+
+
+# ---------- a persona no quadro de um instante ----------
+
+
+class StillEngine:
+    """O motor de persona de mentira: devolve um PNG só do instante pedido e conta os pedidos."""
+
+    kind = "2d"
+    version = "still1"
+    produces_alpha = True
+    expressions = ("neutral", "happy", "sad", "surprised")
+    gestures = ("nod", "shake", "tilt", "wave")
+
+    def __init__(self):
+        self.stills = []
+
+    def normalize_appearance(self, appearance):
+        return dict(appearance)
+
+    def cache_parts(self, request):
+        return ()
+
+    def unavailable_reason(self):
+        return None
+
+    def render(self, request, out, runner, on_warning):
+        pytest.fail("o quadro de um instante não desenha o clipe inteiro")
+
+    def still(self, request, at, on_warning):
+        self.stills.append((request.framing, at))
+        return b"\x89PNG still"
+
+
+def test_the_instant_frame_draws_a_persona_only_at_that_instant_without_speaking(tmp_path, monkeypatch):
+    from dmaker.persona import engine as registry
+    from dmaker.persona.library import PersonaLibrary
+
+    engine = StillEngine()
+    monkeypatch.setattr(registry, "_ENGINES", {"2d": engine})
+    library = PersonaLibrary(root=tmp_path / "personas", presets_root=tmp_path / "nenhuma")
+    library.create("Ana")
+    project = make_project(
+        tmp_path,
+        timeline=[
+            {"type": "persona", "persona": "ana", "speech": {"text": "Oi, tudo bem?"}, "duration": 4.0}
+        ],
+        overlays=[{"type": "persona", "persona": "ana", "start": 1.0, "end": 4.0, "speech": {"text": "Oi"}}],
+    )
+    runner = RecordingRunner(on_run=fake_ffmpeg_output)
+
+    frame = make_renderer(tmp_path, runner, personas=library).render(project, 2.0)
+
+    assert frame.path.exists()
+    # o trecho em 2,0 s e a sobreposição (que começa em 1,0 s) em 1,0 s do clipe dela, cada um só no seu instante
+    assert sorted(engine.stills) == [("corner", pytest.approx(1.0)), ("full", pytest.approx(2.0))]
+    mezzanine = next(c for c in runner.commands if c[-1].endswith(".mov"))
+    assert "-loop 1" in " ".join(mezzanine)  # o quadro único é repetido pelo trecho

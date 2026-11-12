@@ -250,6 +250,9 @@ def doctor(
         if problem is None
         else "  playwright e Chromium: [yellow]faltam[/yellow] (composição em HTML: dmaker setup --html)"
     )
+    from .persona.engine3d import doctor_line
+
+    console.print(f"  {escape(doctor_line())}")
     try:
         import mcp  # noqa: F401
 

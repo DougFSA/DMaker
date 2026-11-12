@@ -36,6 +36,12 @@ def _cover(size: tuple[int, int], fps: float) -> str:
     return f"fps={fps:g},scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"
 
 
+def _fit_clip(size: tuple[int, int]) -> str:
+    """Leva o clipe ao tamanho do quadro: o motor o guarda no tamanho em que desenhou (às vezes menor, para o cache
+    ocupar pouco) e a ampliação acontece só aqui. No tamanho certo o filtro não muda nada."""
+    return f"scale={size[0]}:{size[1]}:flags=lanczos"
+
+
 def _backdrop_input(
     inputs: Inputs, backdrop: Backdrop, size: tuple[int, int], fps: float, duration: float
 ) -> str:
@@ -73,6 +79,7 @@ def persona_mezzanine(
     fade_in: float = 0.0,
     fade_out: float = 0.0,
     label: str = "trecho",
+    still: bool = False,
 ) -> FFmpegCommand:
     """O mezanino do trecho da persona: o clipe dela sobre o `backdrop`, com a fala como áudio.
 
@@ -80,12 +87,13 @@ def persona_mezzanine(
     texto que o dry-run não sintetizou) o áudio é silêncio. O áudio completa com silêncio o que a fala não cobre."""
     inputs = Inputs()
     lines: list[str] = []
-    clip_index = inputs.add(clip)
+    # `still`: o clipe é uma imagem só (o quadro de um instante), repetida pela duração do trecho
+    clip_index = inputs.add_looped_image(clip, fps, duration) if still else inputs.add(clip)
     if backdrop is None:
-        lines.append(f"[{clip_index}:v]setpts=PTS-STARTPTS,format=yuv420p[mz_v1]")
+        lines.append(f"[{clip_index}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=yuv420p[mz_v1]")
     else:
         lines.append(f"{_backdrop_input(inputs, backdrop, size, fps, duration)}[mz_bg]")
-        lines.append(f"[{clip_index}:v]setpts=PTS-STARTPTS,format=rgba[mz_persona]")
+        lines.append(f"[{clip_index}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[mz_persona]")
         lines.append("[mz_bg][mz_persona]overlay=x=0:y=0:eof_action=pass:format=auto[mz_v1]")
     lines += post_video_lines("[mz_v1]", "[vout]", color, look, fade_in, fade_out, duration, size, fps)
     if speech is None:
@@ -123,7 +131,7 @@ def persona_frame_command(
     shape = inputs.add_looped_image(mask, fps, duration)
     lines = [
         f"[{background}:v]format=rgba[fr_bg]",
-        f"[{persona}:v]setpts=PTS-STARTPTS,format=rgba[fr_persona]",
+        f"[{persona}:v]setpts=PTS-STARTPTS,{_fit_clip(size)},format=rgba[fr_persona]",
         "[fr_bg][fr_persona]overlay=x=0:y=0:eof_action=pass:format=auto[fr_flat]",
         f"[{shape}:v]format=gray[fr_mask]",
         "[fr_flat][fr_mask]alphamerge[fr_out]",

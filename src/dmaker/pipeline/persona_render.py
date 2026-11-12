@@ -27,16 +27,17 @@ from ..persona.marks import mark_problems
 from ..persona.validation import persona_problems
 from ..persona.visemes import build_visemes
 from ..persona.words import evenly_timed_words
-from ..text.captions import Word
+from ..text.captions import Cue, Word
 from ..visuals.pip import pip_mask
 from ..voice.library import VoiceLibrary
 from .cache_key import cache_key
 from .context import RenderContext
+from .persona_speech_store import load_durations, save_duration, speech_key
 from .sources import Source
 from .voiceover import NarrationServiceFactory, PreparedVoiceover, default_service
 
 WordTimer = Callable[[Path, str], list[Word]]
-PERSONA_CLIP_VERSION = "pc1"  # muda quando o jeito de compor o clipe com o fundo muda
+PERSONA_CLIP_VERSION = "pc2"  # muda quando o jeito de compor o clipe com o fundo muda
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,11 @@ class PersonaStage:
         voices: VoiceLibrary | None = None,
         word_timer: Callable[[RenderContext], WordTimer] = default_word_timer,
         service_factory: NarrationServiceFactory = default_service,
+        instants: dict[int, float] | None = None,
     ) -> None:
+        # `instants` liga o modo do quadro de um instante: trecho -> instante dele em segundos. Nesse modo nada é
+        # sintetizado nem transcrito (a boca usa a duração conhecida) e só o quadro pedido é desenhado.
+        self.instants = instants
         self.library = library or PersonaLibrary()
         self.voices = voices or VoiceLibrary()
         self._word_timer_factory = word_timer
@@ -79,8 +84,20 @@ class PersonaStage:
         """A fala da persona sintetizada (ou o áudio dado) com a boca já medida; guardada por render."""
         key = cache_key(persona.id, persona.voice, speech.model_dump(mode="json"), ctx.options.dry_run)
         if key not in self._lines:
-            self._lines[key] = self._speak(ctx, persona, speech, key)
+            if self.instants is not None and not speech.audio:
+                self._lines[key] = self._estimated(ctx, persona, speech)
+            else:
+                self._lines[key] = self._speak(ctx, persona, speech, key)
         return self._lines[key]
+
+    @staticmethod
+    def _estimated(ctx: RenderContext, persona: Persona, speech: PersonaSpeech) -> SpokenLine:
+        """A fala sem sintetizar: a duração real guardada no projeto, senão a estimada pelo texto, com a boca repartida."""
+        text = (speech.text or "").strip()
+        duration = load_durations(ctx.project.base_dir).get(speech_key(persona, speech))
+        if duration is None:
+            duration = estimate_speech_seconds(text, speech.speed)
+        return SpokenLine(None, duration, tuple(evenly_timed_words(text, duration)))
 
     def _speak(self, ctx: RenderContext, persona: Persona, speech: PersonaSpeech, key: str) -> SpokenLine:
         if speech.audio:
@@ -107,6 +124,7 @@ class PersonaStage:
             seed=speech.seed,
             brand=ctx.project.brand,
         )
+        save_duration(ctx.project.base_dir, speech_key(persona, speech), result.duration)
         return self._measured(ctx, result.path, speech, result.duration)
 
     def _measured(
@@ -151,6 +169,59 @@ class PersonaStage:
             ctx.log(f"persona {persona.name}: desenhando {request.frame_count} quadros ({size[0]}x{size[1]})")
             engine.render(request, out, ctx.runner, ctx.warn)
         return out, engine.produces_alpha
+
+    def still_for(
+        self,
+        ctx: RenderContext,
+        persona: Persona,
+        line: SpokenLine,
+        expression: str,
+        marks: Sequence[PersonaMark],
+        duration: float,
+        size: tuple[int, int],
+        at: float,
+        framing: str = "full",
+    ) -> Path:
+        """O quadro da persona no instante `at` do clipe, como PNG com alfa em cache (desenhado só ele)."""
+        engine = engine_for(persona.kind)
+        request = PersonaRender(
+            persona=persona,
+            visemes=tuple(build_visemes(line.words, duration)),
+            expression=expression,
+            marks=tuple(marks),
+            duration=duration,
+            fps=ctx.fps,
+            size=size,
+            framing=framing,
+        )
+        out = ctx.cache_dir / f"{clip_cache_key(engine, request)}_{round(at * ctx.fps)}_personastill.png"
+        if not ctx.options.dry_run and (ctx.options.force or not out.exists()):
+            png = engine.still(request, at, ctx.warn)
+            partial = out.with_name(f"{out.stem}.part.png")
+            partial.write_bytes(png)
+            partial.replace(out)
+        return out
+
+    def overlay_still(
+        self, ctx: RenderContext, overlay: PersonaOverlay, frame: int
+    ) -> ResolvedHtmlLayer | None:
+        """A persona sobreposta só no quadro `frame` do vídeo (None se ela não aparece nele), sem o fundo recortado."""
+        persona = self.library.get(overlay.persona)
+        line = self.line_for(ctx, persona, overlay.speech)
+        end = overlay.end if overlay.end is not None else overlay.start + line.duration
+        first, stop = frame_range(overlay.start, end, ctx.fps)
+        if not first <= frame < stop:
+            return None
+        width = even(ctx.width * overlay.width)
+        aspect = 1.0 if overlay.shape == "circle" and overlay.background else parse_aspect(overlay.aspect)
+        size = (width, even(width / aspect))
+        duration = (stop - first) / ctx.fps
+        at = max(frame / ctx.fps - overlay.start, 0.0)
+        png = self.still_for(
+            ctx, persona, line, overlay.expression, overlay.marks, duration, size, at, "corner"
+        )
+        left, top = pip_origin(overlay, size[0], size[1], ctx.width, ctx.height, ctx.scale, ctx.preset.safe)
+        return ResolvedHtmlLayer(png, frame / ctx.fps, (frame + 1) / ctx.fps, str(left), str(top), still=True)
 
     # ---------- o projeto ----------
 
@@ -224,6 +295,17 @@ class PersonaStage:
             path = line.path or ctx.job_dir / f"persona_overlay_{index}.wav"
             prepared.append(PreparedVoiceover(path, overlay.start, overlay.speech.volume, line.duration))
         return prepared
+
+    def overlay_cues(self, ctx: RenderContext) -> list[Cue]:
+        """A legenda da fala de cada persona sobreposta, no tempo do vídeo (o início da sobreposição mais o da palavra)."""
+        cues = []
+        for _index, overlay in self._overlays(ctx.project):
+            line = self.line_for(ctx, self.library.get(overlay.persona), overlay.speech)
+            if not line.words:
+                continue
+            words = [Word(overlay.start + a, overlay.start + b, text) for a, b, text in line.words]
+            cues.append(Cue(words[0].start, words[-1].end, " ".join(word.text for word in words), words))
+        return cues
 
     def overlay_layers(self, ctx: RenderContext, total: float) -> list[ResolvedHtmlLayer]:
         """O vídeo (com alfa) de cada persona sobreposta, pronto para a montagem pelo mesmo caminho das composições."""

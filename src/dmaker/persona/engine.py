@@ -71,6 +71,11 @@ class PersonaEngine(Protocol):
         """Escreve o clipe em `out` (vídeo com alfa, ou opaco se `produces_alpha` for falso)."""
         ...
 
+    def still(self, request: PersonaRender, at: float, on_warning: Callable[[str], None]) -> bytes:
+        """O quadro do instante `at` (segundos do clipe) em PNG, indo direto a ele: serve ao quadro de um instante
+        do editor, que não pode desenhar o clipe inteiro para mostrar um quadro."""
+        ...
+
 
 _ENGINES: dict[str, PersonaEngine] = {}
 

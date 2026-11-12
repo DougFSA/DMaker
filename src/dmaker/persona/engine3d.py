@@ -25,10 +25,11 @@ from .glb import avatar_problems
 from .html_clip import page_digest, render_html_clip
 from .marks import expression_track, gesture_track
 
-ENGINE_VERSION = "p3d1"  # muda quando o desenho da página ou o jeito de montar os dados muda
+ENGINE_VERSION = "p3d2"  # muda quando o desenho da página ou o jeito de montar os dados muda
 EXPRESSIONS = ("neutral", "happy", "sad", "surprised")
 # Os gestos de mão do TalkingHead que não dependem de arquivo Mixamo, mais o aceno e a negação com a cabeça.
-GESTURES = ("nod", "shake", "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug")
+# `wave` e `tilt` também existem no motor 2D: assim a spec de uma persona 2D vale ao trocá-la por uma 3D.
+GESTURES = ("nod", "shake", "tilt", "wave", "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug")
 # O desenho por software (SwiftShader) custa por pixel: acima deste lado maior o quadro é desenhado num tamanho menor
 # (a página mantém o mesmo enquadramento) e ampliado pelo ffmpeg, para a tela cheia não levar dezenas de minutos.
 MAX_DRAWN_SIDE = 960
@@ -36,6 +37,7 @@ BUILTIN_MODEL = "mpfb"
 BUILTIN_MODEL_ID = "persona3d-mpfb"  # o id no registro de modelos (`dmaker models`)
 BUILTIN_MODEL_FILE = "persona3d/mpfb.glb"  # dentro de `cache/models`
 MODEL_URL_NAME = "avatar.glb"  # o nome com que a página enxerga o arquivo (`/_dmaker/files/<nome>`)
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _FILE_NAME = re.compile(r"^\w[\w .-]*\.glb$", re.IGNORECASE)
 
 
@@ -45,6 +47,16 @@ class Appearance3D(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = BUILTIN_MODEL
+    # A roupa do personagem pronto é lisa nesta cor (a textura dele traz um logotipo de terceiro). Vale para o
+    # modelo pronto; um `.glb` próprio traz a roupa dele.
+    outfit_color: str = "#3A4A5E"
+
+    @field_validator("outfit_color")
+    @classmethod
+    def _hex_color(cls, value: str) -> str:
+        if not _HEX.match(value):
+            raise ValueError(f"{value!r} não é uma cor; use o formato #RRGGBB (ex.: #3A4A5E)")
+        return value.upper()
 
     @field_validator("model")
     @classmethod
@@ -70,6 +82,16 @@ def download_hint() -> str:
     )
 
 
+def doctor_line() -> str:
+    """A linha do `dmaker doctor` sobre o personagem 3D: opcional, baixado ou não, e o comando que baixa."""
+    if builtin_model_path().is_file():
+        return "personagem da persona 3D (opcional): baixado"
+    return (
+        "personagem da persona 3D (opcional): não baixado; só é preciso para personas 3D "
+        f"(dmaker models download {BUILTIN_MODEL_ID})"
+    )
+
+
 def draw_scale(size: tuple[int, int]) -> float:
     """A escala em que a página é desenhada: 1 até `MAX_DRAWN_SIDE` no lado maior, menos que isso acima dele."""
     return min(1.0, MAX_DRAWN_SIDE / max(size))
@@ -80,11 +102,12 @@ def view_for(framing: str) -> str:
     return "corner" if framing == "corner" else "full"
 
 
-def page_data(request: PersonaRender) -> dict[str, Any]:
+def page_data(request: PersonaRender, outfit_color: str = "#3A4A5E") -> dict[str, Any]:
     """Os dados que a página lê em `dmaker.data` (função pura: o mesmo pedido dá sempre os mesmos dados)."""
     return {
         "model": f"/_dmaker/files/{MODEL_URL_NAME}",
         "view": view_for(request.framing),
+        "outfit": outfit_color,
         "fps": request.fps,
         "visemes": [[round(span.start, 4), round(span.end, 4), span.viseme] for span in request.visemes],
         "expressions": [
@@ -154,20 +177,25 @@ class Engine3D:
             None if builtin_model_path().is_file() else download_hint()
         )
 
-    def render(
-        self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
-    ) -> None:
+    def _composition(self, request: PersonaRender) -> HtmlComposition:
         model = self.model_file(request)
-        composition = HtmlComposition(
+        return HtmlComposition(
             source=self.page_dir,
             size=request.size,
             scale=draw_scale(request.size),
             fps=request.fps,
             duration=request.duration,
-            data=page_data(request),
+            data=page_data(request, self.normalize_appearance(request.persona.appearance)["outfit_color"]),
             files={MODEL_URL_NAME: model},
         )
-        render_html_clip(self._html(), composition, request, out, runner, on_warning)
+
+    def render(
+        self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
+    ) -> None:
+        render_html_clip(self._html(), self._composition(request), request, out, runner, on_warning)
+
+    def still(self, request: PersonaRender, at: float, on_warning: Callable[[str], None]) -> bytes:
+        return self._html().still(self._composition(request), at, on_warning)
 
 
 _ENGINE: PersonaEngine = register_engine(Engine3D())

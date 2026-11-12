@@ -114,8 +114,11 @@ class CaptionPipeline:
             cues, store = producer(
                 CaptionInputs(ctx, sources, prepared, transitions, voiceovers, vocabulary, voice_files)
             )
-            if cues is None:
+            persona_cues = ctx.personas.overlay_cues(ctx) if ctx.personas is not None else []
+            if cues is None and not persona_cues:
                 return None
+            # a fala das personas no canto não passa pelo Whisper (o áudio não está nos trechos): vem da própria fala
+            cues = sorted([*(cues or []), *persona_cues], key=lambda cue: cue.start)
 
         cues = apply_replacements(cues, replacements)
         if captions.offset:

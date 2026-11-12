@@ -16,6 +16,7 @@ from ..media.probe import probe
 from .context import Prober
 from .layout import project_layout
 from .missing import MissingMedia
+from .persona_speech_store import persona_view
 from .sync import OffsetFinder
 from .timeline_view import TimelineView, build_timeline_view
 from .voicefiles import music_file_playtime, voice_file_playtimes
@@ -37,6 +38,7 @@ def project_timeline_view(
         narration_durations=narration_durations,
         missing=missing,
         voiceover_durations=voice_file_playtimes(project, prober),  # já depois dos efeitos (o Repetir cresce)
+        personas=persona_view(project),
     )
 
 

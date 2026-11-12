@@ -20,13 +20,19 @@ from pathlib import Path
 from .. import config
 from ..domain.brand import load_theme
 from ..domain.outputs import frame_preset
-from ..domain.spec import ClipSegment, Project, Segment, VideoOverlay
+from ..domain.spec import ClipSegment, PersonaOverlay, PersonaSegment, Project, Segment, VideoOverlay
 from ..domain.timeline import transitions_of
 from ..domain.tracks import apply_track_state, carrier_heard_project, silenced_carrier_warnings
 from ..filtergraph.pip import ResolvedVideoOverlay
-from ..filtergraph.preview_audio import clip_audio_piece, preview_encode_args, silence_piece
+from ..filtergraph.preview_audio import (
+    clip_audio_piece,
+    persona_speech_piece,
+    preview_encode_args,
+    silence_piece,
+)
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner
 from ..media.probe import probe
+from ..persona.library import PersonaLibrary
 from ..voice.lexicon_store import LexiconStore
 from ..voice.library import VoiceLibrary
 from .assembly import (
@@ -63,6 +69,7 @@ from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
 from .missing import MissingMedia, media_references
 from .narration import NarrationService
+from .persona_preview_audio import PersonaHearing
 from .placements import clip_placement
 from .segments import PreparedSegment, cache_key, isolate_camera_audio, pan_key_part
 from .sfx import SfxTrack, leveled_effects
@@ -113,6 +120,15 @@ def piece_recipe(segment: Segment) -> dict:
                 "audio_crossfade",  # o serializador tira o campo quando vazio: a receita antiga não muda
             },
         )
+    if isinstance(segment, PersonaSegment):
+        # a fala é o som do trecho (a voz da persona e a duração já sintetizada entram na chave da mixagem)
+        return {
+            "type": segment.type,
+            "persona": segment.persona,
+            "speech": segment.speech.model_dump(mode="json"),
+            "duration": segment.duration,
+            "tail": segment.tail,
+        }
     return {"type": segment.type, "duration": getattr(segment, "duration", None)}
 
 
@@ -122,7 +138,7 @@ def mix_recipe(project: Project) -> dict:
     sounding = [
         overlay.model_dump(mode="json")
         for overlay in project.overlays
-        if isinstance(overlay, VideoOverlay) or getattr(overlay, "sound", None)
+        if isinstance(overlay, VideoOverlay | PersonaOverlay) or getattr(overlay, "sound", None)
     ]
     return {
         "timeline": [
@@ -180,6 +196,7 @@ class PreviewAudioBuilder:
         cache_dir: Path | None = None,
         jobs_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
+        personas: PersonaLibrary | None = None,
     ) -> None:
         self.runner: FFmpegRunner = runner or SubprocessRunner(quiet=True)
         self.prober = prober
@@ -191,6 +208,9 @@ class PreviewAudioBuilder:
         self.jobs_dir = jobs_dir or config.JOBS_DIR
         self.log = log or (lambda message: None)
         self._narrator: NarrationService | None = None
+        self.persona_hearing = PersonaHearing(
+            personas or PersonaLibrary(), self.library, self._narration, prober
+        )
 
     # ---------- chave e cache ----------
 
@@ -227,6 +247,7 @@ class PreviewAudioBuilder:
             scripts,
             file_stamp(base / "sync.json") if base else None,  # o deslocamento calculado das fontes
             self.narration_durations(project),
+            self.persona_hearing.key_part(project),
         )
 
     def mix_path(self, name: str, key: str) -> Path:
@@ -415,6 +436,20 @@ class PreviewAudioBuilder:
         for index, (segment, source, duration) in enumerate(
             zip(layout.project.timeline, layout.sources, layout.durations, strict=True)
         ):
+            if isinstance(segment, PersonaSegment):
+                heard = self.persona_hearing.hear(ctx, segment.persona, segment.speech, f"timeline[{index}]")
+                if heard is not None:
+                    key = cache_key(
+                        PREVIEW_AUDIO_VERSION, "persona", file_stamp(heard.path), f"{duration:.3f}"
+                    )
+                    out = ctx.cache_dir / f"{key}.wav"
+                    if not out.exists():
+                        self.log(f"fala da persona {index + 1}/{count}")
+                        ctx.runner.run(persona_speech_piece(heard.path, duration, out))
+                    else:
+                        os.utime(out)
+                    prepared.append(PreparedSegment(index, segment, duration, out, None, None))
+                    continue
             audible = (
                 isinstance(segment, ClipSegment)
                 and source.path is not None
@@ -545,7 +580,7 @@ class PreviewAudioBuilder:
         """As narrações já sintetizadas, na posição de cada uma. A que ainda não foi falada fica de fora (a prévia
         não espera uma síntese de minutos): o aviso diz qual."""
         project = ctx.project
-        prepared: list[PreparedVoiceover] = []
+        prepared: list[PreparedVoiceover] = self.persona_hearing.overlay_voiceovers(ctx)
         if not project.audio.narration:
             return prepared
         service = self._narration()

@@ -66,7 +66,16 @@ class PersonaPreparer:
         line = stage.line_for(ctx, persona, segment.speech)
         duration = persona_segment_duration(segment, source.info)
         size = (ctx.width, ctx.height)
-        clip, alpha = stage.clip_for(ctx, persona, line, segment.expression, segment.marks, duration, size)
+        still = stage.instants.get(index) if stage.instants is not None else None
+        if still is not None:  # o quadro de um instante: só o quadro pedido, repetido pelo trecho
+            clip = stage.still_for(
+                ctx, persona, line, segment.expression, segment.marks, duration, size, still
+            )
+            alpha = True
+        else:
+            clip, alpha = stage.clip_for(
+                ctx, persona, line, segment.expression, segment.marks, duration, size
+            )
         backdrop = backdrop_of(segment.background, ctx) if alpha else None
         look = segment_look(index, segment, ctx)
         speech_file = line.path
@@ -99,6 +108,7 @@ class PersonaPreparer:
             fade_in=segment.fade_in,
             fade_out=segment.fade_out,
             label=_label(index, ctx),
+            still=still is not None,
         )
         tone = None
         if backdrop is not None and backdrop.kind == "color":

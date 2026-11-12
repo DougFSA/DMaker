@@ -94,19 +94,23 @@ class Engine2D:
     def unavailable_reason(self) -> str | None:
         return self._html().unavailable_reason()
 
-    def render(
-        self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
-    ) -> None:
-        appearance = self.normalize_appearance(request.persona.appearance)
-        composition = HtmlComposition(
+    def _composition(self, request: PersonaRender) -> HtmlComposition:
+        return HtmlComposition(
             source=self.page_dir,
             size=request.size,
             scale=1.0,
             fps=request.fps,
             duration=request.duration,
-            data=page_data(request, appearance),
+            data=page_data(request, self.normalize_appearance(request.persona.appearance)),
         )
-        render_html_clip(self._html(), composition, request, out, runner, on_warning)
+
+    def render(
+        self, request: PersonaRender, out: Path, runner: FFmpegRunner, on_warning: Callable[[str], None]
+    ) -> None:
+        render_html_clip(self._html(), self._composition(request), request, out, runner, on_warning)
+
+    def still(self, request: PersonaRender, at: float, on_warning: Callable[[str], None]) -> bytes:
+        return self._html().still(self._composition(request), at, on_warning)
 
 
 _ENGINE: PersonaEngine = register_engine(Engine2D())

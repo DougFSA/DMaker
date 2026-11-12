@@ -22,15 +22,18 @@ from pathlib import Path
 
 from .. import config
 from ..domain.outputs import frame_preset
-from ..domain.spec import HtmlOverlay, Project, Transition
+from ..domain.spec import HtmlOverlay, PersonaOverlay, PersonaSegment, Project, Transition
 from ..domain.timeline import frame_range, instant_window, transitions_of
 from ..domain.tracks import apply_track_state
 from ..filtergraph.html_layer import ResolvedHtmlLayer
+from ..media.browser import BrowserUnavailable
 from ..media.ffmpeg import FFmpegCommand, FFmpegRunner, SubprocessRunner, format_cmd
 from ..media.html_render import HtmlRenderer
 from ..media.html_site import composition_files
 from ..media.matting import Matter, RvmMatter
 from ..media.probe import probe
+from ..persona.engine import PersonaEngineError
+from ..persona.library import PersonaLibrary, PersonaNotFoundError
 from .assembly import Assembly
 from .audio_effects import effect_processor
 from .captions import CaptionPipeline, TranscriberFactory, default_transcriber_factory
@@ -41,6 +44,7 @@ from .isolation import IsolationService
 from .layout import ProjectLayout, project_layout
 from .missing import media_references
 from .person_layer import PersonLayerBuilder, PreparedPersonLayer
+from .persona_render import PersonaStage
 from .preview_audio import file_stamp
 from .segments import MezzanineBuilder, PreparedSegment, cache_key
 from .sync import OffsetFinder
@@ -129,7 +133,9 @@ class InstantFrameRenderer:
         frames_dir: Path | None = None,
         jobs_dir: Path | None = None,
         log: Callable[[str], None] | None = None,
+        personas: PersonaLibrary | None = None,
     ) -> None:
+        self.personas = personas or PersonaLibrary()
         self.runner: FFmpegRunner = runner or SubprocessRunner(quiet=True)
         self.prober = prober
         self.offset_finder = offset_finder
@@ -185,6 +191,7 @@ class InstantFrameRenderer:
         if captions and captions.source not in ("auto", "narration"):
             stamps.append(file_stamp(project.resolve(captions.source)))  # o arquivo de legendas
         theme = self._theme_signature(project)
+        persona_looks = self._persona_looks(project)
         return cache_key(
             INSTANT_FRAME_VERSION,
             # os marcadores não mudam a imagem: de fora do hash, marcar um instante não refaz o quadro
@@ -192,7 +199,19 @@ class InstantFrameRenderer:
             frame_index(t, self._fps(project)),
             stamps,
             theme,
+            persona_looks,
         )
+
+    def _persona_looks(self, project: Project) -> list:
+        """A aparência de cada persona do projeto: editar a persona no cadastro refaz o quadro."""
+        looks = []
+        for item in [*project.timeline, *project.overlays]:
+            if isinstance(item, PersonaSegment | PersonaOverlay):
+                try:
+                    looks.append([item.persona, self.personas.get(item.persona).fingerprint()])
+                except PersonaNotFoundError:
+                    looks.append([item.persona, None])
+        return looks
 
     @staticmethod
     def _html_stamps(project: Project) -> list:
@@ -297,6 +316,13 @@ class InstantFrameRenderer:
         if window is None:
             raise ValueError(f"nenhum trecho aparece em {at:.2f} s")
 
+        ctx.personas = PersonaStage(
+            self.personas,
+            instants={
+                i: min(max(at - layout.spans[i][0], 0.0), layout.durations[i])
+                for i in range(window.first, window.last + 1)
+            },
+        )
         prepared = self._prepare(ctx, layout, window.first, window.last)
         self.log(f"quadro de {at:.2f} s: trechos {window.first + 1} a {window.last + 1}")
         # a voz já com os efeitos: é o que o render transcreve, e a chave das legendas em cache depende do arquivo
@@ -321,6 +347,7 @@ class InstantFrameRenderer:
             text.behind_doc.write(job_dir / "overlay_behind.ass")
 
         html = self._html_stills(ctx, text.html_overlays, index, notes)
+        html += self._persona_stills(ctx, index, notes)
         people = self._person_layers(
             ctx, prepared, transitions, text.behind_intervals, index, window.first_frame
         )
@@ -376,6 +403,23 @@ class InstantFrameRenderer:
             return []
         stills = (self.html_layers.still(ctx, item, index) for item in active)
         return [layer for layer in stills if layer is not None]
+
+    @staticmethod
+    def _persona_stills(ctx: RenderContext, index: int, notes: list[str]) -> list[ResolvedHtmlLayer]:
+        """A persona sobreposta neste quadro, desenhada só nele (sem o fundo recortado, que é do render)."""
+        stage = ctx.personas
+        layers = []
+        for overlay in ctx.project.overlays:
+            if not isinstance(overlay, PersonaOverlay):
+                continue
+            try:
+                layer = stage.overlay_still(ctx, overlay, index)
+            except (PersonaEngineError, BrowserUnavailable) as exc:
+                notes.append(f"A persona sobreposta não aparece neste quadro: {exc}")
+                continue
+            if layer is not None:
+                layers.append(layer)
+        return layers
 
     def _person_layers(
         self,

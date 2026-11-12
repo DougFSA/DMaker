@@ -20,6 +20,7 @@
     view        "full" (meio corpo, o gesto de mão aparece) ou "corner" (cabeça e ombros)
     fps         quadros por segundo do clipe
     visemes     [[início, fim, visema]] (os 15 visemas Oculus, `sil` incluído)
+    outfit      cor da roupa em #RRGGBB (a textura do modelo traz um logotipo de terceiro e não pode aparecer)
     expressions [[instante, nome]] em ordem; a primeira é a inicial
     gestures    [[instante, nome]] em ordem
 -->
@@ -81,7 +82,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.35), key, fill, rim);
 
 // ---------- o personagem ----------
 // Pico de cada visema (1 fecha os lábios por inteiro; as vogais não precisam de tudo para a boca parecer natural).
-const VISEME_PEAK = { PP: 1.0, FF: 0.9, TH: 0.8, DD: 0.75, kk: 0.7, CH: 0.85, SS: 0.7, nn: 0.7, RR: 0.75, aa: 0.95, E: 0.85, I: 0.8, O: 0.95, U: 0.95 };
+const VISEME_PEAK = { PP: 1.0, FF: 0.9, TH: 0.5, DD: 0.5, kk: 0.7, CH: 0.85, SS: 0.7, nn: 0.5, RR: 0.75, aa: 0.95, E: 0.85, I: 0.8, O: 0.95, U: 0.95 };
 const ATTACK_S = 0.05, RELEASE_S = 0.07; // suavização entre visemas (a boca não pula de uma forma para a outra)
 const GESTURE_HOLD_S = 2.2;
 const NOD_S = 0.9, SHAKE_S = 1.0;
@@ -95,6 +96,9 @@ const EXPRESSION_FACE = {
 };
 const TH_MOODS = { neutral: "neutral", happy: "happy", sad: "sad", surprised: "neutral" };
 const TH_GESTURES = new Set(["handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug"]);
+// Nomes que o motor 2D também aceita: uma spec feita para ele continua valendo ao trocar a persona para 3D.
+const GESTURE_ALIAS = { wave: "handup" }; // acenar é a mão levantada
+const TILT_S = 1.2;
 
 let head = null;
 let state = null;
@@ -134,7 +138,29 @@ async function loadHead() {
   head.stateName = "speaking";
   await head.showAvatar({ url: D.model, body: "F", avatarMood: "neutral", lipsyncLang: "pt_br" });
   state = makeState();
+  tidyAvatar();
   frameCamera();
+}
+
+// ---------- o modelo ----------
+// A roupa do mpfb traz um logotipo de terceiro estampado e a língua dele passa dos dentes em vários visemas: a roupa
+// vira uma cor lisa (a da aparência) e a língua some, que a boca fechada por trás dos dentes não faz falta num vídeo.
+function tidyAvatar() {
+  head.armature.traverse((node) => {
+    if (!node.isMesh) return;
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    for (const material of materials) {
+      const name = (material.name || "") + " " + (node.name || "");
+      if (/casualsuit/i.test(name)) {
+        material.map = null;
+        material.color.set(D.outfit || "#3A4A5E");
+        material.needsUpdate = true;
+      }
+    }
+    if (/tongue/i.test((node.name || "") + " " + (materials[0].name || ""))) node.visible = false;
+  });
+  const tongue = head.mtAvatar.tongueOut;
+  if (tongue) { tongue.fixed = 0; tongue.needsUpdate = true; }
 }
 
 // ---------- câmera ----------
@@ -146,7 +172,9 @@ function frameCamera() {
   headBone.getWorldPosition(headPos);
   const view = D.view === "corner"
     ? { span: 0.6, centerBelowHead: 0.07, width: 0.5, shiftX: 0 }
-    : { span: 1.25, centerBelowHead: 0.4, width: 0.6, shiftX: 0.15 }; // o gesto da mão esquerda sobe à direita do quadro
+    // folga de uns 7% da altura sobre o topo da cabeça (a cabeça sobe uns 0,23 m do osso `Head`), e o meio corpo
+    // abaixo dela, onde a mão do gesto aparece; o gesto da mão esquerda sobe à direita do quadro
+    : { span: 1.35, centerBelowHead: 0.35, width: 0.6, shiftX: 0.15 };
   const fov = camera.fov * Math.PI / 180;
   const needVertical = view.span / 2 / Math.tan(fov / 2);
   const needHorizontal = view.width / 2 / (Math.tan(fov / 2) * camera.aspect);
@@ -181,11 +209,12 @@ function applyMarks(index, t) {
   while (state.gestureIndex < gests.length && gests[state.gestureIndex][0] <= t + eps) {
     const name = gests[state.gestureIndex][1];
     state.gestureIndex += 1;
-    if (TH_GESTURES.has(name)) {
+    const handGesture = GESTURE_ALIAS[name] || name;
+    if (TH_GESTURES.has(handGesture)) {
       if (state.gestureEnd >= 0) head.stopGesture(600);
-      head.playGesture(name, 0, false, 600); // dur 0: quem solta o gesto é esta página, não um setTimeout
+      head.playGesture(handGesture, 0, false, 600); // dur 0: quem solta o gesto é esta página, não um setTimeout
       state.gestureEnd = t + GESTURE_HOLD_S;
-    } else if (name === "nod" || name === "shake") {
+    } else if (name === "nod" || name === "shake" || name === "tilt") {
       state.headMotion = { kind: name, start: t };
     }
   }
@@ -235,17 +264,19 @@ function driveHeadMotion(t) {
     mt.needsUpdate = true;
   };
   if (!motion) return;
-  const len = motion.kind === "nod" ? NOD_S : SHAKE_S;
+  const len = motion.kind === "nod" ? NOD_S : motion.kind === "tilt" ? TILT_S : SHAKE_S;
   const p = (t - motion.start) / len;
   if (p >= 1) {
     roll("headRotateX", 0);
     roll("headRotateY", 0);
+    roll("headRotateZ", 0);
     state.headMotion = null;
     return;
   }
   const envelope = Math.sin(Math.PI * p);
   const wave = Math.sin(2 * Math.PI * 2 * p);
   if (motion.kind === "nod") roll("headRotateX", 0.22 * wave * envelope);
+  else if (motion.kind === "tilt") roll("headRotateZ", 0.25 * envelope); // inclina e volta, sem balançar
   else roll("headRotateY", 0.3 * wave * envelope);
 }
 

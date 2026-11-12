@@ -79,22 +79,42 @@ def test_the_3d_engine_is_registered_and_declares_what_it_does():
     assert engine.kind == "3d" and engine.produces_alpha is True
     assert {"neutral", "happy", "sad", "surprised"} == set(engine.expressions)
     # os gestos do TalkingHead que não dependem de arquivo Mixamo, mais a cabeça
-    assert {"nod", "shake", "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug"} == set(
-        engine.gestures
-    )
+    assert {
+        "nod",
+        "shake",
+        "tilt",
+        "wave",
+        "handup",
+        "index",
+        "ok",
+        "thumbup",
+        "thumbdown",
+        "side",
+        "shrug",
+    } == set(engine.gestures)
+
+
+def test_the_gestures_of_the_2d_engine_are_all_valid_in_3d():
+    """Uma spec feita para a persona 2D não pode quebrar ao trocar a persona por uma 3D."""
+    assert set(engine_for("2d").gestures) <= set(engine_for("3d").gestures)
 
 
 def test_marks_the_3d_engine_does_not_know_are_refused_before_rendering():
     engine = engine_for("3d")
-    marks = [PersonaMark(at=1, gesture="handup"), PersonaMark(at=2, gesture="wave")]
+    marks = [PersonaMark(at=1, gesture="handup"), PersonaMark(at=2, gesture="cartwheel")]
     problems = mark_problems(marks, "neutral", engine.expressions, engine.gestures, 5.0, "timeline[0]", "3d")
-    assert len(problems) == 1 and "'wave'" in problems[0] and "handup" in problems[0]
+    assert len(problems) == 1 and "'cartwheel'" in problems[0] and "handup" in problems[0]
 
 
 def test_appearance_defaults_to_the_builtin_model_and_refuses_what_is_not_a_model(page_dir):
     engine = Engine3D(FakeHtml(), page_dir)
-    assert engine.normalize_appearance({}) == {"model": "mpfb"}
-    assert engine.normalize_appearance({"model": "meu-personagem.glb"}) == {"model": "meu-personagem.glb"}
+    assert engine.normalize_appearance({}) == {"model": "mpfb", "outfit_color": "#3A4A5E"}
+    assert engine.normalize_appearance({"model": "meu-personagem.glb", "outfit_color": "#aa3322"}) == {
+        "model": "meu-personagem.glb",
+        "outfit_color": "#AA3322",
+    }
+    with pytest.raises(PersonaEngineError):
+        engine.normalize_appearance({"outfit_color": "vermelho"})
     for wrong in ("../fora.glb", "pasta/avatar.glb", "avatar.fbx", "C:/x/avatar.glb"):
         with pytest.raises(PersonaEngineError, match="não é um modelo"):
             engine.normalize_appearance({"model": wrong})
@@ -193,3 +213,19 @@ def test_a_big_clip_is_drawn_smaller_and_scaled_up_but_a_small_one_is_drawn_as_i
     assert draw_scale((1080, 1920)) == MAX_DRAWN_SIDE / 1920 == 0.5
     assert draw_scale((540, 960)) == 1.0 and draw_scale((270, 480)) == 1.0
     assert draw_scale((1080, 1440)) * 1440 == MAX_DRAWN_SIDE
+
+
+def test_the_doctor_line_says_the_3d_model_is_optional_and_how_to_download_it(tmp_path, monkeypatch):
+    from dmaker import config
+    from dmaker.persona.engine3d import builtin_model_path, doctor_line
+
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    missing = doctor_line()
+    assert (
+        "opcional" in missing
+        and "não baixado" in missing
+        and "dmaker models download persona3d-mpfb" in missing
+    )
+    builtin_model_path().parent.mkdir(parents=True)
+    builtin_model_path().write_bytes(b"glb")
+    assert "baixado" in doctor_line() and "não baixado" not in doctor_line()
