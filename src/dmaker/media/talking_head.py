@@ -183,10 +183,12 @@ class DittoTalkingHead:
 
     def has_gpu(self) -> bool:
         try:
-            import openvino as ov
+            import openvino  # noqa: F401 - só para saber se o extra está instalado
         except ImportError:
             return False
-        return "GPU" in ov.Core().available_devices
+        from .ditto_fast import detect_accelerator
+
+        return detect_accelerator().device != "CPU"
 
     def frames(
         self, request: TalkingHeadRequest, log: Callable[[str], None], warn: Callable[[str], None]

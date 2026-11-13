@@ -25,6 +25,11 @@ FACE_CENTER = {"full": 0.35, "corner": 0.45}
 # sai borrado: o render avisa.
 MIN_CROP_RATIO = 0.5
 DEFAULT_FRAMING = "full"
+# O BlazeFace vê a foto achatada num quadrado de 128 px e devolve a caixa (xmin, ymin, xmax, ymax) e os seis pontos
+# do rosto (x, y) nessa escala, seguidos da nota; estes são os índices dos x e dos y
+BLAZE_FACE_INPUT = 128.0
+DETECTION_X = [0, 2, 4, 6, 8, 10, 12, 14]
+DETECTION_Y = [1, 3, 5, 7, 9, 11, 13, 15]
 
 
 @dataclass(frozen=True)
@@ -143,13 +148,25 @@ def blaze_face_finder(model_path: Path) -> FaceFinder:
         detections = detector(image)
         if len(detections) == 0:
             return None
-        top, left, bottom, right = detections[0][
-            :4
-        ]  # y e x mínimos e máximos, em unidades da imagem de 128 px
-        scale_x, scale_y = width / 128.0, height / 128.0
-        return Box(left * scale_x, top * scale_y, (right - left) * scale_x, (bottom - top) * scale_y)
+        return detection_box(detections[0], width, height)
 
     return find
+
+
+def detection_to_image(detection: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Leva uma detecção do BlazeFace (xmin, ymin, xmax, ymax e os seis pontos x, y, na escala da entrada de 128 px)
+    para os pixels da imagem. Os x crescem pela largura e os y pela altura: trocados, uma foto vertical manda o
+    recorte do rosto para o canto de cima à direita, e o detector seguinte não acha rosto nenhum."""
+    scaled = np.array(detection, dtype=np.float64, copy=True)
+    scaled[DETECTION_X] *= width / BLAZE_FACE_INPUT
+    scaled[DETECTION_Y] *= height / BLAZE_FACE_INPUT
+    return scaled
+
+
+def detection_box(detection: np.ndarray, width: int, height: int) -> Box:
+    """A caixa do rosto em pixels a partir de uma detecção do BlazeFace."""
+    left, top, right, bottom = detection_to_image(detection, width, height)[:4]
+    return Box(left, top, right - left, bottom - top)
 
 
 def frame_image(image: np.ndarray, crop: Box, out_size: tuple[int, int]) -> np.ndarray:

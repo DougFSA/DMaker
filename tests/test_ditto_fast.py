@@ -9,17 +9,36 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dmaker.media.ditto_fast import Accelerator, choose_accelerator, compile_options
+from dmaker.media.ditto_fast import Accelerator, OpenVinoDevice, choose_accelerator, compile_options
 
 pytest.importorskip("cv2")  # o ditto_sdk importa o código vendorizado, que usa OpenCV e onnxruntime
 sdk = pytest.importorskip("dmaker.media.ditto_sdk")
 
+CPU = OpenVinoDevice("CPU")
+IRIS = OpenVinoDevice("GPU", "INTEGRATED", "Intel(R) Iris(R) Xe Graphics (iGPU)")
+
 
 def test_a_gpu_runs_in_f16_and_without_one_the_cpu_runs_in_f32():
-    assert choose_accelerator(["CPU", "GPU"]) == Accelerator("GPU", "f16")
-    assert choose_accelerator(["CPU"]) == Accelerator("CPU", "f32")
-    assert "GPU integrada (f16)" == choose_accelerator(["GPU"]).describe
+    assert choose_accelerator([CPU, IRIS]) == Accelerator("GPU", "f16")
+    assert choose_accelerator([CPU]) == Accelerator("CPU", "f32")
+    assert "GPU integrada (f16)" == choose_accelerator([IRIS]).describe
     assert choose_accelerator([]).describe == "CPU (f32)"
+
+
+def test_with_an_nvidia_card_beside_it_the_integrated_gpu_is_chosen_by_its_numbered_name():
+    # com duas placas o OpenVINO numera as GPUs, e a NVIDIA também aparece na lista
+    uhd = OpenVinoDevice("GPU.0", "INTEGRATED", "Intel(R) UHD Graphics 620 (iGPU)")
+    nvidia = OpenVinoDevice("GPU.1", "DISCRETE", "NVIDIA GeForce MX130 (dGPU)")
+    assert choose_accelerator([CPU, uhd, nvidia]) == Accelerator("GPU.0", "f16")
+    assert choose_accelerator([CPU, nvidia, uhd]).device == "GPU.0"
+    assert choose_accelerator([CPU, uhd, nvidia]).describe == "GPU integrada (f16)"
+
+
+def test_an_nvidia_card_alone_is_not_an_openvino_accelerator_but_an_intel_arc_is():
+    nvidia = OpenVinoDevice("GPU", "DISCRETE", "NVIDIA GeForce MX130 (dGPU)")
+    arc = OpenVinoDevice("GPU", "DISCRETE", "Intel(R) Arc(TM) A380 Graphics (dGPU)")
+    assert choose_accelerator([CPU, nvidia]) == Accelerator("CPU", "f32")
+    assert choose_accelerator([CPU, arc]) == Accelerator("GPU", "f16")
 
 
 def test_the_openvino_options_pin_latency_the_cache_folder_and_the_precision(tmp_path):
