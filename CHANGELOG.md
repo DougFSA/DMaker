@@ -45,6 +45,8 @@ das versões do Jira, projeto DMK, que também dá o nome da tag `vX`).
 
 - **DMK-76**: o `dmaker release publish`, rodado de novo depois de um envio interrompido, subia os arquivos que faltavam mas deixava a release como rascunho no GitHub, invisível na aba Releases (o `gh release create` cria o rascunho, sobe os arquivos e só então publica). Agora a retomada publica o rascunho depois de conferir que todos os arquivos estão lá, e o comando avisa quando fez isso; uma release já pública não é tocada.
 
+- **DMK-77**: legendas corrigidas à mão (no `captions.auto.json`, por `fix_captions` ou pela interface) se perdiam ao acrescentar um cartão na linha do tempo. A chave da transcrição em cache incluía todos os trechos, cartões inclusive, então qualquer mudança refazia a transcrição e gravava por cima. Agora a chave (v3) depende só da fala: os clipes, a fonte de cada um e o instante em que cada um toca no vídeo final; cartões e imagens só contam pelo deslocamento que causam. Se só mudou o lugar da fala (um cartão no início), as legendas guardadas andam junto com cada clipe, sem transcrever. Se a fala mudou de verdade e as legendas tinham sido editadas (o arquivo guarda a impressão digital do que o Whisper devolveu), a versão editada fica em `captions.auto.editado-<id>.json` e o render avisa. O arquivo gravado no formato anterior continua valendo, sem transcrever de novo.
+
 ### Pré-requisitos na máquina
 
 - **DMK-73**: para a persona **3d**, `dmaker models download persona3d-mpfb` (36,8 MB, CC0); a persona 2d não baixa nada. As duas desenham no Chromium do `dmaker setup --html`. O `dmaker doctor` mostra o modelo como opcional.

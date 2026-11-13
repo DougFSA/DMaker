@@ -672,8 +672,11 @@ preset de áudio é o arquivo (`.mp3`, `.wav`...), sem miniatura; o `qa_report` 
 `mode=compact`) devolve um resumo e só as cues suspeitas (baixa confiança, termo da marca ouvido errado,
 cue longa/curta, substituição pendente); `mode=full` devolve tudo, com tempo por palavra, só quando
 precisar inspecionar de verdade. `fix_captions(name, {"errado": "certo"})` corrige o texto de todas as
-cues (o próximo render usa o corrigido); o cache de transcrição é reaproveitado enquanto as fontes não
-mudarem, `force=true` refaz tudo.
+cues (o próximo render usa o corrigido). A transcrição, com as correções (de `fix_captions`, da interface ou à mão no
+JSON), é reaproveitada enquanto a fala não mudar: mexer em cartões, imagens, títulos ou sobreposições não refaz nada, e
+um cartão que empurra a fala (no início, por exemplo) desloca as legendas junto. Se a fala mudar (outro corte, outra
+fonte, outro modelo), a transcrição é refeita e a versão editada fica em `captions.auto.editado-<id>.json`, com aviso;
+`force=true` refaz tudo.
 
 ## Cortar pausas, vícios e repetições de uma gravação falada (`autocut`)
 

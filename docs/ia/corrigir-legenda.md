@@ -33,7 +33,7 @@ Este comando só transcreve e grava `.srt` e `.json`. A troca de palavras em um 
 
 ## Como conferir
 
-Gere a prévia e procure a palavra: o próximo render usa o texto corrigido, sem transcrever de novo (a transcrição fica em cache enquanto as fontes não mudam).
+Gere a prévia e procure a palavra: o próximo render usa o texto corrigido, sem transcrever de novo. A transcrição corrigida vale enquanto a fala não mudar: acrescentar ou trocar cartões, imagens e textos não a refaz, e um cartão que empurra a fala (no início do vídeo, por exemplo) leva as legendas junto, no tempo certo. Se a fala mudar (outro corte do clipe, outra fonte, outro modelo), a transcrição é refeita e a versão corrigida fica guardada em `captions.auto.editado-<id>.json`, com um aviso no render, para reaplicar as correções.
 
 ## Erros comuns
 
