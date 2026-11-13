@@ -29,8 +29,9 @@ conversa com um modelo local, sem internet (`dmaker://guide`).
    `output=true` a saída renderizada). Só chame `contact_sheet`/`frames` (gastam tokens de imagem) se o
    relatório apontar algo ou o usuário pedir.
 7. **Corrigir e repetir**: `edit_project` para ajustes pontuais (cortar, remover, mover, aparar, mudar um
-   campo; `timeline_view` mostra os índices) e `fix_captions` para palavras erradas nas legendas. Volte ao
-   passo 5.
+   campo; `timeline_view` mostra os índices) e `fix_captions` para palavras erradas nas legendas (a correção
+   sobrevive a mudanças em cartões, imagens e textos; se a fala mudar, o render refaz a transcrição, guarda a
+   versão corrigida em `captions.auto.editado-<id>.json` e avisa). Volte ao passo 5.
 8. **Render final** (`render_project`) e, se pedido, **`export_project`** para outros formatos. Entregue o
    caminho do mp4.
 

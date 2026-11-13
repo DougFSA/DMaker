@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,19 +11,23 @@ from ..filtergraph.audio import audio_graph
 from ..filtergraph.common import Inputs
 from ..filtergraph.timeline import timeline_graph
 from ..media.ffmpeg import FFmpegCommand
-from ..text.captions import Cue, apply_replacements, from_json, load_captions, regroup, shift, to_json, to_srt
+from ..text.captions import Cue, apply_replacements, load_captions, regroup, shift, to_srt
 from ..text.transcribe import Transcriber, WhisperTranscriber
 from .context import RenderContext
 from .segments import PreparedSegment, cache_key
 from .sources import Source
+from .transcript_cache import (
+    TranscriptKeys,
+    TranscriptStore,
+    speech_layout,
+    transcript_keys,
+    transcript_record,
+    was_edited,
+)
 from .voicefiles import PreparedVoiceFile
 from .voiceover import PreparedVoiceover, narration_cues
 
 TranscriberFactory = Callable[[Captions], Transcriber]
-
-CAPTIONS_CACHE_VERSION = (
-    "v2"  # muda quando o formato salvo em captions.auto.json muda (probability por palavra)
-)
 
 
 def default_transcriber_factory(captions: Captions) -> Transcriber:
@@ -156,22 +159,64 @@ class CaptionPipeline:
         )
 
     def _from_cached_transcription(self, inputs: CaptionInputs) -> tuple[list[Cue] | None, Path | None]:
-        """A transcrição que o render anterior deixou em `captions.auto.json`, se ela ainda vale para o projeto."""
+        """A transcrição que o render anterior deixou em `captions.auto.json`, se ela ainda vale para o projeto
+        (deslocada junto com os clipes, se só mudou o lugar deles). Só lê: quem regrava é o render."""
         ctx = inputs.ctx
         if ctx.project.audio.mute_clips and not inputs.voice_files:
             return None, None
-        key = self._audio_key(ctx, inputs.sources, inputs.vocabulary, inputs.voice_files)
-        store = (ctx.project.base_dir or ctx.job_dir) / "captions.auto.json"
-        cached = self._load_cached(store, key)
-        return (cached, store) if cached is not None else (None, None)
+        keys = self._transcript_keys(ctx, inputs.sources, inputs.vocabulary, inputs.voice_files)
+        store = self._store(ctx)
+        found = store.lookup(keys)
+        return (found[0].cues, store.path) if found is not None else (None, None)
 
-    def _audio_key(
+    @staticmethod
+    def _store(ctx: RenderContext) -> TranscriptStore:
+        return TranscriptStore((ctx.project.base_dir or ctx.job_dir) / "captions.auto.json")
+
+    def _transcript_keys(
         self,
         ctx: RenderContext,
         sources: list[Source],
         vocabulary: list[str],
         voice_files: Sequence[PreparedVoiceFile] = (),
+    ) -> TranscriptKeys:
+        """A chave depende só do que muda a fala ouvida pelo modelo (ver `transcript_cache`), mais o modelo e o
+        vocabulário que ele recebe."""
+        captions = ctx.project.captions
+        assert captions is not None
+        settings: list[object] = [
+            ctx.project.audio.voice_gain,
+            ctx.project.audio.mute_clips,
+            captions.language,
+            captions.model,
+            vocabulary,
+        ]
+        if voice_files:
+            settings.append(self._voice_file_parts(voice_files))
+        return transcript_keys(
+            speech_layout(ctx.project.timeline, sources),
+            settings,
+            movable=not voice_files,  # a voz de `audio.voiceover` toca em instante fixo, não anda com os clipes
+            legacy=self._legacy_key(ctx, sources, vocabulary, voice_files),
+        )
+
+    @staticmethod
+    def _voice_file_parts(voice_files: Sequence[PreparedVoiceFile]) -> list[tuple]:
+        return [
+            (str(item.path), item.path.stat().st_mtime_ns, item.path.stat().st_size)
+            + (item.start, item.offset, item.duration, item.volume)
+            for item in voice_files
+        ]
+
+    def _legacy_key(
+        self,
+        ctx: RenderContext,
+        sources: list[Source],
+        vocabulary: list[str],
+        voice_files: Sequence[PreparedVoiceFile],
     ) -> str:
+        """A chave do formato v2 (a linha do tempo inteira), só para aceitar sem transcrever de novo o arquivo
+        gravado antes da v3, com as correções que ele tiver. O render seguinte já o regrava no formato novo."""
         captions = ctx.project.captions
         assert captions is not None
         parts = [
@@ -179,21 +224,15 @@ class CaptionPipeline:
             for seg, src in zip(ctx.project.timeline, sources, strict=True)
         ]
         key_parts: list[object] = [
-            CAPTIONS_CACHE_VERSION,
+            "v2",
             parts,
             ctx.project.audio.voice_gain,
             captions.language,
             captions.model,
             vocabulary,
         ]
-        if voice_files:  # só entra na chave quando há arquivos: sem eles a chave é a de sempre
-            key_parts.append(
-                [
-                    (str(item.path), item.path.stat().st_mtime_ns, item.path.stat().st_size)
-                    + (item.start, item.offset, item.duration, item.volume)
-                    for item in voice_files
-                ]
-            )
+        if voice_files:
+            key_parts.append(self._voice_file_parts(voice_files))
         return cache_key(*key_parts)
 
     def _auto(
@@ -207,12 +246,24 @@ class CaptionPipeline:
     ) -> tuple[list[Cue] | None, Path | None]:
         captions = ctx.project.captions
         assert captions is not None
-        key = self._audio_key(ctx, sources, vocabulary, voice_files)
-        base = ctx.project.base_dir or ctx.job_dir
-        store = base / "captions.auto.json"
-        cached = self._load_cached(store, key) if not ctx.options.force else None
-        if cached is not None:
-            return cached, store
+        keys = self._transcript_keys(ctx, sources, vocabulary, voice_files)
+        store = self._store(ctx)
+        found = store.lookup(keys) if not ctx.options.force else None
+        if found is not None:
+            cached, data = found
+            if cached.rewrite:  # deslocadas ou de antes da v3: regrava com a chave atual, sem perder a edição
+                ctx.log(
+                    "legendas: a fala só mudou de lugar na linha do tempo; as legendas guardadas andaram junto"
+                )
+                record = transcript_record(
+                    cached.cues,
+                    data.get("language", captions.language),
+                    keys,
+                    data.get("meta"),
+                    edited=was_edited(data),
+                )
+                store.save(record, cached.cues)
+            return cached.cues, store.path
 
         wav = self._voice_wav(ctx, prepared, transitions, voice_files)
         prompt = (", ".join(vocabulary) + ".") if vocabulary else None
@@ -221,24 +272,17 @@ class CaptionPipeline:
         except RuntimeError as exc:
             ctx.warn(f"Legendas automáticas puladas: {exc}")
             return None, None
-        payload = json.loads(to_json(transcript.cues, captions.language))
-        payload.update({"hash": key, "meta": transcript.meta})
-        store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-        (base / "captions.auto.srt").write_text(to_srt(transcript.cues), encoding="utf-8")
-        return transcript.cues, store
-
-    @staticmethod
-    def _load_cached(store: Path, key: str) -> list[Cue] | None:
-        if not store.exists():
-            return None
-        try:
-            text = store.read_text(encoding="utf-8")
-            if json.loads(text).get("hash") != key:
-                return None
-            return from_json(text)
-        except (json.JSONDecodeError, KeyError, ValueError):
-            return None
+        backup = store.keep_edited()
+        if backup is not None:
+            ctx.warn(
+                f"A fala da linha do tempo mudou e a transcrição foi refeita; as legendas editadas que estavam em "
+                f"{store.path.name} ficaram guardadas em {backup.name}. Reaplique as correções com fix_captions."
+            )
+        store.save(
+            transcript_record(transcript.cues, captions.language, keys, transcript.meta, edited=False),
+            transcript.cues,
+        )
+        return transcript.cues, store.path
 
     @staticmethod
     def _voice_wav(

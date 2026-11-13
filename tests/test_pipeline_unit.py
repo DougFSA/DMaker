@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from dmaker.domain.spec import AudioTrack, Project, SourceRef, TrackState
+from dmaker.domain.spec import AudioTrack, CardSegment, Project, SourceRef, TrackState, Transition
 from dmaker.media.ffmpeg import FFmpegCommand, RecordingRunner
 from dmaker.media.probe import MediaInfo
 from dmaker.pipeline import RenderOptions, RenderPipeline
@@ -184,8 +184,102 @@ def test_second_run_reuses_cache(workspace):
     assert len(again.commands) == 3 and again.frames_consumed == 0
     assert FakeTranscriber.calls == 1
     forced = RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON)
-    _pipeline(workspace, forced, force=True).run()
+    result = _pipeline(workspace, forced, force=True).run()
     assert len(forced.commands) == 7 and FakeTranscriber.calls == 2
+    # legendas sem edição: transcrever de novo não guarda cópia nem avisa
+    assert not list(workspace["dir"].glob("captions.auto.editado-*.json"))
+    assert not any("editadas" in w for w in result.warnings)
+
+
+def _render(workspace: dict, **opts):
+    return _pipeline(
+        workspace, RecordingRunner(on_run=touch_output, capture_stderr=LOUDNORM_JSON), **opts
+    ).run()
+
+
+def _edit_captions_by_hand(store: Path) -> dict:
+    """O que se faz à mão no captions.auto.json: troca uma palavra e emenda o intervalo entre duas."""
+    data = json.loads(store.read_text(encoding="utf-8"))
+    cue = data["cues"][0]
+    cue["words"][0]["text"] = "basta"
+    cue["words"][0]["end"] = cue["words"][1]["start"] = 0.55
+    cue["text"] = " ".join(w["text"] for w in cue["words"])
+    store.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
+
+
+def _with_timeline(workspace: dict, timeline: list) -> None:
+    project = workspace["project"].model_copy(update={"timeline": timeline})
+    project.base_dir = workspace["dir"]
+    workspace["project"] = project
+
+
+def test_card_added_at_the_end_keeps_hand_edited_captions(workspace):
+    """Um cartão no fim não muda a fala nem o lugar do clipe: o render seguinte não chama o Whisper e usa o texto
+    editado à mão (o caso que perdia as correções: a chave incluía todos os trechos da linha do tempo)."""
+    FakeTranscriber.calls = 0
+    _render(workspace)
+    store = workspace["dir"] / "captions.auto.json"
+    edited = _edit_captions_by_hand(store)
+    closing = CardSegment(
+        title="Até a próxima", duration=1.5, transition=Transition(type="fade", duration=0.4)
+    )
+    _with_timeline(workspace, [*workspace["project"].timeline, closing])
+
+    result = _render(workspace)
+
+    assert FakeTranscriber.calls == 1
+    assert json.loads(store.read_text(encoding="utf-8"))["cues"] == edited["cues"]
+    ass = (result.job_dir / "overlay.ass").read_text(encoding="utf-8-sig")
+    assert "BASTA" in ass.upper() and "CHEGA" not in ass.upper()
+
+
+def test_card_added_at_the_start_moves_captions_with_the_speech(workspace):
+    """Um cartão no início empurra a fala: as legendas guardadas (com a edição) andam junto com o clipe, em vez
+    de ficarem nos tempos antigos ou de a transcrição ser refeita por cima da edição."""
+    FakeTranscriber.calls = 0
+    _render(workspace)
+    store = workspace["dir"] / "captions.auto.json"
+    edited = _edit_captions_by_hand(store)
+    opening = CardSegment(title="Novo gancho", duration=2.0)
+    first, *rest = workspace["project"].timeline
+    _with_timeline(
+        workspace, [opening, first.model_copy(update={"transition": Transition(type="cut")}), *rest]
+    )
+
+    _render(workspace)
+
+    assert FakeTranscriber.calls == 1
+    data = json.loads(store.read_text(encoding="utf-8"))
+    moved, before = data["cues"][0], edited["cues"][0]
+    assert moved["text"] == before["text"] == "basta de medriquer"
+    assert moved["start"] == pytest.approx(before["start"] + 2.0)  # o cartão de 2 s empurrou a fala 2 s
+    assert [w["start"] for w in moved["words"]] == pytest.approx([w["start"] + 2.0 for w in before["words"]])
+    assert "cues_hash" not in data  # continua contando como editada depois de deslocada
+    _render(workspace)  # a chave regravada vale: o render seguinte não mexe em nada
+    assert (
+        FakeTranscriber.calls == 1 and json.loads(store.read_text(encoding="utf-8"))["cues"] == data["cues"]
+    )
+
+
+def test_changed_speech_transcribes_again_and_keeps_the_edited_copy(workspace):
+    """Outro corte do clipe muda a fala: a transcrição é refeita, mas a versão editada fica guardada ao lado e o
+    render avisa, em vez de sobrescrever calado."""
+    FakeTranscriber.calls = 0
+    _render(workspace)
+    store = workspace["dir"] / "captions.auto.json"
+    _edit_captions_by_hand(store)
+    timeline = list(workspace["project"].timeline)
+    timeline[1] = timeline[1].model_copy(update={"end": 4})
+    _with_timeline(workspace, timeline)
+
+    result = _render(workspace)
+
+    assert FakeTranscriber.calls == 2
+    backups = list(workspace["dir"].glob("captions.auto.editado-*.json"))
+    assert len(backups) == 1 and "basta" in backups[0].read_text(encoding="utf-8")
+    assert any(backups[0].name in w and "fix_captions" in w for w in result.warnings)
+    assert json.loads(store.read_text(encoding="utf-8"))["cues"][0]["text"] == "chega de medriquer"
 
 
 def test_silent_audio_skips_loudnorm(workspace):

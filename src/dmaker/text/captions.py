@@ -295,6 +295,25 @@ def shift(cues: list[Cue], offset: float) -> list[Cue]:
     return out
 
 
+def follow_moves(cues: list[Cue], moves: Sequence[tuple[float, float, float]]) -> list[Cue]:
+    """Legendas de trechos que mudaram de lugar no vídeo, sem tocar no texto: cada cue anda inteira junto com o
+    trecho em que o meio dela cai. `moves` traz, por trecho, o intervalo antigo (início, fim) e quanto ele andou;
+    a cue que não cai em nenhum anda com o trecho mais próximo, para nunca separar a legenda da fala."""
+    if not moves:
+        return cues
+
+    def distance(middle: float, move: tuple[float, float, float]) -> float:
+        start, end, _ = move
+        return max(start - middle, middle - end, 0.0)
+
+    out: list[Cue] = []
+    for cue in cues:
+        middle = (cue.start + cue.end) / 2
+        delta = min(moves, key=lambda move: distance(middle, move))[2]
+        out.extend(shift([cue], delta) if delta else [cue])
+    return out
+
+
 # ---------- cues suspeitas (para revisão sem reler tudo) ----------
 
 
