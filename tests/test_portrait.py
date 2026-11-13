@@ -118,3 +118,29 @@ def test_a_photo_in_a_folder_with_accents_is_read(tmp_path, cv2):
     folder.mkdir()
     photo = make_image(folder / "retrato.png", (700, 800), "PNG")
     assert portrait.read_photo(photo).shape == (800, 700, 3)
+
+
+def _detection(xmin, ymin, xmax, ymax, eyes=((40.0, 50.0), (80.0, 50.0))):
+    """Uma detecção do BlazeFace na escala de 128 px: caixa, seis pontos (os dois olhos e quatro zerados) e nota."""
+    points = [*eyes[0], *eyes[1], *[0.0] * 8]
+    return np.array([xmin, ymin, xmax, ymax, *points, 0.9])
+
+
+def test_the_detection_scales_x_by_the_width_and_y_by_the_height_on_a_vertical_photo():
+    # rosto no meio de uma foto 9:16: na escala de 128 a caixa é de 48 a 80 nos dois eixos
+    scaled = portrait.detection_to_image(_detection(48, 40, 80, 72), 900, 1600)
+    assert scaled[:4] == pytest.approx([48 * 900 / 128, 40 * 1600 / 128, 80 * 900 / 128, 72 * 1600 / 128])
+    assert scaled[4:8] == pytest.approx([40 * 900 / 128, 50 * 1600 / 128, 80 * 900 / 128, 50 * 1600 / 128])
+    assert scaled[16] == pytest.approx(0.9)  # a nota não é coordenada
+
+
+def test_the_face_box_of_a_vertical_photo_stays_on_the_face():
+    box = portrait.detection_box(_detection(48, 40, 80, 72), 900, 1600)
+    assert box.center == pytest.approx((64 * 900 / 128, 56 * 1600 / 128))
+    assert (box.width, box.height) == pytest.approx((32 * 900 / 128, 32 * 1600 / 128))
+
+
+def test_scaling_the_detection_does_not_change_the_detector_output():
+    detection = _detection(48, 40, 80, 72)
+    portrait.detection_to_image(detection, 900, 1600)
+    assert detection[0] == 48

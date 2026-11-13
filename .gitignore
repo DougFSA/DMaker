@@ -62,3 +62,6 @@ src/dmaker/ui/dist/
 
 # worktrees do Claude Code (cópias de trabalho de agentes, nunca vão para o git)
 .claude/worktrees/
+
+# diagnóstico que o compilador da GPU Intel grava na pasta atual ao compilar os kernels do OpenVINO (persona realista)
+kernel.errors.txt

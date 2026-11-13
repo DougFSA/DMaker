@@ -39,27 +39,67 @@ WARP_TAIL_INPUT = ((1, 512, 64, 64), (1, 1, 64, 64))  # características deforma
 class Accelerator:
     """Onde o OpenVINO calcula e com que precisão."""
 
-    device: str  # "GPU" ou "CPU"
+    device: str  # o nome no OpenVINO: "CPU", "GPU" (uma placa só) ou "GPU.0", "GPU.1" (mais de uma)
     precision: str  # "f16" ou "f32"
 
     @property
     def describe(self) -> str:
-        where = "GPU integrada" if self.device == "GPU" else "CPU"
+        where = "CPU" if self.device == "CPU" else "GPU integrada"
         return f"{where} ({self.precision})"
 
 
-def choose_accelerator(available_devices: list[str]) -> Accelerator:
-    """GPU em f16 quando o OpenVINO enxerga uma (metade da memória e das contas, e a qualidade medida é a mesma);
-    sem ela, CPU em f32, que é a precisão em que o modelo foi treinado e a CPU não ganha nada com f16."""
-    if "GPU" in available_devices:
-        return Accelerator("GPU", "f16")
+@dataclass(frozen=True)
+class OpenVinoDevice:
+    """Um dispositivo como o OpenVINO o lista: o nome, o tipo ("INTEGRATED" ou "DISCRETE", só nas GPUs) e o nome
+    completo do fabricante."""
+
+    name: str
+    kind: str = ""
+    full_name: str = ""
+
+    @property
+    def is_gpu(self) -> bool:
+        return self.name.split(".")[0] == "GPU"
+
+
+def intel_gpu(devices: list[OpenVinoDevice]) -> str | None:
+    """A GPU que o OpenVINO acelera de verdade: a integrada primeiro e, sem ela, uma discreta Intel (Arc). Com duas
+    placas os nomes viram "GPU.0" e "GPU.1", e uma NVIDIA ao lado também aparece na lista, mas o plugin GPU do
+    OpenVINO só acelera vídeo Intel: escolhê-la seria trocar a CPU por um dispositivo que não serve."""
+    gpus = [device for device in devices if device.is_gpu]
+    integrated = [device for device in gpus if device.kind == "INTEGRATED"]
+    intel = [device for device in gpus if "intel" in device.full_name.lower()]
+    chosen = integrated or intel
+    return chosen[0].name if chosen else None
+
+
+def choose_accelerator(devices: list[OpenVinoDevice]) -> Accelerator:
+    """GPU Intel em f16 quando o OpenVINO enxerga uma (metade da memória e das contas, e a qualidade medida é a
+    mesma); sem ela, CPU em f32, que é a precisão em que o modelo foi treinado e a CPU não ganha nada com f16."""
+    gpu = intel_gpu(devices)
+    if gpu:
+        return Accelerator(gpu, "f16")
     return Accelerator("CPU", "f32")
 
 
-def detect_accelerator() -> Accelerator:
+def list_devices() -> list[OpenVinoDevice]:
+    """Os dispositivos do OpenVINO desta máquina, com o tipo e o fabricante de cada GPU."""
     import openvino as ov
 
-    return choose_accelerator(list(ov.Core().available_devices))
+    core = ov.Core()
+    devices = []
+    for name in core.available_devices:
+        device = OpenVinoDevice(name)
+        if device.is_gpu:
+            kind = core.get_property(name, "DEVICE_TYPE")  # Type.INTEGRATED ou Type.DISCRETE
+            full_name = core.get_property(name, "FULL_DEVICE_NAME")
+            device = OpenVinoDevice(name, getattr(kind, "name", str(kind)).upper(), str(full_name))
+        devices.append(device)
+    return devices
+
+
+def detect_accelerator() -> Accelerator:
+    return choose_accelerator(list_devices())
 
 
 def compile_options(accelerator: Accelerator, cache_dir: Path) -> dict[str, str]:

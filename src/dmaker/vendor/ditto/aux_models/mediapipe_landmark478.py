@@ -1,6 +1,7 @@
 from enum import Enum
 import numpy as np
 
+from ....persona.portrait import detection_to_image  # DMaker: x pela largura e y pela altura (foto vertical)
 from ..utils.load_model import load_model
 from .blaze_face import BlazeFace
 from .face_mesh import FaceMesh
@@ -70,13 +71,12 @@ class Landmark478:
         bboxes = self.blaze_face(image)
         if len(bboxes) == 0:
             return None
-        bbox = bboxes[0]
-        scale = (image.shape[1] / 128.0, image.shape[0] / 128.0)
+        bbox = detection_to_image(bboxes[0], image.shape[1], image.shape[0])
 
         # The first 4 numbers describe the bounding box corners:
         #
-        # ymin, xmin, ymax, xmax
-        # These are normalized coordinates (between 0 and 1).
+        # xmin, ymin, xmax, ymax (DMaker: nesta ordem, como `BlazeFace._decode_boxes` devolve),
+        # in the 128x128 input of the detector.
         # The next 12 numbers are the x,y-coordinates of the 6 facial landmark keypoints:
         #
         # right_eye_x, right_eye_y
@@ -88,10 +88,6 @@ class Landmark478:
         # Tip: these labeled as seen from the perspective of the person, so their right is your left.
         # The final number is the confidence score that this detection really is a face.
 
-        bbox[0] = bbox[0] * scale[1]
-        bbox[1] = bbox[1] * scale[0]
-        bbox[2] = bbox[2] * scale[1]
-        bbox[3] = bbox[3] * scale[0]
         left_eye = (bbox[4], bbox[5])
         right_eye = (bbox[6], bbox[7])
 

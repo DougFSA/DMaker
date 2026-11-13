@@ -18,7 +18,13 @@ from dmaker.pipeline.layout import aggregate_by_origin, project_layout
 from dmaker.pipeline.projects import load_project, save_project, summarize
 from dmaker.pipeline.timeline_view import build_timeline_view
 
-from .test_autocut_service import FakeTranscriber, fake_prober, request, service, writes_the_recording  # noqa: F401
+from .test_autocut_service import (  # noqa: F401
+    FakeTranscriber,
+    fake_prober,
+    request,
+    service,
+    writes_the_recording,
+)
 
 CARD = {"type": "card", "duration": 20}
 
