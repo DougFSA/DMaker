@@ -5,9 +5,17 @@ Referência compartilhada pelas skills do DMaker e pelos subagentes
 
 - **cloudId:** `d6777a03-0582-42ef-a9ed-5f1afd26ee2b`
 - **Site:** https://nativalabs.atlassian.net · **Projeto:** `DMK` · **Board:** 34
-- **Ferramentas:** MCP Atlassian (`searchJiraIssuesUsingJql`, `getJiraIssue`,
-  `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`,
-  `createJiraIssue`). Carregue-as com `ToolSearch` (`select:...`) antes de usar.
+- **Ferramentas:** conector Atlassian MCP (endpoint `https://mcp.atlassian.com/v2/mcp`):
+  `searchJiraIssuesUsingJql`, `getJiraIssue`, `listJiraIssueComments`,
+  `addOrEditJiraIssueComment`, `transitionJiraIssue` e `createJiraIssue`. Carregue-as
+  com `ToolSearch` (`select:...`) antes de usar; o nome completo leva o prefixo do
+  conector (`mcp__<id>__`), que muda se o conector for recriado, então procure pelo
+  nome da ferramenta. O que não está na lista (as transições possíveis, o histórico do
+  card) sai do `discover` e roda pelo `executeRead` com o `name` da operação.
+- **Formatos que mudaram do conector antigo (v1, desligado em 01/03/2027):** a
+  transição é `transitionJiraIssue` com `transitionId: "51"` (não `transition: {id}`);
+  o comentário é `addOrEditJiraIssueComment` (era `addCommentToJiraIssue`); o
+  `getJiraIssue` só conta os comentários, o texto vem do `listJiraIssueComments`.
 
 ## Tipos de chamado e como se escreve um
 
@@ -36,8 +44,9 @@ original" vale mais que "Refatora o alinhador de cues".
 **Todas as transições do DMK são globais:** de qualquer status se vai para
 qualquer outro com o id da transição de destino. Não há caminho obrigatório, então
 um card em `Redesenvolvimento` volta direto para `Teste Manual` com a `51`, em uma
-chamada. Mesmo assim, se uma transição falhar, chame `getTransitionsForJiraIssue`
-e escolha pelo **nome do destino**: id chutado move o card para o lugar errado sem
+chamada. Mesmo assim, se uma transição falhar, liste as possíveis com
+`executeRead` (`name: "listJiraIssueTransitions"`, `inputs: {issueIdOrKey}`)
+e escolha pelo **status de destino**, não pelo nome da transição: id chutado move o card para o lugar errado sem
 erro nenhum.
 
 ### `Teste Manual` e `Concluído`: o código já está na `develop`
@@ -155,8 +164,8 @@ PowerShell + `ConvertFrom-Json` (não existe `jq` nesta máquina).
 
 Título e descrição raramente bastam. **Os comentários costumam carregar a
 decisão que muda o desenho da solução**: uma escolha de produto, um print com o
-sintoma, um "não faz assim". Puxe-os com `fields: ["summary","description","comment"]`
-e leia os últimos primeiro.
+sintoma, um "não faz assim". Leia título e descrição com `getJiraIssue` e os
+comentários com `listJiraIssueComments` (`orderBy: "-created"`, os últimos primeiro).
 
 Nos redesenvolvimentos isso é obrigatório: o comentário mais recente **é** o
 chamado.

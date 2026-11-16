@@ -115,7 +115,8 @@ separado, e não existe a coluna intermediária "Teste em Develop" do MedlyCare
 engano, ou movido por outra pessoa/automação.
 
 Peça ao apurador, por card, o **histórico de transições** (o changelog do card:
-`getJiraIssue` com `expand=changelog`, quando a ferramenta permitir): **quem**
+`executeRead` com `name: "listJiraIssueChangelogs"`, que pagina o histórico inteiro; o
+`expand=changelog` do `getJiraIssue` traz só a página mais nova): **quem**
 moveu para `Concluído`, **quando**, e se foi **depois** da última entrega do card
 (o último comentário `✅ _Entregue` ou `🔁 _Redesenvolvimento`). Uma linha por
 card: autor, data e o status de origem.
