@@ -76,7 +76,11 @@ def test_cli_prepare_refuses_an_existing_dubbing_until_overwrite_is_asked(wired:
 
     assert refused.exit_code == 1
     message = spoken(refused.output)
-    assert "Já existe uma dublagem preparada em" in message and "entrevista.en.dub.json" in message
+    # O caminho vem inteiro e o Rich pode quebrá-lo no meio do nome (pasta temporária longa ou com espaço):
+    # o nome do arquivo se confere sem nenhum espaço.
+    assert "Já existe uma dublagem preparada em" in message and "entrevista.en.dub.json" in "".join(
+        message.split()
+    )
     assert "apaga as traduções que você revisou e as falas que você travou" in message
     assert "Use --overwrite" in message
     assert default_project(tmp_path).read_bytes() == before  # o arquivo não mudou
